@@ -51,6 +51,10 @@ func main() {
 		return
 	}
 
+	if !cfg.Debug {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	engine := gin.New()
 	engine.Use(middleware.RecoveryMiddleware())
 	engine.Use(middleware.CORSMiddleware())

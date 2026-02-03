@@ -14,17 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package conn
+package typeutil
 
-import (
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
-)
+import "strings"
 
-func GetOpenAIClient(baseUrl, apiKey string) *openai.Client {
-	client := openai.NewClient(
-		option.WithBaseURL(baseUrl),
-		option.WithAPIKey(apiKey),
-	)
-	return &client
+func ParseBoolQueryParam(param string) bool {
+	p := strings.ToLower(param)
+	return p == "true" || p == "1" || p == "yes"
 }

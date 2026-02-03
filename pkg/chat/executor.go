@@ -20,22 +20,14 @@ import (
 	"context"
 	"sync"
 
-	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/openai/openai-go/v3"
 )
 
-type ChatExecutor struct {
-	model  string
-	client *openai.Client
-}
+type ChatExecutor struct{}
 
 func NewChatExecutor() *ChatExecutor {
-	cfg := config.GetConfigManager().GetConfig()
-	return &ChatExecutor{
-		model:  cfg.Provider.OpenAI.Model,
-		client: conn.GetOpenAIClient(cfg.Provider.OpenAI),
-	}
+	return &ChatExecutor{}
 }
 
 var (
@@ -50,13 +42,22 @@ func GetChatExecutor() *ChatExecutor {
 	return chatExecutor
 }
 
-func (ce *ChatExecutor) Chat(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion) (string, int64, error) {
-	params := openai.ChatCompletionNewParams{
-		Model:    ce.model,
-		Messages: messages,
+type ChatParams struct {
+	Messages []openai.ChatCompletionMessageParamUnion
+	Model    string
+	BaseURL  string
+	APIKey   string
+}
+
+func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (string, int64, error) {
+	client := conn.GetOpenAIClient(params.BaseURL, params.APIKey)
+
+	apiParams := openai.ChatCompletionNewParams{
+		Model:    params.Model,
+		Messages: params.Messages,
 	}
 
-	resp, err := ce.client.Chat.Completions.New(ctx, params)
+	resp, err := client.Chat.Completions.New(ctx, apiParams)
 	if err != nil {
 		return "", 0, err
 	}

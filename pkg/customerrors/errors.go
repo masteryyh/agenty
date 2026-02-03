@@ -23,10 +23,17 @@ func NewBusinessError(code int, message string) *BusinessError {
 }
 
 var (
-	ErrUnauthorized                 = NewBusinessError(http.StatusUnauthorized, "unauthorized")
-	ErrForbidden                    = NewBusinessError(http.StatusForbidden, "forbidden")
-	ErrInvalidParams                = NewBusinessError(http.StatusBadRequest, "invalid params")
-	ErrInternalServerError          = NewBusinessError(http.StatusInternalServerError, "internal server error")
+	ErrUnauthorized        = NewBusinessError(http.StatusUnauthorized, "unauthorized")
+	ErrForbidden           = NewBusinessError(http.StatusForbidden, "forbidden")
+	ErrInvalidParams       = NewBusinessError(http.StatusBadRequest, "invalid params")
+	ErrInternalServerError = NewBusinessError(http.StatusInternalServerError, "internal server error")
+
+	ErrSessionNotFound       = NewBusinessError(http.StatusNotFound, "session not found")
+	ErrModelNotFound         = NewBusinessError(http.StatusNotFound, "model not found")
+	ErrModelAlreadyExists    = NewBusinessError(http.StatusConflict, "model already exists")
+	ErrProviderNotFound      = NewBusinessError(http.StatusNotFound, "provider not found")
+	ErrProviderAlreadyExists = NewBusinessError(http.StatusConflict, "provider already exists")
+	ErrProviderInUse         = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")
 )
 
 func GetBusinessError(err error) *BusinessError {
