@@ -27,7 +27,7 @@ type AppConfig struct {
 	DB *DatabaseConfig `mapstructure:"db"`
 
 	// Provider for models
-	Provider *ModelProviderConfig `mapstructure:"modelProvider"`
+	Provider *ModelProviderConfig `mapstructure:"provider"`
 }
 
 // DatabaseConfig is the config definition for database connection, only postgresql is supported for now

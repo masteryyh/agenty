@@ -31,7 +31,7 @@ const (
 )
 
 type ChatMessage struct {
-	ID        uuid.UUID   `gorm:"type:uuid;primaryKey;index:idx_message_id_deleted_at"`
+	ID        uuid.UUID   `gorm:"type:uuid;primaryKey;default:uuidv7();index:idx_message_id_deleted_at"`
 	SessionID uuid.UUID   `gorm:"type:uuid;not null;index:idx_message_session_id_deleted_at"`
 	Role      MessageRole `gorm:"type:varchar(50);not null"`
 	Content   string      `gorm:"type:text;not null"`
