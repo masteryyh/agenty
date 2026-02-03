@@ -15,8 +15,8 @@ const (
 )
 
 type PageRequest struct {
-	Page     int       `query:"page" json:"page" validate:"required,min=1"`
-	PageSize int       `query:"pageSize" json:"pageSize" validate:"required,min=1,max=100"`
+	Page     int       `form:"page" json:"page" validate:"required,min=1"`
+	PageSize int       `form:"pageSize" json:"pageSize" validate:"required,min=1,max=100"`
 }
 
 func (p *PageRequest) ApplyDefaults() {

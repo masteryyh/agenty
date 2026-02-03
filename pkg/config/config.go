@@ -54,10 +54,12 @@ func (cm *ConfigManager) BindEnvVariables() {
 	cm.vipers.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	envs := map[string]string{
-		"port":                         "AGENTY_PORT",
-		"modelProvider.openai.baseUrl": "AGENTY_OPENAI_BASE_URL",
-		"modelProvider.openai.apiKey":  "AGENTY_OPENAI_API_KEY",
-		"modelProvider.openai.model":   "AGENTY_OPENAI_MODEL",
+		"port":        "AGENTY_PORT",
+		"db.host":     "AGENTY_DB_HOST",
+		"db.port":     "AGENTY_DB_PORT",
+		"db.username": "AGENTY_DB_USERNAME",
+		"db.password": "AGENTY_DB_PASSWORD",
+		"db.database": "AGENTY_DB_DATABASE",
 	}
 
 	for key, env := range envs {
@@ -67,8 +69,10 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 func (cm *ConfigManager) SetDefaults() {
 	cm.vipers.SetDefault("port", 8080)
-	cm.vipers.SetDefault("modelProvider.openai.baseUrl", "https://api.openai.com/v1")
-	cm.vipers.SetDefault("modelProvider.openai.model", "gpt-5.2")
+	cm.vipers.SetDefault("db.host", "localhost")
+	cm.vipers.SetDefault("db.port", 5432)
+	cm.vipers.SetDefault("db.username", "postgres")
+	cm.vipers.SetDefault("db.database", "agenty")
 }
 
 func (cm *ConfigManager) LoadConfig(configPaths ...string) error {

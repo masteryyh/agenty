@@ -121,7 +121,7 @@ func (r *ChatRoutes) Chat(c *gin.Context) {
 		return
 	}
 
-	result, err := r.service.Chat(c, sessionID, data.Message)
+	result, err := r.service.Chat(c, sessionID, data)
 	if err != nil {
 		response.Failed(c, err)
 		return

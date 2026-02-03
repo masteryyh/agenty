@@ -23,7 +23,9 @@ import (
 )
 
 type V1Routes struct {
-	chatRoutes *ChatRoutes
+	chatRoutes     *ChatRoutes
+	providerRoutes *ProviderRoutes
+	modelRoutes    *ModelRoutes
 }
 
 var (
@@ -34,7 +36,9 @@ var (
 func GetV1Routes() *V1Routes {
 	v1Once.Do(func() {
 		v1Routes = &V1Routes{
-			chatRoutes: GetChatRoutes(),
+			chatRoutes:     GetChatRoutes(),
+			providerRoutes: GetProviderRoutes(),
+			modelRoutes:    GetModelRoutes(),
 		}
 	})
 	return v1Routes
@@ -42,4 +46,6 @@ func GetV1Routes() *V1Routes {
 
 func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) {
 	r.chatRoutes.RegisterRoutes(routerGroup)
+	r.providerRoutes.RegisterRoutes(routerGroup)
+	r.modelRoutes.RegisterRoutes(routerGroup)
 }

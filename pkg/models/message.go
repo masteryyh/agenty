@@ -31,25 +31,42 @@ const (
 )
 
 type ChatMessage struct {
-	ID        uuid.UUID   `gorm:"type:uuid;primaryKey;default:uuidv7();index:idx_message_id_deleted_at"`
-	SessionID uuid.UUID   `gorm:"type:uuid;not null;index:idx_message_session_id_deleted_at"`
+	ID        uuid.UUID   `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	SessionID uuid.UUID   `gorm:"type:uuid;not null"`
 	Role      MessageRole `gorm:"type:varchar(50);not null"`
 	Content   string      `gorm:"type:text;not null"`
+	ModelID   uuid.UUID   `gorm:"type:uuid;not null"`
 	CreatedAt time.Time   `gorm:"autoCreateTime:milli"`
-	DeletedAt *time.Time  `gorm:"index:idx_message_id_deleted_at;index:idx_message_session_id_deleted_at"`
+	DeletedAt *time.Time
 }
 
 func (ChatMessage) TableName() string {
 	return "chat_messages"
 }
 
+func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
+	dto := &ChatMessageDto{
+		ID:        m.ID,
+		Role:      m.Role,
+		Content:   m.Content,
+		CreatedAt: m.CreatedAt,
+	}
+
+	if model != nil {
+		dto.Model = model
+	}
+	return dto
+}
+
 type ChatMessageDto struct {
 	ID        uuid.UUID   `json:"id"`
 	Role      MessageRole `json:"role"`
 	Content   string      `json:"content"`
+	Model     *ModelDto   `json:"model,omitempty"`
 	CreatedAt time.Time   `json:"createdAt"`
 }
 
 type ChatDto struct {
-	Message string `json:"message" binding:"required"`
+	ModelID uuid.UUID `json:"modelId" binding:"required"`
+	Message string    `json:"message" binding:"required"`
 }

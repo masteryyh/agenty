@@ -20,14 +20,14 @@ import "fmt"
 
 // AppConfig is the config definition for this app
 type AppConfig struct {
+	// Debug mode enabled or not
+	Debug bool `mapstructure:"debug"`
+
 	// Port of the HTTP server
 	Port int `mapstructure:"port"`
 
 	// DB configuration
 	DB *DatabaseConfig `mapstructure:"db"`
-
-	// Provider for models
-	Provider *ModelProviderConfig `mapstructure:"provider"`
 }
 
 // DatabaseConfig is the config definition for database connection, only postgresql is supported for now
@@ -71,40 +71,5 @@ func (c *AppConfig) Validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.Port)
 	}
-	return c.Provider.Validate()
-}
-
-// ModelProviderConfig is the config definition for model providers
-type ModelProviderConfig struct {
-	// OpenAI compatible provider configuration
-	OpenAI *OpenAIConfig `mapstructure:"openai"`
-}
-
-func (c *ModelProviderConfig) Validate() error {
-	return c.OpenAI.Validate()
-}
-
-// OpenAIConfig stores OpenAI-compatible provider configuration
-type OpenAIConfig struct {
-	// BaseURL of the OpenAI API
-	BaseURL string `mapstructure:"baseUrl"`
-
-	// APIKey for authentication
-	APIKey string `mapstructure:"apiKey"`
-
-	// Model to chat with
-	Model string `mapstructure:"model"`
-}
-
-func (c *OpenAIConfig) Validate() error {
-	if c.BaseURL == "" {
-		c.BaseURL = "https://api.openai.com/v1"
-	}
-	if c.APIKey == "" {
-		return fmt.Errorf("OpenAI API key is required")
-	}
-	if c.Model == "" {
-		c.Model = "gpt-5.2"
-	}
-	return nil
+	return c.DB.Validate()
 }

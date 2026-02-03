@@ -23,15 +23,29 @@ import (
 )
 
 type ChatSession struct {
-	ID            uuid.UUID  `gorm:"type:uuid;default:uuidv7();primaryKey;index:idx_session_id_deleted_at"`
+	ID            uuid.UUID  `gorm:"type:uuid;default:uuidv7();primaryKey"`
 	TokenConsumed int64      `gorm:"not null;default:0"`
 	CreatedAt     time.Time  `gorm:"autoCreateTime:milli"`
 	UpdatedAt     time.Time  `gorm:"autoUpdateTime:milli"`
-	DeletedAt     *time.Time `gorm:"index:idx_session_id_deleted_at"`
+	DeletedAt     *time.Time
 }
 
 func (ChatSession) TableName() string {
 	return "chat_sessions"
+}
+
+func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
+	dto := &ChatSessionDto{
+		ID:            m.ID,
+		TokenConsumed: m.TokenConsumed,
+		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
+	}
+
+	if messages != nil {
+		dto.Messages = messages
+	}
+	return dto
 }
 
 type ChatSessionDto struct {
