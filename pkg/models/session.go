@@ -23,7 +23,7 @@ import (
 )
 
 type ChatSession struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey;index:idx_session_id_deleted_at"`
+	ID            uuid.UUID  `gorm:"type:uuid;default:uuidv7();primaryKey;index:idx_session_id_deleted_at"`
 	TokenConsumed int64      `gorm:"not null;default:0"`
 	CreatedAt     time.Time  `gorm:"autoCreateTime:milli"`
 	UpdatedAt     time.Time  `gorm:"autoUpdateTime:milli"`

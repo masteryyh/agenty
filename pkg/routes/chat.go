@@ -24,6 +24,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/response"
 )
 
@@ -49,6 +50,7 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	chatGroup := router.Group("/chats")
 	{
 		chatGroup.POST("/session", r.CreateSession)
+		chatGroup.GET("/sessions", r.ListSessions)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
 		chatGroup.POST("/chat", r.Chat)
 	}
@@ -61,6 +63,22 @@ func (r *ChatRoutes) CreateSession(c *gin.Context) {
 		return
 	}
 	response.OK(c, session)
+}
+
+func (r *ChatRoutes) ListSessions(c *gin.Context) {
+	var pageRequest pagination.PageRequest
+	if err := c.ShouldBindQuery(&pageRequest); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+	pageRequest.ApplyDefaults()
+
+	sessions, err := r.service.ListSessions(c, &pageRequest)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, sessions)
 }
 
 func (r *ChatRoutes) GetSession(c *gin.Context) {

@@ -25,6 +25,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/openai/openai-go/v3"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -99,6 +100,51 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 	}, nil
 }
 
+func (s *ChatService) ListSessions(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.ChatSessionDto], error) {
+	var dtos []models.ChatSessionDto
+	var total int64
+
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		sessions, err := gorm.G[models.ChatSession](tx).
+			Where("deleted_at IS NULL").
+			Offset((request.Page - 1) * request.PageSize).
+			Limit(request.PageSize).
+			Order("updated_at DESC").
+			Find(ctx)
+		if err != nil {
+			return err
+		}
+
+		countResult, err := gorm.G[models.ChatSession](tx).
+			Where("deleted_at IS NULL").
+			Count(ctx, "id")
+		if err != nil {
+			return err
+		}
+		total = countResult
+
+		dtos = lo.Map(sessions, func(s models.ChatSession, _ int) models.ChatSessionDto {
+			return models.ChatSessionDto{
+				ID:            s.ID,
+				TokenConsumed: s.TokenConsumed,
+				CreatedAt:     s.CreatedAt,
+				UpdatedAt:     s.UpdatedAt,
+			}
+		})
+		return nil
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to list chat sessions", "error", err)
+		return nil, err
+	}
+
+	return &pagination.PagedResponse[models.ChatSessionDto]{
+		Total:    total,
+		PageSize: request.PageSize,
+		Page:     request.Page,
+		Data:     dtos,
+	}, nil
+}
+
 func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, message string) (*models.ChatMessageDto, error) {
 	session, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ? AND deleted_at IS NULL", sessionID).
@@ -126,7 +172,6 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, message str
 	messages = append(messages, openai.UserMessage(message))
 
 	newUserMessage := models.ChatMessage{
-		ID:        uuid.New(),
 		SessionID: session.ID,
 		Role:      models.RoleUser,
 		Content:   message,
@@ -144,7 +189,6 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, message str
 	}
 
 	newAssistantMessage := models.ChatMessage{
-		ID:        uuid.New(),
 		SessionID: session.ID,
 		Role:      models.RoleAssistant,
 		Content:   response,
