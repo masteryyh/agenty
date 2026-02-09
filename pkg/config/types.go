@@ -18,7 +18,8 @@ package config
 
 import (
 	"fmt"
-	"path/filepath"
+
+	"github.com/masteryyh/agenty/pkg/utils"
 )
 
 // AppConfig is the config definition for this app
@@ -79,20 +80,14 @@ func (c *AppConfig) Validate() error {
 	}
 
 	cleanedPaths := make([]string, 0, len(c.AllowedPaths))
-	if len(c.AllowedPaths) > 0 {
-		for _, path := range c.AllowedPaths {
-			if path == "" {
-				return fmt.Errorf("allowed paths cannot contain empty string")
-			}
-
-			abs, err := filepath.Abs(filepath.Clean(path))
-			if err != nil {
-				return fmt.Errorf("invalid allowed path '%s': %w", path, err)
-			}
-			cleanedPaths = append(cleanedPaths, abs)
+	for _, p := range c.AllowedPaths {
+		cleaned, err := utils.GetCleanPath(p, true)
+		if err != nil {
+			return fmt.Errorf("invalid allowed path '%s': %w", p, err)
 		}
-		c.AllowedPaths = cleanedPaths
+		cleanedPaths = append(cleanedPaths, cleaned)
 	}
+	c.AllowedPaths = cleanedPaths
 
 	return c.DB.Validate()
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/samber/lo"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -78,7 +79,7 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 	}
 
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
-		Where("sessionId = ? AND deleted_at IS NULL", session.ID).
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).
 		Order("created_at ASC").
 		Find(ctx)
 	if err != nil {
@@ -182,7 +183,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
-		Where("sessionId = ? AND deleted_at IS NULL", session.ID).
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).
 		Order("created_at ASC").
 		Find(ctx)
 	if err != nil {
@@ -191,9 +192,28 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) provider.Message {
+		var toolCalls []models.ToolCall
+		if len(cm.ToolCalls) > 0 {
+			if err := json.Unmarshal(cm.ToolCalls, &toolCalls); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool calls", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+			}
+		}
+
+		var toolResult *models.ToolResult
+		if len(cm.ToolResults) > 0 {
+			var tr models.ToolResult
+			if err := json.Unmarshal(cm.ToolResults, &tr); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool result", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+			} else {
+				toolResult = &tr
+			}
+		}
+
 		return provider.Message{
-			Role:    string(cm.Role),
-			Content: cm.Content,
+			Role:       string(cm.Role),
+			Content:    cm.Content,
+			ToolCalls:  toolCalls,
+			ToolResult: toolResult,
 		}
 	})
 	messages = append(messages, provider.Message{
@@ -248,8 +268,8 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			SessionID:   session.ID,
 			Role:        models.MessageRole(m.Role),
 			Content:     m.Content,
-			ToolCalls:   rawCalls,
-			ToolResults: rawCallResult,
+			ToolCalls:   datatypes.JSON(rawCalls),
+			ToolResults: datatypes.JSON(rawCallResult),
 			ModelID:     model.ID,
 		}
 	})
@@ -275,10 +295,13 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
-		var toolResult models.ToolResult
+		var toolResult *models.ToolResult
 		if len(m.ToolResults) > 0 {
-			if err := json.Unmarshal(m.ToolResults, &toolResult); err != nil {
+			var tr models.ToolResult
+			if err := json.Unmarshal(m.ToolResults, &tr); err != nil {
 				slog.ErrorContext(ctx, "failed to unmarshal tool result", "error", err, "sessionId", sessionID, "messageId", m.ID)
+			} else {
+				toolResult = &tr
 			}
 		}
 
@@ -287,7 +310,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			Role:       m.Role,
 			Content:    m.Content,
 			ToolCalls:  toolCalls,
-			ToolResult: &toolResult,
+			ToolResult: toolResult,
 			CreatedAt:  m.CreatedAt,
 		}
 	})

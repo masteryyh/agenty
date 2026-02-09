@@ -58,7 +58,7 @@ func (t *ReadFileTool) Execute(_ context.Context, arguments string) (string, err
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	abs, err := utils.GetCleanPath(args.Path)
+	abs, err := utils.GetCleanPath(args.Path, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -119,7 +119,7 @@ func (t *WriteFileTool) Execute(_ context.Context, arguments string) (string, er
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath, err := utils.GetCleanPath(args.Path)
+	cleanPath, err := utils.GetCleanPath(args.Path, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
@@ -172,7 +172,7 @@ func (t *ListDirectoryTool) Execute(_ context.Context, arguments string) (string
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath, err := utils.GetCleanPath(args.Path)
+	cleanPath, err := utils.GetCleanPath(args.Path, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to list directory: %w", err)
 	}

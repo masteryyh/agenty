@@ -109,7 +109,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		if len(resp.ToolCalls) == 0 {
 			return &ChatResult{
 				TotalToken: totalTokens,
-				Messages:   messages,
+				Messages:   messages[len(params.Messages):],
 			}, nil
 		}
 

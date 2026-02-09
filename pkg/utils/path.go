@@ -18,11 +18,12 @@ package utils
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 )
 
-func GetCleanPath(path string) (string, error) {
+func GetCleanPath(path string, followSymlink bool) (string, error) {
 	if path == "" {
 		return "", errors.New("path cannot be empty")
 	}
@@ -30,6 +31,21 @@ func GetCleanPath(path string) (string, error) {
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return "", err
+	}
+
+	if followSymlink {
+		if _, err := os.Stat(abs); err != nil {
+			if os.IsNotExist(err) {
+				return abs, nil
+			}
+			return "", err
+		}
+
+		eval, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return "", err
+		}
+		return eval, nil
 	}
 	return abs, nil
 }
@@ -45,7 +61,7 @@ func PathContained(basePaths []string, targetPath string) (bool, error) {
 			return false, err
 		}
 
-		if !strings.HasPrefix(rel, "..") {
+		if rel == "." || !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return true, nil
 		}
 	}

@@ -19,8 +19,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
@@ -77,7 +79,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				}
 				id := part.FunctionCall.ID
 				if id == "" {
-					id = fmt.Sprintf("call_%s", part.FunctionCall.Name)
+					id = fmt.Sprintf("gemini_call_%s_%s", part.FunctionCall.Name, strings.ReplaceAll(uuid.NewString(), "-", ""))
 				}
 				result.ToolCalls = append(result.ToolCalls, models.ToolCall{
 					ID:        id,
