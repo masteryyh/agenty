@@ -18,16 +18,19 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
-	"github.com/masteryyh/agenty/pkg/conn"
-	"github.com/openai/openai-go/v3"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
+	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/models"
 )
 
-type ChatExecutor struct{}
+const maxToolCallIterations = 20
 
-func NewChatExecutor() *ChatExecutor {
-	return &ChatExecutor{}
+type ChatExecutor struct {
+	registry  *tools.Registry
+	providers map[models.APIType]provider.ChatProvider
 }
 
 var (
@@ -35,31 +38,107 @@ var (
 	once         sync.Once
 )
 
+func NewChatExecutor(registry *tools.Registry) *ChatExecutor {
+	providers := map[models.APIType]provider.ChatProvider{
+		models.APITypeOpenAI:    provider.NewOpenAIProvider(),
+		models.APITypeAnthropic: provider.NewAnthropicProvider(),
+		models.APITypeKimi:      provider.NewKimiProvider(),
+		models.APITypeGemini:    provider.NewGeminiProvider(),
+	}
+
+	return &ChatExecutor{
+		registry:  registry,
+		providers: providers,
+	}
+}
+
 func GetChatExecutor() *ChatExecutor {
 	once.Do(func() {
-		chatExecutor = NewChatExecutor()
+		chatExecutor = NewChatExecutor(tools.GetRegistry())
 	})
 	return chatExecutor
 }
 
 type ChatParams struct {
-	Messages []openai.ChatCompletionMessageParamUnion
+	Messages []provider.Message
 	Model    string
 	BaseURL  string
 	APIKey   string
+	APIType  models.APIType
 }
 
-func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (string, int64, error) {
-	client := conn.GetOpenAIClient(params.BaseURL, params.APIKey)
+type ChatResult struct {
+	Content    string
+	TotalToken int64
+	Messages   []provider.Message
+}
 
-	apiParams := openai.ChatCompletionNewParams{
-		Model:    params.Model,
-		Messages: params.Messages,
+func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResult, error) {
+	p, ok := ce.providers[params.APIType]
+	if !ok {
+		p = ce.providers[models.APITypeOpenAI]
 	}
 
-	resp, err := client.Chat.Completions.New(ctx, apiParams)
-	if err != nil {
-		return "", 0, err
+	toolDefs := ce.registry.Definitions()
+	messages := make([]provider.Message, len(params.Messages))
+	copy(messages, params.Messages)
+
+	var totalTokens int64
+
+	for i := 0; i < maxToolCallIterations; i++ {
+		req := &provider.ChatRequest{
+			Model:    params.Model,
+			Messages: messages,
+			Tools:    toolDefs,
+			BaseURL:  params.BaseURL,
+			APIKey:   params.APIKey,
+		}
+
+		resp, err := p.Chat(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		totalTokens += resp.TotalToken
+
+		assistantMsg := provider.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		}
+		messages = append(messages, assistantMsg)
+
+		if len(resp.ToolCalls) == 0 {
+			return &ChatResult{
+				Content:    resp.Content,
+				TotalToken: totalTokens,
+				Messages:   messages,
+			}, nil
+		}
+
+		slog.InfoContext(ctx, "executing tool calls", "count", len(resp.ToolCalls), "iteration", i+1)
+
+		for _, tc := range resp.ToolCalls {
+			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
+			result := ce.registry.Execute(ctx, tc)
+			messages = append(messages, provider.Message{
+				Role:       "tool",
+				Content:    result.Content,
+				ToolResult: &result,
+			})
+		}
 	}
-	return resp.Choices[0].Message.Content, resp.Usage.TotalTokens, nil
+
+	lastContent := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			lastContent = messages[i].Content
+			break
+		}
+	}
+
+	return &ChatResult{
+		Content:    lastContent,
+		TotalToken: totalTokens,
+		Messages:   messages,
+	}, nil
 }

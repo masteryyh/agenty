@@ -25,11 +25,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
-	"github.com/openai/openai-go/v3"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 )
@@ -169,7 +169,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	provider, err := gorm.G[models.ModelProvider](s.db).
+	chatProvider, err := gorm.G[models.ModelProvider](s.db).
 		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
 		First(ctx)
 	if err != nil {
@@ -189,13 +189,16 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) openai.ChatCompletionMessageParamUnion {
-		if cm.Role == models.RoleUser {
-			return openai.UserMessage(cm.Content)
+	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) provider.Message {
+		return provider.Message{
+			Role:    string(cm.Role),
+			Content: cm.Content,
 		}
-		return openai.AssistantMessage(cm.Content)
 	})
-	messages = append(messages, openai.UserMessage(data.Message))
+	messages = append(messages, provider.Message{
+		Role:    "user",
+		Content: data.Message,
+	})
 
 	newUserMessage := models.ChatMessage{
 		SessionID: session.ID,
@@ -209,11 +212,12 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	response, token, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:  provider.BaseURL,
-		APIKey:   provider.APIKey,
+	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
+		BaseURL:  chatProvider.BaseURL,
+		APIKey:   chatProvider.APIKey,
 		Model:    model.Name,
 		Messages: messages,
+		APIType:  chatProvider.Type,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "chat completion failed", "error", err, "session_id", sessionID)
@@ -223,7 +227,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	newAssistantMessage := models.ChatMessage{
 		SessionID: session.ID,
 		Role:      models.RoleAssistant,
-		Content:   response,
+		Content:   result.Content,
 		ModelID:   model.ID,
 	}
 
@@ -232,7 +236,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	session.TokenConsumed += token
+	session.TokenConsumed += result.TotalToken
 	if _, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ?", session.ID).
 		Update(ctx, "token_consumed", session.TokenConsumed); err != nil {
