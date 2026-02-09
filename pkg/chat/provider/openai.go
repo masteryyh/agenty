@@ -9,6 +9,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/samber/lo"
 )
 
 type OpenAIProvider struct{}
@@ -64,17 +65,15 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 }
 
 func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
-	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
-	for _, msg := range messages {
+	return lo.FilterMap(messages, func(msg Message, _ int) (openai.ChatCompletionMessageParamUnion, bool) {
 		switch msg.Role {
 		case "user":
-			result = append(result, openai.UserMessage(msg.Content))
+			return openai.UserMessage(msg.Content), true
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				assistantMsg := openai.AssistantMessage(msg.Content)
-				toolCalls := make([]openai.ChatCompletionMessageToolCallUnionParam, len(msg.ToolCalls))
-				for i, tc := range msg.ToolCalls {
-					toolCalls[i] = openai.ChatCompletionMessageToolCallUnionParam{
+				assistantMsg.OfAssistant.ToolCalls = lo.Map(msg.ToolCalls, func(tc tools.ToolCall, _ int) openai.ChatCompletionMessageToolCallUnionParam {
+					return openai.ChatCompletionMessageToolCallUnionParam{
 						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
 							ID: tc.ID,
 							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
@@ -83,26 +82,25 @@ func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParam
 							},
 						},
 					}
-				}
-				assistantMsg.OfAssistant.ToolCalls = toolCalls
-				result = append(result, assistantMsg)
-			} else {
-				result = append(result, openai.AssistantMessage(msg.Content))
+				})
+				return assistantMsg, true
 			}
+			return openai.AssistantMessage(msg.Content), true
 		case "tool":
 			if msg.ToolResult != nil {
-				result = append(result, openai.ToolMessage(msg.ToolResult.Content, msg.ToolResult.CallID))
+				return openai.ToolMessage(msg.ToolResult.Content, msg.ToolResult.CallID), true
 			}
+			return openai.ChatCompletionMessageParamUnion{}, false
 		case "system":
-			result = append(result, openai.SystemMessage(msg.Content))
+			return openai.SystemMessage(msg.Content), true
+		default:
+			return openai.ChatCompletionMessageParamUnion{}, false
 		}
-	}
-	return result
+	})
 }
 
 func buildOpenAITools(defs []tools.ToolDefinition) []openai.ChatCompletionToolUnionParam {
-	result := make([]openai.ChatCompletionToolUnionParam, len(defs))
-	for i, def := range defs {
+	return lo.Map(defs, func(def tools.ToolDefinition, _ int) openai.ChatCompletionToolUnionParam {
 		properties := make(map[string]shared.FunctionParameters)
 		for name, prop := range def.Parameters.Properties {
 			properties[name] = shared.FunctionParameters{
@@ -110,8 +108,7 @@ func buildOpenAITools(defs []tools.ToolDefinition) []openai.ChatCompletionToolUn
 				"description": prop.Description,
 			}
 		}
-
-		result[i] = openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+		return openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        def.Name,
 			Description: param.NewOpt(def.Description),
 			Parameters: shared.FunctionParameters{
@@ -120,6 +117,5 @@ func buildOpenAITools(defs []tools.ToolDefinition) []openai.ChatCompletionToolUn
 				"required":   def.Parameters.Required,
 			},
 		})
-	}
-	return result
+	})
 }

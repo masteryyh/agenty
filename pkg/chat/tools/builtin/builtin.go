@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
@@ -34,7 +35,7 @@ func (t *ReadFileTool) Execute(_ context.Context, arguments json.RawMessage) (st
 	var args struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(arguments, &args); err != nil {
+	if err := sonic.Unmarshal(arguments, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
@@ -74,7 +75,7 @@ func (t *WriteFileTool) Execute(_ context.Context, arguments json.RawMessage) (s
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if err := json.Unmarshal(arguments, &args); err != nil {
+	if err := sonic.Unmarshal(arguments, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
@@ -113,7 +114,7 @@ func (t *ListDirectoryTool) Execute(_ context.Context, arguments json.RawMessage
 	var args struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(arguments, &args); err != nil {
+	if err := sonic.Unmarshal(arguments, &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
