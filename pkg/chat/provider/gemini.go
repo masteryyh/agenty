@@ -77,9 +77,9 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 func buildGeminiContents(messages []Message) []*genai.Content {
 	return lo.FilterMap(messages, func(msg Message, _ int) (*genai.Content, bool) {
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
-		case "assistant":
+		case RoleAssistant:
 			c := &genai.Content{Role: genai.RoleModel}
 			if msg.Content != "" {
 				c.Parts = append(c.Parts, genai.NewPartFromText(msg.Content))
@@ -92,7 +92,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 				c.Parts = append(c.Parts, genai.NewPartFromFunctionCall(tc.Name, args))
 			}
 			return c, true
-		case "tool":
+		case RoleTool:
 			if msg.ToolResult != nil {
 				return genai.NewContentFromFunctionResponse(
 					msg.ToolResult.Name,
@@ -101,7 +101,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 				), true
 			}
 			return nil, false
-		case "system":
+		case RoleSystem:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
 		default:
 			return nil, false

@@ -101,7 +101,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		totalTokens += resp.TotalToken
 
 		assistantMsg := provider.Message{
-			Role:      "assistant",
+			Role:      provider.RoleAssistant,
 			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
 		}
@@ -121,7 +121,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
 			result := ce.registry.Execute(ctx, tc)
 			messages = append(messages, provider.Message{
-				Role:       "tool",
+				Role:       provider.RoleTool,
 				Content:    result.Content,
 				ToolResult: &result,
 			})
@@ -130,7 +130,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 	lastContent := ""
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "assistant" {
+		if messages[i].Role == provider.RoleAssistant {
 			lastContent = messages[i].Content
 			break
 		}

@@ -11,6 +11,13 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/samber/lo"
+)
+
+const (
+	kimiDefaultBaseURL = "https://api.moonshot.ai/v1"
+	kimiToolTypeFunc   = "function"
+	kimiThinkingOn     = "enabled"
 )
 
 type KimiProvider struct {
@@ -90,7 +97,7 @@ type kimiError struct {
 func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	baseURL := req.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api.moonshot.ai/v1"
+		baseURL = kimiDefaultBaseURL
 	}
 
 	messages := buildKimiMessages(req.Messages)
@@ -102,7 +109,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
 		strings.HasPrefix(req.Model, "kimi-k2")
 	if isThinkingModel {
-		apiReq.Thinking = &kimiThinking{Type: "enabled"}
+		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOn}
 	}
 
 	if len(req.Tools) > 0 {
@@ -153,11 +160,13 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		choice := apiResp.Choices[0]
 		result.Content = choice.Message.Content
 
-		for _, tc := range choice.Message.ToolCalls {
-			result.ToolCalls = append(result.ToolCalls, tools.ToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: json.RawMessage(tc.Function.Arguments),
+		if len(choice.Message.ToolCalls) > 0 {
+			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) tools.ToolCall {
+				return tools.ToolCall{
+					ID:        tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: json.RawMessage(tc.Function.Arguments),
+				}
 			})
 		}
 	}
@@ -166,51 +175,44 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 }
 
 func buildKimiMessages(messages []Message) []kimiMessage {
-	result := make([]kimiMessage, 0, len(messages))
-	for _, msg := range messages {
+	return lo.FilterMap(messages, func(msg Message, _ int) (kimiMessage, bool) {
 		switch msg.Role {
-		case "user":
-			result = append(result, kimiMessage{
-				Role:    "user",
-				Content: msg.Content,
-			})
-		case "assistant":
-			km := kimiMessage{
-				Role:    "assistant",
-				Content: msg.Content,
-			}
-			for _, tc := range msg.ToolCalls {
-				km.ToolCalls = append(km.ToolCalls, kimiToolCall{
-					ID:   tc.ID,
-					Type: "function",
-					Function: kimiToolFunction{
-						Name:      tc.Name,
-						Arguments: string(tc.Arguments),
-					},
+		case RoleUser:
+			return kimiMessage{Role: RoleUser, Content: msg.Content}, true
+		case RoleAssistant:
+			km := kimiMessage{Role: RoleAssistant, Content: msg.Content}
+			if len(msg.ToolCalls) > 0 {
+				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc tools.ToolCall, _ int) kimiToolCall {
+					return kimiToolCall{
+						ID:   tc.ID,
+						Type: kimiToolTypeFunc,
+						Function: kimiToolFunction{
+							Name:      tc.Name,
+							Arguments: string(tc.Arguments),
+						},
+					}
 				})
 			}
-			result = append(result, km)
-		case "tool":
+			return km, true
+		case RoleTool:
 			if msg.ToolResult != nil {
-				result = append(result, kimiMessage{
-					Role:       "tool",
+				return kimiMessage{
+					Role:       RoleTool,
 					Content:    msg.ToolResult.Content,
 					ToolCallID: msg.ToolResult.CallID,
-				})
+				}, true
 			}
-		case "system":
-			result = append(result, kimiMessage{
-				Role:    "system",
-				Content: msg.Content,
-			})
+			return kimiMessage{}, false
+		case RoleSystem:
+			return kimiMessage{Role: RoleSystem, Content: msg.Content}, true
+		default:
+			return kimiMessage{}, false
 		}
-	}
-	return result
+	})
 }
 
 func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
-	result := make([]kimiTool, len(defs))
-	for i, def := range defs {
+	return lo.Map(defs, func(def tools.ToolDefinition, _ int) kimiTool {
 		properties := make(map[string]any)
 		for name, prop := range def.Parameters.Properties {
 			properties[name] = map[string]any{
@@ -218,8 +220,8 @@ func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
 				"description": prop.Description,
 			}
 		}
-		result[i] = kimiTool{
-			Type: "function",
+		return kimiTool{
+			Type: kimiToolTypeFunc,
 			Function: kimiToolFunctionDef{
 				Name:        def.Name,
 				Description: def.Description,
@@ -230,6 +232,5 @@ func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
 				},
 			},
 		}
-	}
-	return result
+	})
 }

@@ -66,9 +66,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
 	return lo.FilterMap(messages, func(msg Message, _ int) (openai.ChatCompletionMessageParamUnion, bool) {
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			return openai.UserMessage(msg.Content), true
-		case "assistant":
+		case RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				assistantMsg := openai.AssistantMessage(msg.Content)
 				assistantMsg.OfAssistant.ToolCalls = lo.Map(msg.ToolCalls, func(tc tools.ToolCall, _ int) openai.ChatCompletionMessageToolCallUnionParam {
@@ -85,12 +85,12 @@ func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParam
 				return assistantMsg, true
 			}
 			return openai.AssistantMessage(msg.Content), true
-		case "tool":
+		case RoleTool:
 			if msg.ToolResult != nil {
 				return openai.ToolMessage(msg.ToolResult.Content, msg.ToolResult.CallID), true
 			}
 			return openai.ChatCompletionMessageParamUnion{}, false
-		case "system":
+		case RoleSystem:
 			return openai.SystemMessage(msg.Content), true
 		default:
 			return openai.ChatCompletionMessageParamUnion{}, false

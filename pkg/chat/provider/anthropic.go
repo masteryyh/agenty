@@ -25,9 +25,12 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(req.Model),
-		MaxTokens: 4096,
-		Messages:  buildAnthropicMessages(req.Messages),
+		Model:    anthropic.Model(req.Model),
+		Messages: buildAnthropicMessages(req.Messages),
+	}
+
+	if req.MaxTokens > 0 {
+		params.MaxTokens = req.MaxTokens
 	}
 
 	if len(req.Tools) > 0 {
@@ -69,9 +72,9 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
 	return lo.FilterMap(messages, func(msg Message, _ int) (anthropic.MessageParam, bool) {
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)), true
-		case "assistant":
+		case RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion
 				if msg.Content != "" {
@@ -87,7 +90,7 @@ func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
 				return anthropic.NewAssistantMessage(blocks...), true
 			}
 			return anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)), true
-		case "tool":
+		case RoleTool:
 			if msg.ToolResult != nil {
 				return anthropic.NewUserMessage(
 					anthropic.NewToolResultBlock(msg.ToolResult.CallID, msg.ToolResult.Content, msg.ToolResult.IsError),

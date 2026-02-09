@@ -6,6 +6,13 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
+const (
+	RoleUser      = "user"
+	RoleAssistant = "assistant"
+	RoleTool      = "tool"
+	RoleSystem    = "system"
+)
+
 type Message struct {
 	Role       string            `json:"role"`
 	Content    string            `json:"content"`
@@ -14,11 +21,12 @@ type Message struct {
 }
 
 type ChatRequest struct {
-	Model    string
-	Messages []Message
-	Tools    []tools.ToolDefinition
-	BaseURL  string
-	APIKey   string
+	Model     string
+	Messages  []Message
+	Tools     []tools.ToolDefinition
+	BaseURL   string
+	APIKey    string
+	MaxTokens int64
 }
 
 type ChatResponse struct {

@@ -196,7 +196,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		}
 	})
 	messages = append(messages, provider.Message{
-		Role:    "user",
+		Role:    provider.RoleUser,
 		Content: data.Message,
 	})
 
