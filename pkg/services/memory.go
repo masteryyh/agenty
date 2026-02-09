@@ -143,9 +143,11 @@ func (s *MemoryService) keywordSearch(ctx context.Context, query string, limit i
 	})
 
 	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL")
-	for _, p := range patterns {
-		tx = tx.Or("LOWER(content) LIKE ?", p)
+	orConditions := s.db.Where("LOWER(content) LIKE ?", patterns[0])
+	for _, p := range patterns[1:] {
+		orConditions = orConditions.Or("LOWER(content) LIKE ?", p)
 	}
+	tx = tx.Where(orConditions)
 
 	var memories []models.Memory
 	if err := tx.Limit(limit).Find(&memories).Error; err != nil {
