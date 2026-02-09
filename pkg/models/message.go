@@ -17,9 +17,14 @@ limitations under the License.
 package models
 
 import (
+	"context"
+	"log/slog"
 	"time"
 
+	json "github.com/bytedance/sonic"
+
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 )
 
 type MessageRole string
@@ -28,16 +33,19 @@ const (
 	RoleUser      MessageRole = "user"
 	RoleAssistant MessageRole = "assistant"
 	RoleTool      MessageRole = "tool"
+	RoleSystem    MessageRole = "system"
 )
 
 type ChatMessage struct {
-	ID        uuid.UUID   `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	SessionID uuid.UUID   `gorm:"type:uuid;not null"`
-	Role      MessageRole `gorm:"type:varchar(50);not null"`
-	Content   string      `gorm:"type:text;not null"`
-	ModelID   uuid.UUID   `gorm:"type:uuid;not null"`
-	CreatedAt time.Time   `gorm:"autoCreateTime:milli"`
-	DeletedAt *time.Time
+	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	SessionID   uuid.UUID      `gorm:"type:uuid;not null"`
+	Role        MessageRole    `gorm:"type:varchar(50);not null"`
+	Content     string         `gorm:"type:text"`
+	ToolCalls   datatypes.JSON `gorm:"type:jsonb"`
+	ToolResults datatypes.JSON `gorm:"type:jsonb"`
+	ModelID     uuid.UUID      `gorm:"type:uuid;not null"`
+	CreatedAt   time.Time      `gorm:"autoCreateTime:milli"`
+	DeletedAt   *time.Time
 }
 
 func (ChatMessage) TableName() string {
@@ -45,11 +53,30 @@ func (ChatMessage) TableName() string {
 }
 
 func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
+	var toolCalls []ToolCall
+	if len(m.ToolCalls) > 0 {
+		if err := json.Unmarshal(m.ToolCalls, &toolCalls); err != nil {
+			slog.ErrorContext(context.Background(), "failed to unmarshal tool calls", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		}
+	}
+
+	var toolResult *ToolResult
+	if len(m.ToolResults) > 0 {
+		var tr ToolResult
+		if err := json.Unmarshal(m.ToolResults, &tr); err != nil {
+			slog.ErrorContext(context.Background(), "failed to unmarshal tool result", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		} else {
+			toolResult = &tr
+		}
+	}
+
 	dto := &ChatMessageDto{
-		ID:        m.ID,
-		Role:      m.Role,
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt,
+		ID:         m.ID,
+		Role:       m.Role,
+		Content:    m.Content,
+		ToolCalls:  toolCalls,
+		ToolResult: toolResult,
+		CreatedAt:  m.CreatedAt,
 	}
 
 	if model != nil {
@@ -59,14 +86,29 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 }
 
 type ChatMessageDto struct {
-	ID        uuid.UUID   `json:"id"`
-	Role      MessageRole `json:"role"`
-	Content   string      `json:"content"`
-	Model     *ModelDto   `json:"model,omitempty"`
-	CreatedAt time.Time   `json:"createdAt"`
+	ID         uuid.UUID   `json:"id"`
+	Role       MessageRole `json:"role"`
+	Content    string      `json:"content"`
+	ToolCalls  []ToolCall  `json:"toolCalls,omitempty"`
+	ToolResult *ToolResult `json:"toolResult,omitempty"`
+	Model      *ModelDto   `json:"model,omitempty"`
+	CreatedAt  time.Time   `json:"createdAt"`
 }
 
 type ChatDto struct {
 	ModelID uuid.UUID `json:"modelId" binding:"required"`
 	Message string    `json:"message" binding:"required"`
+}
+
+type ToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type ToolResult struct {
+	CallID  string `json:"callId"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	IsError bool   `json:"isError"`
 }

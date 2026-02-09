@@ -23,14 +23,16 @@ import (
 	"log/slog"
 	"sync"
 
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
-	"github.com/openai/openai-go/v3"
 	"github.com/samber/lo"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -72,7 +74,7 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 			return nil, customerrors.ErrSessionNotFound
 		}
 
-		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
@@ -81,7 +83,7 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 		Order("created_at ASC").
 		Find(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "session_id", session.ID)
+		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "sessionId", session.ID)
 		return nil, err
 	}
 	if len(chatMessages) == 0 {
@@ -96,7 +98,7 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 		Where("id IN ? AND deleted_at IS NULL", modelIds).
 		Find(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to find models for chat messages", "error", err, "model_ids", modelIds)
+		slog.ErrorContext(ctx, "failed to find models for chat messages", "error", err, "modelIds", modelIds)
 		return nil, err
 	}
 	modelMap := lo.Associate(chatModels, func(m models.Model) (uuid.UUID, *models.ModelDto) {
@@ -149,12 +151,12 @@ func (s *ChatService) ListSessions(ctx context.Context, request *pagination.Page
 	}, nil
 }
 
-func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (*models.ChatMessageDto, error) {
+func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) ([]*models.ChatMessageDto, error) {
 	session, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ? AND deleted_at IS NULL", sessionID).
 		First(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
@@ -165,18 +167,18 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customerrors.ErrModelNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "model_id", data.ModelID)
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", data.ModelID)
 		return nil, err
 	}
 
-	provider, err := gorm.G[models.ModelProvider](s.db).
+	chatProvider, err := gorm.G[models.ModelProvider](s.db).
 		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
 		First(ctx)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customerrors.ErrProviderNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find provider", "error", err, "provider_id", model.ProviderID)
+		slog.ErrorContext(ctx, "failed to find provider", "error", err, "providerId", model.ProviderID)
 		return nil, err
 	}
 
@@ -185,17 +187,39 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		Order("created_at ASC").
 		Find(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) openai.ChatCompletionMessageParamUnion {
-		if cm.Role == models.RoleUser {
-			return openai.UserMessage(cm.Content)
+	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) provider.Message {
+		var toolCalls []models.ToolCall
+		if len(cm.ToolCalls) > 0 {
+			if err := json.Unmarshal(cm.ToolCalls, &toolCalls); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool calls", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+			}
 		}
-		return openai.AssistantMessage(cm.Content)
+
+		var toolResult *models.ToolResult
+		if len(cm.ToolResults) > 0 {
+			var tr models.ToolResult
+			if err := json.Unmarshal(cm.ToolResults, &tr); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool result", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+			} else {
+				toolResult = &tr
+			}
+		}
+
+		return provider.Message{
+			Role:       string(cm.Role),
+			Content:    cm.Content,
+			ToolCalls:  toolCalls,
+			ToolResult: toolResult,
+		}
 	})
-	messages = append(messages, openai.UserMessage(data.Message))
+	messages = append(messages, provider.Message{
+		Role:    provider.RoleUser,
+		Content: data.Message,
+	})
 
 	newUserMessage := models.ChatMessage{
 		SessionID: session.ID,
@@ -205,45 +229,90 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &newUserMessage); err != nil {
-		slog.ErrorContext(ctx, "failed to save user message", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "failed to save user message", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	response, token, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:  provider.BaseURL,
-		APIKey:   provider.APIKey,
+	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
+		BaseURL:  chatProvider.BaseURL,
+		APIKey:   chatProvider.APIKey,
 		Model:    model.Name,
 		Messages: messages,
+		APIType:  chatProvider.Type,
 	})
 	if err != nil {
-		slog.ErrorContext(ctx, "chat completion failed", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "chat completion failed", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	newAssistantMessage := models.ChatMessage{
-		SessionID: session.ID,
-		Role:      models.RoleAssistant,
-		Content:   response,
-		ModelID:   model.ID,
-	}
+	newMessages := lo.Map(result.Messages, func(m provider.Message, _ int) models.ChatMessage {
+		var rawCalls []byte
+		if len(m.ToolCalls) > 0 {
+			if data, err := json.Marshal(m.ToolCalls); err != nil {
+				slog.ErrorContext(ctx, "failed to marshal tool calls", "error", err, "sessionId", sessionID)
+			} else {
+				rawCalls = data
+			}
+		}
 
-	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &newAssistantMessage); err != nil {
-		slog.ErrorContext(ctx, "failed to save assistant message", "error", err, "session_id", sessionID)
+		var rawCallResult []byte
+		if m.ToolResult != nil {
+			if data, err := json.Marshal(m.ToolResult); err != nil {
+				slog.ErrorContext(ctx, "failed to marshal tool result", "error", err, "sessionId", sessionID)
+			} else {
+				rawCallResult = data
+			}
+		}
+
+		return models.ChatMessage{
+			SessionID:   session.ID,
+			Role:        models.MessageRole(m.Role),
+			Content:     m.Content,
+			ToolCalls:   datatypes.JSON(rawCalls),
+			ToolResults: datatypes.JSON(rawCallResult),
+			ModelID:     model.ID,
+		}
+	})
+
+	if err := s.db.WithContext(ctx).Create(&newMessages).Error; err != nil {
+		slog.ErrorContext(ctx, "failed to save assistant message", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	session.TokenConsumed += token
+	session.TokenConsumed += result.TotalToken
 	if _, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ?", session.ID).
 		Update(ctx, "token_consumed", session.TokenConsumed); err != nil {
-		slog.ErrorContext(ctx, "failed to update token consumed", "error", err, "session_id", sessionID)
+		slog.ErrorContext(ctx, "failed to update token consumed", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	return &models.ChatMessageDto{
-		ID:        newAssistantMessage.ID,
-		Role:      newAssistantMessage.Role,
-		Content:   newAssistantMessage.Content,
-		CreatedAt: newAssistantMessage.CreatedAt,
-	}, nil
+	messageDtos := lo.Map(newMessages, func(m models.ChatMessage, _ int) *models.ChatMessageDto {
+		var toolCalls []models.ToolCall
+		if len(m.ToolCalls) > 0 {
+			if err := json.Unmarshal(m.ToolCalls, &toolCalls); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool calls", "error", err, "sessionId", sessionID, "messageId", m.ID)
+			}
+		}
+
+		var toolResult *models.ToolResult
+		if len(m.ToolResults) > 0 {
+			var tr models.ToolResult
+			if err := json.Unmarshal(m.ToolResults, &tr); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal tool result", "error", err, "sessionId", sessionID, "messageId", m.ID)
+			} else {
+				toolResult = &tr
+			}
+		}
+
+		return &models.ChatMessageDto{
+			ID:         m.ID,
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCalls:  toolCalls,
+			ToolResult: toolResult,
+			CreatedAt:  m.CreatedAt,
+		}
+	})
+	return messageDtos, nil
 }

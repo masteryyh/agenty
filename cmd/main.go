@@ -24,6 +24,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/chat/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/middleware"
@@ -50,6 +52,11 @@ func main() {
 		slog.ErrorContext(baseCtx, "failed to initialize database connection", "error", err)
 		return
 	}
+
+	slog.InfoContext(baseCtx, "registering built-in tools...")
+	registry := tools.GetRegistry()
+	builtin.RegisterAll(registry)
+	slog.InfoContext(baseCtx, "built-in tools registered", "count", len(registry.All()))
 
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)

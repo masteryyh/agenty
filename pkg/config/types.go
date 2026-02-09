@@ -16,7 +16,11 @@ limitations under the License.
 
 package config
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/masteryyh/agenty/pkg/utils"
+)
 
 // AppConfig is the config definition for this app
 type AppConfig struct {
@@ -25,6 +29,9 @@ type AppConfig struct {
 
 	// Port of the HTTP server
 	Port int `mapstructure:"port"`
+
+	// AllowedPaths is a list of allowed filesystem paths for tools to operate, if empty, all paths are allowed
+	AllowedPaths []string `mapstructure:"allowedPaths"`
 
 	// DB configuration
 	DB *DatabaseConfig `mapstructure:"db"`
@@ -71,5 +78,16 @@ func (c *AppConfig) Validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.Port)
 	}
+
+	cleanedPaths := make([]string, 0, len(c.AllowedPaths))
+	for _, p := range c.AllowedPaths {
+		cleaned, err := utils.GetCleanPath(p, true)
+		if err != nil {
+			return fmt.Errorf("invalid allowed path '%s': %w", p, err)
+		}
+		cleanedPaths = append(cleanedPaths, cleaned)
+	}
+	c.AllowedPaths = cleanedPaths
+
 	return c.DB.Validate()
 }
