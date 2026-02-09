@@ -47,12 +47,15 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
+		dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector")
+
 		if migrateErr := dbConn.WithContext(timeoutCtx).
 			AutoMigrate(
 				&models.ChatSession{},
 				&models.ChatMessage{},
 				&models.ModelProvider{},
 				&models.Model{},
+				&models.Memory{},
 			); migrateErr != nil {
 			err = migrateErr
 			return

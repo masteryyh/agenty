@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	json "github.com/bytedance/sonic"
@@ -31,14 +32,16 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 type ChatService struct {
-	chatExecutor *chat.ChatExecutor
-	db           *gorm.DB
+	chatExecutor  *chat.ChatExecutor
+	db            *gorm.DB
+	memoryService *MemoryService
 }
 
 var (
@@ -49,8 +52,9 @@ var (
 func GetChatService() *ChatService {
 	chatOnce.Do(func() {
 		chatService = &ChatService{
-			chatExecutor: chat.GetChatExecutor(),
-			db:           conn.GetDB(),
+			chatExecutor:  chat.GetChatExecutor(),
+			db:            conn.GetDB(),
+			memoryService: GetMemoryService(),
 		}
 	})
 	return chatService
@@ -314,5 +318,74 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			CreatedAt:  m.CreatedAt,
 		}
 	})
+
+	if s.memoryService.embeddingService.IsEnabled() {
+		safe.GoSafeWithCtx("auto-memory", ctx, func(bgCtx context.Context) {
+			s.evaluateAndSaveMemory(bgCtx, data.Message, result.Messages, chatProvider, model)
+		})
+	}
+
 	return messageDtos, nil
+}
+
+const memoryEvalPrompt = `You are a memory evaluation assistant. Analyze the following conversation and determine if it contains information worth remembering for future conversations.
+
+Worth remembering includes:
+- User preferences, habits, or personal information
+- Important facts or decisions made
+- Technical details or solutions discussed
+- Key context that would be useful in future conversations
+
+If the conversation contains memorable information, respond with EXACTLY this format:
+SAVE: <a clear, concise summary of the information to remember>
+
+If nothing is worth remembering, respond with EXACTLY:
+SKIP
+
+Only extract the most important information. Be concise.`
+
+func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage string, assistantMessages []provider.Message, chatProvider models.ModelProvider, model models.Model) {
+	var sb strings.Builder
+	sb.WriteString("User: ")
+	sb.WriteString(userMessage)
+	sb.WriteString("\n")
+	for _, msg := range assistantMessages {
+		if msg.Role == provider.RoleAssistant && msg.Content != "" {
+			sb.WriteString("Assistant: ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n")
+		}
+	}
+
+	evalMessages := []provider.Message{
+		{Role: provider.RoleSystem, Content: memoryEvalPrompt},
+		{Role: provider.RoleUser, Content: sb.String()},
+	}
+
+	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
+		BaseURL:  chatProvider.BaseURL,
+		APIKey:   chatProvider.APIKey,
+		Model:    model.Name,
+		Messages: evalMessages,
+		APIType:  chatProvider.Type,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "memory evaluation failed", "error", err)
+		return
+	}
+
+	for _, msg := range result.Messages {
+		if msg.Role == provider.RoleAssistant && strings.HasPrefix(msg.Content, "SAVE: ") {
+			content := strings.TrimPrefix(msg.Content, "SAVE: ")
+			content = strings.TrimSpace(content)
+			if content != "" {
+				if _, err := s.memoryService.SaveMemory(ctx, content); err != nil {
+					slog.ErrorContext(ctx, "failed to auto-save memory", "error", err)
+				} else {
+					slog.InfoContext(ctx, "auto-saved memory", "content", content)
+				}
+			}
+			return
+		}
+	}
 }

@@ -35,6 +35,24 @@ type AppConfig struct {
 
 	// DB configuration
 	DB *DatabaseConfig `mapstructure:"db"`
+
+	// Embedding configuration for memory features
+	Embedding *EmbeddingConfig `mapstructure:"embedding"`
+}
+
+// EmbeddingConfig is the config definition for embedding model used by memory features
+type EmbeddingConfig struct {
+	// BaseURL is the base URL of the embedding API (OpenAI-compatible)
+	BaseURL string `mapstructure:"baseUrl"`
+
+	// APIKey is the API key for the embedding API
+	APIKey string `mapstructure:"apiKey"`
+
+	// Model is the embedding model name
+	Model string `mapstructure:"model"`
+
+	// Dimensions is the dimension count of the embedding vector
+	Dimensions int `mapstructure:"dimensions"`
 }
 
 // DatabaseConfig is the config definition for database connection, only postgresql is supported for now
@@ -74,6 +92,19 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
+func (c *EmbeddingConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.Model == "" {
+		c.Model = "text-embedding-3-small"
+	}
+	if c.Dimensions <= 0 {
+		c.Dimensions = 1536
+	}
+	return nil
+}
+
 func (c *AppConfig) Validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.Port)
@@ -88,6 +119,10 @@ func (c *AppConfig) Validate() error {
 		cleanedPaths = append(cleanedPaths, cleaned)
 	}
 	c.AllowedPaths = cleanedPaths
+
+	if err := c.Embedding.Validate(); err != nil {
+		return fmt.Errorf("invalid embedding config: %w", err)
+	}
 
 	return c.DB.Validate()
 }

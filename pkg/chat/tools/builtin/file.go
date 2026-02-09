@@ -26,6 +26,7 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/config"
+	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
 
@@ -207,4 +208,8 @@ func RegisterAll(registry *tools.Registry) {
 	registry.Register(&ReadFileTool{cfg: cfg})
 	registry.Register(&WriteFileTool{cfg: cfg})
 	registry.Register(&ListDirectoryTool{cfg: cfg})
+
+	memoryService := services.GetMemoryService()
+	registry.Register(&SaveMemoryTool{memoryService: memoryService})
+	registry.Register(&SearchMemoryTool{memoryService: memoryService})
 }
