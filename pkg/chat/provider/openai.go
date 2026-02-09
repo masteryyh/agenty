@@ -50,14 +50,13 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		result.Content = choice.Message.Content
 
 		if len(choice.Message.ToolCalls) > 0 {
-			result.ToolCalls = make([]tools.ToolCall, len(choice.Message.ToolCalls))
-			for i, tc := range choice.Message.ToolCalls {
-				result.ToolCalls[i] = tools.ToolCall{
+			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc openai.ChatCompletionMessageToolCallUnion, _ int) tools.ToolCall {
+				return tools.ToolCall{
 					ID:        tc.ID,
 					Name:      tc.Function.Name,
 					Arguments: json.RawMessage(tc.Function.Arguments),
 				}
-			}
+			})
 		}
 	}
 

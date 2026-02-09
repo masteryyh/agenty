@@ -2,10 +2,11 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
+	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/samber/lo"
 	"google.golang.org/genai"
 )
@@ -21,17 +22,9 @@ func (p *GeminiProvider) Name() string {
 }
 
 func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	cc := &genai.ClientConfig{
-		APIKey:  req.APIKey,
-		Backend: genai.BackendGeminiAPI,
-	}
-	if req.BaseURL != "" {
-		cc.HTTPOptions = genai.HTTPOptions{BaseURL: req.BaseURL}
-	}
-
-	client, err := genai.NewClient(ctx, cc)
+	client, err := conn.GetGeminiClient(ctx, req.BaseURL, req.APIKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+		return nil, err
 	}
 
 	contents := buildGeminiContents(req.Messages)
@@ -61,7 +54,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				result.Content += part.Text
 			}
 			if part.FunctionCall != nil {
-				argsJSON, err := json.Marshal(part.FunctionCall.Args)
+				argsJSON, err := sonic.Marshal(part.FunctionCall.Args)
 				if err != nil {
 					argsJSON = []byte("{}")
 				}
@@ -93,7 +86,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 			}
 			for _, tc := range msg.ToolCalls {
 				var args map[string]any
-				if err := json.Unmarshal(tc.Arguments, &args); err != nil {
+				if err := sonic.Unmarshal(tc.Arguments, &args); err != nil {
 					args = map[string]any{}
 				}
 				c.Parts = append(c.Parts, genai.NewPartFromFunctionCall(tc.Name, args))

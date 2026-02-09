@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
@@ -108,7 +109,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		apiReq.Tools = buildKimiTools(req.Tools)
 	}
 
-	body, err := json.Marshal(apiReq)
+	body, err := sonic.Marshal(apiReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -136,7 +137,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	}
 
 	var apiResp kimiResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

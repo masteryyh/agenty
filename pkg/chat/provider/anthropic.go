@@ -2,12 +2,12 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/samber/lo"
 )
 
@@ -22,11 +22,7 @@ func (p *AnthropicProvider) Name() string {
 }
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	opts := []option.RequestOption{option.WithAPIKey(req.APIKey)}
-	if req.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(req.BaseURL))
-	}
-	client := anthropic.NewClient(opts...)
+	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
 
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(req.Model),
@@ -83,7 +79,7 @@ func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
 				}
 				for _, tc := range msg.ToolCalls {
 					var input any
-					if err := json.Unmarshal(tc.Arguments, &input); err != nil {
+					if err := sonic.Unmarshal(tc.Arguments, &input); err != nil {
 						input = map[string]any{}
 					}
 					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, input, tc.Name))
