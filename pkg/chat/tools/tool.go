@@ -1,9 +1,28 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package tools
 
 import (
 	"context"
-	"encoding/json"
+	"sort"
 	"sync"
+
+	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/samber/lo"
 )
 
 type ParameterProperty struct {
@@ -23,22 +42,9 @@ type ToolDefinition struct {
 	Parameters  ToolParameters `json:"parameters"`
 }
 
-type ToolCall struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-type ToolResult struct {
-	CallID  string `json:"call_id"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	IsError bool   `json:"is_error"`
-}
-
 type Tool interface {
 	Definition() ToolDefinition
-	Execute(ctx context.Context, arguments json.RawMessage) (string, error)
+	Execute(ctx context.Context, arguments string) (string, error)
 }
 
 type Registry struct {
@@ -86,17 +92,21 @@ func (r *Registry) All() []Tool {
 func (r *Registry) Definitions() []ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	keys := lo.Keys(r.tools)
+	sort.Strings(keys)
+
 	result := make([]ToolDefinition, 0, len(r.tools))
-	for _, t := range r.tools {
-		result = append(result, t.Definition())
+	for _, key := range keys {
+		result = append(result, r.tools[key].Definition())
 	}
 	return result
 }
 
-func (r *Registry) Execute(ctx context.Context, call ToolCall) ToolResult {
+func (r *Registry) Execute(ctx context.Context, call models.ToolCall) models.ToolResult {
 	tool, ok := r.Get(call.Name)
 	if !ok {
-		return ToolResult{
+		return models.ToolResult{
 			CallID:  call.ID,
 			Name:    call.Name,
 			Content: "tool not found: " + call.Name,
@@ -106,7 +116,7 @@ func (r *Registry) Execute(ctx context.Context, call ToolCall) ToolResult {
 
 	content, err := tool.Execute(ctx, call.Arguments)
 	if err != nil {
-		return ToolResult{
+		return models.ToolResult{
 			CallID:  call.ID,
 			Name:    call.Name,
 			Content: "error: " + err.Error(),
@@ -114,7 +124,7 @@ func (r *Registry) Execute(ctx context.Context, call ToolCall) ToolResult {
 		}
 	}
 
-	return ToolResult{
+	return models.ToolResult{
 		CallID:  call.ID,
 		Name:    call.Name,
 		Content: content,

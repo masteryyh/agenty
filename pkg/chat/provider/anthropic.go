@@ -1,3 +1,19 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package provider
 
 import (
@@ -8,6 +24,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
 )
 
@@ -24,9 +41,11 @@ func (p *AnthropicProvider) Name() string {
 func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
 
+	systemPrompts, messages := buildAnthropicMessages(req.Messages)
 	params := anthropic.MessageNewParams{
 		Model:    anthropic.Model(req.Model),
-		Messages: buildAnthropicMessages(req.Messages),
+		System:   systemPrompts,
+		Messages: messages,
 	}
 
 	if req.MaxTokens > 0 {
@@ -52,10 +71,10 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 		case "text":
 			textParts = append(textParts, block.Text)
 		case "tool_use":
-			result.ToolCalls = append(result.ToolCalls, tools.ToolCall{
+			result.ToolCalls = append(result.ToolCalls, models.ToolCall{
 				ID:        block.ID,
 				Name:      block.Name,
-				Arguments: block.Input,
+				Arguments: string(block.Input),
 			})
 		}
 	}
@@ -69,9 +88,13 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 	return result, nil
 }
 
-func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
-	return lo.FilterMap(messages, func(msg Message, _ int) (anthropic.MessageParam, bool) {
+func buildAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam) {
+	systemMessages := make([]anthropic.TextBlockParam, 0)
+	params := lo.FilterMap(messages, func(msg Message, _ int) (anthropic.MessageParam, bool) {
 		switch msg.Role {
+		case RoleSystem:
+			systemMessages = append(systemMessages, *anthropic.NewTextBlock(msg.Content).OfText)
+			return anthropic.MessageParam{}, false
 		case RoleUser:
 			return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)), true
 		case RoleAssistant:
@@ -82,7 +105,7 @@ func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
 				}
 				for _, tc := range msg.ToolCalls {
 					var input any
-					if err := sonic.Unmarshal(tc.Arguments, &input); err != nil {
+					if err := sonic.Unmarshal([]byte(tc.Arguments), &input); err != nil {
 						input = map[string]any{}
 					}
 					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, input, tc.Name))
@@ -101,6 +124,7 @@ func buildAnthropicMessages(messages []Message) []anthropic.MessageParam {
 			return anthropic.MessageParam{}, false
 		}
 	})
+	return systemMessages, params
 }
 
 func buildAnthropicTools(defs []tools.ToolDefinition) []anthropic.ToolUnionParam {

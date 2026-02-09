@@ -1,9 +1,24 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package provider
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +26,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
 )
 
@@ -35,10 +51,10 @@ func (p *KimiProvider) Name() string {
 }
 
 type kimiRequest struct {
-	Model    string             `json:"model"`
-	Messages []kimiMessage      `json:"messages"`
-	Tools    []kimiTool         `json:"tools,omitempty"`
-	Thinking *kimiThinking      `json:"thinking,omitempty"`
+	Model    string        `json:"model"`
+	Messages []kimiMessage `json:"messages"`
+	Tools    []kimiTool    `json:"tools,omitempty"`
+	Thinking *kimiThinking `json:"thinking,omitempty"`
 }
 
 type kimiMessage struct {
@@ -61,8 +77,8 @@ type kimiToolFunction struct {
 }
 
 type kimiTool struct {
-	Type     string               `json:"type"`
-	Function kimiToolFunctionDef  `json:"function"`
+	Type     string              `json:"type"`
+	Function kimiToolFunctionDef `json:"function"`
 }
 
 type kimiToolFunctionDef struct {
@@ -161,11 +177,11 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		result.Content = choice.Message.Content
 
 		if len(choice.Message.ToolCalls) > 0 {
-			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) tools.ToolCall {
-				return tools.ToolCall{
+			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) models.ToolCall {
+				return models.ToolCall{
 					ID:        tc.ID,
 					Name:      tc.Function.Name,
-					Arguments: json.RawMessage(tc.Function.Arguments),
+					Arguments: tc.Function.Arguments,
 				}
 			})
 		}
@@ -182,7 +198,7 @@ func buildKimiMessages(messages []Message) []kimiMessage {
 		case RoleAssistant:
 			km := kimiMessage{Role: RoleAssistant, Content: msg.Content}
 			if len(msg.ToolCalls) > 0 {
-				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc tools.ToolCall, _ int) kimiToolCall {
+				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) kimiToolCall {
 					return kimiToolCall{
 						ID:   tc.ID,
 						Type: kimiToolTypeFunc,

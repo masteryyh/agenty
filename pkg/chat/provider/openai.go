@@ -1,11 +1,27 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package provider
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
@@ -50,11 +66,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		result.Content = choice.Message.Content
 
 		if len(choice.Message.ToolCalls) > 0 {
-			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc openai.ChatCompletionMessageToolCallUnion, _ int) tools.ToolCall {
-				return tools.ToolCall{
+			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc openai.ChatCompletionMessageToolCallUnion, _ int) models.ToolCall {
+				return models.ToolCall{
 					ID:        tc.ID,
 					Name:      tc.Function.Name,
-					Arguments: json.RawMessage(tc.Function.Arguments),
+					Arguments: tc.Function.Arguments,
 				}
 			})
 		}
@@ -71,7 +87,7 @@ func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParam
 		case RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				assistantMsg := openai.AssistantMessage(msg.Content)
-				assistantMsg.OfAssistant.ToolCalls = lo.Map(msg.ToolCalls, func(tc tools.ToolCall, _ int) openai.ChatCompletionMessageToolCallUnionParam {
+				assistantMsg.OfAssistant.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) openai.ChatCompletionMessageToolCallUnionParam {
 					return openai.ChatCompletionMessageToolCallUnionParam{
 						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
 							ID: tc.ID,

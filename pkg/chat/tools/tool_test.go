@@ -1,10 +1,27 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
+
+	"github.com/masteryyh/agenty/pkg/models"
 )
 
 type mockTool struct {
@@ -27,7 +44,7 @@ func (t *mockTool) Definition() ToolDefinition {
 	}
 }
 
-func (t *mockTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+func (t *mockTool) Execute(_ context.Context, _ string) (string, error) {
 	return t.result, t.err
 }
 
@@ -95,10 +112,10 @@ func TestRegistryExecuteSuccess(t *testing.T) {
 	r := newTestRegistry()
 	r.Register(&mockTool{name: "echo", result: "hello world"})
 
-	result := r.Execute(context.Background(), ToolCall{
+	result := r.Execute(context.Background(), models.ToolCall{
 		ID:        "call_1",
 		Name:      "echo",
-		Arguments: json.RawMessage(`{"input":"test"}`),
+		Arguments: `{"input":"test"}`,
 	})
 
 	if result.IsError {
@@ -115,7 +132,7 @@ func TestRegistryExecuteSuccess(t *testing.T) {
 func TestRegistryExecuteToolNotFound(t *testing.T) {
 	r := newTestRegistry()
 
-	result := r.Execute(context.Background(), ToolCall{
+	result := r.Execute(context.Background(), models.ToolCall{
 		ID:   "call_1",
 		Name: "nonexistent",
 	})
@@ -132,10 +149,10 @@ func TestRegistryExecuteToolError(t *testing.T) {
 	r := newTestRegistry()
 	r.Register(&mockTool{name: "failing", err: fmt.Errorf("tool execution failed")})
 
-	result := r.Execute(context.Background(), ToolCall{
+	result := r.Execute(context.Background(), models.ToolCall{
 		ID:        "call_1",
 		Name:      "failing",
-		Arguments: json.RawMessage(`{}`),
+		Arguments: `{}`,
 	})
 
 	if !result.IsError {

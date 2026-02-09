@@ -1,18 +1,37 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package builtin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/bytedance/sonic"
+	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/config"
+	"github.com/masteryyh/agenty/pkg/utils"
 )
 
-type ReadFileTool struct{}
+type ReadFileTool struct {
+	cfg *config.AppConfig
+}
 
 func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
@@ -31,23 +50,44 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReadFileTool) Execute(_ context.Context, arguments json.RawMessage) (string, error) {
+func (t *ReadFileTool) Execute(_ context.Context, arguments string) (string, error) {
 	var args struct {
 		Path string `json:"path"`
 	}
-	if err := sonic.Unmarshal(arguments, &args); err != nil {
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath := filepath.Clean(args.Path)
-	data, err := os.ReadFile(cleanPath)
+	abs, err := utils.GetCleanPath(args.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	contains, err := utils.PathContained(t.cfg.AllowedPaths, abs)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+	if !contains {
+		return "", fmt.Errorf("access to path '%s' is not allowed", args.Path)
+	}
+
+	if _, err := os.Stat(abs); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("file does not exist: %s", args.Path)
+		}
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	data, err := os.ReadFile(abs)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 	return string(data), nil
 }
 
-type WriteFileTool struct{}
+type WriteFileTool struct {
+	cfg *config.AppConfig
+}
 
 func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
@@ -70,16 +110,28 @@ func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *WriteFileTool) Execute(_ context.Context, arguments json.RawMessage) (string, error) {
+func (t *WriteFileTool) Execute(_ context.Context, arguments string) (string, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if err := sonic.Unmarshal(arguments, &args); err != nil {
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath := filepath.Clean(args.Path)
+	cleanPath, err := utils.GetCleanPath(args.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	contains, err := utils.PathContained(t.cfg.AllowedPaths, cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	if !contains {
+		return "", fmt.Errorf("access to path '%s' is not allowed", args.Path)
+	}
+
 	dir := filepath.Dir(cleanPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create directory: %w", err)
@@ -91,7 +143,9 @@ func (t *WriteFileTool) Execute(_ context.Context, arguments json.RawMessage) (s
 	return fmt.Sprintf("successfully wrote %d bytes to %s", len(args.Content), cleanPath), nil
 }
 
-type ListDirectoryTool struct{}
+type ListDirectoryTool struct {
+	cfg *config.AppConfig
+}
 
 func (t *ListDirectoryTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
@@ -110,15 +164,27 @@ func (t *ListDirectoryTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ListDirectoryTool) Execute(_ context.Context, arguments json.RawMessage) (string, error) {
+func (t *ListDirectoryTool) Execute(_ context.Context, arguments string) (string, error) {
 	var args struct {
 		Path string `json:"path"`
 	}
-	if err := sonic.Unmarshal(arguments, &args); err != nil {
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath := filepath.Clean(args.Path)
+	cleanPath, err := utils.GetCleanPath(args.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to list directory: %w", err)
+	}
+
+	contains, err := utils.PathContained(t.cfg.AllowedPaths, cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to list directory: %w", err)
+	}
+	if !contains {
+		return "", fmt.Errorf("access to path '%s' is not allowed", args.Path)
+	}
+
 	entries, err := os.ReadDir(cleanPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
@@ -130,13 +196,15 @@ func (t *ListDirectoryTool) Execute(_ context.Context, arguments json.RawMessage
 		if entry.IsDir() {
 			entryType = "dir"
 		}
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", entryType, entry.Name()))
+		fmt.Fprintf(&sb, "[%s] %s\n", entryType, entry.Name())
 	}
 	return sb.String(), nil
 }
 
 func RegisterAll(registry *tools.Registry) {
-	registry.Register(&ReadFileTool{})
-	registry.Register(&WriteFileTool{})
-	registry.Register(&ListDirectoryTool{})
+	cfg := config.GetConfigManager().GetConfig()
+
+	registry.Register(&ReadFileTool{cfg: cfg})
+	registry.Register(&WriteFileTool{cfg: cfg})
+	registry.Register(&ListDirectoryTool{cfg: cfg})
 }

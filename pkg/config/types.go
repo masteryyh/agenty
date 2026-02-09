@@ -16,7 +16,10 @@ limitations under the License.
 
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // AppConfig is the config definition for this app
 type AppConfig struct {
@@ -25,6 +28,9 @@ type AppConfig struct {
 
 	// Port of the HTTP server
 	Port int `mapstructure:"port"`
+
+	// AllowedPaths is a list of allowed filesystem paths for tools to operate, if empty, all paths are allowed
+	AllowedPaths []string `mapstructure:"allowedPaths"`
 
 	// DB configuration
 	DB *DatabaseConfig `mapstructure:"db"`
@@ -71,5 +77,22 @@ func (c *AppConfig) Validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.Port)
 	}
+
+	cleanedPaths := make([]string, 0, len(c.AllowedPaths))
+	if len(c.AllowedPaths) > 0 {
+		for _, path := range c.AllowedPaths {
+			if path == "" {
+				return fmt.Errorf("allowed paths cannot contain empty string")
+			}
+
+			abs, err := filepath.Abs(filepath.Clean(path))
+			if err != nil {
+				return fmt.Errorf("invalid allowed path '%s': %w", path, err)
+			}
+			cleanedPaths = append(cleanedPaths, abs)
+		}
+		c.AllowedPaths = cleanedPaths
+	}
+
 	return c.DB.Validate()
 }

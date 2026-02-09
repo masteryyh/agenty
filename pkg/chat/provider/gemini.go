@@ -1,3 +1,19 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package provider
 
 import (
@@ -7,6 +23,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
 	"google.golang.org/genai"
 )
@@ -54,15 +71,15 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				result.Content += part.Text
 			}
 			if part.FunctionCall != nil {
-				argsJSON, err := sonic.Marshal(part.FunctionCall.Args)
+				argsJSON, err := sonic.MarshalString(part.FunctionCall.Args)
 				if err != nil {
-					argsJSON = []byte("{}")
+					argsJSON = "{}"
 				}
 				id := part.FunctionCall.ID
 				if id == "" {
 					id = fmt.Sprintf("call_%s", part.FunctionCall.Name)
 				}
-				result.ToolCalls = append(result.ToolCalls, tools.ToolCall{
+				result.ToolCalls = append(result.ToolCalls, models.ToolCall{
 					ID:        id,
 					Name:      part.FunctionCall.Name,
 					Arguments: argsJSON,
@@ -86,7 +103,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 			}
 			for _, tc := range msg.ToolCalls {
 				var args map[string]any
-				if err := sonic.Unmarshal(tc.Arguments, &args); err != nil {
+				if err := sonic.Unmarshal([]byte(tc.Arguments), &args); err != nil {
 					args = map[string]any{}
 				}
 				c.Parts = append(c.Parts, genai.NewPartFromFunctionCall(tc.Name, args))

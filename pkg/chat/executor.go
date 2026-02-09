@@ -68,7 +68,6 @@ type ChatParams struct {
 }
 
 type ChatResult struct {
-	Content    string
 	TotalToken int64
 	Messages   []provider.Message
 }
@@ -85,7 +84,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 	var totalTokens int64
 
-	for i := 0; i < maxToolCallIterations; i++ {
+	for i := range maxToolCallIterations {
 		req := &provider.ChatRequest{
 			Model:    params.Model,
 			Messages: messages,
@@ -109,7 +108,6 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 		if len(resp.ToolCalls) == 0 {
 			return &ChatResult{
-				Content:    resp.Content,
 				TotalToken: totalTokens,
 				Messages:   messages,
 			}, nil
@@ -128,17 +126,8 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		}
 	}
 
-	lastContent := ""
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == provider.RoleAssistant {
-			lastContent = messages[i].Content
-			break
-		}
-	}
-
 	return &ChatResult{
-		Content:    lastContent,
 		TotalToken: totalTokens,
-		Messages:   messages,
+		Messages:   messages[len(params.Messages):],
 	}, nil
 }
