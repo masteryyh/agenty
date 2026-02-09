@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
@@ -97,7 +98,8 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		Messages: messages,
 	}
 
-	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5"
+	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
+		strings.HasPrefix(req.Model, "kimi-k2")
 	if isThinkingModel {
 		apiReq.Thinking = &kimiThinking{Type: "enabled"}
 	}

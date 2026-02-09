@@ -148,7 +148,10 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				result.Content += part.Text
 			}
 			if part.FunctionCall != nil {
-				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+				argsJSON, err := json.Marshal(part.FunctionCall.Args)
+				if err != nil {
+					argsJSON = []byte("{}")
+				}
 				result.ToolCalls = append(result.ToolCalls, tools.ToolCall{
 					ID:        fmt.Sprintf("call_%s", part.FunctionCall.Name),
 					Name:      part.FunctionCall.Name,
@@ -179,7 +182,9 @@ func buildGeminiContents(messages []Message) []geminiContent {
 			}
 			for _, tc := range msg.ToolCalls {
 				var args map[string]any
-				json.Unmarshal(tc.Arguments, &args)
+				if err := json.Unmarshal(tc.Arguments, &args); err != nil {
+					args = map[string]any{}
+				}
 				gc.Parts = append(gc.Parts, geminiPart{
 					FunctionCall: &geminiFunctionCall{
 						Name: tc.Name,
