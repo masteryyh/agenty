@@ -4,13 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -20,8 +24,8 @@ import (
 const rrfK = 60
 
 type MemoryService struct {
-	db               *gorm.DB
-	embeddingService *EmbeddingService
+	db  *gorm.DB
+	cfg *config.EmbeddingConfig
 }
 
 var (
@@ -32,15 +36,60 @@ var (
 func GetMemoryService() *MemoryService {
 	memoryOnce.Do(func() {
 		memoryService = &MemoryService{
-			db:               conn.GetDB(),
-			embeddingService: GetEmbeddingService(),
+			db:  conn.GetDB(),
+			cfg: config.GetConfigManager().GetConfig().Embedding,
 		}
 	})
 	return memoryService
 }
 
+func (s *MemoryService) IsEnabled() bool {
+	return s.cfg != nil && s.cfg.APIKey != ""
+}
+
+func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, error) {
+	if !s.IsEnabled() {
+		return nil, fmt.Errorf("embedding service is not configured")
+	}
+
+	client := conn.GetOpenAIClient(s.cfg.BaseURL, s.cfg.APIKey)
+	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model: s.cfg.Model,
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfString: param.NewOpt(text),
+		},
+		Dimensions: param.NewOpt(int64(s.cfg.Dimensions)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding: %w", err)
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("empty embedding response")
+	}
+
+	vec := lo.Map(resp.Data[0].Embedding, func(v float64, _ int) float32 {
+		return float32(v)
+	})
+	return normalizeVector(vec), nil
+}
+
+func normalizeVector(vec []float32) []float32 {
+	var norm float64
+	for _, v := range vec {
+		norm += float64(v) * float64(v)
+	}
+	norm = math.Sqrt(norm)
+	if norm == 0 {
+		return vec
+	}
+	return lo.Map(vec, func(v float32, _ int) float32 {
+		return float32(float64(v) / norm)
+	})
+}
+
 func (s *MemoryService) SaveMemory(ctx context.Context, content string) (*models.MemoryDto, error) {
-	embedding, err := s.embeddingService.Embed(ctx, content)
+	embedding, err := s.embed(ctx, content)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to embed memory content", "error", err)
 		return nil, fmt.Errorf("failed to embed content: %w", err)
@@ -86,7 +135,7 @@ func (s *MemoryService) SearchMemory(ctx context.Context, query string, limit in
 }
 
 func (s *MemoryService) vectorSearch(ctx context.Context, query string, limit int) ([]rankedItem, error) {
-	embedding, err := s.embeddingService.Embed(ctx, query)
+	embedding, err := s.embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
@@ -96,7 +145,7 @@ func (s *MemoryService) vectorSearch(ctx context.Context, query string, limit in
 	err = s.db.WithContext(ctx).
 		Where("deleted_at IS NULL").
 		Clauses(clause.OrderBy{
-			Expression: clause.Expr{SQL: "embedding <-> ?", Vars: []interface{}{queryVec}},
+			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{queryVec}},
 		}).
 		Limit(limit).
 		Find(&memories).Error
@@ -114,10 +163,10 @@ func (s *MemoryService) fullTextSearch(ctx context.Context, query string, limit 
 
 	var memories []models.Memory
 	err := s.db.WithContext(ctx).
-		Where("deleted_at IS NULL AND to_tsvector('english', content) @@ to_tsquery('english', ?)", tsQuery).
+		Where("deleted_at IS NULL AND to_tsvector('simple', content) @@ to_tsquery('simple', ?)", tsQuery).
 		Clauses(clause.OrderBy{
 			Expression: clause.Expr{
-				SQL:  "ts_rank(to_tsvector('english', content), to_tsquery('english', ?)) DESC",
+				SQL:  "ts_rank(to_tsvector('simple', content), to_tsquery('simple', ?)) DESC",
 				Vars: []interface{}{tsQuery},
 			},
 		}).
@@ -139,13 +188,13 @@ func (s *MemoryService) keywordSearch(ctx context.Context, query string, limit i
 	}
 
 	patterns := lo.Map(words, func(w string, _ int) string {
-		return "%" + strings.ToLower(w) + "%"
+		return "%" + w + "%"
 	})
 
 	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL")
-	orConditions := s.db.Where("LOWER(content) LIKE ?", patterns[0])
+	orConditions := s.db.Where("content ILIKE ?", patterns[0])
 	for _, p := range patterns[1:] {
-		orConditions = orConditions.Or("LOWER(content) LIKE ?", p)
+		orConditions = orConditions.Or("content ILIKE ?", p)
 	}
 	tx = tx.Where(orConditions)
 

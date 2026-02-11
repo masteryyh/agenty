@@ -60,6 +60,8 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			err = migrateErr
 			return
 		}
+
+		dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`)
 		db = dbConn
 	})
 	return err

@@ -319,7 +319,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		}
 	})
 
-	if s.memoryService.embeddingService.IsEnabled() {
+	if s.memoryService.IsEnabled() {
 		safe.GoSafeWithCtx("auto-memory", ctx, func(bgCtx context.Context) {
 			s.evaluateAndSaveMemory(bgCtx, data.Message, result.Messages, chatProvider, model)
 		})
