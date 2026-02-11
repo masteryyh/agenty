@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
@@ -40,6 +41,27 @@ func TestNormalizeVectorZero(t *testing.T) {
 		if v != 0 {
 			t.Fatalf("expected 0 at index %d, got %f", i, v)
 		}
+	}
+}
+
+func TestMemoryServiceIsEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *config.EmbeddingConfig
+		expected bool
+	}{
+		{"nil config", nil, false},
+		{"empty api key", &config.EmbeddingConfig{APIKey: ""}, false},
+		{"configured", &config.EmbeddingConfig{APIKey: "sk-test"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &MemoryService{cfg: tt.cfg}
+			if got := svc.IsEnabled(); got != tt.expected {
+				t.Fatalf("expected IsEnabled()=%v, got %v", tt.expected, got)
+			}
+		})
 	}
 }
 
