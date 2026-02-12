@@ -37,15 +37,16 @@ const (
 )
 
 type ChatMessage struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	SessionID   uuid.UUID      `gorm:"type:uuid;not null"`
-	Role        MessageRole    `gorm:"type:varchar(50);not null"`
-	Content     string         `gorm:"type:text"`
-	ToolCalls   datatypes.JSON `gorm:"type:jsonb"`
-	ToolResults datatypes.JSON `gorm:"type:jsonb"`
-	ModelID     uuid.UUID      `gorm:"type:uuid;not null"`
-	CreatedAt   time.Time      `gorm:"autoCreateTime:milli"`
-	DeletedAt   *time.Time
+	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	SessionID         uuid.UUID      `gorm:"type:uuid;not null"`
+	Role              MessageRole    `gorm:"type:varchar(50);not null"`
+	Content           string         `gorm:"type:text"`
+	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
+	ToolResults       datatypes.JSON `gorm:"type:jsonb"`
+	ModelID           uuid.UUID      `gorm:"type:uuid;not null"`
+	ProviderSpecifics datatypes.JSON `gorm:"type:jsonb"`
+	CreatedAt         time.Time      `gorm:"autoCreateTime:milli"`
+	DeletedAt         *time.Time
 }
 
 func (ChatMessage) TableName() string {
@@ -111,4 +112,8 @@ type ToolResult struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	IsError bool   `json:"isError"`
+}
+
+type ProviderSpecificData struct {
+	KimiReasoningContent string `json:"kimiReasoningContent,omitempty"`
 }

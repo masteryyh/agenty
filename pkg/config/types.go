@@ -50,9 +50,6 @@ type EmbeddingConfig struct {
 
 	// Model is the embedding model name
 	Model string `mapstructure:"model"`
-
-	// Dimensions is the dimension count of the embedding vector
-	Dimensions int `mapstructure:"dimensions"`
 }
 
 // DatabaseConfig is the config definition for database connection, only postgresql is supported for now
@@ -98,9 +95,6 @@ func (c *EmbeddingConfig) Validate() error {
 	}
 	if c.Model == "" {
 		c.Model = "text-embedding-3-small"
-	}
-	if c.Dimensions <= 0 {
-		c.Dimensions = 1536
 	}
 	return nil
 }

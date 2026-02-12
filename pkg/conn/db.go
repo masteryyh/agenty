@@ -19,7 +19,6 @@ package conn
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -48,7 +47,10 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
-		dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector")
+		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; extErr != nil {
+			err = extErr
+			return
+		}
 
 		if migrateErr := dbConn.WithContext(timeoutCtx).
 			AutoMigrate(
@@ -62,8 +64,9 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
-		if result := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`); result.Error != nil {
-			slog.WarnContext(timeoutCtx, "failed to create HNSW index on memories", "error", result.Error)
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`).Error; idxErr != nil {
+			err = idxErr
+			return
 		}
 		db = dbConn
 	})

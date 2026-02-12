@@ -37,7 +37,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const rrfK = 60
+const (
+	rrfK = 60
+)
 
 type MemoryService struct {
 	db  *gorm.DB
@@ -74,7 +76,7 @@ func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, erro
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfString: param.NewOpt(text),
 		},
-		Dimensions: param.NewOpt(int64(s.cfg.Dimensions)),
+		Dimensions: param.NewOpt(int64(1536)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding: %w", err)
@@ -179,10 +181,10 @@ func (s *MemoryService) fullTextSearch(ctx context.Context, query string, limit 
 
 	var memories []models.Memory
 	err := s.db.WithContext(ctx).
-		Where("deleted_at IS NULL AND to_tsvector('simple', content) @@ to_tsquery('simple', ?)", tsQuery).
+		Where("deleted_at IS NULL AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", tsQuery).
 		Clauses(clause.OrderBy{
 			Expression: clause.Expr{
-				SQL:  "ts_rank(to_tsvector('simple', content), to_tsquery('simple', ?)) DESC",
+				SQL:  "ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) DESC",
 				Vars: []any{tsQuery},
 			},
 		}).

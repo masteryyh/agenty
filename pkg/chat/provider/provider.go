@@ -23,33 +23,41 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
-const (
-	RoleUser      = "user"
-	RoleAssistant = "assistant"
-	RoleTool      = "tool"
-	RoleSystem    = "system"
-)
-
 type Message struct {
-	Role       string             `json:"role"`
-	Content    string             `json:"content"`
-	ToolCalls  []models.ToolCall  `json:"tool_calls,omitempty"`
-	ToolResult *models.ToolResult `json:"tool_result,omitempty"`
+	Role                 models.MessageRole `json:"role"`
+	Content              string             `json:"content"`
+	ToolCalls            []models.ToolCall  `json:"toolCalls,omitempty"`
+	ToolResult           *models.ToolResult `json:"toolResult,omitempty"`
+	KimiReasoningContent string             `json:"kimiReasoningContent,omitempty"`
+}
+
+type ResponseFormat struct {
+	Type       string            `json:"type"`                 // "json_object", "json_schema" or "text"
+	JSONSchema *JSONSchemaFormat `json:"jsonSchema,omitempty"` // Required when Type is "json_schema"
+}
+
+type JSONSchemaFormat struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Schema      map[string]any `json:"schema"`
+	Strict      bool           `json:"strict,omitempty"`
 }
 
 type ChatRequest struct {
-	Model     string
-	Messages  []Message
-	Tools     []tools.ToolDefinition
-	BaseURL   string
-	APIKey    string
-	MaxTokens int64
+	Model          string
+	Messages       []Message
+	Tools          []tools.ToolDefinition
+	BaseURL        string
+	APIKey         string
+	MaxTokens      int64
+	ResponseFormat *ResponseFormat
 }
 
 type ChatResponse struct {
-	Content    string
-	ToolCalls  []models.ToolCall
-	TotalToken int64
+	Content              string
+	KimiReasoningContent string
+	ToolCalls            []models.ToolCall
+	TotalToken           int64
 }
 
 type ChatProvider interface {

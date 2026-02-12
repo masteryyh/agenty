@@ -60,11 +60,12 @@ func GetChatExecutor() *ChatExecutor {
 }
 
 type ChatParams struct {
-	Messages []provider.Message
-	Model    string
-	BaseURL  string
-	APIKey   string
-	APIType  models.APIType
+	Messages       []provider.Message
+	Model          string
+	BaseURL        string
+	APIKey         string
+	APIType        models.APIType
+	ResponseFormat *provider.ResponseFormat
 }
 
 type ChatResult struct {
@@ -86,11 +87,12 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 	for i := range maxToolCallIterations {
 		req := &provider.ChatRequest{
-			Model:    params.Model,
-			Messages: messages,
-			Tools:    toolDefs,
-			BaseURL:  params.BaseURL,
-			APIKey:   params.APIKey,
+			Model:          params.Model,
+			Messages:       messages,
+			Tools:          toolDefs,
+			BaseURL:        params.BaseURL,
+			APIKey:         params.APIKey,
+			ResponseFormat: params.ResponseFormat,
 		}
 
 		resp, err := p.Chat(ctx, req)
@@ -100,10 +102,14 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		totalTokens += resp.TotalToken
 
 		assistantMsg := provider.Message{
-			Role:      provider.RoleAssistant,
+			Role:      models.RoleAssistant,
 			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
 		}
+		if params.APIType == models.APITypeKimi {
+			assistantMsg.KimiReasoningContent = resp.KimiReasoningContent
+		}
+
 		messages = append(messages, assistantMsg)
 
 		if len(resp.ToolCalls) == 0 {
@@ -118,11 +124,16 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		for _, tc := range resp.ToolCalls {
 			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
 			result := ce.registry.Execute(ctx, tc)
-			messages = append(messages, provider.Message{
-				Role:       provider.RoleTool,
+
+			toolMsg := provider.Message{
+				Role:       models.RoleTool,
 				Content:    result.Content,
 				ToolResult: &result,
-			})
+			}
+			if params.APIType == models.APITypeKimi {
+				toolMsg.KimiReasoningContent = resp.KimiReasoningContent
+			}
+			messages = append(messages, toolMsg)
 		}
 	}
 

@@ -29,6 +29,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat"
 	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
@@ -213,15 +214,28 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
-		return provider.Message{
-			Role:       string(cm.Role),
+		msg := provider.Message{
+			Role:       cm.Role,
 			Content:    cm.Content,
 			ToolCalls:  toolCalls,
 			ToolResult: toolResult,
 		}
+
+		if len(cm.ProviderSpecifics) > 0 {
+			var specificData models.ProviderSpecificData
+			if err := json.Unmarshal(cm.ProviderSpecifics, &specificData); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal provider specific data", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+				return msg
+			}
+
+			if chatProvider.Type == models.APITypeKimi && specificData.KimiReasoningContent != "" {
+				msg.KimiReasoningContent = specificData.KimiReasoningContent
+			}
+		}
+		return msg
 	})
 	messages = append(messages, provider.Message{
-		Role:    provider.RoleUser,
+		Role:    models.RoleUser,
 		Content: data.Message,
 	})
 
@@ -268,7 +282,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
-		return models.ChatMessage{
+		chatMsg := models.ChatMessage{
 			SessionID:   session.ID,
 			Role:        models.MessageRole(m.Role),
 			Content:     m.Content,
@@ -276,6 +290,16 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ToolResults: datatypes.JSON(rawCallResult),
 			ModelID:     model.ID,
 		}
+
+		if chatProvider.Type == models.APITypeKimi && m.KimiReasoningContent != "" {
+			specificData := models.ProviderSpecificData{
+				KimiReasoningContent: m.KimiReasoningContent,
+			}
+			if data, err := json.Marshal(specificData); err == nil {
+				chatMsg.ProviderSpecifics = datatypes.JSON(data)
+			}
+		}
+		return chatMsg
 	})
 
 	if err := s.db.WithContext(ctx).Create(&newMessages).Error; err != nil {
@@ -328,29 +352,13 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	return messageDtos, nil
 }
 
-const memoryEvalPrompt = `You are a memory evaluation assistant. Analyze the following conversation and determine if it contains information worth remembering for future conversations.
-
-Worth remembering includes:
-- User preferences, habits, or personal information
-- Important facts or decisions made
-- Technical details or solutions discussed
-- Key context that would be useful in future conversations
-
-If the conversation contains memorable information, respond with EXACTLY this format:
-SAVE: <a clear, concise summary of the information to remember>
-
-If nothing is worth remembering, respond with EXACTLY:
-SKIP
-
-Only extract the most important information. Be concise.`
-
 func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage string, assistantMessages []provider.Message, chatProvider models.ModelProvider, model models.Model) {
 	var sb strings.Builder
 	sb.WriteString("User: ")
 	sb.WriteString(userMessage)
 	sb.WriteString("\n")
 	for _, msg := range assistantMessages {
-		if msg.Role == provider.RoleAssistant && msg.Content != "" {
+		if msg.Role == models.RoleAssistant && msg.Content != "" {
 			sb.WriteString("Assistant: ")
 			sb.WriteString(msg.Content)
 			sb.WriteString("\n")
@@ -358,16 +366,42 @@ func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage str
 	}
 
 	evalMessages := []provider.Message{
-		{Role: provider.RoleSystem, Content: memoryEvalPrompt},
-		{Role: provider.RoleUser, Content: sb.String()},
+		{Role: models.RoleSystem, Content: consts.MemoryEvalPrompt},
+		{Role: models.RoleUser, Content: sb.String()},
+	}
+
+	responseFormat := &provider.ResponseFormat{Type: "json_object"}
+	if chatProvider.Type == models.APITypeOpenAI {
+		responseFormat = &provider.ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &provider.JSONSchemaFormat{
+				Name:        "memory_evaluation",
+				Description: "Extract facts from conversation for long-term memory",
+				Strict:      true,
+				Schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"facts": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "string",
+							},
+						},
+					},
+					"required":             []string{"facts"},
+					"additionalProperties": false,
+				},
+			},
+		}
 	}
 
 	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:  chatProvider.BaseURL,
-		APIKey:   chatProvider.APIKey,
-		Model:    model.Name,
-		Messages: evalMessages,
-		APIType:  chatProvider.Type,
+		BaseURL:        chatProvider.BaseURL,
+		APIKey:         chatProvider.APIKey,
+		Model:          model.Name,
+		Messages:       evalMessages,
+		APIType:        chatProvider.Type,
+		ResponseFormat: responseFormat,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "memory evaluation failed", "error", err)
@@ -375,14 +409,27 @@ func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage str
 	}
 
 	for _, msg := range result.Messages {
-		if msg.Role == provider.RoleAssistant && strings.HasPrefix(msg.Content, "SAVE: ") {
-			content := strings.TrimPrefix(msg.Content, "SAVE: ")
-			content = strings.TrimSpace(content)
-			if content != "" {
-				if _, err := s.memoryService.SaveMemory(ctx, content); err != nil {
-					slog.ErrorContext(ctx, "failed to auto-save memory", "error", err)
-				} else {
-					slog.InfoContext(ctx, "auto-saved memory", "content", content)
+		if msg.Role == models.RoleAssistant && msg.Content != "" {
+			var evalResult struct {
+				Facts []string `json:"facts"`
+			}
+			if err := json.Unmarshal([]byte(msg.Content), &evalResult); err != nil {
+				slog.ErrorContext(ctx, "failed to parse memory evaluation result", "error", err, "content", msg.Content)
+				return
+			}
+
+			if len(evalResult.Facts) == 0 {
+				return
+			}
+
+			for _, fact := range evalResult.Facts {
+				fact = strings.TrimSpace(fact)
+				if fact != "" {
+					if _, err := s.memoryService.SaveMemory(ctx, fact); err != nil {
+						slog.ErrorContext(ctx, "failed to auto-save memory", "error", err, "fact", fact)
+					} else {
+						slog.InfoContext(ctx, "auto-saved memory", "fact", fact)
+					}
 				}
 			}
 			return

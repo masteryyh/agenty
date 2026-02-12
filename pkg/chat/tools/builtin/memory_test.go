@@ -17,6 +17,7 @@ limitations under the License.
 package builtin
 
 import (
+	"context"
 	"testing"
 )
 
@@ -52,7 +53,7 @@ func TestSearchMemoryToolDefinition(t *testing.T) {
 
 func TestSaveMemoryToolEmptyContent(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(nil, `{"content": ""}`)
+	_, err := tool.Execute(context.Background(), `{"content": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty content")
 	}
@@ -60,7 +61,7 @@ func TestSaveMemoryToolEmptyContent(t *testing.T) {
 
 func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(nil, `invalid json`)
+	_, err := tool.Execute(context.Background(), `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -68,7 +69,7 @@ func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 
 func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(nil, `{"query": ""}`)
+	_, err := tool.Execute(context.Background(), `{"query": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty query")
 	}
@@ -76,7 +77,7 @@ func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 
 func TestSearchMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(nil, `invalid json`)
+	_, err := tool.Execute(context.Background(), `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}

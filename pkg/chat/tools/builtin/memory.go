@@ -26,6 +26,8 @@ import (
 	"github.com/masteryyh/agenty/pkg/services"
 )
 
+const memoryTopK = 5
+
 type SaveMemoryTool struct {
 	memoryService *services.MemoryService
 }
@@ -100,7 +102,7 @@ func (t *SearchMemoryTool) Execute(ctx context.Context, arguments string) (strin
 		return "", fmt.Errorf("query cannot be empty")
 	}
 
-	results, err := t.memoryService.SearchMemory(ctx, args.Query, 5)
+	results, err := t.memoryService.SearchMemory(ctx, args.Query, memoryTopK)
 	if err != nil {
 		return "", fmt.Errorf("failed to search memory: %w", err)
 	}

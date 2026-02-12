@@ -26,7 +26,6 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/config"
-	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
 
@@ -200,16 +199,4 @@ func (t *ListDirectoryTool) Execute(_ context.Context, arguments string) (string
 		fmt.Fprintf(&sb, "[%s] %s\n", entryType, entry.Name())
 	}
 	return sb.String(), nil
-}
-
-func RegisterAll(registry *tools.Registry) {
-	cfg := config.GetConfigManager().GetConfig()
-
-	registry.Register(&ReadFileTool{cfg: cfg})
-	registry.Register(&WriteFileTool{cfg: cfg})
-	registry.Register(&ListDirectoryTool{cfg: cfg})
-
-	memoryService := services.GetMemoryService()
-	registry.Register(&SaveMemoryTool{memoryService: memoryService})
-	registry.Register(&SearchMemoryTool{memoryService: memoryService})
 }

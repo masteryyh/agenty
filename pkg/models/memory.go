@@ -26,7 +26,7 @@ import (
 type Memory struct {
 	ID        uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
 	Content   string          `gorm:"type:text;not null"`
-	Embedding pgvector.Vector `gorm:"type:vector(1536)"`
+	Embedding pgvector.Vector `gorm:"type:vector(1536);not null"`
 	CreatedAt time.Time       `gorm:"autoCreateTime:milli"`
 	UpdatedAt time.Time       `gorm:"autoUpdateTime:milli"`
 	DeletedAt *time.Time

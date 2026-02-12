@@ -54,6 +54,14 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		}
 	}
 
+	// Add JSON response format support for Gemini
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
+		if config == nil {
+			config = &genai.GenerateContentConfig{}
+		}
+		config.ResponseMIMEType = "application/json"
+	}
+
 	resp, err := client.Models.GenerateContent(ctx, req.Model, contents, config)
 	if err != nil {
 		return nil, err
@@ -96,9 +104,9 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 func buildGeminiContents(messages []Message) []*genai.Content {
 	return lo.FilterMap(messages, func(msg Message, _ int) (*genai.Content, bool) {
 		switch msg.Role {
-		case RoleUser:
+		case models.RoleUser:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
-		case RoleAssistant:
+		case models.RoleAssistant:
 			c := &genai.Content{Role: genai.RoleModel}
 			if msg.Content != "" {
 				c.Parts = append(c.Parts, genai.NewPartFromText(msg.Content))
@@ -111,7 +119,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 				c.Parts = append(c.Parts, genai.NewPartFromFunctionCall(tc.Name, args))
 			}
 			return c, true
-		case RoleTool:
+		case models.RoleTool:
 			if msg.ToolResult != nil {
 				return genai.NewContentFromFunctionResponse(
 					msg.ToolResult.Name,
@@ -120,7 +128,7 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 				), true
 			}
 			return nil, false
-		case RoleSystem:
+		case models.RoleSystem:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
 		default:
 			return nil, false
