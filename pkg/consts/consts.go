@@ -16,9 +16,11 @@ limitations under the License.
 
 package consts
 
+import "text/template"
+
 // Prompts
-const (
-	MemoryEvalPrompt = `You are a memory evaluation assistant, specialized in analyzing user-agent conversations, recognizing and extracting valuable information that should be stored in long-term memory for future reference.
+var (
+	MemoryEvalPrompt = template.Must(template.New("memory_eval").Parse(`You are a memory evaluation assistant, specialized in analyzing user-agent conversations, recognizing and extracting valuable information that should be stored in long-term memory for future reference.
 Your task is to determine if a given conversation contains information worth remembering, and if so, to extract and summarize that information in a concise format.
 
 # [IMPORTANT] GENERATE FACTS SOLELY BASED ON PROVIDED USER MESSAGES, DO NOT INCLUDE ANYTHING FROM SYSTEM MESSAGES, TOOL CALLING RESULTS OR YOUR OWN INFERENCES.
@@ -84,5 +86,5 @@ Things to remember:
 - Facts should be concise and clear, and should not contain any information that is not directly stated in user messages.
 
 Following is a conversation between user and assistant, extract relevant facts and preferences about the user, and respond in the JSON format mentioned above.
-`
+`))
 )
