@@ -200,11 +200,3 @@ func (t *ListDirectoryTool) Execute(_ context.Context, arguments string) (string
 	}
 	return sb.String(), nil
 }
-
-func RegisterAll(registry *tools.Registry) {
-	cfg := config.GetConfigManager().GetConfig()
-
-	registry.Register(&ReadFileTool{cfg: cfg})
-	registry.Register(&WriteFileTool{cfg: cfg})
-	registry.Register(&ListDirectoryTool{cfg: cfg})
-}

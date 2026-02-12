@@ -92,12 +92,12 @@ func buildAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []a
 	systemMessages := make([]anthropic.TextBlockParam, 0)
 	params := lo.FilterMap(messages, func(msg Message, _ int) (anthropic.MessageParam, bool) {
 		switch msg.Role {
-		case RoleSystem:
+		case models.RoleSystem:
 			systemMessages = append(systemMessages, *anthropic.NewTextBlock(msg.Content).OfText)
 			return anthropic.MessageParam{}, false
-		case RoleUser:
+		case models.RoleUser:
 			return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)), true
-		case RoleAssistant:
+		case models.RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion
 				if msg.Content != "" {
@@ -113,7 +113,7 @@ func buildAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []a
 				return anthropic.NewAssistantMessage(blocks...), true
 			}
 			return anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)), true
-		case RoleTool:
+		case models.RoleTool:
 			if msg.ToolResult != nil {
 				return anthropic.NewUserMessage(
 					anthropic.NewToolResultBlock(msg.ToolResult.CallID, msg.ToolResult.Content, msg.ToolResult.IsError),

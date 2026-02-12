@@ -24,7 +24,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/bytedance/sonic"
+	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
@@ -33,7 +33,7 @@ import (
 const (
 	kimiDefaultBaseURL = "https://api.moonshot.ai/v1"
 	kimiToolTypeFunc   = "function"
-	kimiThinkingOn     = "enabled"
+	kimiThinkingOff    = "disabled"
 )
 
 type KimiProvider struct {
@@ -51,18 +51,23 @@ func (p *KimiProvider) Name() string {
 }
 
 type kimiRequest struct {
-	Model    string        `json:"model"`
-	Messages []kimiMessage `json:"messages"`
-	Tools    []kimiTool    `json:"tools,omitempty"`
-	Thinking *kimiThinking `json:"thinking,omitempty"`
+	Model          string              `json:"model"`
+	Messages       []kimiMessage       `json:"messages"`
+	Tools          []kimiTool          `json:"tools,omitempty"`
+	Thinking       *kimiThinking       `json:"thinking,omitempty"`
+	ResponseFormat *kimiResponseFormat `json:"response_format,omitempty"`
+}
+
+type kimiResponseFormat struct {
+	Type string `json:"type"`
 }
 
 type kimiMessage struct {
-	Role             string         `json:"role"`
-	Content          string         `json:"content"`
-	ToolCalls        []kimiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string         `json:"tool_call_id,omitempty"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Role             models.MessageRole `json:"role"`
+	Content          string             `json:"content"`
+	ToolCalls        []kimiToolCall     `json:"tool_calls,omitempty"`
+	ToolCallID       string             `json:"tool_call_id,omitempty"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
 }
 
 type kimiToolCall struct {
@@ -124,15 +129,19 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 
 	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
 		strings.HasPrefix(req.Model, "kimi-k2")
-	if isThinkingModel {
-		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOn}
+	if !isThinkingModel {
+		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOff}
 	}
 
 	if len(req.Tools) > 0 {
 		apiReq.Tools = buildKimiTools(req.Tools)
 	}
 
-	body, err := sonic.Marshal(apiReq)
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
+		apiReq.ResponseFormat = &kimiResponseFormat{Type: "json_object"}
+	}
+
+	body, err := json.Marshal(apiReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -160,7 +169,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	}
 
 	var apiResp kimiResponse
-	if err := sonic.Unmarshal(respBody, &apiResp); err != nil {
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -175,6 +184,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	if len(apiResp.Choices) > 0 {
 		choice := apiResp.Choices[0]
 		result.Content = choice.Message.Content
+		result.KimiReasoningContent = choice.Message.ReasoningContent
 
 		if len(choice.Message.ToolCalls) > 0 {
 			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) models.ToolCall {
@@ -193,10 +203,18 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 func buildKimiMessages(messages []Message) []kimiMessage {
 	return lo.FilterMap(messages, func(msg Message, _ int) (kimiMessage, bool) {
 		switch msg.Role {
-		case RoleUser:
-			return kimiMessage{Role: RoleUser, Content: msg.Content}, true
-		case RoleAssistant:
-			km := kimiMessage{Role: RoleAssistant, Content: msg.Content}
+		case models.RoleUser:
+			return kimiMessage{
+				Role:             models.RoleUser,
+				Content:          msg.Content,
+				ReasoningContent: msg.KimiReasoningContent,
+			}, true
+		case models.RoleAssistant:
+			km := kimiMessage{
+				Role:             models.RoleAssistant,
+				Content:          msg.Content,
+				ReasoningContent: msg.KimiReasoningContent,
+			}
 			if len(msg.ToolCalls) > 0 {
 				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) kimiToolCall {
 					return kimiToolCall{
@@ -210,17 +228,22 @@ func buildKimiMessages(messages []Message) []kimiMessage {
 				})
 			}
 			return km, true
-		case RoleTool:
+		case models.RoleTool:
 			if msg.ToolResult != nil {
 				return kimiMessage{
-					Role:       RoleTool,
-					Content:    msg.ToolResult.Content,
-					ToolCallID: msg.ToolResult.CallID,
+					Role:             models.RoleTool,
+					Content:          msg.ToolResult.Content,
+					ToolCallID:       msg.ToolResult.CallID,
+					ReasoningContent: msg.KimiReasoningContent,
 				}, true
 			}
 			return kimiMessage{}, false
-		case RoleSystem:
-			return kimiMessage{Role: RoleSystem, Content: msg.Content}, true
+		case models.RoleSystem:
+			return kimiMessage{
+				Role:             models.RoleSystem,
+				Content:          msg.Content,
+				ReasoningContent: msg.KimiReasoningContent,
+			}, true
 		default:
 			return kimiMessage{}, false
 		}

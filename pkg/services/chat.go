@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	json "github.com/bytedance/sonic"
@@ -28,17 +29,20 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat"
 	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 type ChatService struct {
-	chatExecutor *chat.ChatExecutor
-	db           *gorm.DB
+	chatExecutor  *chat.ChatExecutor
+	db            *gorm.DB
+	memoryService *MemoryService
 }
 
 var (
@@ -49,8 +53,9 @@ var (
 func GetChatService() *ChatService {
 	chatOnce.Do(func() {
 		chatService = &ChatService{
-			chatExecutor: chat.GetChatExecutor(),
-			db:           conn.GetDB(),
+			chatExecutor:  chat.GetChatExecutor(),
+			db:            conn.GetDB(),
+			memoryService: GetMemoryService(),
 		}
 	})
 	return chatService
@@ -209,15 +214,28 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
-		return provider.Message{
-			Role:       string(cm.Role),
+		msg := provider.Message{
+			Role:       cm.Role,
 			Content:    cm.Content,
 			ToolCalls:  toolCalls,
 			ToolResult: toolResult,
 		}
+
+		if len(cm.ProviderSpecifics) > 0 {
+			var specificData models.ProviderSpecificData
+			if err := json.Unmarshal(cm.ProviderSpecifics, &specificData); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal provider specific data", "error", err, "sessionId", sessionID, "messageId", cm.ID)
+				return msg
+			}
+
+			if chatProvider.Type == models.APITypeKimi && specificData.KimiReasoningContent != "" {
+				msg.KimiReasoningContent = specificData.KimiReasoningContent
+			}
+		}
+		return msg
 	})
 	messages = append(messages, provider.Message{
-		Role:    provider.RoleUser,
+		Role:    models.RoleUser,
 		Content: data.Message,
 	})
 
@@ -264,7 +282,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
-		return models.ChatMessage{
+		chatMsg := models.ChatMessage{
 			SessionID:   session.ID,
 			Role:        models.MessageRole(m.Role),
 			Content:     m.Content,
@@ -272,6 +290,16 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ToolResults: datatypes.JSON(rawCallResult),
 			ModelID:     model.ID,
 		}
+
+		if chatProvider.Type == models.APITypeKimi && m.KimiReasoningContent != "" {
+			specificData := models.ProviderSpecificData{
+				KimiReasoningContent: m.KimiReasoningContent,
+			}
+			if data, err := json.Marshal(specificData); err == nil {
+				chatMsg.ProviderSpecifics = datatypes.JSON(data)
+			}
+		}
+		return chatMsg
 	})
 
 	if err := s.db.WithContext(ctx).Create(&newMessages).Error; err != nil {
@@ -314,5 +342,97 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			CreatedAt:  m.CreatedAt,
 		}
 	})
+
+	if s.memoryService.IsEnabled() {
+		safe.GoSafeWithCtx("auto-memory", ctx, func(bgCtx context.Context) {
+			s.evaluateAndSaveMemory(bgCtx, data.Message, result.Messages, chatProvider, model)
+		})
+	}
+
 	return messageDtos, nil
+}
+
+func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage string, assistantMessages []provider.Message, chatProvider models.ModelProvider, model models.Model) {
+	var sb strings.Builder
+	sb.WriteString("User: ")
+	sb.WriteString(userMessage)
+	sb.WriteString("\n")
+	for _, msg := range assistantMessages {
+		if msg.Role == models.RoleAssistant && msg.Content != "" {
+			sb.WriteString("Assistant: ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n")
+		}
+	}
+
+	evalMessages := []provider.Message{
+		{Role: models.RoleSystem, Content: consts.MemoryEvalPrompt},
+		{Role: models.RoleUser, Content: sb.String()},
+	}
+
+	responseFormat := &provider.ResponseFormat{Type: "json_object"}
+	if chatProvider.Type == models.APITypeOpenAI {
+		responseFormat = &provider.ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &provider.JSONSchemaFormat{
+				Name:        "memory_evaluation",
+				Description: "Extract facts from conversation for long-term memory",
+				Strict:      true,
+				Schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"facts": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "string",
+							},
+						},
+					},
+					"required":             []string{"facts"},
+					"additionalProperties": false,
+				},
+			},
+		}
+	}
+
+	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
+		BaseURL:        chatProvider.BaseURL,
+		APIKey:         chatProvider.APIKey,
+		Model:          model.Name,
+		Messages:       evalMessages,
+		APIType:        chatProvider.Type,
+		ResponseFormat: responseFormat,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "memory evaluation failed", "error", err)
+		return
+	}
+
+	for _, msg := range result.Messages {
+		if msg.Role == models.RoleAssistant && msg.Content != "" {
+			var evalResult struct {
+				Facts []string `json:"facts"`
+			}
+			if err := json.Unmarshal([]byte(msg.Content), &evalResult); err != nil {
+				slog.ErrorContext(ctx, "failed to parse memory evaluation result", "error", err, "content", msg.Content)
+				return
+			}
+
+			if len(evalResult.Facts) == 0 {
+				return
+			}
+
+			for _, fact := range evalResult.Facts {
+				fact = strings.TrimSpace(fact)
+				if fact != "" {
+					if _, err := s.memoryService.SaveMemory(ctx, fact); err != nil {
+						slog.ErrorContext(ctx, "failed to auto-save memory", "error", err, "fact", fact)
+					} else {
+						slog.InfoContext(ctx, "auto-saved memory", "fact", fact)
+					}
+				}
+			}
+			return
+		}
+	}
 }

@@ -7,7 +7,8 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/main.go",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
         }
     ]
 }

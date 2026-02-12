@@ -47,14 +47,25 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
+		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; extErr != nil {
+			err = extErr
+			return
+		}
+
 		if migrateErr := dbConn.WithContext(timeoutCtx).
 			AutoMigrate(
 				&models.ChatSession{},
 				&models.ChatMessage{},
 				&models.ModelProvider{},
 				&models.Model{},
+				&models.Memory{},
 			); migrateErr != nil {
 			err = migrateErr
+			return
+		}
+
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`).Error; idxErr != nil {
+			err = idxErr
 			return
 		}
 		db = dbConn

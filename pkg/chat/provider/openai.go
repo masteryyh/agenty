@@ -25,6 +25,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/openai/openai-go/v3/shared/constant"
 	"github.com/samber/lo"
 )
 
@@ -50,6 +51,34 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 
 	if len(req.Tools) > 0 {
 		params.Tools = buildOpenAITools(req.Tools)
+	}
+
+	if req.ResponseFormat != nil {
+		switch req.ResponseFormat.Type {
+		case "json_object":
+			jsonFormat := shared.NewResponseFormatJSONObjectParam()
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONObject: &jsonFormat,
+			}
+		case "json_schema":
+			if req.ResponseFormat.JSONSchema != nil {
+				schema := req.ResponseFormat.JSONSchema
+				jsonSchemaParam := shared.ResponseFormatJSONSchemaParam{
+					JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+						Name:   schema.Name,
+						Schema: schema.Schema,
+						Strict: param.NewOpt(schema.Strict),
+					},
+					Type: constant.JSONSchema("json_schema"),
+				}
+				if schema.Description != "" {
+					jsonSchemaParam.JSONSchema.Description = param.NewOpt(schema.Description)
+				}
+				params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+					OfJSONSchema: &jsonSchemaParam,
+				}
+			}
+		}
 	}
 
 	resp, err := client.Chat.Completions.New(ctx, params)
@@ -82,9 +111,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
 	return lo.FilterMap(messages, func(msg Message, _ int) (openai.ChatCompletionMessageParamUnion, bool) {
 		switch msg.Role {
-		case RoleUser:
+		case models.RoleUser:
 			return openai.UserMessage(msg.Content), true
-		case RoleAssistant:
+		case models.RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				assistantMsg := openai.AssistantMessage(msg.Content)
 				assistantMsg.OfAssistant.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) openai.ChatCompletionMessageToolCallUnionParam {
@@ -101,12 +130,12 @@ func buildOpenAIMessages(messages []Message) []openai.ChatCompletionMessageParam
 				return assistantMsg, true
 			}
 			return openai.AssistantMessage(msg.Content), true
-		case RoleTool:
+		case models.RoleTool:
 			if msg.ToolResult != nil {
 				return openai.ToolMessage(msg.ToolResult.Content, msg.ToolResult.CallID), true
 			}
 			return openai.ChatCompletionMessageParamUnion{}, false
-		case RoleSystem:
+		case models.RoleSystem:
 			return openai.SystemMessage(msg.Content), true
 		default:
 			return openai.ChatCompletionMessageParamUnion{}, false
