@@ -18,13 +18,13 @@ package client
 
 import (
 	"bytes"
-	"encoding/json"
+	stdjson "encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	sonic "github.com/bytedance/sonic"
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
@@ -45,15 +45,15 @@ func NewClient(baseURL string) *Client {
 }
 
 type APIResponse struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data"`
+	Code    int                  `json:"code"`
+	Message string               `json:"message"`
+	Data    stdjson.RawMessage `json:"data"`
 }
 
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
-		jsonData, err := sonic.Marshal(body)
+		jsonData, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
@@ -81,7 +81,7 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 	}
 
 	var apiResp APIResponse
-	if err := sonic.Unmarshal(respBody, &apiResp); err != nil {
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -99,7 +99,7 @@ func (c *Client) ListProviders(page, pageSize int) (*pagination.PagedResponse[mo
 	}
 
 	var result pagination.PagedResponse[models.ModelProviderDto]
-	if err := sonic.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal providers: %w", err)
 	}
 
@@ -113,7 +113,7 @@ func (c *Client) CreateProvider(dto *models.CreateModelProviderDto) (*models.Mod
 	}
 
 	var provider models.ModelProviderDto
-	if err := sonic.Unmarshal(data, &provider); err != nil {
+	if err := json.Unmarshal(data, &provider); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal provider: %w", err)
 	}
 
@@ -136,7 +136,7 @@ func (c *Client) ListModels(page, pageSize int) (*pagination.PagedResponse[model
 	}
 
 	var result pagination.PagedResponse[models.ModelDto]
-	if err := sonic.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal models: %w", err)
 	}
 
@@ -150,7 +150,7 @@ func (c *Client) CreateModel(dto *models.CreateModelDto) (*models.ModelDto, erro
 	}
 
 	var model models.ModelDto
-	if err := sonic.Unmarshal(data, &model); err != nil {
+	if err := json.Unmarshal(data, &model); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal model: %w", err)
 	}
 
@@ -169,7 +169,7 @@ func (c *Client) ListSessions(page, pageSize int) (*pagination.PagedResponse[mod
 	}
 
 	var result pagination.PagedResponse[models.ChatSessionDto]
-	if err := sonic.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal sessions: %w", err)
 	}
 
@@ -183,7 +183,7 @@ func (c *Client) CreateSession() (*models.ChatSessionDto, error) {
 	}
 
 	var session models.ChatSessionDto
-	if err := sonic.Unmarshal(data, &session); err != nil {
+	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
 
@@ -197,7 +197,7 @@ func (c *Client) GetSession(sessionID uuid.UUID) (*models.ChatSessionDto, error)
 	}
 
 	var session models.ChatSessionDto
-	if err := sonic.Unmarshal(data, &session); err != nil {
+	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
 
@@ -211,7 +211,7 @@ func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) ([]*models.ChatM
 	}
 
 	var messages []*models.ChatMessageDto
-	if err := sonic.Unmarshal(data, &messages); err != nil {
+	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal messages: %w", err)
 	}
 

@@ -18,7 +18,9 @@ package cmd
 
 import (
 	"fmt"
+	"math/rand/v2"
 
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
@@ -61,16 +63,9 @@ func Execute() error {
 }
 
 func showBanner() {
-	banner := `
-   ▄████████    ▄██████▄     ▄████████ ███▄▄▄▄       ███     ▄██   ▄   
-  ███    ███   ███    ███   ███    ███ ███▀▀▀██▄ ▀█████████▄ ███   ██▄ 
-  ███    ███   ███    █▀    ███    █▀  ███   ███    ▀███▀▀██ ███▄▄▄███ 
-  ███    ███  ▄███          ███        ███   ███     ███   ▀ ▀▀▀▀▀▀███ 
-▀███████████ ▀▀███ ████▄  ▀███████████ ███   ███     ███     ▄██   ███ 
-  ███    ███   ███    ███          ███ ███   ███     ███     ███   ███ 
-  ███    ███   ███    ███    ▄█    ███ ███   ███     ███     ███   ███ 
-  ███    █▀    ████████▀   ▄████████▀   ▀█   █▀     ▄████▀    ▀█████▀  
-`
+	index := rand.IntN(len(consts.ASCIIArts))
+	banner := consts.ASCIIArts[index]
+
 	pterm.DefaultCenter.Println(pterm.DefaultHeader.WithBackgroundStyle(pterm.NewStyle(pterm.BgDarkGray)).WithTextStyle(pterm.NewStyle(pterm.FgLightCyan)).Sprint(banner))
 	fmt.Println()
 }
