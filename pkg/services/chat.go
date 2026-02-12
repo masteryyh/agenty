@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
@@ -365,8 +366,16 @@ func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage str
 		}
 	}
 
+	var promptBuilder strings.Builder
+	if err := consts.MemoryEvalPrompt.Execute(&promptBuilder, map[string]any{
+		"DateTime": time.Now().Format(time.RFC3339),
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to execute memory evaluation prompt", "error", err)
+		return
+	}
+
 	evalMessages := []provider.Message{
-		{Role: models.RoleSystem, Content: consts.MemoryEvalPrompt},
+		{Role: models.RoleSystem, Content: promptBuilder.String()},
 		{Role: models.RoleUser, Content: sb.String()},
 	}
 
