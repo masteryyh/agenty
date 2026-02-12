@@ -139,6 +139,12 @@ func printMessage(msg *models.ChatMessageDto) {
 		}
 		pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, msg.CreatedAt.Format("15:04:05")))
 		
+		if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
+			pterm.Println(pterm.FgBlue.Sprint("  💭 Reasoning:"))
+			pterm.Println(pterm.NewStyle(pterm.FgGray).Sprint("  " + msg.ProviderSpecifics.KimiReasoningContent))
+			fmt.Println()
+		}
+		
 		if msg.Content != "" {
 			pterm.Println(pterm.NewStyle(pterm.FgWhite).Sprint("  " + msg.Content))
 		}
