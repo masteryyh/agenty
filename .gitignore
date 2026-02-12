@@ -32,3 +32,6 @@ go.work.sum
 
 cmd/__debug*
 *.yaml
+
+# Build output
+bin/
