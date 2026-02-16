@@ -75,10 +75,19 @@ var chatCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to reload session: %w", err)
 			}
-			pterm.DefaultSection.Println("Previous Messages")
-			for _, msg := range session.Messages {
-				printMessage(&msg)
+			
+			// Display limited history
+			const maxInitialMessages = 10
+			messageCount := len(session.Messages)
+			startIdx := 0
+			
+			if messageCount > maxInitialMessages {
+				startIdx = messageCount - maxInitialMessages
+				pterm.Info.Printf("Showing last %d messages (total: %d). Use /history to load more.\n", maxInitialMessages, messageCount)
 			}
+			
+			pterm.DefaultSection.Println("Previous Messages")
+			printMessageHistory(session.Messages[startIdx:])
 			fmt.Println()
 		}
 
@@ -94,6 +103,7 @@ func printChatHelp() {
 	pterm.Println("  • Type your message and press Enter to chat")
 	pterm.Println("  • /new - Start a new chat session")
 	pterm.Println("  • /status - Show current session status")
+	pterm.Println("  • /history [n] - Load more message history (default: 20)")
 	pterm.Println("  • /model [provider/model] - Switch to a different model")
 	pterm.Println("  • /exit - Quit the chat")
 }
@@ -110,6 +120,7 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 	completer := readline.NewPrefixCompleter(
 		readline.PcItem("/new"),
 		readline.PcItem("/status"),
+		readline.PcItem("/history"),
 		readline.PcItem("/model"),
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
@@ -222,6 +233,15 @@ func handleSlashCommand(c *client.Client, input string, sessionID uuid.UUID) (ha
 
 	case "/status":
 		return handleStatusCommand(c, sessionID)
+		
+	case "/history":
+		count := 20
+		if len(parts) > 1 {
+			if n, err := fmt.Sscanf(parts[1], "%d", &count); err == nil && n == 1 {
+				// use parsed count
+			}
+		}
+		return handleHistoryCommand(c, sessionID, count)
 
 	case "/model":
 		if len(parts) < 2 {
@@ -268,6 +288,37 @@ func handleStatusCommand(c *client.Client, sessionID uuid.UUID) (bool, uuid.UUID
 	pterm.Printf("  Updated: %s\n", pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
 	fmt.Println()
 
+	return true, uuid.Nil, uuid.Nil, nil
+}
+
+func handleHistoryCommand(c *client.Client, sessionID uuid.UUID, count int) (bool, uuid.UUID, uuid.UUID, error) {
+	session, err := c.GetSession(sessionID)
+	if err != nil {
+		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	
+	messageCount := len(session.Messages)
+	if messageCount == 0 {
+		pterm.Info.Println("No message history available")
+		return true, uuid.Nil, uuid.Nil, nil
+	}
+	
+	// Calculate which messages to show
+	startIdx := 0
+	if messageCount > count {
+		startIdx = messageCount - count
+	}
+	
+	fmt.Println()
+	pterm.DefaultHeader.Printf("📜 Message History (%d of %d total)\n", count, messageCount)
+	if startIdx > 0 {
+		pterm.Info.Printf("Showing messages from #%d to #%d\n", startIdx+1, messageCount)
+	}
+	fmt.Println()
+	
+	printMessageHistory(session.Messages[startIdx:])
+	fmt.Println()
+	
 	return true, uuid.Nil, uuid.Nil, nil
 }
 
@@ -320,6 +371,122 @@ func handleModelCommand(c *client.Client, modelSpec string) (bool, uuid.UUID, uu
 	pterm.Success.Printf("Switched to model: %s (from %s)\n", foundModel.Name, foundModel.Provider.Name)
 
 	return true, uuid.Nil, foundModel.ID, nil
+}
+
+// printMessageHistory groups and displays messages, merging tool calling sequences
+func printMessageHistory(messages []models.ChatMessageDto) {
+	i := 0
+	for i < len(messages) {
+		msg := &messages[i]
+		
+		// Check if this is an assistant message with tool calls
+		if msg.Role == models.RoleAssistant && len(msg.ToolCalls) > 0 {
+			// This is the start of a tool calling sequence
+			printToolCallingSequence(messages, &i)
+		} else {
+			// Regular message
+			printMessage(msg)
+			i++
+		}
+	}
+}
+
+// printToolCallingSequence displays a complete tool calling sequence in a grouped format
+func printToolCallingSequence(messages []models.ChatMessageDto, idx *int) {
+	i := *idx
+	assistantMsg := &messages[i]
+	
+	modelInfo := ""
+	if assistantMsg.Model != nil {
+		modelInfo = fmt.Sprintf(" (%s)", assistantMsg.Model.Name)
+	}
+	
+	// Header for the tool calling sequence
+	pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, assistantMsg.CreatedAt.Format("15:04:05")))
+	
+	// Show reasoning if available
+	if assistantMsg.ProviderSpecifics != nil && assistantMsg.ProviderSpecifics.KimiReasoningContent != "" {
+		pterm.Println(pterm.FgBlue.Sprint("  💭 Reasoning:"))
+		pterm.Println(pterm.NewStyle(pterm.FgGray).Sprint("  " + assistantMsg.ProviderSpecifics.KimiReasoningContent))
+		fmt.Println()
+	}
+	
+	// Show initial content if any
+	if assistantMsg.Content != "" {
+		pterm.Println(pterm.NewStyle(pterm.FgWhite).Sprint("  " + assistantMsg.Content))
+		fmt.Println()
+	}
+	
+	// Display tool calls in a tree structure
+	pterm.Println(pterm.FgYellow.Sprint("  🔧 Tool Execution:"))
+	
+	for tcIdx, tc := range assistantMsg.ToolCalls {
+		isLast := tcIdx == len(assistantMsg.ToolCalls)-1
+		prefix := "  ├─"
+		if isLast {
+			prefix = "  └─"
+		}
+		
+		pterm.Printf("%s %s ", pterm.FgYellow.Sprint(prefix), pterm.FgCyan.Sprint(tc.Name))
+		
+		// Parse and display arguments compactly
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
+			argsStr, _ := json.Marshal(args)
+			argDisplay := string(argsStr)
+			if len(argDisplay) > 80 {
+				argDisplay = argDisplay[:77] + "..."
+			}
+			pterm.Println(pterm.FgGray.Sprint(argDisplay))
+		} else {
+			pterm.Println()
+		}
+		
+		// Look for the corresponding tool result
+		i++
+		if i < len(messages) && messages[i].Role == models.RoleTool && messages[i].ToolResult != nil {
+			toolResultMsg := &messages[i]
+			resultPrefix := "    "
+			if !isLast {
+				resultPrefix = "  │ "
+			} else {
+				resultPrefix = "    "
+			}
+			
+			if toolResultMsg.ToolResult.IsError {
+				pterm.Printf("%s%s\n", resultPrefix, pterm.FgRed.Sprint("❌ Error"))
+				contentPreview := toolResultMsg.ToolResult.Content
+				if len(contentPreview) > 100 {
+					contentPreview = contentPreview[:97] + "..."
+				}
+				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGray.Sprint(contentPreview))
+			} else {
+				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGreen.Sprint("✅ Success"))
+				contentPreview := toolResultMsg.ToolResult.Content
+				if len(contentPreview) > 100 {
+					contentPreview = contentPreview[:97] + "..."
+				}
+				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGray.Sprint(contentPreview))
+			}
+		}
+	}
+	
+	// Move to next message after tool sequence
+	i++
+	
+	// Check if the next message is the assistant's final response
+	if i < len(messages) && messages[i].Role == models.RoleAssistant {
+		finalMsg := &messages[i]
+		if finalMsg.Content != "" {
+			fmt.Println()
+			pterm.Println(pterm.FgGreen.Sprint("  📝 Final Response:"))
+			pterm.Println(pterm.NewStyle(pterm.FgWhite).Sprint("  " + finalMsg.Content))
+		}
+		i++
+	}
+	
+	fmt.Println()
+	*idx = i
 }
 
 func printMessage(msg *models.ChatMessageDto) {
