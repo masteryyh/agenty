@@ -71,13 +71,24 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 		}
 	}
 
+	var providerSpecifics *ProviderSpecificData
+	if len(m.ProviderSpecifics) > 0 {
+		var ps ProviderSpecificData
+		if err := json.Unmarshal(m.ProviderSpecifics, &ps); err != nil {
+			slog.ErrorContext(context.Background(), "failed to unmarshal provider specifics", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		} else {
+			providerSpecifics = &ps
+		}
+	}
+
 	dto := &ChatMessageDto{
-		ID:         m.ID,
-		Role:       m.Role,
-		Content:    m.Content,
-		ToolCalls:  toolCalls,
-		ToolResult: toolResult,
-		CreatedAt:  m.CreatedAt,
+		ID:                m.ID,
+		Role:              m.Role,
+		Content:           m.Content,
+		ToolCalls:         toolCalls,
+		ToolResult:        toolResult,
+		ProviderSpecifics: providerSpecifics,
+		CreatedAt:         m.CreatedAt,
 	}
 
 	if model != nil {
@@ -87,13 +98,14 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 }
 
 type ChatMessageDto struct {
-	ID         uuid.UUID   `json:"id"`
-	Role       MessageRole `json:"role"`
-	Content    string      `json:"content"`
-	ToolCalls  []ToolCall  `json:"toolCalls,omitempty"`
-	ToolResult *ToolResult `json:"toolResult,omitempty"`
-	Model      *ModelDto   `json:"model,omitempty"`
-	CreatedAt  time.Time   `json:"createdAt"`
+	ID                uuid.UUID             `json:"id"`
+	Role              MessageRole           `json:"role"`
+	Content           string                `json:"content"`
+	ToolCalls         []ToolCall            `json:"toolCalls,omitempty"`
+	ToolResult        *ToolResult           `json:"toolResult,omitempty"`
+	Model             *ModelDto             `json:"model,omitempty"`
+	ProviderSpecifics *ProviderSpecificData `json:"providerSpecifics,omitempty"`
+	CreatedAt         time.Time             `json:"createdAt"`
 }
 
 type ChatDto struct {
