@@ -40,29 +40,57 @@ var chatCmd = &cobra.Command{
 		var session *models.ChatSessionDto
 		var err error
 
-		sessions, err := c.ListSessions(1, 1)
-		if err == nil && len(sessions.Data) > 0 {
-			sessionID = sessions.Data[0].ID
+		sessionFlag, _ := cmd.Flags().GetString("session")
+		if sessionFlag != "" {
+			sessionID, err = uuid.Parse(sessionFlag)
+			if err != nil {
+				return fmt.Errorf("invalid session ID: %w", err)
+			}
 			session, err = c.GetSession(sessionID)
 			if err != nil {
-				return fmt.Errorf("failed to get session details: %w", err)
+				return fmt.Errorf("failed to get session: %w", err)
 			}
-			pterm.Info.Printf("Resuming last session: %s\n", sessionID)
+			pterm.Info.Printf("Using session: %s\n", sessionID)
 		} else {
-			session, err = c.CreateSession()
-			if err != nil {
-				return fmt.Errorf("failed to create session: %w", err)
+			sessions, listErr := c.ListSessions(1, 1)
+			if listErr == nil && len(sessions.Data) > 0 {
+				sessionID = sessions.Data[0].ID
+				session, err = c.GetSession(sessionID)
+				if err != nil {
+					return fmt.Errorf("failed to get session details: %w", err)
+				}
+				pterm.Info.Printf("Resuming last session: %s\n", sessionID)
+			} else {
+				session, err = c.CreateSession()
+				if err != nil {
+					return fmt.Errorf("failed to create session: %w", err)
+				}
+				sessionID = session.ID
+				pterm.Info.Printf("Created new session: %s\n", sessionID)
 			}
-			sessionID = session.ID
-			pterm.Info.Printf("Created new session: %s\n", sessionID)
 		}
 
-		modelsList, err := c.ListModels(1, 1)
-		if err != nil || len(modelsList.Data) == 0 {
-			return fmt.Errorf("no models available, please create a model first or specify --model flag")
+		var modelID uuid.UUID
+		modelFlag, _ := cmd.Flags().GetString("model")
+		if modelFlag != "" {
+			resolvedID, displayName, resolveErr := resolveModel(c, modelFlag)
+			if resolveErr != nil {
+				return fmt.Errorf("failed to resolve model: %w", resolveErr)
+			}
+			modelID = resolvedID
+			pterm.Info.Printf("Using model: %s\n", displayName)
+		} else {
+			modelsList, listErr := c.ListModels(1, 1)
+			if listErr != nil || len(modelsList.Data) == 0 {
+				return fmt.Errorf("no models available, please create a model first or specify --model flag")
+			}
+			modelID = modelsList.Data[0].ID
+			modelInfo := modelsList.Data[0].Name
+			if modelsList.Data[0].Provider != nil {
+				modelInfo = fmt.Sprintf("%s/%s", modelsList.Data[0].Provider.Name, modelsList.Data[0].Name)
+			}
+			pterm.Info.Printf("Using model: %s\n", modelInfo)
 		}
-		modelID := modelsList.Data[0].ID
-		pterm.Info.Printf("Using model: %s/%s\n", modelsList.Data[0].Provider.Name, modelsList.Data[0].Name)
 
 		fmt.Println()
 
@@ -118,8 +146,10 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 		return modelNames
 	}
 
-	completer := NewChatCompleter(modelProvider)
-	painter := NewHintPainter(modelProvider)
+	SetArgCompleter("/model", modelProvider)
+
+	completer := NewChatCompleter()
+	painter := NewHintPainter()
 
 	config := &readline.Config{
 		Prompt:              basePrompt,
@@ -215,6 +245,6 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
-	chatCmd.Flags().String("session", "", "Session ID")
-	chatCmd.Flags().String("model", "", "Model ID")
+	chatCmd.Flags().String("session", "", "Session ID to resume")
+	chatCmd.Flags().String("model", "", "Model to use (provider/model format)")
 }

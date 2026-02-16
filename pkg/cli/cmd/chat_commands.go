@@ -22,7 +22,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/cli/client"
-	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 )
 
@@ -50,6 +49,45 @@ func handleSlashCommand(c *client.Client, input string, sessionID uuid.UUID, mod
 	}
 
 	return handler(c, parts[1:], sessionID, modelID)
+}
+
+func resolveModel(c *client.Client, modelSpec string) (uuid.UUID, string, error) {
+	parts := strings.Split(modelSpec, "/")
+	if len(parts) != 2 {
+		return uuid.Nil, "", fmt.Errorf("invalid format, use: provider-name/model-name")
+	}
+
+	providerName := strings.TrimSpace(parts[0])
+	modelName := strings.TrimSpace(parts[1])
+
+	providers, err := c.ListProviders(1, 100)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("failed to list providers: %w", err)
+	}
+
+	var providerID uuid.UUID
+	for _, p := range providers.Data {
+		if strings.EqualFold(p.Name, providerName) {
+			providerID = p.ID
+			break
+		}
+	}
+	if providerID == uuid.Nil {
+		return uuid.Nil, "", fmt.Errorf("provider '%s' not found", providerName)
+	}
+
+	modelsList, err := c.ListModels(1, 100)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("failed to list models: %w", err)
+	}
+
+	for _, m := range modelsList.Data {
+		if m.Provider != nil && m.Provider.ID == providerID && strings.EqualFold(m.Name, modelName) {
+			return m.ID, fmt.Sprintf("%s/%s", m.Provider.Name, m.Name), nil
+		}
+	}
+
+	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
 }
 
 func handleNewCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
@@ -131,52 +169,13 @@ func handleModelCmd(c *client.Client, args []string, sessionID uuid.UUID, modelI
 		return true, uuid.Nil, uuid.Nil, fmt.Errorf("usage: /model [provider-name/model-name]")
 	}
 
-	modelSpec := args[0]
-	parts := strings.Split(modelSpec, "/")
-	if len(parts) != 2 {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("invalid format, use: provider-name/model-name")
-	}
-
-	providerName := strings.TrimSpace(parts[0])
-	modelName := strings.TrimSpace(parts[1])
-
-	providers, err := c.ListProviders(1, 100)
+	resolvedID, displayName, err := resolveModel(c, args[0])
 	if err != nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to list providers: %w", err)
+		return true, uuid.Nil, uuid.Nil, err
 	}
 
-	var providerID uuid.UUID
-	for _, p := range providers.Data {
-		if strings.EqualFold(p.Name, providerName) {
-			providerID = p.ID
-			break
-		}
-	}
-
-	if providerID == uuid.Nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("provider '%s' not found", providerName)
-	}
-
-	modelsList, err := c.ListModels(1, 100)
-	if err != nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to list models: %w", err)
-	}
-
-	var foundModel *models.ModelDto
-	for _, m := range modelsList.Data {
-		if m.Provider != nil && m.Provider.ID == providerID && strings.EqualFold(m.Name, modelName) {
-			foundModel = &m
-			break
-		}
-	}
-
-	if foundModel == nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
-	}
-
-	pterm.Success.Printf("Switched to model: %s (from %s)\n", foundModel.Name, foundModel.Provider.Name)
-
-	return true, uuid.Nil, foundModel.ID, nil
+	pterm.Success.Printf("Switched to model: %s\n", displayName)
+	return true, uuid.Nil, resolvedID, nil
 }
 
 func handleHelpCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {

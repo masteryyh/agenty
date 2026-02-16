@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	json "github.com/bytedance/sonic"
 	"github.com/charmbracelet/glamour"
@@ -110,8 +111,6 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 			resultPrefix := "    "
 			if !isLast {
 				resultPrefix = "  │ "
-			} else {
-				resultPrefix = "    "
 			}
 
 			if toolResultMsg.ToolResult.IsError {
@@ -298,16 +297,27 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 	return fmt.Errorf("no pager available (less or more)")
 }
 
+var (
+	markdownRenderer     *glamour.TermRenderer
+	markdownRendererOnce sync.Once
+)
+
 func renderMarkdown(text string) string {
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(100),
-	)
-	if err != nil {
+	markdownRendererOnce.Do(func() {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(100),
+		)
+		if err == nil {
+			markdownRenderer = r
+		}
+	})
+
+	if markdownRenderer == nil {
 		return text
 	}
 
-	rendered, err := r.Render(text)
+	rendered, err := markdownRenderer.Render(text)
 	if err != nil {
 		return text
 	}

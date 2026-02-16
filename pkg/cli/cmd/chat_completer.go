@@ -26,9 +26,10 @@ import (
 )
 
 type Command struct {
-	Name        string
-	Description string
-	Usage       string
+	Name         string
+	Description  string
+	Usage        string
+	ArgCompleter func() []string
 }
 
 var commands = []Command{
@@ -40,36 +41,41 @@ var commands = []Command{
 	{Name: "/exit", Description: "Quit the chat", Usage: "/exit"},
 }
 
-func NewChatCompleter(modelProvider func() []string) readline.AutoCompleter {
-	dynamicModels := readline.PcItemDynamic(func(line string) []string {
-		if modelProvider == nil {
-			return nil
+func SetArgCompleter(cmdName string, completer func() []string) {
+	for i := range commands {
+		if commands[i].Name == cmdName {
+			commands[i].ArgCompleter = completer
+			return
 		}
-		models := modelProvider()
-		if len(models) == 0 {
-			return nil
-		}
-		sorted := append([]string(nil), models...)
-		sort.Strings(sorted)
-		return sorted
-	})
-
-	return readline.NewPrefixCompleter(
-		readline.PcItem("/new"),
-		readline.PcItem("/status"),
-		readline.PcItem("/history"),
-		readline.PcItem("/help"),
-		readline.PcItem("/exit"),
-		readline.PcItem("/model", dynamicModels),
-	)
+	}
 }
 
-type HintPainter struct {
-	modelProvider func() []string
+func NewChatCompleter() readline.AutoCompleter {
+	items := make([]readline.PrefixCompleterInterface, 0, len(commands))
+	for _, cmd := range commands {
+		if cmd.ArgCompleter != nil {
+			completer := cmd.ArgCompleter
+			dynamic := readline.PcItemDynamic(func(line string) []string {
+				vals := completer()
+				if len(vals) == 0 {
+					return nil
+				}
+				sorted := append([]string(nil), vals...)
+				sort.Strings(sorted)
+				return sorted
+			})
+			items = append(items, readline.PcItem(cmd.Name, dynamic))
+		} else {
+			items = append(items, readline.PcItem(cmd.Name))
+		}
+	}
+	return readline.NewPrefixCompleter(items...)
 }
 
-func NewHintPainter(modelProvider func() []string) *HintPainter {
-	return &HintPainter{modelProvider: modelProvider}
+type HintPainter struct{}
+
+func NewHintPainter() *HintPainter {
+	return &HintPainter{}
 }
 
 func (p *HintPainter) Paint(line []rune, pos int) []rune {
@@ -109,8 +115,10 @@ func (p *HintPainter) Paint(line []rune, pos int) []rune {
 func (p *HintPainter) findInlineHint(input string) string {
 	lower := strings.ToLower(input)
 
-	if strings.HasPrefix(lower, "/model ") {
-		return p.findModelHint(input)
+	for _, cmd := range commands {
+		if cmd.ArgCompleter != nil && strings.HasPrefix(lower, strings.ToLower(cmd.Name)+" ") {
+			return p.findArgHint(input, cmd.Name, cmd.ArgCompleter)
+		}
 	}
 
 	for _, cmd := range commands {
@@ -128,20 +136,16 @@ func (p *HintPainter) findInlineHint(input string) string {
 	return ""
 }
 
-func (p *HintPainter) findModelHint(input string) string {
-	if p.modelProvider == nil {
-		return ""
-	}
+func (p *HintPainter) findArgHint(input, cmdName string, completer func() []string) string {
+	prefix := strings.TrimSpace(input[len(cmdName):])
+	items := completer()
 
-	prefix := strings.TrimSpace(input[len("/model"):])
-	models := p.modelProvider()
-
-	for _, model := range models {
+	for _, item := range items {
 		if prefix == "" {
-			return model
+			return item
 		}
-		if strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) && !strings.EqualFold(model, prefix) {
-			return model[len(prefix):]
+		if strings.HasPrefix(strings.ToLower(item), strings.ToLower(prefix)) && !strings.EqualFold(item, prefix) {
+			return item[len(prefix):]
 		}
 	}
 
@@ -151,8 +155,10 @@ func (p *HintPainter) findModelHint(input string) string {
 func (p *HintPainter) buildPanel(input string) []string {
 	lower := strings.ToLower(input)
 
-	if strings.HasPrefix(lower, "/model ") {
-		return p.buildModelPanel(input)
+	for _, cmd := range commands {
+		if cmd.ArgCompleter != nil && strings.HasPrefix(lower, strings.ToLower(cmd.Name)+" ") {
+			return p.buildArgPanel(input, cmd.Name, cmd.ArgCompleter)
+		}
 	}
 
 	var lines []string
@@ -165,18 +171,14 @@ func (p *HintPainter) buildPanel(input string) []string {
 	return lines
 }
 
-func (p *HintPainter) buildModelPanel(input string) []string {
-	if p.modelProvider == nil {
-		return nil
-	}
-
-	prefix := strings.TrimSpace(input[len("/model"):])
-	models := p.modelProvider()
+func (p *HintPainter) buildArgPanel(input, cmdName string, completer func() []string) []string {
+	prefix := strings.TrimSpace(input[len(cmdName):])
+	items := completer()
 
 	var lines []string
-	for _, model := range models {
-		if prefix == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) {
-			lines = append(lines, fmt.Sprintf("  \033[36m%s\033[0m", model))
+	for _, item := range items {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(item), strings.ToLower(prefix)) {
+			lines = append(lines, fmt.Sprintf("  \033[36m%s\033[0m", item))
 			if len(lines) >= 8 {
 				break
 			}
@@ -186,7 +188,7 @@ func (p *HintPainter) buildModelPanel(input string) []string {
 	return lines
 }
 
-func MatchingCommands(input string) []Command {
+func matchingCommands(input string) []Command {
 	trimmed := strings.ToLower(strings.TrimSpace(input))
 	if trimmed == "" || !strings.HasPrefix(trimmed, "/") {
 		return nil
@@ -204,7 +206,7 @@ func MatchingCommands(input string) []Command {
 
 func PrintMatchingCommandHints(input string) {
 	trimmed := strings.TrimSpace(input)
-	matches := MatchingCommands(trimmed)
+	matches := matchingCommands(trimmed)
 	if len(matches) == 0 {
 		pterm.Warning.Printf("Unknown command: %s\n", trimmed)
 		pterm.Info.Println("Type /help to see available commands")
