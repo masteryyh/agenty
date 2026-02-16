@@ -154,6 +154,8 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 			return fmt.Errorf("readline error: %w", err)
 		}
 
+		rl.Write([]byte("\033[J"))
+
 		input := strings.TrimSpace(line)
 		if input == "" {
 			continue

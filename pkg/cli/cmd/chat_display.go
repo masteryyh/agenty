@@ -69,7 +69,7 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 	if assistantMsg.ProviderSpecifics != nil && assistantMsg.ProviderSpecifics.KimiReasoningContent != "" {
 		pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
 		renderedReasoning := renderMarkdown(assistantMsg.ProviderSpecifics.KimiReasoningContent)
-		for _, line := range strings.Split(renderedReasoning, "\n") {
+		for line := range strings.SplitSeq(renderedReasoning, "\n") {
 			pterm.Println(pterm.FgLightWhite.Sprint("  " + line))
 		}
 		fmt.Println()
@@ -77,7 +77,7 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 
 	if assistantMsg.Content != "" {
 		renderedContent := renderMarkdown(assistantMsg.Content)
-		for _, line := range strings.Split(renderedContent, "\n") {
+		for line := range strings.SplitSeq(renderedContent, "\n") {
 			pterm.Println("  " + line)
 		}
 		fmt.Println()
@@ -94,7 +94,7 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 
 		pterm.Printf("%s %s ", pterm.FgYellow.Sprint(prefix), pterm.FgCyan.Sprint(tc.Name))
 
-		var args map[string]interface{}
+		var args map[string]any
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
 			argsStr, _ := json.Marshal(args)
 			argDisplay := string(argsStr)
@@ -136,7 +136,7 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 		fmt.Println()
 		pterm.Println(pterm.FgGreen.Sprint("  📝 Final Response:"))
 		renderedContent := renderMarkdown(finalResponse.Content)
-		for _, line := range strings.Split(renderedContent, "\n") {
+		for line := range strings.SplitSeq(renderedContent, "\n") {
 			pterm.Println("  " + line)
 		}
 	}
@@ -149,7 +149,7 @@ func printMessage(msg *models.ChatMessageDto) {
 	case models.RoleUser:
 		pterm.Println(pterm.FgCyan.Sprintf("👤 User [%s]:", msg.CreatedAt.Format("15:04:05")))
 		rendered := renderMarkdown(msg.Content)
-		for _, line := range strings.Split(rendered, "\n") {
+		for line := range strings.SplitSeq(rendered, "\n") {
 			pterm.Println("  " + line)
 		}
 
@@ -163,7 +163,7 @@ func printMessage(msg *models.ChatMessageDto) {
 		if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
 			pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
 			rendered := renderMarkdown(msg.ProviderSpecifics.KimiReasoningContent)
-			for _, line := range strings.Split(rendered, "\n") {
+			for line := range strings.SplitSeq(rendered, "\n") {
 				pterm.Println(pterm.FgLightWhite.Sprint("  " + line))
 			}
 			fmt.Println()
@@ -171,7 +171,7 @@ func printMessage(msg *models.ChatMessageDto) {
 
 		if msg.Content != "" {
 			rendered := renderMarkdown(msg.Content)
-			for _, line := range strings.Split(rendered, "\n") {
+			for line := range strings.SplitSeq(rendered, "\n") {
 				pterm.Println("  " + line)
 			}
 		}
@@ -181,7 +181,7 @@ func printMessage(msg *models.ChatMessageDto) {
 			for _, tc := range msg.ToolCalls {
 				pterm.Printf("    • %s", pterm.FgYellow.Sprint(tc.Name))
 
-				var args map[string]interface{}
+				var args map[string]any
 				if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
 					argsStr, _ := json.MarshalIndent(args, "      ", "  ")
 					pterm.Println(pterm.FgGray.Sprintf("\n      %s", string(argsStr)))
@@ -221,7 +221,7 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 		case models.RoleUser:
 			buf.WriteString(pterm.FgCyan.Sprintf("👤 User [%s]:\n", msg.CreatedAt.Format("15:04:05")))
 			renderedContent := renderMarkdown(msg.Content)
-			for _, line := range strings.Split(renderedContent, "\n") {
+			for line := range strings.SplitSeq(renderedContent, "\n") {
 				buf.WriteString("  " + line + "\n")
 			}
 			buf.WriteString("\n")
@@ -236,7 +236,7 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 			if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
 				buf.WriteString(pterm.FgLightBlue.Sprint("  💭 Reasoning:\n"))
 				renderedReasoning := renderMarkdown(msg.ProviderSpecifics.KimiReasoningContent)
-				for _, line := range strings.Split(renderedReasoning, "\n") {
+				for line := range strings.SplitSeq(renderedReasoning, "\n") {
 					buf.WriteString(pterm.FgLightWhite.Sprint("  " + line + "\n"))
 				}
 				buf.WriteString("\n")
@@ -244,7 +244,7 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 
 			if msg.Content != "" {
 				renderedContent := renderMarkdown(msg.Content)
-				for _, line := range strings.Split(renderedContent, "\n") {
+				for line := range strings.SplitSeq(renderedContent, "\n") {
 					buf.WriteString("  " + line + "\n")
 				}
 			}
@@ -253,7 +253,7 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 				buf.WriteString("\n" + pterm.FgYellow.Sprint("  🔧 Tool Calls:\n"))
 				for _, tc := range msg.ToolCalls {
 					buf.WriteString(pterm.FgYellow.Sprintf("    • %s\n", tc.Name))
-					var args map[string]interface{}
+					var args map[string]any
 					if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
 						argsStr, _ := json.MarshalIndent(args, "      ", "  ")
 						buf.WriteString(pterm.FgGray.Sprintf("      %s\n", string(argsStr)))
@@ -270,7 +270,7 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 				} else {
 					buf.WriteString(pterm.FgGreen.Sprintf("  ✅ %s\n", msg.ToolResult.Name))
 				}
-				for _, line := range strings.Split(msg.ToolResult.Content, "\n") {
+				for line := range strings.SplitSeq(msg.ToolResult.Content, "\n") {
 					buf.WriteString(pterm.FgGray.Sprint("  " + line + "\n"))
 				}
 				buf.WriteString("\n")

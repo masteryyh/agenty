@@ -50,7 +50,7 @@ type APIResponse struct {
 	Data    stdjson.RawMessage `json:"data"`
 }
 
-func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
+func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)

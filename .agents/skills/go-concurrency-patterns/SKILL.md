@@ -514,15 +514,15 @@ type Cache struct {
     m sync.Map
 }
 
-func (c *Cache) Get(key string) (interface{}, bool) {
+func (c *Cache) Get(key string) (any, bool) {
     return c.m.Load(key)
 }
 
-func (c *Cache) Set(key string, value interface{}) {
+func (c *Cache) Set(key string, value any) {
     c.m.Store(key, value)
 }
 
-func (c *Cache) GetOrSet(key string, value interface{}) (interface{}, bool) {
+func (c *Cache) GetOrSet(key string, value any) (any, bool) {
     return c.m.LoadOrStore(key, value)
 }
 
@@ -538,7 +538,7 @@ type ShardedMap struct {
 
 type shard struct {
     sync.RWMutex
-    data map[string]interface{}
+    data map[string]any
 }
 
 func NewShardedMap(numShards int) *ShardedMap {
@@ -547,7 +547,7 @@ func NewShardedMap(numShards int) *ShardedMap {
         numShards: numShards,
     }
     for i := range m.shards {
-        m.shards[i] = &shard{data: make(map[string]interface{})}
+        m.shards[i] = &shard{data: make(map[string]any)}
     }
     return m
 }
@@ -561,7 +561,7 @@ func (m *ShardedMap) getShard(key string) *shard {
     return m.shards[h%m.numShards]
 }
 
-func (m *ShardedMap) Get(key string) (interface{}, bool) {
+func (m *ShardedMap) Get(key string) (any, bool) {
     shard := m.getShard(key)
     shard.RLock()
     defer shard.RUnlock()
@@ -569,7 +569,7 @@ func (m *ShardedMap) Get(key string) (interface{}, bool) {
     return v, ok
 }
 
-func (m *ShardedMap) Set(key string, value interface{}) {
+func (m *ShardedMap) Set(key string, value any) {
     shard := m.getShard(key)
     shard.Lock()
     defer shard.Unlock()
