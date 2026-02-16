@@ -17,12 +17,12 @@ limitations under the License.
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 
 	json "github.com/bytedance/sonic"
+	"github.com/chzyer/readline"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/cli/client"
 	"github.com/masteryyh/agenty/pkg/models"
@@ -103,27 +103,65 @@ func clearScreen() {
 }
 
 func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
-	scanner := bufio.NewScanner(os.Stdin)
 	currentSessionID := sessionID
 	currentModelID := modelID
-
+	
+	// Create readline completer
+	completer := readline.NewPrefixCompleter(
+		readline.PcItem("/new"),
+		readline.PcItem("/status"),
+		readline.PcItem("/model"),
+		readline.PcItem("/help"),
+		readline.PcItem("/exit"),
+	)
+	
+	// Configure readline
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          pterm.FgCyan.Sprint("You: "),
+		HistoryFile:     "/tmp/agenty-chat-history.txt",
+		AutoComplete:    completer,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+		
+		HistorySearchFold: true,
+		FuncFilterInputRune: func(r rune) (rune, bool) {
+			// Allow all runes including Chinese characters
+			return r, true
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize readline: %w", err)
+	}
+	defer rl.Close()
+	
 	for {
-		pterm.Print(pterm.FgCyan.Sprint("You: "))
-		if !scanner.Scan() {
-			break
+		line, err := rl.Readline()
+		if err != nil {
+			if err == readline.ErrInterrupt {
+				if len(line) == 0 {
+					pterm.Info.Println("Goodbye!")
+					break
+				} else {
+					continue
+				}
+			} else if err == io.EOF {
+				pterm.Info.Println("Goodbye!")
+				break
+			}
+			return fmt.Errorf("readline error: %w", err)
 		}
-
-		input := strings.TrimSpace(scanner.Text())
+		
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
-
+		
 		// Check for exit
-		if strings.ToLower(input) == "/exit" {
+		if strings.ToLower(input) == "/exit" || strings.ToLower(input) == "exit" {
 			pterm.Info.Println("Goodbye!")
 			break
 		}
-
+		
 		// Check for slash commands
 		if strings.HasPrefix(input, "/") {
 			handled, newSessionID, newModelID, err := handleSlashCommand(c, input, currentSessionID)
@@ -135,6 +173,8 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 				// Update current IDs if changed
 				if newSessionID != uuid.Nil {
 					currentSessionID = newSessionID
+					// Update readline prompt with new session indicator
+					rl.SetPrompt(pterm.FgCyan.Sprint("You: "))
 				}
 				if newModelID != uuid.Nil {
 					currentModelID = newModelID
@@ -142,29 +182,29 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 				continue
 			}
 		}
-
+		
 		// Regular chat message
 		spinner, _ := pterm.DefaultSpinner.Start("Thinking...")
-
+		
 		messages, err := c.Chat(currentSessionID, &models.ChatDto{
 			ModelID: currentModelID,
 			Message: input,
 		})
-
+		
 		spinner.Stop()
-
+		
 		if err != nil {
 			pterm.Error.Printf("Error: %v\n", err)
 			continue
 		}
-
+		
 		fmt.Println()
 		for _, msg := range messages {
 			printMessage(msg)
 		}
 		fmt.Println()
 	}
-
+	
 	return nil
 }
 
