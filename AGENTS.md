@@ -27,8 +27,9 @@ The backend service can also act as a MCP client to communicate with other MCP s
 
 When coding agents for this project, please adhere to the following guidelines:
 
-# [IMPORTANT] DO NOT WRITE ANY SUMMARY DOCUMENT UNLESS BEING TOLD TO DO SO.
-# [IMPORTANT] YOU WILL BE HEAVILY PENALIZED IF YOU WRITE ANY SUMMARY DOCUMENT WITHOUT BEING TOLD TO DO SO.
+# [IMPORTANT] DO NOT WRITE ANY SUMMARY DOCUMENT OR REDUNDANT COMMENTS UNLESS BEING TOLD TO DO SO.
+# [IMPORTANT] ABOVE INSTRUCTION DOES NOT INCLUDE APACHE LICENSE FILE HEADER, APPLY LICENSE FILE HEADER WHEN CREATING NEW SOURCE FILES.
+# [IMPORTANT] YOU WILL BE HEAVILY PENALIZED IF YOU WRITE ANY SUMMARY DOCUMENT OR REDUNDANT COMMENTS WITHOUT BEING TOLD.
 
 1. **Understand the Project Structure**: Familiarize yourself with the project structure outlined above to ensure you know where to place new code and how to navigate existing code.
 
