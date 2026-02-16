@@ -17,11 +17,15 @@ limitations under the License.
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 
 	json "github.com/bytedance/sonic"
+	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/cli/client"
@@ -103,7 +107,7 @@ func printChatHelp() {
 	pterm.Println("  • Type your message and press Enter to chat")
 	pterm.Println("  • /new - Start a new chat session")
 	pterm.Println("  • /status - Show current session status")
-	pterm.Println("  • /history [n] - Load more message history (default: 20)")
+	pterm.Println("  • /history - Open interactive viewer to browse all message history")
 	pterm.Println("  • /model [provider/model] - Switch to a different model")
 	pterm.Println("  • /exit - Quit the chat")
 }
@@ -235,13 +239,8 @@ func handleSlashCommand(c *client.Client, input string, sessionID uuid.UUID) (ha
 		return handleStatusCommand(c, sessionID)
 		
 	case "/history":
-		count := 20
-		if len(parts) > 1 {
-			if n, err := fmt.Sscanf(parts[1], "%d", &count); err == nil && n == 1 {
-				// use parsed count
-			}
-		}
-		return handleHistoryCommand(c, sessionID, count)
+		// Open interactive viewer (count parameter no longer needed)
+		return handleHistoryCommand(c, sessionID, 0)
 
 	case "/model":
 		if len(parts) < 2 {
@@ -303,23 +302,100 @@ func handleHistoryCommand(c *client.Client, sessionID uuid.UUID, count int) (boo
 		return true, uuid.Nil, uuid.Nil, nil
 	}
 	
-	// Calculate which messages to show
-	startIdx := 0
-	if messageCount > count {
-		startIdx = messageCount - count
+	// Open interactive viewer for all history
+	if err := openHistoryViewer(session.Messages); err != nil {
+		// Fallback to simple display if viewer fails
+		pterm.Warning.Printf("Failed to open interactive viewer: %v\n", err)
+		pterm.Info.Println("Showing history in console instead...")
+		fmt.Println()
+		printMessageHistory(session.Messages)
+		fmt.Println()
 	}
-	
-	fmt.Println()
-	pterm.DefaultHeader.Printf("📜 Message History (%d of %d total)\n", count, messageCount)
-	if startIdx > 0 {
-		pterm.Info.Printf("Showing messages from #%d to #%d\n", startIdx+1, messageCount)
-	}
-	fmt.Println()
-	
-	printMessageHistory(session.Messages[startIdx:])
-	fmt.Println()
 	
 	return true, uuid.Nil, uuid.Nil, nil
+}
+
+// openHistoryViewer opens an interactive viewer (like less) to browse all history
+func openHistoryViewer(messages []models.ChatMessageDto) error {
+	// Format all messages to a buffer
+	var buf bytes.Buffer
+	buf.WriteString("=== Chat History ===\n\n")
+	
+	for i, msg := range messages {
+		buf.WriteString(fmt.Sprintf("--- Message %d/%d ---\n", i+1, len(messages)))
+		
+		switch msg.Role {
+		case models.RoleUser:
+			buf.WriteString(fmt.Sprintf("👤 User [%s]:\n", msg.CreatedAt.Format("15:04:05")))
+			buf.WriteString(msg.Content + "\n\n")
+			
+		case models.RoleAssistant:
+			modelInfo := ""
+			if msg.Model != nil {
+				modelInfo = fmt.Sprintf(" (%s)", msg.Model.Name)
+			}
+			buf.WriteString(fmt.Sprintf("🤖 Assistant%s [%s]:\n", modelInfo, msg.CreatedAt.Format("15:04:05")))
+			
+			if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
+				buf.WriteString("💭 Reasoning:\n")
+				buf.WriteString(msg.ProviderSpecifics.KimiReasoningContent + "\n\n")
+			}
+			
+			if msg.Content != "" {
+				buf.WriteString(msg.Content + "\n")
+			}
+			
+			if len(msg.ToolCalls) > 0 {
+				buf.WriteString("\n🔧 Tool Calls:\n")
+				for _, tc := range msg.ToolCalls {
+					buf.WriteString(fmt.Sprintf("  • %s\n", tc.Name))
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
+						argsStr, _ := json.MarshalIndent(args, "    ", "  ")
+						buf.WriteString(fmt.Sprintf("    %s\n", string(argsStr)))
+					}
+				}
+			}
+			buf.WriteString("\n")
+			
+		case models.RoleTool:
+			buf.WriteString(fmt.Sprintf("🛠️  Tool Result [%s]:\n", msg.CreatedAt.Format("15:04:05")))
+			if msg.ToolResult != nil {
+				if msg.ToolResult.IsError {
+					buf.WriteString(fmt.Sprintf("❌ %s (Error)\n", msg.ToolResult.Name))
+				} else {
+					buf.WriteString(fmt.Sprintf("✅ %s\n", msg.ToolResult.Name))
+				}
+				buf.WriteString(msg.ToolResult.Content + "\n\n")
+			}
+		}
+		buf.WriteString("\n")
+	}
+	
+	// Try to use 'less' command if available
+	lessPath, err := exec.LookPath("less")
+	if err == nil {
+		cmd := exec.Command(lessPath, "-R") // -R for ANSI color support
+		cmd.Stdin = strings.NewReader(buf.String())
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		
+		return cmd.Run()
+	}
+	
+	// Fallback: try 'more' command
+	morePath, err := exec.LookPath("more")
+	if err == nil {
+		cmd := exec.Command(morePath)
+		cmd.Stdin = strings.NewReader(buf.String())
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		
+		return cmd.Run()
+	}
+	
+	// If no pager available, return error to trigger fallback
+	return fmt.Errorf("no pager available (less or more)")
 }
 
 func handleModelCommand(c *client.Client, modelSpec string) (bool, uuid.UUID, uuid.UUID, error) {
@@ -493,7 +569,12 @@ func printMessage(msg *models.ChatMessageDto) {
 	switch msg.Role {
 	case models.RoleUser:
 		pterm.Println(pterm.FgCyan.Sprintf("👤 User [%s]:", msg.CreatedAt.Format("15:04:05")))
-		pterm.Println(pterm.NewStyle(pterm.FgWhite).Sprint("  " + msg.Content))
+		// Render markdown for user messages
+		rendered := renderMarkdown(msg.Content)
+		// Add indentation to each line
+		for _, line := range strings.Split(rendered, "\n") {
+			pterm.Println("  " + line)
+		}
 
 	case models.RoleAssistant:
 		modelInfo := ""
@@ -504,12 +585,20 @@ func printMessage(msg *models.ChatMessageDto) {
 
 		if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
 			pterm.Println(pterm.FgBlue.Sprint("  💭 Reasoning:"))
-			pterm.Println(pterm.NewStyle(pterm.FgGray).Sprint("  " + msg.ProviderSpecifics.KimiReasoningContent))
+			// Render markdown for reasoning content
+			rendered := renderMarkdown(msg.ProviderSpecifics.KimiReasoningContent)
+			for _, line := range strings.Split(rendered, "\n") {
+				pterm.Println("  " + line)
+			}
 			fmt.Println()
 		}
 
 		if msg.Content != "" {
-			pterm.Println(pterm.NewStyle(pterm.FgWhite).Sprint("  " + msg.Content))
+			// Render markdown for assistant content
+			rendered := renderMarkdown(msg.Content)
+			for _, line := range strings.Split(rendered, "\n") {
+				pterm.Println("  " + line)
+			}
 		}
 
 		if len(msg.ToolCalls) > 0 {
@@ -544,6 +633,27 @@ func printMessage(msg *models.ChatMessageDto) {
 	}
 
 	fmt.Println()
+}
+
+// renderMarkdown renders markdown text with glamour for terminal display
+func renderMarkdown(text string) string {
+	// Create a glamour renderer with dark theme for terminals
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(100),
+	)
+	if err != nil {
+		// If rendering fails, return original text
+		return text
+	}
+	
+	rendered, err := r.Render(text)
+	if err != nil {
+		// If rendering fails, return original text
+		return text
+	}
+	
+	return strings.TrimSpace(rendered)
 }
 
 func init() {
