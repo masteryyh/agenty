@@ -45,8 +45,8 @@ func NewClient(baseURL string) *Client {
 }
 
 type APIResponse struct {
-	Code    int                  `json:"code"`
-	Message string               `json:"message"`
+	Code    int                `json:"code"`
+	Message string             `json:"message"`
 	Data    stdjson.RawMessage `json:"data"`
 }
 

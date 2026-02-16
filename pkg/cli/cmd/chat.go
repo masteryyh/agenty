@@ -64,7 +64,7 @@ var chatCmd = &cobra.Command{
 			return fmt.Errorf("no models available, please create a model first or specify --model flag")
 		}
 		modelID := modelsList.Data[0].ID
-		pterm.Info.Printf("Using model: %s (from %s)\n", modelsList.Data[0].Name, modelsList.Data[0].Provider.Name)
+		pterm.Info.Printf("Using model: %s/%s\n", modelsList.Data[0].Provider.Name, modelsList.Data[0].Name)
 
 		fmt.Println()
 
@@ -105,7 +105,7 @@ func clearScreen() {
 func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 	currentSessionID := sessionID
 	currentModelID := modelID
-	
+
 	// Create readline completer
 	completer := readline.NewPrefixCompleter(
 		readline.PcItem("/new"),
@@ -114,7 +114,7 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 		readline.PcItem("/help"),
 		readline.PcItem("/exit"),
 	)
-	
+
 	// Configure readline
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          pterm.FgCyan.Sprint("You: "),
@@ -122,7 +122,7 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 		AutoComplete:    completer,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
-		
+
 		HistorySearchFold: true,
 		FuncFilterInputRune: func(r rune) (rune, bool) {
 			// Allow all runes including Chinese characters
@@ -133,7 +133,7 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 		return fmt.Errorf("failed to initialize readline: %w", err)
 	}
 	defer rl.Close()
-	
+
 	for {
 		line, err := rl.Readline()
 		if err != nil {
@@ -150,18 +150,18 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 			}
 			return fmt.Errorf("readline error: %w", err)
 		}
-		
+
 		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
-		
+
 		// Check for exit
-		if strings.ToLower(input) == "/exit" || strings.ToLower(input) == "exit" {
+		if strings.ToLower(input) == "/exit" {
 			pterm.Info.Println("Goodbye!")
 			break
 		}
-		
+
 		// Check for slash commands
 		if strings.HasPrefix(input, "/") {
 			handled, newSessionID, newModelID, err := handleSlashCommand(c, input, currentSessionID)
@@ -182,29 +182,29 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 				continue
 			}
 		}
-		
+
 		// Regular chat message
 		spinner, _ := pterm.DefaultSpinner.Start("Thinking...")
-		
+
 		messages, err := c.Chat(currentSessionID, &models.ChatDto{
 			ModelID: currentModelID,
 			Message: input,
 		})
-		
+
 		spinner.Stop()
-		
+
 		if err != nil {
 			pterm.Error.Printf("Error: %v\n", err)
 			continue
 		}
-		
+
 		fmt.Println()
 		for _, msg := range messages {
 			printMessage(msg)
 		}
 		fmt.Println()
 	}
-	
+
 	return nil
 }
 

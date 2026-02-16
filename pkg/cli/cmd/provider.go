@@ -37,24 +37,24 @@ var providerListCmd = &cobra.Command{
 	Short: "List all providers",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
-		
+
 		result, err := c.ListProviders(page, pageSize)
 		if err != nil {
 			return err
 		}
-		
+
 		if len(result.Data) == 0 {
 			pterm.Warning.Println("No providers found")
 			return nil
 		}
-		
+
 		tableData := pterm.TableData{
 			{"ID", "Name", "Type", "Base URL", "API Key"},
 		}
-		
+
 		for _, p := range result.Data {
 			tableData = append(tableData, []string{
 				p.ID.String(),
@@ -64,10 +64,10 @@ var providerListCmd = &cobra.Command{
 				p.APIKeyCensored,
 			})
 		}
-		
+
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
-		
+
 		return nil
 	},
 }
@@ -77,24 +77,24 @@ var providerCreateCmd = &cobra.Command{
 	Short: "Create a new provider",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		name, _ := cmd.Flags().GetString("name")
 		apiType, _ := cmd.Flags().GetString("type")
 		baseURLFlag, _ := cmd.Flags().GetString("base-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
-		
+
 		dto := &models.CreateModelProviderDto{
 			Name:    name,
 			Type:    models.APIType(apiType),
 			BaseURL: baseURLFlag,
 			APIKey:  apiKey,
 		}
-		
+
 		provider, err := c.CreateProvider(dto)
 		if err != nil {
 			return err
 		}
-		
+
 		pterm.Success.Printf("Provider created: %s (ID: %s)\n", provider.Name, provider.ID)
 		return nil
 	},
@@ -106,18 +106,18 @@ var providerDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		providerID, err := uuid.Parse(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid provider ID: %w", err)
 		}
-		
+
 		force, _ := cmd.Flags().GetBool("force")
-		
+
 		if err := c.DeleteProvider(providerID, force); err != nil {
 			return err
 		}
-		
+
 		pterm.Success.Printf("Provider deleted: %s\n", providerID)
 		return nil
 	},
@@ -125,11 +125,11 @@ var providerDeleteCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(providerCmd)
-	
+
 	providerCmd.AddCommand(providerListCmd)
 	providerListCmd.Flags().Int("page", 1, "Page number")
 	providerListCmd.Flags().Int("page-size", 10, "Page size")
-	
+
 	providerCmd.AddCommand(providerCreateCmd)
 	providerCreateCmd.Flags().String("name", "", "Provider name (required)")
 	providerCreateCmd.Flags().String("type", "", "Provider type: openai, anthropic, kimi, gemini (required)")
@@ -139,7 +139,7 @@ func init() {
 	providerCreateCmd.MarkFlagRequired("type")
 	providerCreateCmd.MarkFlagRequired("base-url")
 	providerCreateCmd.MarkFlagRequired("api-key")
-	
+
 	providerCmd.AddCommand(providerDeleteCmd)
 	providerDeleteCmd.Flags().Bool("force", false, "Force delete (also delete associated models)")
 }

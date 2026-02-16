@@ -37,24 +37,24 @@ var modelListCmd = &cobra.Command{
 	Short: "List all models",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
-		
+
 		result, err := c.ListModels(page, pageSize)
 		if err != nil {
 			return err
 		}
-		
+
 		if len(result.Data) == 0 {
 			pterm.Warning.Println("No models found")
 			return nil
 		}
-		
+
 		tableData := pterm.TableData{
 			{"ID", "Name", "Provider"},
 		}
-		
+
 		for _, m := range result.Data {
 			providerName := ""
 			if m.Provider != nil {
@@ -66,10 +66,10 @@ var modelListCmd = &cobra.Command{
 				providerName,
 			})
 		}
-		
+
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
-		
+
 		return nil
 	},
 }
@@ -79,25 +79,25 @@ var modelCreateCmd = &cobra.Command{
 	Short: "Create a new model",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		name, _ := cmd.Flags().GetString("name")
 		providerIDStr, _ := cmd.Flags().GetString("provider-id")
-		
+
 		providerID, err := uuid.Parse(providerIDStr)
 		if err != nil {
 			return fmt.Errorf("invalid provider ID: %w", err)
 		}
-		
+
 		dto := &models.CreateModelDto{
 			Name:       name,
 			ProviderID: providerID,
 		}
-		
+
 		model, err := c.CreateModel(dto)
 		if err != nil {
 			return err
 		}
-		
+
 		pterm.Success.Printf("Model created: %s (ID: %s)\n", model.Name, model.ID)
 		return nil
 	},
@@ -109,16 +109,16 @@ var modelDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		modelID, err := uuid.Parse(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid model ID: %w", err)
 		}
-		
+
 		if err := c.DeleteModel(modelID); err != nil {
 			return err
 		}
-		
+
 		pterm.Success.Printf("Model deleted: %s\n", modelID)
 		return nil
 	},
@@ -126,16 +126,16 @@ var modelDeleteCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(modelCmd)
-	
+
 	modelCmd.AddCommand(modelListCmd)
 	modelListCmd.Flags().Int("page", 1, "Page number")
 	modelListCmd.Flags().Int("page-size", 10, "Page size")
-	
+
 	modelCmd.AddCommand(modelCreateCmd)
 	modelCreateCmd.Flags().String("name", "", "Model name (required)")
 	modelCreateCmd.Flags().String("provider-id", "", "Provider ID (required)")
 	modelCreateCmd.MarkFlagRequired("name")
 	modelCreateCmd.MarkFlagRequired("provider-id")
-	
+
 	modelCmd.AddCommand(modelDeleteCmd)
 }

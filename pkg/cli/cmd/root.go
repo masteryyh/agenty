@@ -26,10 +26,10 @@ import (
 )
 
 var (
-	cfgFile      string
-	baseURL      string
-	bannerShown  bool
-	rootCmd = &cobra.Command{
+	cfgFile     string
+	baseURL     string
+	bannerShown bool
+	rootCmd     = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 

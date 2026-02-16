@@ -36,24 +36,24 @@ var sessionListCmd = &cobra.Command{
 	Short: "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
-		
+
 		result, err := c.ListSessions(page, pageSize)
 		if err != nil {
 			return err
 		}
-		
+
 		if len(result.Data) == 0 {
 			pterm.Warning.Println("No sessions found")
 			return nil
 		}
-		
+
 		tableData := pterm.TableData{
 			{"ID", "Token Consumed", "Created At", "Updated At"},
 		}
-		
+
 		for _, s := range result.Data {
 			tableData = append(tableData, []string{
 				s.ID.String(),
@@ -62,10 +62,10 @@ var sessionListCmd = &cobra.Command{
 				s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			})
 		}
-		
+
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
-		
+
 		return nil
 	},
 }
@@ -75,12 +75,12 @@ var sessionCreateCmd = &cobra.Command{
 	Short: "Create a new session",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		session, err := c.CreateSession()
 		if err != nil {
 			return err
 		}
-		
+
 		pterm.Success.Printf("Session created: %s\n", session.ID)
 		return nil
 	},
@@ -92,44 +92,44 @@ var sessionViewCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.NewClient(GetBaseURL())
-		
+
 		sessionID, err := uuid.Parse(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid session ID: %w", err)
 		}
-		
+
 		session, err := c.GetSession(sessionID)
 		if err != nil {
 			return err
 		}
-		
+
 		pterm.DefaultHeader.Printf("Session: %s\n", session.ID)
 		pterm.Info.Printf("Token Consumed: %d\n", session.TokenConsumed)
 		pterm.Info.Printf("Created At: %s\n", session.CreatedAt.Format("2006-01-02 15:04:05"))
 		pterm.Info.Printf("Updated At: %s\n", session.UpdatedAt.Format("2006-01-02 15:04:05"))
 		fmt.Println()
-		
+
 		if len(session.Messages) == 0 {
 			pterm.Warning.Println("No messages in this session")
 			return nil
 		}
-		
+
 		pterm.DefaultSection.Println("Messages")
 		for _, msg := range session.Messages {
 			printMessage(&msg)
 		}
-		
+
 		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(sessionCmd)
-	
+
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionListCmd.Flags().Int("page", 1, "Page number")
 	sessionListCmd.Flags().Int("page-size", 10, "Page size")
-	
+
 	sessionCmd.AddCommand(sessionCreateCmd)
 	sessionCmd.AddCommand(sessionViewCmd)
 }
