@@ -19,6 +19,8 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -151,9 +153,14 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 	completer := NewChatCompleter()
 	painter := NewHintPainter()
 
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+
 	config := &readline.Config{
 		Prompt:              basePrompt,
-		HistoryFile:         "/tmp/agenty-chat-history.txt",
+		HistoryFile:         filepath.Join(cacheDir, "agenty-chat-history.txt"),
 		AutoComplete:        completer,
 		Painter:             painter,
 		InterruptPrompt:     "^C",
