@@ -89,16 +89,26 @@ go build -o agenty-server ./cmd/server.go
 ### 交互式聊天
 
 ```bash
-# 开始新的聊天会话
+# 开始聊天（自动使用最近的会话和默认模型）
+./agenty-cli chat
+
+# 指定特定会话
+./agenty-cli chat --session <session-id>
+
+# 指定特定模型
 ./agenty-cli chat --model <model-id>
 
-# 继续已有会话
-./agenty-cli chat --model <model-id> --session <session-id>
+# 指定会话和模型
+./agenty-cli chat --session <session-id> --model <model-id>
 ```
 
-在聊天界面中：
+在聊天界面中可用的命令：
 - 直接输入消息并按回车发送
-- 输入 `exit` 退出聊天
+- `/new` - 开始新的聊天会话（清空屏幕）
+- `/status` - 查看当前会话状态（ID、token消耗、消息数等）
+- `/model provider-name/model-name` - 切换到不同的模型
+- `/help` - 显示帮助信息
+- `exit` - 退出聊天
 
 ## 消息展示
 
@@ -142,8 +152,21 @@ CLI会以不同颜色和图标展示不同类型的消息：
   --name "gpt-4" \
   --provider-id <provider-id>
 
-# 4. 记录model-id，开始聊天
-./agenty-cli chat --model <model-id>
+# 4. 开始聊天（自动使用默认模型和最近会话）
+./agenty-cli chat
+
+# 在聊天中使用斜杠命令
+You: /status
+📊 Session Status
+  Session ID: xxx
+  Token Consumed: 1234
+  Messages: 10
+  
+You: /model OpenAI/gpt-3.5-turbo
+✓ Switched to model: gpt-3.5-turbo (from OpenAI)
+
+You: /new
+✓ Started new session: yyy
 ```
 
 ## 开发
