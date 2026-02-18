@@ -17,6 +17,7 @@ limitations under the License.
 package routes
 
 import (
+	"net/url"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -51,9 +52,21 @@ func (r *ModelRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	{
 		modelGroup.POST("", r.CreateModel)
 		modelGroup.GET("", r.ListModels)
+		modelGroup.GET("/default", r.GetDefaultModel)
 		modelGroup.GET("/:id", r.GetModel)
+		modelGroup.PUT("/by-name", r.UpdateByName)
+		modelGroup.PUT("/:id", r.UpdateModel)
 		modelGroup.DELETE("/:id", r.DeleteModel)
 	}
+}
+
+func (r *ModelRoutes) GetDefaultModel(c *gin.Context) {
+	model, err := r.service.GetDefault(c)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, model)
 }
 
 func (r *ModelRoutes) CreateModel(c *gin.Context) {
@@ -69,6 +82,57 @@ func (r *ModelRoutes) CreateModel(c *gin.Context) {
 		return
 	}
 	response.OK(c, model)
+}
+
+func (r *ModelRoutes) UpdateByName(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+	name, err := url.QueryUnescape(name)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	var dto models.UpdateModelDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	if err := r.service.UpdateByName(c, name, &dto); err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (r *ModelRoutes) UpdateModel(c *gin.Context) {
+	idRaw := c.Param("id")
+	if idRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	modelID, err := uuid.Parse(idRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	var dto models.UpdateModelDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	if err := r.service.UpdateModel(c, modelID, &dto); err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, nil)
 }
 
 func (r *ModelRoutes) ListModels(c *gin.Context) {

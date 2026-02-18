@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	json "github.com/bytedance/sonic"
@@ -88,7 +89,6 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 	if apiResp.Code != 200 {
 		return nil, fmt.Errorf("API error: %s", apiResp.Message)
 	}
-
 	return apiResp.Data, nil
 }
 
@@ -102,7 +102,6 @@ func (c *Client) ListProviders(page, pageSize int) (*pagination.PagedResponse[mo
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal providers: %w", err)
 	}
-
 	return &result, nil
 }
 
@@ -116,7 +115,6 @@ func (c *Client) CreateProvider(dto *models.CreateModelProviderDto) (*models.Mod
 	if err := json.Unmarshal(data, &provider); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal provider: %w", err)
 	}
-
 	return &provider, nil
 }
 
@@ -139,7 +137,6 @@ func (c *Client) ListModels(page, pageSize int) (*pagination.PagedResponse[model
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal models: %w", err)
 	}
-
 	return &result, nil
 }
 
@@ -153,8 +150,30 @@ func (c *Client) CreateModel(dto *models.CreateModelDto) (*models.ModelDto, erro
 	if err := json.Unmarshal(data, &model); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal model: %w", err)
 	}
-
 	return &model, nil
+}
+
+func (c *Client) GetDefaultModel() (*models.ModelDto, error) {
+	data, err := c.doRequest("GET", "/api/v1/models/default", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var model models.ModelDto
+	if err := json.Unmarshal(data, &model); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal model: %w", err)
+	}
+	return &model, nil
+}
+
+func (c *Client) UpdateModel(modelID uuid.UUID, dto *models.UpdateModelDto) error {
+	_, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/models/%s", modelID), dto)
+	return err
+}
+
+func (c *Client) UpdateModelByName(name string, dto *models.UpdateModelDto) error {
+	_, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/models/by-name?name=%s", url.QueryEscape(name)), dto)
+	return err
 }
 
 func (c *Client) DeleteModel(modelID uuid.UUID) error {
@@ -172,7 +191,6 @@ func (c *Client) ListSessions(page, pageSize int) (*pagination.PagedResponse[mod
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal sessions: %w", err)
 	}
-
 	return &result, nil
 }
 
@@ -186,7 +204,6 @@ func (c *Client) CreateSession() (*models.ChatSessionDto, error) {
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
-
 	return &session, nil
 }
 
@@ -200,7 +217,23 @@ func (c *Client) GetSession(sessionID uuid.UUID) (*models.ChatSessionDto, error)
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
+	return &session, nil
+}
 
+func (c *Client) GetLastSession() (*models.ChatSessionDto, error) {
+	data, err := c.doRequest("GET", "/api/v1/chats/session/last", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var session models.ChatSessionDto
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
+	}
 	return &session, nil
 }
 
@@ -214,6 +247,5 @@ func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) ([]*models.ChatM
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal messages: %w", err)
 	}
-
 	return messages, nil
 }

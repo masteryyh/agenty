@@ -99,7 +99,7 @@ func handleNewCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID 
 	clearScreen()
 	pterm.Success.Printf("Started new session: %s\n", session.ID)
 	fmt.Println()
-	PrintCommandHints()
+	pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
 	fmt.Println()
 
 	return true, session.ID, uuid.Nil, nil

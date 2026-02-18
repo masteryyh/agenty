@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -49,6 +50,31 @@ func GetModelService() *ModelService {
 	return modelService
 }
 
+func (s *ModelService) GetDefault(ctx context.Context) (*models.ModelDto, error) {
+	model, err := gorm.G[models.Model](s.db).
+		Where("default_model IS TRUE AND deleted_at IS NULL").
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrModelNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find default model", "error", err)
+		return nil, err
+	}
+
+	provider, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrProviderNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find provider for default model", "error", err, "provider_id", model.ProviderID)
+		return nil, err
+	}
+	return model.ToDto(provider.ToDto()), nil
+}
+
 func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelDto) (*models.ModelDto, error) {
 	providerExists, err := gorm.G[models.ModelProvider](s.db).
 		Where("id = ? AND deleted_at IS NULL", dto.ProviderID).
@@ -60,6 +86,15 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 	if providerExists == 0 {
 		return nil, customerrors.ErrProviderNotFound
 	}
+
+	currentCount, err := gorm.G[models.Model](s.db).
+		Where("deleted_at IS NULL AND provider_id = ?", dto.ProviderID).
+		Count(ctx, "id")
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to count existing models", "error", err)
+		return nil, err
+	}
+	defaultModel := currentCount == 0
 
 	exists, err := gorm.G[models.Model](s.db).
 		Where("name = ? AND provider_id = ? AND deleted_at IS NULL", dto.Name, dto.ProviderID).
@@ -73,8 +108,9 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 	}
 
 	model := &models.Model{
-		ProviderID: dto.ProviderID,
-		Name:       dto.Name,
+		ProviderID:   dto.ProviderID,
+		Name:         dto.Name,
+		DefaultModel: defaultModel,
 	}
 
 	if err := gorm.G[models.Model](s.db).Create(ctx, model); err != nil {
@@ -85,6 +121,101 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 	return model.ToDto(nil), nil
 }
 
+func (s *ModelService) UpdateByName(ctx context.Context, name string, dto *models.UpdateModelDto) error {
+	if name == "" || !strings.Contains(name, "/") {
+		return customerrors.ErrInvalidParams
+	}
+
+	parts := strings.Split(name, "/")
+	if len(parts) != 2 {
+		return customerrors.ErrInvalidParams
+	}
+	providerName, modelName := parts[0], parts[1]
+
+	provider, err := gorm.G[models.ModelProvider](s.db).
+		Where("name = ? AND deleted_at IS NULL", providerName).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return customerrors.ErrProviderNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find provider", "error", err, "providerName", providerName)
+		return err
+	}
+
+	model, err := gorm.G[models.Model](s.db).
+		Where("name = ? AND provider_id = ? AND deleted_at IS NULL", modelName, provider.ID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return customerrors.ErrModelNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelName", modelName, "providerId", provider.ID)
+		return err
+	}
+	return s.UpdateModel(ctx, model.ID, dto)
+}
+
+func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *models.UpdateModelDto) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		model, err := gorm.G[models.Model](tx).
+			Where("id = ? AND deleted_at IS NULL", modelID).
+			First(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return customerrors.ErrModelNotFound
+			}
+			slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
+			return err
+		}
+
+		if !dto.DefaultModel {
+			_, err := gorm.G[models.Model](tx).
+				Where("id = ? AND deleted_at IS NULL", modelID).
+				Update(ctx, "default_model", false)
+			if err != nil {
+				slog.ErrorContext(ctx, "failed to unset default model", "error", err, "modelId", modelID)
+				return err
+			}
+			return nil
+		}
+
+		currentDefaultModel, err := gorm.G[models.Model](tx).
+			Where("default_model IS TRUE AND deleted_at IS NULL").
+			First(ctx)
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				slog.ErrorContext(ctx, "failed to find current default model", "error", err, "providerId", model.ProviderID)
+				return err
+			}
+		}
+
+		if currentDefaultModel.ID != uuid.Nil {
+			_, err := gorm.G[models.Model](tx).
+				Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
+				Update(ctx, "default_model", false)
+			if err != nil {
+				slog.ErrorContext(ctx, "failed to unset default model", "error", err, "modelId", currentDefaultModel.ID)
+				return err
+			}
+		}
+
+		if _, err := gorm.G[models.Model](tx).
+			Where("id = ? AND deleted_at IS NULL", modelID).
+			Update(ctx, "default_model", true); err != nil {
+			slog.ErrorContext(ctx, "failed to update model", "error", err, "modelId", modelID)
+			return err
+		}
+		return nil
+	}); err != nil {
+		if customerrors.GetBusinessError(err) == nil {
+			slog.ErrorContext(ctx, "failed to update model", "error", err, "modelId", modelID)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *ModelService) GetModel(ctx context.Context, modelID uuid.UUID) (*models.ModelDto, error) {
 	model, err := gorm.G[models.Model](s.db).
 		Where("id = ? AND deleted_at IS NULL", modelID).
@@ -93,7 +224,7 @@ func (s *ModelService) GetModel(ctx context.Context, modelID uuid.UUID) (*models
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customerrors.ErrModelNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "model_id", modelID)
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return nil, err
 	}
 
@@ -213,21 +344,26 @@ func (s *ModelService) ListModelsByProvider(ctx context.Context, providerID uuid
 }
 
 func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error {
-	modelCount, err := gorm.G[models.Model](s.db).
+	model, err := gorm.G[models.Model](s.db).
 		Where("id = ? AND deleted_at IS NULL", modelID).
-		Count(ctx, "id")
+		First(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "model_id", modelID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return customerrors.ErrModelNotFound
+		}
+
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return err
 	}
-	if modelCount == 0 {
-		return customerrors.ErrModelNotFound
+
+	if model.DefaultModel {
+		return customerrors.ErrDeletingDefaultModel
 	}
 
 	if _, err := gorm.G[models.Model](s.db).
 		Where("id = ? AND deleted_at IS NULL", modelID).
 		Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
-		slog.ErrorContext(ctx, "failed to delete model", "error", err, "model_id", modelID)
+		slog.ErrorContext(ctx, "failed to delete model", "error", err, "modelId", modelID)
 		return err
 	}
 

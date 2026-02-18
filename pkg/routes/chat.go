@@ -51,6 +51,7 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	{
 		chatGroup.POST("/session", r.CreateSession)
 		chatGroup.GET("/sessions", r.ListSessions)
+		chatGroup.GET("/session/last", r.GetLastSession)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
 		chatGroup.POST("/chat", r.Chat)
 	}
@@ -95,6 +96,15 @@ func (r *ChatRoutes) GetSession(c *gin.Context) {
 	}
 
 	session, err := r.service.GetSession(c, sessionID)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, session)
+}
+
+func (r *ChatRoutes) GetLastSession(c *gin.Context) {
+	session, err := r.service.GetLastSession(c)
 	if err != nil {
 		response.Failed(c, err)
 		return
