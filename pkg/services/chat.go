@@ -63,7 +63,30 @@ func GetChatService() *ChatService {
 }
 
 func (s *ChatService) CreateSession(ctx context.Context) (*models.ChatSessionDto, error) {
-	session := &models.ChatSession{}
+	defaultModel, err := gorm.G[models.Model](s.db).
+		Where("default = true AND deleted_at IS NULL").
+		First(ctx)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.ErrorContext(ctx, "failed to find default model for new session", "error", err)
+			return nil, err
+		}
+	}
+
+	if defaultModel.ID == uuid.Nil {
+		defaultModel, err = gorm.G[models.Model](s.db).
+			Where("deleted_at IS NULL").
+			Order("created_at DESC").
+			First(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to find any model for new session", "error", err)
+			return nil, err
+		}
+	}
+
+	session := &models.ChatSession{
+		LastUsedModel: defaultModel.ID,
+	}
 	if err := gorm.G[models.ChatSession](s.db).Create(ctx, session); err != nil {
 		slog.ErrorContext(ctx, "failed to create chat session", "error", err)
 		return nil, err
@@ -81,6 +104,53 @@ func (s *ChatService) GetSession(ctx context.Context, sessionID uuid.UUID) (*mod
 		}
 
 		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).
+		Order("created_at ASC").
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "sessionId", session.ID)
+		return nil, err
+	}
+	if len(chatMessages) == 0 {
+		return session.ToDto(nil), nil
+	}
+
+	modelIds := lo.Uniq(lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) uuid.UUID {
+		return cm.ModelID
+	}))
+
+	chatModels, err := gorm.G[models.Model](s.db).
+		Where("id IN ? AND deleted_at IS NULL", modelIds).
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find models for chat messages", "error", err, "modelIds", modelIds)
+		return nil, err
+	}
+	modelMap := lo.Associate(chatModels, func(m models.Model) (uuid.UUID, *models.ModelDto) {
+		return m.ID, m.ToDto(nil)
+	})
+
+	messageDtos := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) models.ChatMessageDto {
+		return *cm.ToDto(modelMap[cm.ModelID])
+	})
+	return session.ToDto(messageDtos), nil
+}
+
+func (s *ChatService) GetLastSession(ctx context.Context) (*models.ChatSessionDto, error) {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("deleted_at IS NULL").
+		Order("updated_at DESC").
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+
+		slog.ErrorContext(ctx, "failed to find last chat session", "error", err)
 		return nil, err
 	}
 
@@ -309,9 +379,10 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	session.TokenConsumed += result.TotalToken
+	session.LastUsedModel = model.ID
 	if _, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ?", session.ID).
-		Update(ctx, "token_consumed", session.TokenConsumed); err != nil {
+		Updates(ctx, session); err != nil {
 		slog.ErrorContext(ctx, "failed to update token consumed", "error", err, "sessionId", sessionID)
 		return nil, err
 	}

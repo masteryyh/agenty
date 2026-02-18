@@ -103,6 +103,46 @@ var modelCreateCmd = &cobra.Command{
 	},
 }
 
+var modelUpdateCmd = &cobra.Command{
+	Use:   "update [model-id]",
+	Short: "Update a model",
+	Long:  `Update a model by ID or by name (provider/model format)`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := client.NewClient(GetBaseURL())
+
+		name, _ := cmd.Flags().GetString("name")
+		defaultFlag, _ := cmd.Flags().GetBool("default")
+
+		dto := &models.UpdateModelDto{
+			DefaultModel: defaultFlag,
+		}
+
+		if name != "" {
+			if err := c.UpdateModelByName(name, dto); err != nil {
+				return err
+			}
+			pterm.Success.Printf("Model updated: %s\n", name)
+			return nil
+		}
+
+		if len(args) != 1 {
+			return fmt.Errorf("model ID required when --name is not specified")
+		}
+
+		modelID, err := uuid.Parse(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid model ID: %w", err)
+		}
+
+		if err := c.UpdateModel(modelID, dto); err != nil {
+			return err
+		}
+
+		pterm.Success.Printf("Model updated: %s\n", modelID)
+		return nil
+	},
+}
+
 var modelDeleteCmd = &cobra.Command{
 	Use:   "delete [model-id]",
 	Short: "Delete a model",
@@ -136,6 +176,10 @@ func init() {
 	modelCreateCmd.Flags().String("provider-id", "", "Provider ID (required)")
 	modelCreateCmd.MarkFlagRequired("name")
 	modelCreateCmd.MarkFlagRequired("provider-id")
+
+	modelCmd.AddCommand(modelUpdateCmd)
+	modelUpdateCmd.Flags().String("name", "", "Model name in 'provider/model' format (alternative to ID)")
+	modelUpdateCmd.Flags().Bool("default", false, "Set as default model")
 
 	modelCmd.AddCommand(modelDeleteCmd)
 }

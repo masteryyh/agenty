@@ -31,6 +31,7 @@ var (
 	ErrSessionNotFound       = NewBusinessError(http.StatusNotFound, "session not found")
 	ErrModelNotFound         = NewBusinessError(http.StatusNotFound, "model not found")
 	ErrModelAlreadyExists    = NewBusinessError(http.StatusConflict, "model already exists")
+	ErrDeletingDefaultModel  = NewBusinessError(http.StatusBadRequest, "default model cannot be deleted")
 	ErrProviderNotFound      = NewBusinessError(http.StatusNotFound, "provider not found")
 	ErrProviderAlreadyExists = NewBusinessError(http.StatusConflict, "provider already exists")
 	ErrProviderInUse         = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")

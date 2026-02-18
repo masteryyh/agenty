@@ -25,6 +25,7 @@ import (
 type ChatSession struct {
 	ID            uuid.UUID `gorm:"type:uuid;default:uuidv7();primaryKey"`
 	TokenConsumed int64     `gorm:"not null;default:0"`
+	LastUsedModel uuid.UUID `gorm:"type:uuid"`
 	CreatedAt     time.Time `gorm:"autoCreateTime:milli"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime:milli"`
 	DeletedAt     *time.Time
@@ -38,6 +39,7 @@ func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 	dto := &ChatSessionDto{
 		ID:            m.ID,
 		TokenConsumed: m.TokenConsumed,
+		LastUsedModel: m.LastUsedModel,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
 	}
@@ -52,6 +54,7 @@ type ChatSessionDto struct {
 	ID            uuid.UUID        `json:"id"`
 	TokenConsumed int64            `json:"tokenConsumed"`
 	Messages      []ChatMessageDto `json:"messages"`
+	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
 	CreatedAt     time.Time        `json:"createdAt"`
 	UpdatedAt     time.Time        `json:"updatedAt"`
 }

@@ -23,12 +23,13 @@ import (
 )
 
 type Model struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	ProviderID uuid.UUID `gorm:"type:uuid;not null"`
-	Name       string    `gorm:"type:varchar(255);not null"`
-	CreatedAt  time.Time `gorm:"autoCreateTime"`
-	UpdatedAt  time.Time `gorm:"autoUpdateTime"`
-	DeletedAt  *time.Time
+	ID           uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	ProviderID   uuid.UUID `gorm:"type:uuid;not null"`
+	Name         string    `gorm:"type:varchar(255);not null"`
+	DefaultModel bool      `gorm:"default:false"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+	DeletedAt    *time.Time
 }
 
 func (Model) TableName() string {
@@ -37,10 +38,11 @@ func (Model) TableName() string {
 
 func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
 	dto := &ModelDto{
-		ID:        m.ID,
-		Name:      m.Name,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		ID:           m.ID,
+		Name:         m.Name,
+		DefaultModel: m.DefaultModel,
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.UpdatedAt,
 	}
 
 	if provider != nil {
@@ -54,10 +56,15 @@ type CreateModelDto struct {
 	Name       string    `json:"name" binding:"required"`
 }
 
+type UpdateModelDto struct {
+	DefaultModel bool `json:"defaultModel"`
+}
+
 type ModelDto struct {
-	ID        uuid.UUID         `json:"id"`
-	Provider  *ModelProviderDto `json:"provider,omitempty"`
-	Name      string            `json:"name"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
+	ID           uuid.UUID         `json:"id"`
+	Provider     *ModelProviderDto `json:"provider,omitempty"`
+	Name         string            `json:"name"`
+	DefaultModel bool              `json:"defaultModel"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
 }

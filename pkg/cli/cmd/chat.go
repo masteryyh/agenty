@@ -40,70 +40,54 @@ var chatCmd = &cobra.Command{
 
 		var sessionID uuid.UUID
 		var session *models.ChatSessionDto
-		var err error
 
-		sessionFlag, _ := cmd.Flags().GetString("session")
-		if sessionFlag != "" {
-			sessionID, err = uuid.Parse(sessionFlag)
-			if err != nil {
-				return fmt.Errorf("invalid session ID: %w", err)
-			}
-			session, err = c.GetSession(sessionID)
-			if err != nil {
-				return fmt.Errorf("failed to get session: %w", err)
-			}
-			pterm.Info.Printf("Using session: %s\n", sessionID)
+		lastSession, err := c.GetLastSession()
+		if err == nil && lastSession != nil {
+			sessionID = lastSession.ID
+			session = lastSession
+			pterm.Info.Printf("Resuming last session: %s\n", sessionID)
 		} else {
-			sessions, listErr := c.ListSessions(1, 1)
-			if listErr == nil && len(sessions.Data) > 0 {
-				sessionID = sessions.Data[0].ID
-				session, err = c.GetSession(sessionID)
-				if err != nil {
-					return fmt.Errorf("failed to get session details: %w", err)
-				}
-				pterm.Info.Printf("Resuming last session: %s\n", sessionID)
-			} else {
-				session, err = c.CreateSession()
-				if err != nil {
-					return fmt.Errorf("failed to create session: %w", err)
-				}
-				sessionID = session.ID
-				pterm.Info.Printf("Created new session: %s\n", sessionID)
+			if err != nil {
+				pterm.Warning.Printf("Error occurred when looking for last session: %v\n", err)
 			}
+
+			session, err = c.CreateSession()
+			if err != nil {
+				return fmt.Errorf("failed to create session: %w", err)
+			}
+			sessionID = session.ID
+			pterm.Info.Printf("Created new session: %s\n", sessionID)
 		}
 
 		var modelID uuid.UUID
-		modelFlag, _ := cmd.Flags().GetString("model")
-		if modelFlag != "" {
-			resolvedID, displayName, resolveErr := resolveModel(c, modelFlag)
-			if resolveErr != nil {
-				return fmt.Errorf("failed to resolve model: %w", resolveErr)
+		if session.LastUsedModel == uuid.Nil {
+			defaultModel, err := c.GetDefaultModel()
+			if err == nil && defaultModel != nil {
+				modelID = defaultModel.ID
+			} else {
+				models, err := c.ListModels(1, 1)
+				if err != nil {
+					return fmt.Errorf("failed to list models: %w", err)
+				}
+				if len(models.Data) > 0 {
+					modelID = models.Data[0].ID
+				} else {
+					return fmt.Errorf("no models available to use")
+				}
 			}
-			modelID = resolvedID
-			pterm.Info.Printf("Using model: %s\n", displayName)
 		} else {
-			modelsList, listErr := c.ListModels(1, 1)
-			if listErr != nil || len(modelsList.Data) == 0 {
-				return fmt.Errorf("no models available, please create a model first or specify --model flag")
-			}
-			modelID = modelsList.Data[0].ID
-			modelInfo := modelsList.Data[0].Name
-			if modelsList.Data[0].Provider != nil {
-				modelInfo = fmt.Sprintf("%s/%s", modelsList.Data[0].Provider.Name, modelsList.Data[0].Name)
-			}
-			pterm.Info.Printf("Using model: %s\n", modelInfo)
+			modelID = session.LastUsedModel
 		}
 
 		fmt.Println()
 
 		if len(session.Messages) > 0 {
-			const maxInitialMessages = 10
 			messageCount := len(session.Messages)
 			startIdx := 0
 
-			if messageCount > maxInitialMessages {
-				startIdx = messageCount - maxInitialMessages
-				pterm.Info.Printf("Showing last %d messages (total: %d). Use /history to view all.\n", maxInitialMessages, messageCount)
+			if messageCount > 10 {
+				startIdx = messageCount - 10
+				pterm.Info.Printf("Showing last %d messages (total: %d). Use /history to view all.\n", 10, messageCount)
 			}
 
 			pterm.DefaultSection.Println("Previous Messages")
@@ -111,7 +95,7 @@ var chatCmd = &cobra.Command{
 			fmt.Println()
 		}
 
-		PrintCommandHints()
+		pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
 		fmt.Println()
 
 		return runChatLoop(c, sessionID, modelID)
@@ -252,6 +236,4 @@ func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
-	chatCmd.Flags().String("session", "", "Session ID to resume")
-	chatCmd.Flags().String("model", "", "Model to use (provider/model format)")
 }
