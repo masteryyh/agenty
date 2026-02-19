@@ -405,13 +405,24 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			}
 		}
 
+		var providerSpecifics *models.ProviderSpecificData
+		if len(m.ProviderSpecifics) > 0 {
+			var ps models.ProviderSpecificData
+			if err := json.Unmarshal(m.ProviderSpecifics, &ps); err != nil {
+				slog.ErrorContext(ctx, "failed to unmarshal provider specifics", "error", err, "sessionId", sessionID, "messageId", m.ID)
+			} else {
+				providerSpecifics = &ps
+			}
+		}
+
 		return &models.ChatMessageDto{
-			ID:         m.ID,
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCalls:  toolCalls,
-			ToolResult: toolResult,
-			CreatedAt:  m.CreatedAt,
+			ID:                m.ID,
+			Role:              m.Role,
+			Content:           m.Content,
+			ToolCalls:         toolCalls,
+			ToolResult:        toolResult,
+			ProviderSpecifics: providerSpecifics,
+			CreatedAt:         m.CreatedAt,
 		}
 	})
 

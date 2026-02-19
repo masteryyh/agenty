@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/client"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -36,7 +35,7 @@ var providerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all providers",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
@@ -76,7 +75,7 @@ var providerCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new provider",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		name, _ := cmd.Flags().GetString("name")
 		apiType, _ := cmd.Flags().GetString("type")
@@ -105,7 +104,7 @@ var providerDeleteCmd = &cobra.Command{
 	Short: "Delete a provider",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		providerID, err := uuid.Parse(args[0])
 		if err != nil {

@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/client"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +34,7 @@ var sessionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
@@ -74,7 +73,7 @@ var sessionCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new session",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		session, err := c.CreateSession()
 		if err != nil {
@@ -91,7 +90,7 @@ var sessionViewCmd = &cobra.Command{
 	Short: "View session details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		sessionID, err := uuid.Parse(args[0])
 		if err != nil {
