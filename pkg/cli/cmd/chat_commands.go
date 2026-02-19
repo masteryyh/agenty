@@ -21,11 +21,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/client"
+	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/pterm/pterm"
 )
 
-type CommandHandler func(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error)
+type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error)
 
 var commandRegistry = map[string]CommandHandler{
 	"/new":     handleNewCmd,
@@ -35,7 +35,7 @@ var commandRegistry = map[string]CommandHandler{
 	"/help":    handleHelpCmd,
 }
 
-func handleSlashCommand(c *client.Client, input string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error) {
+func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error) {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return false, uuid.Nil, uuid.Nil, nil
@@ -51,7 +51,7 @@ func handleSlashCommand(c *client.Client, input string, sessionID uuid.UUID, mod
 	return handler(c, parts[1:], sessionID, modelID)
 }
 
-func resolveModel(c *client.Client, modelSpec string) (uuid.UUID, string, error) {
+func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 	parts := strings.Split(modelSpec, "/")
 	if len(parts) != 2 {
 		return uuid.Nil, "", fmt.Errorf("invalid format, use: provider-name/model-name")
@@ -90,7 +90,7 @@ func resolveModel(c *client.Client, modelSpec string) (uuid.UUID, string, error)
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
 }
 
-func handleNewCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
 	session, err := c.CreateSession()
 	if err != nil {
 		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to create new session: %w", err)
@@ -105,7 +105,7 @@ func handleNewCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID 
 	return true, session.ID, uuid.Nil, nil
 }
 
-func handleStatusCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
 		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to get session: %w", err)
@@ -142,7 +142,7 @@ func handleStatusCmd(c *client.Client, args []string, sessionID uuid.UUID, model
 	return true, uuid.Nil, uuid.Nil, nil
 }
 
-func handleHistoryCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
 		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to get session: %w", err)
@@ -164,7 +164,7 @@ func handleHistoryCmd(c *client.Client, args []string, sessionID uuid.UUID, mode
 	return true, uuid.Nil, uuid.Nil, nil
 }
 
-func handleModelCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
 	if len(args) == 0 {
 		return true, uuid.Nil, uuid.Nil, fmt.Errorf("usage: /model [provider-name/model-name]")
 	}
@@ -178,7 +178,7 @@ func handleModelCmd(c *client.Client, args []string, sessionID uuid.UUID, modelI
 	return true, uuid.Nil, resolvedID, nil
 }
 
-func handleHelpCmd(c *client.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
 	PrintCommandHints()
 	return true, uuid.Nil, uuid.Nil, nil
 }

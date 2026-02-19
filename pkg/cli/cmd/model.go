@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/client"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -36,7 +35,7 @@ var modelListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all models",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
 		pageSize, _ := cmd.Flags().GetInt("page-size")
@@ -78,7 +77,7 @@ var modelCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new model",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		name, _ := cmd.Flags().GetString("name")
 		providerIDStr, _ := cmd.Flags().GetString("provider-id")
@@ -108,7 +107,7 @@ var modelUpdateCmd = &cobra.Command{
 	Short: "Update a model",
 	Long:  `Update a model by ID or by name (provider/model format)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		name, _ := cmd.Flags().GetString("name")
 		defaultFlag, _ := cmd.Flags().GetBool("default")
@@ -148,7 +147,7 @@ var modelDeleteCmd = &cobra.Command{
 	Short: "Delete a model",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		modelID, err := uuid.Parse(args[0])
 		if err != nil {

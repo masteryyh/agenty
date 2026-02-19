@@ -26,7 +26,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/client"
+	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -36,7 +36,7 @@ var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.NewClient(GetBaseURL())
+		c := GetClient()
 
 		var sessionID uuid.UUID
 		var session *models.ChatSessionDto
@@ -102,7 +102,7 @@ var chatCmd = &cobra.Command{
 	},
 }
 
-func runChatLoop(c *client.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
+func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 	currentSessionID := sessionID
 	currentModelID := modelID
 	basePrompt := pterm.FgCyan.Sprint("You: ")

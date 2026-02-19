@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package client
+package api
 
 import (
 	"bytes"
@@ -34,11 +34,24 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	username   string
+	password   string
 }
 
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: 120 * time.Second,
+		},
+	}
+}
+
+func NewClientWithAuth(baseURL, username, password string) *Client {
+	return &Client{
+		baseURL:  baseURL,
+		username: username,
+		password: password,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -68,6 +81,10 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+
+	if c.username != "" && c.password != "" {
+		req.SetBasicAuth(c.username, c.password)
 	}
 
 	resp, err := c.httpClient.Do(req)

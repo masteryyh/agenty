@@ -38,6 +38,21 @@ type AppConfig struct {
 
 	// Embedding configuration for memory features
 	Embedding *EmbeddingConfig `mapstructure:"embedding"`
+
+	// Auth configuration for HTTP Basic Auth
+	Auth *AuthConfig `mapstructure:"auth"`
+}
+
+// AuthConfig is the config definition for HTTP Basic Auth
+type AuthConfig struct {
+	// Enabled indicates whether HTTP Basic Auth is enabled
+	Enabled bool `mapstructure:"enabled"`
+
+	// Username for HTTP Basic Auth
+	Username string `mapstructure:"username"`
+
+	// Password for HTTP Basic Auth
+	Password string `mapstructure:"password"`
 }
 
 // EmbeddingConfig is the config definition for embedding model used by memory features
@@ -99,6 +114,19 @@ func (c *EmbeddingConfig) Validate() error {
 	return nil
 }
 
+func (c *AuthConfig) Validate() error {
+	if c == nil || !c.Enabled {
+		return nil
+	}
+	if c.Username == "" {
+		return fmt.Errorf("auth username is required when auth is enabled")
+	}
+	if c.Password == "" {
+		return fmt.Errorf("auth password is required when auth is enabled")
+	}
+	return nil
+}
+
 func (c *AppConfig) Validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port number: %d", c.Port)
@@ -116,6 +144,10 @@ func (c *AppConfig) Validate() error {
 
 	if err := c.Embedding.Validate(); err != nil {
 		return fmt.Errorf("invalid embedding config: %w", err)
+	}
+
+	if err := c.Auth.Validate(); err != nil {
+		return fmt.Errorf("invalid auth config: %w", err)
 	}
 
 	return c.DB.Validate()

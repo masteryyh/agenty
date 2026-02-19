@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
+	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -48,14 +49,31 @@ agentic looping and skills usage capabilities.`,
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&baseURL, "url", "http://localhost:8080", "Backend API base URL")
+	rootCmd.PersistentFlags().StringVar(&baseURL, "url", "", "Backend API base URL (overrides config file)")
 }
 
 func GetBaseURL() string {
-	if baseURL == "" {
-		return "http://localhost:8080"
+	if baseURL != "" {
+		return baseURL
 	}
-	return baseURL
+
+	cfg := GetCLIConfig()
+	if cfg.BaseURL != "" {
+		return cfg.BaseURL
+	}
+
+	return "http://localhost:8080"
+}
+
+func GetClient() *api.Client {
+	cfg := GetCLIConfig()
+	url := GetBaseURL()
+
+	if cfg.Username != "" && cfg.Password != "" {
+		return api.NewClientWithAuth(url, cfg.Username, cfg.Password)
+	}
+
+	return api.NewClient(url)
 }
 
 func Execute() error {
