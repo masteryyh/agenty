@@ -64,7 +64,7 @@ func GetChatService() *ChatService {
 
 func (s *ChatService) CreateSession(ctx context.Context) (*models.ChatSessionDto, error) {
 	defaultModel, err := gorm.G[models.Model](s.db).
-		Where("default = true AND deleted_at IS NULL").
+		Where("default_model IS true AND deleted_at IS NULL").
 		First(ctx)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
