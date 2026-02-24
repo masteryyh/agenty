@@ -20,7 +20,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func GetCleanPath(path string, followSymlink bool) (string, error) {
@@ -48,22 +47,4 @@ func GetCleanPath(path string, followSymlink bool) (string, error) {
 		return eval, nil
 	}
 	return abs, nil
-}
-
-func PathContained(basePaths []string, targetPath string) (bool, error) {
-	if len(basePaths) == 0 {
-		return true, nil
-	}
-
-	for _, base := range basePaths {
-		rel, err := filepath.Rel(base, targetPath)
-		if err != nil {
-			return false, err
-		}
-
-		if rel == "." || !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			return true, nil
-		}
-	}
-	return false, nil
 }

@@ -24,8 +24,6 @@ import (
 	"testing"
 
 	json "github.com/bytedance/sonic"
-
-	"github.com/masteryyh/agenty/pkg/config"
 )
 
 func TestReadFileTool(t *testing.T) {
@@ -35,7 +33,7 @@ func TestReadFileTool(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	tool := &ReadFileTool{cfg: &config.AppConfig{AllowedPaths: []string{dir}}}
+	tool := &ReadFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path})
 	result, err := tool.Execute(context.Background(), args)
 	if err != nil {
@@ -50,7 +48,7 @@ func TestReadFileToolNotFound(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing.txt")
 
-	tool := &ReadFileTool{cfg: &config.AppConfig{AllowedPaths: []string{dir}}}
+	tool := &ReadFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path})
 	_, err := tool.Execute(context.Background(), args)
 	if err == nil {
@@ -58,26 +56,11 @@ func TestReadFileToolNotFound(t *testing.T) {
 	}
 }
 
-func TestReadFileToolDenied(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	tool := &ReadFileTool{cfg: &config.AppConfig{AllowedPaths: []string{t.TempDir()}}}
-	args, _ := json.MarshalString(map[string]string{"path": path})
-	_, err := tool.Execute(context.Background(), args)
-	if err == nil {
-		t.Fatal("expected error for denied path")
-	}
-}
-
 func TestWriteFileTool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "output.txt")
 
-	tool := &WriteFileTool{cfg: &config.AppConfig{AllowedPaths: []string{dir}}}
+	tool := &WriteFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path, "content": "test content"})
 	result, err := tool.Execute(context.Background(), args)
 	if err != nil {
@@ -96,18 +79,6 @@ func TestWriteFileTool(t *testing.T) {
 	}
 }
 
-func TestWriteFileToolDenied(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "output.txt")
-
-	tool := &WriteFileTool{cfg: &config.AppConfig{AllowedPaths: []string{t.TempDir()}}}
-	args, _ := json.MarshalString(map[string]string{"path": path, "content": "test content"})
-	_, err := tool.Execute(context.Background(), args)
-	if err == nil {
-		t.Fatal("expected error for denied path")
-	}
-}
-
 func TestListDirectoryTool(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("a"), 0o644); err != nil {
@@ -117,7 +88,7 @@ func TestListDirectoryTool(t *testing.T) {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
 
-	tool := &ListDirectoryTool{cfg: &config.AppConfig{AllowedPaths: []string{dir}}}
+	tool := &ListDirectoryTool{}
 	args, _ := json.MarshalString(map[string]string{"path": dir})
 	result, err := tool.Execute(context.Background(), args)
 	if err != nil {
@@ -131,30 +102,95 @@ func TestListDirectoryTool(t *testing.T) {
 	}
 }
 
-func TestListDirectoryToolDenied(t *testing.T) {
+func TestReadFileToolLineRange(t *testing.T) {
 	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	content := "line1\nline2\nline3\nline4\nline5"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
-	tool := &ListDirectoryTool{cfg: &config.AppConfig{AllowedPaths: []string{t.TempDir()}}}
-	args, _ := json.MarshalString(map[string]string{"path": dir})
-	_, err := tool.Execute(context.Background(), args)
+	tool := &ReadFileTool{}
+
+	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 4})
+	result, err := tool.Execute(context.Background(), string(args))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "line2\nline3\nline4" {
+		t.Fatalf("expected 'line2\\nline3\\nline4', got '%s'", result)
+	}
+
+	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 10, "endLine": 12})
+	_, err = tool.Execute(context.Background(), string(args))
 	if err == nil {
-		t.Fatal("expected error for denied path")
+		t.Fatal("expected error for out-of-range startLine")
+	}
+
+	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 3, "endLine": 2})
+	_, err = tool.Execute(context.Background(), string(args))
+	if err == nil {
+		t.Fatal("expected error for startLine > endLine")
 	}
 }
 
-func TestToolDefinitions(t *testing.T) {
-	cfg := &config.AppConfig{AllowedPaths: []string{t.TempDir()}}
-	tool1 := &ReadFileTool{cfg: cfg}
-	tool2 := &WriteFileTool{cfg: cfg}
-	tool3 := &ListDirectoryTool{cfg: cfg}
+func TestReplaceInFileTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "replace.txt")
+	content := "line1\nline2\nline3\nline4\nline5"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
 
-	if tool1.Definition().Name != "read_file" {
-		t.Fatalf("expected 'read_file', got '%s'", tool1.Definition().Name)
+	tool := &ReplaceInFileTool{}
+	args, _ := json.Marshal(map[string]any{
+		"path":       path,
+		"startLine":  2,
+		"endLine":    3,
+		"newContent": "replaced2\nreplaced3",
+	})
+	result, err := tool.Execute(context.Background(), string(args))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if tool2.Definition().Name != "write_file" {
-		t.Fatalf("expected 'write_file', got '%s'", tool2.Definition().Name)
+	if !strings.Contains(result, "successfully replaced") {
+		t.Fatalf("expected success message, got '%s'", result)
 	}
-	if tool3.Definition().Name != "list_directory" {
-		t.Fatalf("expected 'list_directory', got '%s'", tool3.Definition().Name)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	expected := "line1\nreplaced2\nreplaced3\nline4\nline5"
+	if string(data) != expected {
+		t.Fatalf("expected '%s', got '%s'", expected, string(data))
+	}
+}
+
+func TestReplaceInFileToolErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "err.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc"), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	tool := &ReplaceInFileTool{}
+
+	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 0, "endLine": 1, "newContent": "x"})
+	_, err := tool.Execute(context.Background(), string(args))
+	if err == nil {
+		t.Fatal("expected error for startLine < 1")
+	}
+
+	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 1, "newContent": "x"})
+	_, err = tool.Execute(context.Background(), string(args))
+	if err == nil {
+		t.Fatal("expected error for endLine < startLine")
+	}
+
+	args, _ = json.Marshal(map[string]any{"path": filepath.Join(dir, "missing.txt"), "startLine": 1, "endLine": 1, "newContent": "x"})
+	_, err = tool.Execute(context.Background(), string(args))
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
 	}
 }

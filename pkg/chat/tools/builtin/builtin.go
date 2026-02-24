@@ -18,16 +18,15 @@ package builtin
 
 import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
-	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/services"
 )
 
 func RegisterAll(registry *tools.Registry) {
-	cfg := config.GetConfigManager().GetConfig()
-
-	registry.Register(&ReadFileTool{cfg: cfg})
-	registry.Register(&WriteFileTool{cfg: cfg})
-	registry.Register(&ListDirectoryTool{cfg: cfg})
+	registry.Register(&ReadFileTool{})
+	registry.Register(&WriteFileTool{})
+	registry.Register(&ListDirectoryTool{})
+	registry.Register(&ReplaceInFileTool{})
+	registry.Register(&RunShellCommandTool{})
 
 	memoryService := services.GetMemoryService()
 	if memoryService.IsEnabled() {
