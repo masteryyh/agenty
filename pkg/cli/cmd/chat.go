@@ -135,7 +135,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 	SetArgCompleter("/model", modelProvider)
 
 	completer := NewChatCompleter()
-	painter := NewHintPainter()
+	painter := NewHintPainter(basePrompt)
 
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {

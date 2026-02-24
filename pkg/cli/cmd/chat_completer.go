@@ -72,10 +72,31 @@ func NewChatCompleter() readline.AutoCompleter {
 	return readline.NewPrefixCompleter(items...)
 }
 
-type HintPainter struct{}
+type HintPainter struct {
+	promptWidth int
+}
 
-func NewHintPainter() *HintPainter {
-	return &HintPainter{}
+func stripANSIWidth(s string) int {
+	inEscape := false
+	width := 0
+	for _, r := range s {
+		if r == '\033' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		width++
+	}
+	return width
+}
+
+func NewHintPainter(prompt string) *HintPainter {
+	return &HintPainter{promptWidth: stripANSIWidth(prompt)}
 }
 
 func (p *HintPainter) Paint(line []rune, pos int) []rune {
@@ -95,12 +116,9 @@ func (p *HintPainter) Paint(line []rune, pos int) []rune {
 
 	var buf strings.Builder
 	buf.WriteString(input)
-	buf.WriteString("\033[s")
 
 	if inlineHint != "" {
-		buf.WriteString("\033[90m")
 		buf.WriteString(inlineHint)
-		buf.WriteString("\033[0m")
 	}
 
 	for _, pl := range panelLines {
@@ -108,7 +126,15 @@ func (p *HintPainter) Paint(line []rune, pos int) []rune {
 		buf.WriteString(pl)
 	}
 
-	buf.WriteString("\033[u")
+	if len(panelLines) > 0 {
+		fmt.Fprintf(&buf, "\033[%dA", len(panelLines))
+		buf.WriteString("\r")
+		moveRight := p.promptWidth + len(line)
+		if moveRight > 0 {
+			fmt.Fprintf(&buf, "\033[%dC", moveRight)
+		}
+	}
+
 	return []rune(buf.String())
 }
 
@@ -117,19 +143,24 @@ func (p *HintPainter) findInlineHint(input string) string {
 
 	for _, cmd := range commands {
 		if cmd.ArgCompleter != nil && strings.HasPrefix(lower, strings.ToLower(cmd.Name)+" ") {
-			return p.findArgHint(input, cmd.Name, cmd.ArgCompleter)
+			hint := p.findArgHint(input, cmd.Name, cmd.ArgCompleter)
+			if hint == "" {
+				return ""
+			}
+			return "\033[90m" + hint + "\033[0m"
 		}
 	}
 
 	for _, cmd := range commands {
 		if strings.HasPrefix(strings.ToLower(cmd.Name), lower) && strings.ToLower(cmd.Name) != lower {
-			return cmd.Name[len(input):] + "  " + cmd.Description
+			suffix := cmd.Name[len(input):]
+			return "\033[90m" + suffix + "\033[0m\033[37m  " + cmd.Description + "\033[0m"
 		}
 	}
 
 	for _, cmd := range commands {
 		if strings.ToLower(cmd.Name) == lower {
-			return "  " + cmd.Description
+			return "\033[37m  " + cmd.Description + "\033[0m"
 		}
 	}
 
