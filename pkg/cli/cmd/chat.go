@@ -30,12 +30,17 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Start an interactive chat session",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return fmt.Errorf("must be run in an interactive terminal")
+		}
+
 		c := GetClient()
 
 		var sessionID uuid.UUID

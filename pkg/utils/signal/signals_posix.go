@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 /*
 Copyright © 2026 masteryyh <yyh991013@163.com>

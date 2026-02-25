@@ -73,7 +73,10 @@ func main() {
 
 	apiRoute := engine.Group("/api")
 	v1Route := routes.GetV1Routes()
-	v1Route.RegisterRoutes(apiRoute.Group("/v1"))
+	if err := v1Route.RegisterRoutes(apiRoute.Group("/v1")); err != nil {
+		slog.ErrorContext(baseCtx, "failed to register routes", "error", err)
+		return
+	}
 
 	safe.GoSafeWithCtx("http-server", baseCtx, func(ctx context.Context) {
 		port := cfg.Port
