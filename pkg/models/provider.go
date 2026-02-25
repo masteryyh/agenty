@@ -36,7 +36,7 @@ type ModelProvider struct {
 	Name      string    `gorm:"type:varchar(255);not null"`
 	Type      APIType   `gorm:"type:varchar(50);not null"`
 	BaseURL   string    `gorm:"type:varchar(255);not null"`
-	APIKey    string    `gorm:"type:varchar(255);not null"`
+	APIKey    string    `gorm:"type:varchar(255);not null;default:''" json:"-"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 	DeletedAt *time.Time
@@ -50,6 +50,8 @@ func (p *ModelProvider) ToDto() *ModelProviderDto {
 	censored := "****"
 	if len(p.APIKey) > 10 {
 		censored = p.APIKey[:4] + "****" + p.APIKey[len(p.APIKey)-2:]
+	} else if p.APIKey == "" {
+		censored = "<not set>"
 	}
 
 	return &ModelProviderDto{

@@ -140,7 +140,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 		return nil, err
 	}
 
-	if provider.Name != dto.Name {
+	if dto.Name != "" && provider.Name != dto.Name {
 		exists, err := gorm.G[models.ModelProvider](s.db).
 			Where("name = ? AND id != ? AND deleted_at IS NULL", dto.Name, providerID).
 			Count(ctx, "id")
@@ -151,9 +151,8 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 		if exists > 0 {
 			return nil, customerrors.ErrProviderAlreadyExists
 		}
+		provider.Name = dto.Name
 	}
-
-	provider.Name = dto.Name
 
 	if dto.Type != "" {
 		provider.Type = dto.Type

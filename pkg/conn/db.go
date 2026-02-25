@@ -68,6 +68,12 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			err = idxErr
 			return
 		}
+
+		if seedErr := seedPresets(timeoutCtx, dbConn); seedErr != nil {
+			err = seedErr
+			return
+		}
+
 		db = dbConn
 	})
 	return err

@@ -84,6 +84,18 @@ func (s *ChatService) CreateSession(ctx context.Context) (*models.ChatSessionDto
 		}
 	}
 
+	defaultModelProvider, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", defaultModel.ProviderID).
+		First(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find provider for default model", "error", err, "providerId", defaultModel.ProviderID)
+		return nil, err
+	}
+
+	if defaultModelProvider.APIKey == "" {
+		return nil, customerrors.ErrProviderNotConfigured
+	}
+
 	session := &models.ChatSession{
 		LastUsedModel: defaultModel.ID,
 	}
@@ -258,6 +270,10 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
+	if chatProvider.APIKey == "" {
+		return nil, customerrors.ErrProviderNotConfigured
+	}
+
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
 		Where("session_id = ? AND deleted_at IS NULL", session.ID).
 		Order("created_at ASC").
@@ -325,7 +341,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
 		BaseURL:  chatProvider.BaseURL,
 		APIKey:   chatProvider.APIKey,
-		Model:    model.Name,
+		Model:    model.Code,
 		Messages: messages,
 		APIType:  chatProvider.Type,
 	})
@@ -489,7 +505,7 @@ func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage str
 	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
 		BaseURL:        chatProvider.BaseURL,
 		APIKey:         chatProvider.APIKey,
-		Model:          model.Name,
+		Model:          model.Code,
 		Messages:       evalMessages,
 		APIType:        chatProvider.Type,
 		ResponseFormat: responseFormat,

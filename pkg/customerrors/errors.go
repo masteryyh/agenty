@@ -35,6 +35,7 @@ var (
 	ErrProviderNotFound      = NewBusinessError(http.StatusNotFound, "provider not found")
 	ErrProviderAlreadyExists = NewBusinessError(http.StatusConflict, "provider already exists")
 	ErrProviderInUse         = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")
+	ErrProviderNotConfigured = NewBusinessError(http.StatusBadRequest, "provider is not configured")
 )
 
 func GetBusinessError(err error) *BusinessError {

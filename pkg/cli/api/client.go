@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	json "github.com/bytedance/sonic"
@@ -135,6 +134,19 @@ func (c *Client) CreateProvider(dto *models.CreateModelProviderDto) (*models.Mod
 	return &provider, nil
 }
 
+func (c *Client) UpdateProvider(providerID uuid.UUID, dto *models.UpdateModelProviderDto) (*models.ModelProviderDto, error) {
+	data, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/providers/%s", providerID), dto)
+	if err != nil {
+		return nil, err
+	}
+
+	var provider models.ModelProviderDto
+	if err := json.Unmarshal(data, &provider); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal provider: %w", err)
+	}
+	return &provider, nil
+}
+
 func (c *Client) DeleteProvider(providerID uuid.UUID, force bool) error {
 	path := fmt.Sprintf("/api/v1/providers/%s", providerID)
 	if force {
@@ -185,11 +197,6 @@ func (c *Client) GetDefaultModel() (*models.ModelDto, error) {
 
 func (c *Client) UpdateModel(modelID uuid.UUID, dto *models.UpdateModelDto) error {
 	_, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/models/%s", modelID), dto)
-	return err
-}
-
-func (c *Client) UpdateModelByName(name string, dto *models.UpdateModelDto) error {
-	_, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/models/by-name?name=%s", url.QueryEscape(name)), dto)
 	return err
 }
 
