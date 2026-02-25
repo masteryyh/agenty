@@ -53,7 +53,7 @@ func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) error {
 		if err := v.RegisterValidation("code", func(fl validator.FieldLevel) bool {
 			return codeRegex.MatchString(fl.Field().String())
 		}); err != nil {
-			return err;
+			return err
 		}
 	}
 

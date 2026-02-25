@@ -109,10 +109,9 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 		}
 
 		model := &models.Model{
-			ProviderID:   dto.ProviderID,
-			Name:         dto.Name,
-			Code:         dto.Code,
-			DefaultModel: dto.DefaultModel,
+			ProviderID: dto.ProviderID,
+			Name:       dto.Name,
+			Code:       dto.Code,
 		}
 
 		if err := gorm.G[models.Model](tx).Create(ctx, model); err != nil {
@@ -187,39 +186,34 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 			if exists > 0 {
 				return customerrors.ErrModelAlreadyExists
 			}
+			model.Name = dto.Name
 		}
 
 		if !dto.DefaultModel {
-			_, err := gorm.G[models.Model](tx).
-				Where("id = ? AND deleted_at IS NULL", modelID).
-				Update(ctx, "default_model", false)
+			model.DefaultModel = false
+		} else {
+			currentDefaultModel, err := gorm.G[models.Model](tx).
+				Where("default_model IS TRUE AND id != ? AND deleted_at IS NULL", modelID).
+				First(ctx)
 			if err != nil {
-				return err
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
 			}
-			return nil
-		}
 
-		currentDefaultModel, err := gorm.G[models.Model](tx).
-			Where("default_model IS TRUE AND deleted_at IS NULL").
-			First(ctx)
-		if err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-		}
-
-		if currentDefaultModel.ID != uuid.Nil {
-			_, err := gorm.G[models.Model](tx).
-				Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
-				Update(ctx, "default_model", false)
-			if err != nil {
-				return err
+			if currentDefaultModel.ID != uuid.Nil {
+				_, err := gorm.G[models.Model](tx).
+					Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
+					Update(ctx, "default_model", false)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
 		if _, err := gorm.G[models.Model](tx).
 			Where("id = ? AND deleted_at IS NULL", modelID).
-			Update(ctx, "default_model", true); err != nil {
+			Updates(ctx, model); err != nil {
 			return err
 		}
 		return nil

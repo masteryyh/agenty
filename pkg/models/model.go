@@ -54,10 +54,9 @@ func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
 }
 
 type CreateModelDto struct {
-	ProviderID   uuid.UUID `json:"providerId" binding:"required"`
-	Name         string    `json:"name" binding:"required"`
-	Code         string    `json:"code" binding:"required,code"`
-	DefaultModel bool      `json:"defaultModel"`
+	ProviderID uuid.UUID `json:"providerId" binding:"required"`
+	Name       string    `json:"name" binding:"required"`
+	Code       string    `json:"code" binding:"required,code"`
 }
 
 type UpdateModelDto struct {
