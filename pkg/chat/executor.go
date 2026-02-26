@@ -19,11 +19,13 @@ package chat
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/samber/lo"
 )
 
 const maxToolCallIterations = 20
@@ -60,12 +62,15 @@ func GetChatExecutor() *ChatExecutor {
 }
 
 type ChatParams struct {
-	Messages       []provider.Message
-	Model          string
-	BaseURL        string
-	APIKey         string
-	APIType        models.APIType
-	ResponseFormat *provider.ResponseFormat
+	Messages                  []provider.Message
+	Model                     string
+	Thinking                  bool
+	ThinkingLevel             string
+	AnthropicAdaptiveThinking bool
+	BaseURL                   string
+	APIKey                    string
+	APIType                   models.APIType
+	ResponseFormat            *provider.ResponseFormat
 }
 
 type ChatResult struct {
@@ -84,15 +89,18 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 	copy(messages, params.Messages)
 
 	var totalTokens int64
-
 	for i := range maxToolCallIterations {
 		req := &provider.ChatRequest{
-			Model:          params.Model,
-			Messages:       messages,
-			Tools:          toolDefs,
-			BaseURL:        params.BaseURL,
-			APIKey:         params.APIKey,
-			ResponseFormat: params.ResponseFormat,
+			Model:                     params.Model,
+			Thinking:                  params.Thinking,
+			ThinkingLevel:             params.ThinkingLevel,
+			AnthropicAdaptiveThinking: params.AnthropicAdaptiveThinking,
+			Messages:                  messages,
+			Tools:                     toolDefs,
+			BaseURL:                   params.BaseURL,
+			APIType:                   params.APIType,
+			APIKey:                    params.APIKey,
+			ResponseFormat:            params.ResponseFormat,
 		}
 
 		resp, err := p.Chat(ctx, req)
@@ -102,21 +110,17 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		totalTokens += resp.TotalToken
 
 		assistantMsg := provider.Message{
-			Role:      models.RoleAssistant,
-			Content:   resp.Content,
-			ToolCalls: resp.ToolCalls,
-		}
-		if params.APIType == models.APITypeKimi {
-			assistantMsg.KimiReasoningContent = resp.KimiReasoningContent
+			Role:             models.RoleAssistant,
+			Content:          resp.Content,
+			ToolCalls:        resp.ToolCalls,
+			ReasoningContent: resp.ReasoningContent,
+			ReasoningBlocks:  resp.ReasoningBlocks,
 		}
 
 		messages = append(messages, assistantMsg)
 
 		if len(resp.ToolCalls) == 0 {
-			return &ChatResult{
-				TotalToken: totalTokens,
-				Messages:   messages[len(params.Messages):],
-			}, nil
+			break
 		}
 
 		slog.InfoContext(ctx, "executing tool calls", "count", len(resp.ToolCalls), "iteration", i+1)
@@ -126,19 +130,39 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			result := ce.registry.Execute(ctx, tc)
 
 			toolMsg := provider.Message{
-				Role:       models.RoleTool,
-				Content:    result.Content,
-				ToolResult: &result,
-			}
-			if params.APIType == models.APITypeKimi {
-				toolMsg.KimiReasoningContent = resp.KimiReasoningContent
+				Role:             models.RoleTool,
+				Content:          result.Content,
+				ToolResult:       &result,
+				ReasoningContent: resp.ReasoningContent,
+				ReasoningBlocks:  resp.ReasoningBlocks,
 			}
 			messages = append(messages, toolMsg)
 		}
 	}
 
+	finalMessages := lo.Map(messages[len(params.Messages):], func(msg provider.Message, _ int) provider.Message {
+		if msg.Role == models.RoleAssistant {
+			if msg.ReasoningContent == "" && len(msg.ReasoningBlocks) > 0 {
+				var summaryBuilder strings.Builder
+				for _, block := range msg.ReasoningBlocks {
+					if !block.Redacted {
+						summaryBuilder.WriteString(block.Summary)
+						summaryBuilder.WriteString("\n")
+					}
+				}
+				msg.ReasoningContent = summaryBuilder.String()
+
+			}
+		} else {
+			msg.ReasoningContent = ""
+		}
+		clear(msg.ReasoningBlocks)
+
+		return msg
+	})
+
 	return &ChatResult{
 		TotalToken: totalTokens,
-		Messages:   messages[len(params.Messages):],
+		Messages:   finalMessages,
 	}, nil
 }

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/customerrors"
@@ -78,14 +79,14 @@ func (s *ModelService) GetDefault(ctx context.Context) (*models.ModelDto, error)
 func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelDto) (*models.ModelDto, error) {
 	var result *models.ModelDto
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		providerExists, err := gorm.G[models.ModelProvider](tx).
+		provider, err := gorm.G[models.ModelProvider](tx).
 			Where("id = ? AND deleted_at IS NULL", dto.ProviderID).
-			Count(ctx, "id")
+			First(ctx)
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return customerrors.ErrProviderNotFound
+			}
 			return err
-		}
-		if providerExists == 0 {
-			return customerrors.ErrProviderNotFound
 		}
 
 		nameExists, err := gorm.G[models.Model](tx).
@@ -112,6 +113,19 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 			ProviderID: dto.ProviderID,
 			Name:       dto.Name,
 			Code:       dto.Code,
+			Thinking:   dto.Thinking,
+		}
+
+		if dto.Thinking && len(dto.ThinkingLevels) > 0 {
+			thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
+			if err != nil {
+				return err
+			}
+			model.ThinkingLevels = thinkingLevels
+		}
+
+		if dto.Thinking && provider.Type == "anthropic" && dto.AnthropicAdaptiveThinking {
+			model.AnthropicAdaptiveThinking = true
 		}
 
 		if err := gorm.G[models.Model](tx).Create(ctx, model); err != nil {
@@ -208,6 +222,31 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 				if err != nil {
 					return err
 				}
+			}
+		}
+
+		model.Thinking = dto.Thinking
+
+		if dto.Thinking && len(dto.ThinkingLevels) > 0 {
+			thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
+			if err != nil {
+				return err
+			}
+			model.ThinkingLevels = thinkingLevels
+		}
+
+		if dto.Thinking && dto.AnthropicAdaptiveThinking {
+			provider, err := gorm.G[models.ModelProvider](tx).
+				Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+				First(ctx)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return customerrors.ErrProviderNotFound
+				}
+				return err
+			}
+			if provider.Type == "anthropic" {
+				model.AnthropicAdaptiveThinking = true
 			}
 		}
 

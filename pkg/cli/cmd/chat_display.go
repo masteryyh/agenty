@@ -67,9 +67,9 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 
 	pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, assistantMsg.CreatedAt.Format("15:04:05")))
 
-	if assistantMsg.ProviderSpecifics != nil && assistantMsg.ProviderSpecifics.KimiReasoningContent != "" {
+	if assistantMsg.ReasoningContent != "" {
 		pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
-		for line := range strings.SplitSeq(assistantMsg.ProviderSpecifics.KimiReasoningContent, "\n") {
+		for line := range strings.SplitSeq(assistantMsg.ReasoningContent, "\n") {
 			pterm.Println(pterm.FgGray.Sprint("  " + line))
 		}
 		fmt.Println()
@@ -158,9 +158,9 @@ func printMessage(msg *models.ChatMessageDto) {
 		}
 		pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, msg.CreatedAt.Format("15:04:05")))
 
-		if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
+		if msg.ReasoningContent != "" {
 			pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
-			for line := range strings.SplitSeq(msg.ProviderSpecifics.KimiReasoningContent, "\n") {
+			for line := range strings.SplitSeq(msg.ReasoningContent, "\n") {
 				pterm.Println(pterm.FgGray.Sprint("  " + line))
 			}
 			fmt.Println()
@@ -230,9 +230,9 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 			}
 			buf.WriteString(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:\n", modelInfo, msg.CreatedAt.Format("15:04:05")))
 
-			if msg.ProviderSpecifics != nil && msg.ProviderSpecifics.KimiReasoningContent != "" {
+			if msg.ReasoningContent != "" {
 				buf.WriteString(pterm.FgLightBlue.Sprint("  💭 Reasoning:\n"))
-				for line := range strings.SplitSeq(msg.ProviderSpecifics.KimiReasoningContent, "\n") {
+				for line := range strings.SplitSeq(msg.ReasoningContent, "\n") {
 					buf.WriteString(pterm.FgGray.Sprint("  " + line + "\n"))
 				}
 				buf.WriteString("\n")

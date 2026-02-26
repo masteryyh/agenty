@@ -308,17 +308,10 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ToolResult: toolResult,
 		}
 
-		if len(cm.ProviderSpecifics) > 0 {
-			var specificData models.ProviderSpecificData
-			if err := json.Unmarshal(cm.ProviderSpecifics, &specificData); err != nil {
-				slog.ErrorContext(ctx, "failed to unmarshal provider specific data", "error", err, "sessionId", sessionID, "messageId", cm.ID)
-				return msg
-			}
-
-			if chatProvider.Type == models.APITypeKimi && specificData.KimiReasoningContent != "" {
-				msg.KimiReasoningContent = specificData.KimiReasoningContent
-			}
+		if data.ModelID == cm.ModelID {
+			
 		}
+
 		return msg
 	})
 	messages = append(messages, provider.Message{
@@ -378,14 +371,14 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ModelID:     model.ID,
 		}
 
-		if chatProvider.Type == models.APITypeKimi && m.KimiReasoningContent != "" {
-			specificData := models.ProviderSpecificData{
-				KimiReasoningContent: m.KimiReasoningContent,
-			}
-			if data, err := json.Marshal(specificData); err == nil {
-				chatMsg.ProviderSpecifics = datatypes.JSON(data)
-			}
-		}
+		// if chatProvider.Type == models.APITypeKimi && m.ReasoningContent != "" {
+		// 	specificData := models.ProviderSpecificData{
+		// 		KimiReasoningContent: m.ReasoningContent,
+		// 	}
+		// 	if data, err := json.Marshal(specificData); err == nil {
+		// 		chatMsg.ProviderSpecifics = datatypes.JSON(data)
+		// 	}
+		// }
 		return chatMsg
 	})
 

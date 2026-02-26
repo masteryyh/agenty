@@ -23,12 +23,19 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
+type ReasoningBlock struct {
+	Summary   string `json:"summary"`
+	Signature string `json:"signature,omitempty"`
+	Redacted  bool   `json:"redacted,omitempty"`
+}
+
 type Message struct {
-	Role                 models.MessageRole `json:"role"`
-	Content              string             `json:"content"`
-	ToolCalls            []models.ToolCall  `json:"toolCalls,omitempty"`
-	ToolResult           *models.ToolResult `json:"toolResult,omitempty"`
-	KimiReasoningContent string             `json:"kimiReasoningContent,omitempty"`
+	Role             models.MessageRole `json:"role"`
+	Content          string             `json:"content"`
+	ToolCalls        []models.ToolCall  `json:"toolCalls,omitempty"`
+	ToolResult       *models.ToolResult `json:"toolResult,omitempty"`
+	ReasoningContent string             `json:"reasoningContent,omitempty"`
+	ReasoningBlocks  []ReasoningBlock   `json:"reasoningBlocks,omitempty"`
 }
 
 type ResponseFormat struct {
@@ -44,20 +51,25 @@ type JSONSchemaFormat struct {
 }
 
 type ChatRequest struct {
-	Model          string
-	Messages       []Message
-	Tools          []tools.ToolDefinition
-	BaseURL        string
-	APIKey         string
-	MaxTokens      int64
-	ResponseFormat *ResponseFormat
+	Model                     string
+	Messages                  []Message
+	Tools                     []tools.ToolDefinition
+	Thinking                  bool
+	ThinkingLevel             string
+	AnthropicAdaptiveThinking bool
+	BaseURL                   string
+	APIType                   models.APIType
+	APIKey                    string
+	MaxTokens                 int64
+	ResponseFormat            *ResponseFormat
 }
 
 type ChatResponse struct {
-	Content              string
-	KimiReasoningContent string
-	ToolCalls            []models.ToolCall
-	TotalToken           int64
+	Content          string
+	ReasoningContent string
+	ReasoningBlocks  []ReasoningBlock
+	ToolCalls        []models.ToolCall
+	TotalToken       int64
 }
 
 type ChatProvider interface {

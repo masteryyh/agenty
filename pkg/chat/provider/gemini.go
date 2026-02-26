@@ -18,10 +18,11 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
-	"github.com/bytedance/sonic"
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
@@ -47,19 +48,26 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	}
 
 	contents := buildGeminiContents(req.Messages)
-	var config *genai.GenerateContentConfig
+	config := &genai.GenerateContentConfig{}
 	if len(req.Tools) > 0 {
-		config = &genai.GenerateContentConfig{
-			Tools: buildGeminiTools(req.Tools),
-		}
+		config.Tools = buildGeminiTools(req.Tools)
 	}
 
-	// Add JSON response format support for Gemini
 	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
-		if config == nil {
-			config = &genai.GenerateContentConfig{}
-		}
 		config.ResponseMIMEType = "application/json"
+	}
+
+	if req.Thinking {
+		thinkingLevel := genai.ThinkingLevel(strings.ToUpper(req.ThinkingLevel))
+		if thinkingLevel == "" {
+			thinkingLevel = genai.ThinkingLevelMedium
+		}
+
+		thinkingConfig := &genai.ThinkingConfig{
+			IncludeThoughts: true,
+			ThinkingLevel:   thinkingLevel,
+		}
+		config.ThinkingConfig = thinkingConfig
 	}
 
 	resp, err := client.Models.GenerateContent(ctx, req.Model, contents, config)
@@ -74,6 +82,14 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 
 	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		for _, part := range resp.Candidates[0].Content.Parts {
+			if part.Thought {
+				block := ReasoningBlock{
+					Summary:   part.Text,
+					Signature: base64.StdEncoding.EncodeToString(part.ThoughtSignature),
+				}
+				result.ReasoningBlocks = append(result.ReasoningBlocks, block)
+				continue
+			}
 			if part.Text != "" {
 				if result.Content != "" {
 					result.Content += "\n"
@@ -81,7 +97,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				result.Content += part.Text
 			}
 			if part.FunctionCall != nil {
-				argsJSON, err := sonic.MarshalString(part.FunctionCall.Args)
+				argsJSON, err := json.MarshalString(part.FunctionCall.Args)
 				if err != nil {
 					argsJSON = "{}"
 				}
@@ -106,19 +122,28 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 		switch msg.Role {
 		case models.RoleUser:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
+
 		case models.RoleAssistant:
 			c := &genai.Content{Role: genai.RoleModel}
+
+			if len(msg.ReasoningBlocks) > 0 {
+				thinkingParts := buildGeminiThoughtChain(msg.ReasoningBlocks)
+				c.Parts = append(c.Parts, thinkingParts...)
+			}
+
 			if msg.Content != "" {
 				c.Parts = append(c.Parts, genai.NewPartFromText(msg.Content))
 			}
+
 			for _, tc := range msg.ToolCalls {
 				var args map[string]any
-				if err := sonic.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+				if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
 					args = map[string]any{}
 				}
 				c.Parts = append(c.Parts, genai.NewPartFromFunctionCall(tc.Name, args))
 			}
 			return c, true
+
 		case models.RoleTool:
 			if msg.ToolResult != nil {
 				return genai.NewContentFromFunctionResponse(
@@ -128,8 +153,10 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 				), true
 			}
 			return nil, false
+
 		case models.RoleSystem:
 			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
+
 		default:
 			return nil, false
 		}
@@ -156,4 +183,15 @@ func buildGeminiTools(defs []tools.ToolDefinition) []*genai.Tool {
 		}
 	})
 	return []*genai.Tool{{FunctionDeclarations: decls}}
+}
+
+func buildGeminiThoughtChain(blocks []ReasoningBlock) []*genai.Part {
+	return lo.Map(blocks, func(block ReasoningBlock, _ int) *genai.Part {
+		signature, _ := base64.StdEncoding.DecodeString(block.Signature)
+		return &genai.Part{
+			Thought:          true,
+			Text:             block.Summary,
+			ThoughtSignature: signature,
+		}
+	})
 }

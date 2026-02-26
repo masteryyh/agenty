@@ -17,7 +17,6 @@ limitations under the License.
 package models
 
 import (
-	"context"
 	"log/slog"
 	"time"
 
@@ -44,6 +43,7 @@ type ChatMessage struct {
 	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
 	ToolResults       datatypes.JSON `gorm:"type:jsonb"`
 	ModelID           uuid.UUID      `gorm:"type:uuid;not null"`
+	ReasoningContent  string         `gorm:"type:text"`
 	ProviderSpecifics datatypes.JSON `gorm:"type:jsonb"`
 	CreatedAt         time.Time      `gorm:"autoCreateTime:milli"`
 	DeletedAt         *time.Time
@@ -57,7 +57,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 	var toolCalls []ToolCall
 	if len(m.ToolCalls) > 0 {
 		if err := json.Unmarshal(m.ToolCalls, &toolCalls); err != nil {
-			slog.ErrorContext(context.Background(), "failed to unmarshal tool calls", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+			slog.Error("failed to unmarshal tool calls", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
 		}
 	}
 
@@ -65,7 +65,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 	if len(m.ToolResults) > 0 {
 		var tr ToolResult
 		if err := json.Unmarshal(m.ToolResults, &tr); err != nil {
-			slog.ErrorContext(context.Background(), "failed to unmarshal tool result", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+			slog.Error("failed to unmarshal tool result", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
 		} else {
 			toolResult = &tr
 		}
@@ -75,7 +75,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 	if len(m.ProviderSpecifics) > 0 {
 		var ps ProviderSpecificData
 		if err := json.Unmarshal(m.ProviderSpecifics, &ps); err != nil {
-			slog.ErrorContext(context.Background(), "failed to unmarshal provider specifics", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+			slog.Error("failed to unmarshal provider specifics", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
 		} else {
 			providerSpecifics = &ps
 		}
@@ -88,6 +88,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 		ToolCalls:         toolCalls,
 		ToolResult:        toolResult,
 		ProviderSpecifics: providerSpecifics,
+		ReasoningContent:  m.ReasoningContent,
 		CreatedAt:         m.CreatedAt,
 	}
 
@@ -104,13 +105,16 @@ type ChatMessageDto struct {
 	ToolCalls         []ToolCall            `json:"toolCalls,omitempty"`
 	ToolResult        *ToolResult           `json:"toolResult,omitempty"`
 	Model             *ModelDto             `json:"model,omitempty"`
+	ReasoningContent  string                `json:"reasoningContent,omitempty"`
 	ProviderSpecifics *ProviderSpecificData `json:"providerSpecifics,omitempty"`
 	CreatedAt         time.Time             `json:"createdAt"`
 }
 
 type ChatDto struct {
-	ModelID uuid.UUID `json:"modelId" binding:"required"`
-	Message string    `json:"message" binding:"required"`
+	ModelID       uuid.UUID `json:"modelId" binding:"required"`
+	Message       string    `json:"message" binding:"required"`
+	Thinking      bool      `json:"thinking"`
+	ThinkingLevel string    `json:"thinkingLevel"`
 }
 
 type ToolCall struct {
@@ -126,6 +130,16 @@ type ToolResult struct {
 	IsError bool   `json:"isError"`
 }
 
+type AnthropicThinkingBlock struct {
+	Type      string `json:"type"`
+	Thinking  string `json:"summary,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+type GeminiThinkingData struct {
+	
+}
+
 type ProviderSpecificData struct {
-	KimiReasoningContent string `json:"kimiReasoningContent,omitempty"`
 }
