@@ -18,6 +18,7 @@ package builtin
 
 import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/services"
 )
 
@@ -27,6 +28,11 @@ func RegisterAll(registry *tools.Registry) {
 	registry.Register(&ListDirectoryTool{})
 	registry.Register(&ReplaceInFileTool{})
 	registry.Register(&RunShellCommandTool{})
+
+	conf := config.GetConfigManager().GetConfig()
+	if conf.Debug {
+		registry.Register(&DebugTool{})
+	}
 
 	memoryService := services.GetMemoryService()
 	if memoryService.IsEnabled() {

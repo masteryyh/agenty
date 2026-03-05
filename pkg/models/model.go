@@ -19,18 +19,23 @@ package models
 import (
 	"time"
 
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 )
 
 type Model struct {
-	ID           uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	ProviderID   uuid.UUID `gorm:"type:uuid;not null"`
-	Name         string    `gorm:"type:varchar(255);not null"`
-	Code         string    `gorm:"type:varchar(255);not null"`
-	DefaultModel bool      `gorm:"default:false"`
-	CreatedAt    time.Time `gorm:"autoCreateTime"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
-	DeletedAt    *time.Time
+	ID                        uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	ProviderID                uuid.UUID      `gorm:"type:uuid;not null"`
+	Name                      string         `gorm:"type:varchar(255);not null"`
+	Code                      string         `gorm:"type:varchar(255);not null"`
+	DefaultModel              bool           `gorm:"default:false"`
+	Thinking                  bool           `gorm:"default:false"`
+	ThinkingLevels            datatypes.JSON `gorm:"type:jsonb;default:'[]'::jsonb"`
+	AnthropicAdaptiveThinking bool           `gorm:"default:false"`
+	CreatedAt                 time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt                 time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt                 *time.Time
 }
 
 func (Model) TableName() string {
@@ -38,13 +43,21 @@ func (Model) TableName() string {
 }
 
 func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
+	var thinkingLevels []string
+	if err := json.Unmarshal(m.ThinkingLevels, &thinkingLevels); err != nil {
+		thinkingLevels = []string{}
+	}
+
 	dto := &ModelDto{
-		ID:           m.ID,
-		Name:         m.Name,
-		Code:         m.Code,
-		DefaultModel: m.DefaultModel,
-		CreatedAt:    m.CreatedAt,
-		UpdatedAt:    m.UpdatedAt,
+		ID:                        m.ID,
+		Name:                      m.Name,
+		Code:                      m.Code,
+		DefaultModel:              m.DefaultModel,
+		Thinking:                  m.Thinking,
+		ThinkingLevels:            thinkingLevels,
+		AnthropicAdaptiveThinking: m.AnthropicAdaptiveThinking,
+		CreatedAt:                 m.CreatedAt,
+		UpdatedAt:                 m.UpdatedAt,
 	}
 
 	if provider != nil {
@@ -54,22 +67,31 @@ func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
 }
 
 type CreateModelDto struct {
-	ProviderID uuid.UUID `json:"providerId" binding:"required"`
-	Name       string    `json:"name" binding:"required"`
-	Code       string    `json:"code" binding:"required,code"`
+	ProviderID                uuid.UUID `json:"providerId" binding:"required"`
+	Name                      string    `json:"name" binding:"required"`
+	Code                      string    `json:"code" binding:"required,code"`
+	Thinking                  bool      `json:"thinking" binding:"required"`
+	ThinkingLevels            []string  `json:"thinkingLevels" binding:"omitempty"`
+	AnthropicAdaptiveThinking bool      `json:"anthropicAdaptiveThinking" binding:"omitempty"`
 }
 
 type UpdateModelDto struct {
-	Name         string `json:"name" binding:"omitempty"`
-	DefaultModel bool   `json:"defaultModel"`
+	Name                      string   `json:"name" binding:"omitempty"`
+	DefaultModel              bool     `json:"defaultModel" binding:"omitempty"`
+	Thinking                  bool     `json:"thinking" binding:"omitempty"`
+	ThinkingLevels            []string `json:"thinkingLevels" binding:"omitempty"`
+	AnthropicAdaptiveThinking bool     `json:"anthropicAdaptiveThinking" binding:"omitempty"`
 }
 
 type ModelDto struct {
-	ID           uuid.UUID         `json:"id"`
-	Provider     *ModelProviderDto `json:"provider,omitempty"`
-	Name         string            `json:"name"`
-	Code         string            `json:"code"`
-	DefaultModel bool              `json:"defaultModel"`
-	CreatedAt    time.Time         `json:"createdAt"`
-	UpdatedAt    time.Time         `json:"updatedAt"`
+	ID                        uuid.UUID         `json:"id"`
+	Provider                  *ModelProviderDto `json:"provider,omitempty"`
+	Name                      string            `json:"name"`
+	Code                      string            `json:"code"`
+	DefaultModel              bool              `json:"defaultModel"`
+	Thinking                  bool              `json:"thinking"`
+	ThinkingLevels            []string          `json:"thinkingLevels"`
+	AnthropicAdaptiveThinking bool              `json:"anthropicAdaptiveThinking"`
+	CreatedAt                 time.Time         `json:"createdAt"`
+	UpdatedAt                 time.Time         `json:"updatedAt"`
 }

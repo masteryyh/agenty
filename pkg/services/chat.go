@@ -308,17 +308,43 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ToolResult: toolResult,
 		}
 
-		if len(cm.ProviderSpecifics) > 0 {
-			var specificData models.ProviderSpecificData
-			if err := json.Unmarshal(cm.ProviderSpecifics, &specificData); err != nil {
-				slog.ErrorContext(ctx, "failed to unmarshal provider specific data", "error", err, "sessionId", sessionID, "messageId", cm.ID)
-				return msg
-			}
-
-			if chatProvider.Type == models.APITypeKimi && specificData.KimiReasoningContent != "" {
-				msg.KimiReasoningContent = specificData.KimiReasoningContent
+		if data.ModelID == cm.ModelID {
+			msg.ReasoningContent = cm.ReasoningContent
+			if data.Thinking && len(cm.ProviderSpecifics) > 0 {
+				var ps models.ProviderSpecificData
+				if err := json.Unmarshal(cm.ProviderSpecifics, &ps); err == nil {
+					if len(ps.AnthropicThinkingBlocks) > 0 {
+						msg.ReasoningBlocks = lo.Map(ps.AnthropicThinkingBlocks, func(b models.AnthropicThinkingBlock, _ int) provider.ReasoningBlock {
+							if b.Type == "redacted_thinking" {
+								return provider.ReasoningBlock{
+									Signature: b.Data,
+									Redacted:  true,
+								}
+							}
+							return provider.ReasoningBlock{
+								Summary:   b.Thinking,
+								Signature: b.Signature,
+							}
+						})
+					} else if len(ps.GeminiThinkingBlocks) > 0 {
+						msg.ReasoningBlocks = lo.Map(ps.GeminiThinkingBlocks, func(b models.GeminiThinkingData, _ int) provider.ReasoningBlock {
+							return provider.ReasoningBlock{
+								Summary:   b.Summary,
+								Signature: b.ThoughtSignature,
+							}
+						})
+					} else if len(ps.OpenAIReasoningBlocks) > 0 {
+						msg.ReasoningBlocks = lo.Map(ps.OpenAIReasoningBlocks, func(b models.OpenAIReasoningBlock, _ int) provider.ReasoningBlock {
+							return provider.ReasoningBlock{
+								Summary:   b.Summary,
+								Signature: b.EncryptedContent,
+							}
+						})
+					}
+				}
 			}
 		}
+
 		return msg
 	})
 	messages = append(messages, provider.Message{
@@ -339,11 +365,14 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:  chatProvider.BaseURL,
-		APIKey:   chatProvider.APIKey,
-		Model:    model.Code,
-		Messages: messages,
-		APIType:  chatProvider.Type,
+		BaseURL:                   chatProvider.BaseURL,
+		APIKey:                    chatProvider.APIKey,
+		Model:                     model.Code,
+		Messages:                  messages,
+		APIType:                   chatProvider.Type,
+		Thinking:                  data.Thinking && model.Thinking,
+		ThinkingLevel:             data.ThinkingLevel,
+		AnthropicAdaptiveThinking: model.AnthropicAdaptiveThinking,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "chat completion failed", "error", err, "sessionId", sessionID)
@@ -370,22 +399,53 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		}
 
 		chatMsg := models.ChatMessage{
-			SessionID:   session.ID,
-			Role:        models.MessageRole(m.Role),
-			Content:     m.Content,
-			ToolCalls:   datatypes.JSON(rawCalls),
-			ToolResults: datatypes.JSON(rawCallResult),
-			ModelID:     model.ID,
+			SessionID:        session.ID,
+			Role:             models.MessageRole(m.Role),
+			Content:          m.Content,
+			ToolCalls:        datatypes.JSON(rawCalls),
+			ToolResults:      datatypes.JSON(rawCallResult),
+			ModelID:          model.ID,
+			ReasoningContent: m.ReasoningContent,
 		}
 
-		if chatProvider.Type == models.APITypeKimi && m.KimiReasoningContent != "" {
-			specificData := models.ProviderSpecificData{
-				KimiReasoningContent: m.KimiReasoningContent,
+		if m.Role == models.RoleAssistant && len(m.ReasoningBlocks) > 0 {
+			var specificData models.ProviderSpecificData
+			switch chatProvider.Type {
+			case models.APITypeAnthropic:
+				specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
+					if b.Redacted {
+						return models.AnthropicThinkingBlock{
+							Type: "redacted_thinking",
+							Data: b.Signature,
+						}
+					}
+					return models.AnthropicThinkingBlock{
+						Type:      "thinking",
+						Thinking:  b.Summary,
+						Signature: b.Signature,
+					}
+				})
+			case models.APITypeGemini:
+				specificData.GeminiThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.GeminiThinkingData {
+					return models.GeminiThinkingData{
+						ThoughtSignature: b.Signature,
+						ThinkingLevel:    data.ThinkingLevel,
+						Summary:          b.Summary,
+					}
+				})
+			case models.APITypeOpenAI:
+				specificData.OpenAIReasoningBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.OpenAIReasoningBlock {
+					return models.OpenAIReasoningBlock{
+						Summary:          b.Summary,
+						EncryptedContent: b.Signature,
+					}
+				})
 			}
-			if data, err := json.Marshal(specificData); err == nil {
-				chatMsg.ProviderSpecifics = datatypes.JSON(data)
+			if raw, err := json.Marshal(specificData); err == nil {
+				chatMsg.ProviderSpecifics = datatypes.JSON(raw)
 			}
 		}
+
 		return chatMsg
 	})
 
@@ -437,6 +497,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			Content:           m.Content,
 			ToolCalls:         toolCalls,
 			ToolResult:        toolResult,
+			ReasoningContent:  m.ReasoningContent,
 			ProviderSpecifics: providerSpecifics,
 			CreatedAt:         m.CreatedAt,
 		}
@@ -478,7 +539,7 @@ func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage str
 	}
 
 	responseFormat := &provider.ResponseFormat{Type: "json_object"}
-	if chatProvider.Type == models.APITypeOpenAI {
+	if chatProvider.Type == models.APITypeOpenAI || chatProvider.Type == models.APITypeOpenAILegacy {
 		responseFormat = &provider.ResponseFormat{
 			Type: "json_schema",
 			JSONSchema: &provider.JSONSchemaFormat{

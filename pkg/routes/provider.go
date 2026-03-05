@@ -157,5 +157,5 @@ func (r *ProviderRoutes) DeleteProvider(c *gin.Context) {
 		response.Failed(c, err)
 		return
 	}
-	response.OK(c, nil)
+	response.OK[any](c, nil)
 }

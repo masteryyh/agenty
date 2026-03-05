@@ -18,6 +18,7 @@ package conn
 
 import (
 	"context"
+	json "github.com/bytedance/sonic"
 	"log/slog"
 
 	"github.com/masteryyh/agenty/pkg/models"
@@ -32,9 +33,12 @@ type presetProvider struct {
 }
 
 type presetModel struct {
-	Name         string
-	Code         string
-	DefaultModel bool
+	Name                      string
+	Code                      string
+	DefaultModel              bool
+	Thinking                  bool
+	ThinkingLevels            []string
+	AnthropicAdaptiveThinking bool
 }
 
 var presetProviders = []presetProvider{
@@ -43,9 +47,24 @@ var presetProviders = []presetProvider{
 		Type:    models.APITypeOpenAI,
 		BaseURL: "https://api.openai.com/v1",
 		Models: []presetModel{
-			{Name: "GPT-5.3 Codex", Code: "gpt-5.3-codex"},
-			{Name: "GPT-5.2", Code: "gpt-5.2"},
-			{Name: "GPT-4o", Code: "gpt-4o-2024-11-20"},
+			{
+				Name:           "GPT-5.3 Codex",
+				Code:           "gpt-5.3-codex",
+				Thinking:       true,
+				ThinkingLevels: []string{"low", "medium", "high"},
+			},
+			{
+				Name:           "GPT-5.2",
+				Code:           "gpt-5.2",
+				Thinking:       true,
+				ThinkingLevels: []string{"low", "medium", "high"},
+			},
+			{
+				Name:           "GPT-4o",
+				Code:           "gpt-4o-2024-11-20",
+				Thinking:       true,
+				ThinkingLevels: []string{"low", "medium", "high"},
+			},
 		},
 	},
 	{
@@ -53,9 +72,24 @@ var presetProviders = []presetProvider{
 		Type:    models.APITypeGemini,
 		BaseURL: "https://generativelanguage.googleapis.com",
 		Models: []presetModel{
-			{Name: "Gemini 3.1 Pro Preview", Code: "gemini-3.1-pro-preview"},
-			{Name: "Gemini 3 Pro Preview", Code: "gemini-3-pro-preview"},
-			{Name: "Gemini 3 Flash Preview", Code: "gemini-3-flash-preview"},
+			{
+				Name:           "Gemini 3.1 Pro Preview",
+				Code:           "gemini-3.1-pro-preview",
+				Thinking:       true,
+				ThinkingLevels: []string{"low", "medium", "high"},
+			},
+			{
+				Name:           "Gemini 3 Pro Preview",
+				Code:           "gemini-3-pro-preview",
+				Thinking:       true,
+				ThinkingLevels: []string{"low", "high"},
+			},
+			{
+				Name:           "Gemini 3 Flash Preview",
+				Code:           "gemini-3-flash-preview",
+				Thinking:       true,
+				ThinkingLevels: []string{"minimal", "low", "medium", "high"},
+			},
 		},
 	},
 	{
@@ -63,9 +97,26 @@ var presetProviders = []presetProvider{
 		Type:    models.APITypeAnthropic,
 		BaseURL: "https://api.anthropic.com",
 		Models: []presetModel{
-			{Name: "Claude Opus 4.6", Code: "claude-opus-4-6"},
-			{Name: "Claude Sonnet 4.6", Code: "claude-sonnet-4-6"},
-			{Name: "Claude Haiku 4.5", Code: "claude-haiku-4-5-20251001"},
+			{
+				Name:                      "Claude Opus 4.6",
+				Code:                      "claude-opus-4-6",
+				Thinking:                  true,
+				ThinkingLevels:            []string{"low", "medium", "high", "max"},
+				AnthropicAdaptiveThinking: true,
+			},
+			{
+				Name:                      "Claude Sonnet 4.6",
+				Code:                      "claude-sonnet-4-6",
+				Thinking:                  true,
+				ThinkingLevels:            []string{"low", "medium", "high", "max"},
+				AnthropicAdaptiveThinking: true,
+			},
+			{
+				Name:                      "Claude Haiku 4.5",
+				Code:                      "claude-haiku-4-5-20251001",
+				Thinking:                  true,
+				AnthropicAdaptiveThinking: true,
+			},
 		},
 	},
 	{
@@ -73,7 +124,12 @@ var presetProviders = []presetProvider{
 		Type:    models.APITypeKimi,
 		BaseURL: "https://api.moonshot.cn/v1",
 		Models: []presetModel{
-			{Name: "Kimi k2.5", Code: "kimi-k2.5", DefaultModel: true},
+			{
+				Name:         "Kimi k2.5",
+				Code:         "kimi-k2.5",
+				DefaultModel: true,
+				Thinking:     true,
+			},
 		},
 	},
 }
@@ -103,11 +159,18 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 			slog.InfoContext(ctx, "created preset provider", "name", pp.Name)
 
 			for _, pm := range pp.Models {
+				thinkingLevels := []byte("[]")
+				if len(pm.ThinkingLevels) > 0 {
+					thinkingLevels, _ = json.Marshal(pm.ThinkingLevels)
+				}
 				model := &models.Model{
-					ProviderID:   provider.ID,
-					Name:         pm.Name,
-					Code:         pm.Code,
-					DefaultModel: pm.DefaultModel,
+					ProviderID:                provider.ID,
+					Name:                      pm.Name,
+					Code:                      pm.Code,
+					DefaultModel:              pm.DefaultModel,
+					Thinking:                  pm.Thinking,
+					ThinkingLevels:            thinkingLevels,
+					AnthropicAdaptiveThinking: pm.AnthropicAdaptiveThinking,
 				}
 				if err := tx.Create(model).Error; err != nil {
 					return err

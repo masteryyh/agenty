@@ -18,7 +18,6 @@ package api
 
 import (
 	"bytes"
-	stdjson "encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
+	"github.com/masteryyh/agenty/pkg/utils/response"
 )
 
 type Client struct {
@@ -57,13 +57,7 @@ func NewClientWithAuth(baseURL, username, password string) *Client {
 	}
 }
 
-type APIResponse struct {
-	Code    int                `json:"code"`
-	Message string             `json:"message"`
-	Data    stdjson.RawMessage `json:"data"`
-}
-
-func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
+func doRequest[T any](c *Client, method, path string, body any) (*T, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -97,7 +91,7 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var apiResp APIResponse
+	var apiResp response.GenericResponse[T]
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
@@ -109,42 +103,15 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 }
 
 func (c *Client) ListProviders(page, pageSize int) (*pagination.PagedResponse[models.ModelProviderDto], error) {
-	data, err := c.doRequest("GET", fmt.Sprintf("/api/v1/providers?page=%d&pageSize=%d", page, pageSize), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var result pagination.PagedResponse[models.ModelProviderDto]
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal providers: %w", err)
-	}
-	return &result, nil
+	return doRequest[pagination.PagedResponse[models.ModelProviderDto]](c, "GET", fmt.Sprintf("/api/v1/providers?page=%d&pageSize=%d", page, pageSize), nil)
 }
 
 func (c *Client) CreateProvider(dto *models.CreateModelProviderDto) (*models.ModelProviderDto, error) {
-	data, err := c.doRequest("POST", "/api/v1/providers", dto)
-	if err != nil {
-		return nil, err
-	}
-
-	var provider models.ModelProviderDto
-	if err := json.Unmarshal(data, &provider); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal provider: %w", err)
-	}
-	return &provider, nil
+	return doRequest[models.ModelProviderDto](c, "POST", "/api/v1/providers", dto)
 }
 
 func (c *Client) UpdateProvider(providerID uuid.UUID, dto *models.UpdateModelProviderDto) (*models.ModelProviderDto, error) {
-	data, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/providers/%s", providerID), dto)
-	if err != nil {
-		return nil, err
-	}
-
-	var provider models.ModelProviderDto
-	if err := json.Unmarshal(data, &provider); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal provider: %w", err)
-	}
-	return &provider, nil
+	return doRequest[models.ModelProviderDto](c, "PUT", fmt.Sprintf("/api/v1/providers/%s", providerID), dto)
 }
 
 func (c *Client) DeleteProvider(providerID uuid.UUID, force bool) error {
@@ -152,124 +119,52 @@ func (c *Client) DeleteProvider(providerID uuid.UUID, force bool) error {
 	if force {
 		path += "?force=true"
 	}
-	_, err := c.doRequest("DELETE", path, nil)
+	_, err := doRequest[any](c, "DELETE", path, nil)
 	return err
 }
 
 func (c *Client) ListModels(page, pageSize int) (*pagination.PagedResponse[models.ModelDto], error) {
-	data, err := c.doRequest("GET", fmt.Sprintf("/api/v1/models?page=%d&pageSize=%d", page, pageSize), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var result pagination.PagedResponse[models.ModelDto]
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal models: %w", err)
-	}
-	return &result, nil
+	return doRequest[pagination.PagedResponse[models.ModelDto]](c, "GET", fmt.Sprintf("/api/v1/models?page=%d&pageSize=%d", page, pageSize), nil)
 }
 
 func (c *Client) CreateModel(dto *models.CreateModelDto) (*models.ModelDto, error) {
-	data, err := c.doRequest("POST", "/api/v1/models", dto)
-	if err != nil {
-		return nil, err
-	}
-
-	var model models.ModelDto
-	if err := json.Unmarshal(data, &model); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal model: %w", err)
-	}
-	return &model, nil
+	return doRequest[models.ModelDto](c, "POST", "/api/v1/models", dto)
 }
 
 func (c *Client) GetDefaultModel() (*models.ModelDto, error) {
-	data, err := c.doRequest("GET", "/api/v1/models/default", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var model models.ModelDto
-	if err := json.Unmarshal(data, &model); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal model: %w", err)
-	}
-	return &model, nil
+	return doRequest[models.ModelDto](c, "GET", "/api/v1/models/default", nil)
 }
 
 func (c *Client) UpdateModel(modelID uuid.UUID, dto *models.UpdateModelDto) error {
-	_, err := c.doRequest("PUT", fmt.Sprintf("/api/v1/models/%s", modelID), dto)
+	_, err := doRequest[any](c, "PUT", fmt.Sprintf("/api/v1/models/%s", modelID), dto)
 	return err
 }
 
 func (c *Client) DeleteModel(modelID uuid.UUID) error {
-	_, err := c.doRequest("DELETE", fmt.Sprintf("/api/v1/models/%s", modelID), nil)
+	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/models/%s", modelID), nil)
 	return err
 }
 
 func (c *Client) ListSessions(page, pageSize int) (*pagination.PagedResponse[models.ChatSessionDto], error) {
-	data, err := c.doRequest("GET", fmt.Sprintf("/api/v1/chats/sessions?page=%d&pageSize=%d", page, pageSize), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var result pagination.PagedResponse[models.ChatSessionDto]
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sessions: %w", err)
-	}
-	return &result, nil
+	return doRequest[pagination.PagedResponse[models.ChatSessionDto]](c, "GET", fmt.Sprintf("/api/v1/chats/sessions?page=%d&pageSize=%d", page, pageSize), nil)
 }
 
 func (c *Client) CreateSession() (*models.ChatSessionDto, error) {
-	data, err := c.doRequest("POST", "/api/v1/chats/session", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var session models.ChatSessionDto
-	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
-	}
-	return &session, nil
+	return doRequest[models.ChatSessionDto](c, "POST", "/api/v1/chats/session", nil)
 }
 
 func (c *Client) GetSession(sessionID uuid.UUID) (*models.ChatSessionDto, error) {
-	data, err := c.doRequest("GET", fmt.Sprintf("/api/v1/chats/session/%s", sessionID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var session models.ChatSessionDto
-	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
-	}
-	return &session, nil
+	return doRequest[models.ChatSessionDto](c, "GET", fmt.Sprintf("/api/v1/chats/session/%s", sessionID), nil)
 }
 
 func (c *Client) GetLastSession() (*models.ChatSessionDto, error) {
-	data, err := c.doRequest("GET", "/api/v1/chats/session/last", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	var session models.ChatSessionDto
-	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
-	}
-	return &session, nil
+	return doRequest[models.ChatSessionDto](c, "GET", "/api/v1/chats/session/last", nil)
 }
 
-func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) ([]*models.ChatMessageDto, error) {
-	data, err := c.doRequest("POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
-	if err != nil {
-		return nil, err
-	}
+func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
+	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
+}
 
-	var messages []*models.ChatMessageDto
-	if err := json.Unmarshal(data, &messages); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal messages: %w", err)
-	}
-	return messages, nil
+func (c *Client) GetModelThinkingLevels(modelID uuid.UUID) (*[]string, error) {
+	return doRequest[[]string](c, "GET", fmt.Sprintf("/api/v1/models/%s/thinking-levels", modelID), nil)
 }
