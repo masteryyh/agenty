@@ -25,10 +25,11 @@ import (
 type APIType string
 
 const (
-	APITypeOpenAI    APIType = "openai"
-	APITypeAnthropic APIType = "anthropic"
-	APITypeKimi      APIType = "kimi"
-	APITypeGemini    APIType = "gemini"
+	APITypeOpenAI       APIType = "openai"
+	APITypeOpenAILegacy APIType = "openai-legacy"
+	APITypeAnthropic    APIType = "anthropic"
+	APITypeKimi         APIType = "kimi"
+	APITypeGemini       APIType = "gemini"
 )
 
 type ModelProvider struct {
@@ -67,14 +68,14 @@ func (p *ModelProvider) ToDto() *ModelProviderDto {
 
 type CreateModelProviderDto struct {
 	Name    string  `json:"name" binding:"required"`
-	Type    APIType `json:"type" binding:"required,oneof=openai anthropic kimi gemini"`
+	Type    APIType `json:"type" binding:"required,oneof=openai openai-legacy anthropic kimi gemini"`
 	BaseURL string  `json:"baseUrl" binding:"required,url"`
 	APIKey  string  `json:"apiKey" binding:"required"`
 }
 
 type UpdateModelProviderDto struct {
 	Name    string  `json:"name" binding:"omitempty"`
-	Type    APIType `json:"type" binding:"omitempty,oneof=openai anthropic kimi gemini"`
+	Type    APIType `json:"type" binding:"omitempty,oneof=openai openai-legacy anthropic kimi gemini"`
 	BaseURL string  `json:"baseUrl" binding:"omitempty,url"`
 	APIKey  string  `json:"apiKey" binding:"omitempty"`
 }

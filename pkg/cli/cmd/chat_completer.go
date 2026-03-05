@@ -37,6 +37,11 @@ var commands = []Command{
 	{Name: "/status", Description: "Show current session status", Usage: "/status"},
 	{Name: "/history", Description: "Browse message history", Usage: "/history"},
 	{Name: "/model", Description: "Switch to a different model", Usage: "/model [provider/model]"},
+	{
+		Name:        "/think",
+		Description: "Set thinking mode",
+		Usage:       "/think [off|<level>]",
+	},
 	{Name: "/help", Description: "Show available commands", Usage: "/help"},
 	{Name: "/exit", Description: "Quit the chat", Usage: "/exit"},
 }
@@ -62,7 +67,15 @@ func NewChatCompleter() readline.AutoCompleter {
 				}
 				sorted := append([]string(nil), vals...)
 				sort.Strings(sorted)
-				return sorted
+				result := make([]string, len(sorted))
+				for i, v := range sorted {
+					if strings.Contains(v, " ") {
+						result[i] = `"` + v + `"`
+					} else {
+						result[i] = v
+					}
+				}
+				return result
 			})
 			items = append(items, readline.PcItem(cmd.Name, dynamic))
 		} else {
@@ -168,15 +181,33 @@ func (p *HintPainter) findInlineHint(input string) string {
 }
 
 func (p *HintPainter) findArgHint(input, cmdName string, completer func() []string) string {
-	prefix := strings.TrimSpace(input[len(cmdName):])
+	rawPrefix := strings.TrimSpace(input[len(cmdName):])
 	items := completer()
 
+	quoteChar := rune(0)
+	prefix := rawPrefix
+	if len(rawPrefix) > 0 && (rawPrefix[0] == '"' || rawPrefix[0] == '\'') {
+		quoteChar = rune(rawPrefix[0])
+		prefix = rawPrefix[1:]
+	}
+
 	for _, item := range items {
-		if prefix == "" {
+		itemHasSpace := strings.Contains(item, " ")
+		if prefix == "" && quoteChar == 0 {
+			if itemHasSpace {
+				return `"` + item + `"`
+			}
 			return item
 		}
 		if strings.HasPrefix(strings.ToLower(item), strings.ToLower(prefix)) && !strings.EqualFold(item, prefix) {
-			return item[len(prefix):]
+			suffix := item[len(prefix):]
+			if quoteChar != 0 {
+				return suffix + string(quoteChar)
+			}
+			if itemHasSpace {
+				return ""
+			}
+			return suffix
 		}
 	}
 
@@ -203,13 +234,22 @@ func (p *HintPainter) buildPanel(input string) []string {
 }
 
 func (p *HintPainter) buildArgPanel(input, cmdName string, completer func() []string) []string {
-	prefix := strings.TrimSpace(input[len(cmdName):])
+	rawPrefix := strings.TrimSpace(input[len(cmdName):])
 	items := completer()
+
+	matchPrefix := rawPrefix
+	if len(matchPrefix) > 0 && (matchPrefix[0] == '"' || matchPrefix[0] == '\'') {
+		matchPrefix = matchPrefix[1:]
+	}
 
 	var lines []string
 	for _, item := range items {
-		if prefix == "" || strings.HasPrefix(strings.ToLower(item), strings.ToLower(prefix)) {
-			lines = append(lines, fmt.Sprintf("  \033[36m%s\033[0m", item))
+		if matchPrefix == "" || strings.HasPrefix(strings.ToLower(item), strings.ToLower(matchPrefix)) {
+			display := item
+			if strings.Contains(item, " ") {
+				display = `"` + item + `"`
+			}
+			lines = append(lines, fmt.Sprintf("  \033[36m%s\033[0m", display))
 			if len(lines) >= 8 {
 				break
 			}

@@ -184,7 +184,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	if len(apiResp.Choices) > 0 {
 		choice := apiResp.Choices[0]
 		result.Content = choice.Message.Content
-		result.KimiReasoningContent = choice.Message.ReasoningContent
+		result.ReasoningContent = choice.Message.ReasoningContent
 
 		if len(choice.Message.ToolCalls) > 0 {
 			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) models.ToolCall {
@@ -207,13 +207,13 @@ func buildKimiMessages(messages []Message) []kimiMessage {
 			return kimiMessage{
 				Role:             models.RoleUser,
 				Content:          msg.Content,
-				ReasoningContent: msg.KimiReasoningContent,
+				ReasoningContent: msg.ReasoningContent,
 			}, true
 		case models.RoleAssistant:
 			km := kimiMessage{
 				Role:             models.RoleAssistant,
 				Content:          msg.Content,
-				ReasoningContent: msg.KimiReasoningContent,
+				ReasoningContent: msg.ReasoningContent,
 			}
 			if len(msg.ToolCalls) > 0 {
 				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) kimiToolCall {
@@ -234,15 +234,14 @@ func buildKimiMessages(messages []Message) []kimiMessage {
 					Role:             models.RoleTool,
 					Content:          msg.ToolResult.Content,
 					ToolCallID:       msg.ToolResult.CallID,
-					ReasoningContent: msg.KimiReasoningContent,
+					ReasoningContent: msg.ReasoningContent,
 				}, true
 			}
 			return kimiMessage{}, false
 		case models.RoleSystem:
 			return kimiMessage{
-				Role:             models.RoleSystem,
-				Content:          msg.Content,
-				ReasoningContent: msg.KimiReasoningContent,
+				Role:    models.RoleSystem,
+				Content: msg.Content,
 			}, true
 		default:
 			return kimiMessage{}, false

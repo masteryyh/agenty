@@ -25,30 +25,70 @@ import (
 	"github.com/pterm/pterm"
 )
 
-type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error)
+type ChatState struct {
+	Thinking      bool
+	ThinkingLevel string
+}
+
+type CommandResult struct {
+	Handled      bool
+	NewSessionID uuid.UUID
+	NewModelID   uuid.UUID
+	ShouldExit   bool
+}
+
+type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
 	"/new":     handleNewCmd,
 	"/status":  handleStatusCmd,
 	"/history": handleHistoryCmd,
 	"/model":   handleModelCmd,
+	"/think":   handleThinkCmd,
 	"/help":    handleHelpCmd,
+	"/exit":    handleExitCmd,
 }
 
-func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID) (handled bool, newSessionID uuid.UUID, newModelID uuid.UUID, err error) {
-	parts := strings.Fields(input)
+func parseSlashInput(input string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+	for _, r := range input {
+		switch {
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t') && !inSingle && !inDouble:
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+
+func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+	parts := parseSlashInput(input)
 	if len(parts) == 0 {
-		return false, uuid.Nil, uuid.Nil, nil
+		return CommandResult{}, nil
 	}
 
 	command := strings.ToLower(parts[0])
 
 	handler, ok := commandRegistry[command]
 	if !ok {
-		return false, uuid.Nil, uuid.Nil, nil
+		return CommandResult{}, nil
 	}
 
-	return handler(c, parts[1:], sessionID, modelID)
+	return handler(c, parts[1:], sessionID, modelID, state)
 }
 
 func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
@@ -90,10 +130,65 @@ func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
 }
 
-func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleExitCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+	pterm.Info.Println("Goodbye!")
+	return CommandResult{Handled: true, ShouldExit: true}, nil
+}
+
+func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) == 0 {
+		if state.Thinking {
+			if state.ThinkingLevel != "" {
+				pterm.Info.Printf("Thinking is %s (level: %s)\n", pterm.FgGreen.Sprint("on"), pterm.FgYellow.Sprint(state.ThinkingLevel))
+			} else {
+				pterm.Info.Printf("Thinking is %s\n", pterm.FgGreen.Sprint("on"))
+			}
+		} else {
+			pterm.Info.Printf("Thinking is %s\n", pterm.FgRed.Sprint("off"))
+		}
+		pterm.Info.Println("Usage: /think [off|<level>]")
+		return CommandResult{Handled: true}, nil
+	}
+
+	arg := strings.ToLower(args[0])
+	if arg == "off" {
+		state.Thinking = false
+		state.ThinkingLevel = ""
+		pterm.Success.Println("Thinking disabled")
+		return CommandResult{Handled: true}, nil
+	}
+
+	supportedLevelsPtr, _ := c.GetModelThinkingLevels(modelID)
+	var supportedLevels []string
+	if supportedLevelsPtr != nil {
+		supportedLevels = *supportedLevelsPtr
+	}
+	valid := false
+	for _, l := range supportedLevels {
+		if l == arg {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		if len(supportedLevels) == 0 {
+			pterm.Error.Printf("Model does not support thinking\n")
+		} else {
+			pterm.Error.Printf("Unknown level: %s. Supported: %s\n", arg, strings.Join(supportedLevels, ", "))
+		}
+		return CommandResult{Handled: true}, nil
+	}
+
+	state.Thinking = true
+	state.ThinkingLevel = arg
+	pterm.Success.Printf("Thinking enabled (level: %s)\n", pterm.FgYellow.Sprint(arg))
+	return CommandResult{Handled: true}, nil
+}
+
+func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := c.CreateSession()
 	if err != nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to create new session: %w", err)
+		return CommandResult{Handled: true}, fmt.Errorf("failed to create new session: %w", err)
 	}
 
 	clearScreen()
@@ -102,13 +197,13 @@ func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 	pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
 	fmt.Println()
 
-	return true, session.ID, uuid.Nil, nil
+	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }
 
-func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to get session: %w", err)
+		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	modelsList, err := c.ListModels(1, 100)
@@ -139,18 +234,18 @@ func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID 
 	pterm.Printf("  Updated: %s\n", pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
 	fmt.Println()
 
-	return true, uuid.Nil, uuid.Nil, nil
+	return CommandResult{Handled: true}, nil
 }
 
-func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("failed to get session: %w", err)
+		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	if len(session.Messages) == 0 {
 		pterm.Info.Println("No message history available")
-		return true, uuid.Nil, uuid.Nil, nil
+		return CommandResult{Handled: true}, nil
 	}
 
 	if err := openHistoryViewer(session.Messages); err != nil {
@@ -161,26 +256,26 @@ func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID
 		fmt.Println()
 	}
 
-	return true, uuid.Nil, uuid.Nil, nil
+	return CommandResult{Handled: true}, nil
 }
 
-func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) == 0 {
-		return true, uuid.Nil, uuid.Nil, fmt.Errorf("usage: /model [provider-name/model-name]")
+		return CommandResult{Handled: true}, fmt.Errorf("usage: /model [provider-name/model-name]")
 	}
 
 	resolvedID, displayName, err := resolveModel(c, args[0])
 	if err != nil {
-		return true, uuid.Nil, uuid.Nil, err
+		return CommandResult{Handled: true}, err
 	}
 
 	pterm.Success.Printf("Switched to model: %s\n", displayName)
-	return true, uuid.Nil, resolvedID, nil
+	return CommandResult{Handled: true, NewModelID: resolvedID}, nil
 }
 
-func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID) (bool, uuid.UUID, uuid.UUID, error) {
+func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
 	PrintCommandHints()
-	return true, uuid.Nil, uuid.Nil, nil
+	return CommandResult{Handled: true}, nil
 }
 
 func clearScreen() {

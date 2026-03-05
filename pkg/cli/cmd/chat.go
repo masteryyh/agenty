@@ -110,6 +110,7 @@ var chatCmd = &cobra.Command{
 func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 	currentSessionID := sessionID
 	currentModelID := modelID
+	chatState := &ChatState{}
 	basePrompt := pterm.FgCyan.Sprint("You: ")
 	var cachedModelNames []string
 	var cachedModelAt time.Time
@@ -137,6 +138,17 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 		return modelNames
 	}
 
+	thinkLevelProvider := func() []string {
+		levels, err := c.GetModelThinkingLevels(currentModelID)
+		if err != nil || levels == nil || len(*levels) == 0 {
+			return []string{"off"}
+		}
+		result := make([]string, 0, len(*levels)+1)
+		result = append(result, "off")
+		result = append(result, *levels...)
+		return result
+	}
+	SetArgCompleter("/think", thinkLevelProvider)
 	SetArgCompleter("/model", modelProvider)
 
 	completer := NewChatCompleter()
@@ -187,24 +199,22 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 			continue
 		}
 
-		if strings.ToLower(input) == "/exit" {
-			pterm.Info.Println("Goodbye!")
-			break
-		}
-
 		if strings.HasPrefix(input, "/") {
-			handled, newSessionID, newModelID, err := handleSlashCommand(c, input, currentSessionID, currentModelID)
+			result, err := handleSlashCommand(c, input, currentSessionID, currentModelID, chatState)
 			if err != nil {
 				pterm.Error.Printf("Command error: %v\n", err)
 				continue
 			}
-			if handled {
-				if newSessionID != uuid.Nil {
-					currentSessionID = newSessionID
+			if result.Handled {
+				if result.ShouldExit {
+					break
+				}
+				if result.NewSessionID != uuid.Nil {
+					currentSessionID = result.NewSessionID
 					rl.SetPrompt(basePrompt)
 				}
-				if newModelID != uuid.Nil {
-					currentModelID = newModelID
+				if result.NewModelID != uuid.Nil {
+					currentModelID = result.NewModelID
 					cachedModelAt = time.Time{}
 					cachedModelNames = nil
 				}
@@ -218,8 +228,10 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 		spinner, _ := pterm.DefaultSpinner.Start("Thinking...")
 
 		messages, err := c.Chat(currentSessionID, &models.ChatDto{
-			ModelID: currentModelID,
-			Message: input,
+			ModelID:       currentModelID,
+			Message:       input,
+			Thinking:      chatState.Thinking,
+			ThinkingLevel: chatState.ThinkingLevel,
 		})
 
 		spinner.Stop()
@@ -230,8 +242,10 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 		}
 
 		fmt.Println()
-		for _, msg := range messages {
-			printMessage(msg)
+		if messages != nil {
+			for _, msg := range *messages {
+				printMessage(msg)
+			}
 		}
 		fmt.Println()
 	}

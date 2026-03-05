@@ -54,6 +54,7 @@ func (r *ModelRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		modelGroup.GET("", r.ListModels)
 		modelGroup.GET("/default", r.GetDefaultModel)
 		modelGroup.GET("/:id", r.GetModel)
+		modelGroup.GET("/:id/thinking-levels", r.GetThinkingLevels)
 		modelGroup.PUT("/by-name", r.UpdateByName)
 		modelGroup.PUT("/:id", r.UpdateModel)
 		modelGroup.DELETE("/:id", r.DeleteModel)
@@ -106,7 +107,7 @@ func (r *ModelRoutes) UpdateByName(c *gin.Context) {
 		response.Failed(c, err)
 		return
 	}
-	response.OK(c, nil)
+	response.OK[any](c, nil)
 }
 
 func (r *ModelRoutes) UpdateModel(c *gin.Context) {
@@ -132,7 +133,7 @@ func (r *ModelRoutes) UpdateModel(c *gin.Context) {
 		response.Failed(c, err)
 		return
 	}
-	response.OK(c, nil)
+	response.OK[any](c, nil)
 }
 
 func (r *ModelRoutes) ListModels(c *gin.Context) {
@@ -189,6 +190,27 @@ func (r *ModelRoutes) GetModel(c *gin.Context) {
 	response.OK(c, model)
 }
 
+func (r *ModelRoutes) GetThinkingLevels(c *gin.Context) {
+	idRaw := c.Param("id")
+	if idRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	modelID, err := uuid.Parse(idRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	levels, err := r.service.GetThinkingLevels(c, modelID)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, levels)
+}
+
 func (r *ModelRoutes) DeleteModel(c *gin.Context) {
 	idRaw := c.Param("id")
 	if idRaw == "" {
@@ -206,5 +228,5 @@ func (r *ModelRoutes) DeleteModel(c *gin.Context) {
 		response.Failed(c, err)
 		return
 	}
-	response.OK(c, nil)
+	response.OK[any](c, nil)
 }
