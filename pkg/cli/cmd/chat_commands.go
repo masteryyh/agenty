@@ -34,10 +34,11 @@ type CommandResult struct {
 	Handled      bool
 	NewSessionID uuid.UUID
 	NewModelID   uuid.UUID
+	NewAgentID   uuid.UUID
 	ShouldExit   bool
 }
 
-type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error)
+type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
 	"/new":     handleNewCmd,
@@ -47,6 +48,7 @@ var commandRegistry = map[string]CommandHandler{
 	"/think":   handleThinkCmd,
 	"/help":    handleHelpCmd,
 	"/exit":    handleExitCmd,
+	"/agent":   handleAgentCmd,
 }
 
 func parseSlashInput(input string) []string {
@@ -75,7 +77,7 @@ func parseSlashInput(input string) []string {
 	return parts
 }
 
-func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	parts := parseSlashInput(input)
 	if len(parts) == 0 {
 		return CommandResult{}, nil
@@ -88,7 +90,7 @@ func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelI
 		return CommandResult{}, nil
 	}
 
-	return handler(c, parts[1:], sessionID, modelID, state)
+	return handler(c, parts[1:], sessionID, modelID, agentID, state)
 }
 
 func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
@@ -130,12 +132,12 @@ func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
 }
 
-func handleExitCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleExitCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	pterm.Info.Println("Goodbye!")
 	return CommandResult{Handled: true, ShouldExit: true}, nil
 }
 
-func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) == 0 {
 		if state.Thinking {
 			if state.ThinkingLevel != "" {
@@ -185,8 +187,13 @@ func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	return CommandResult{Handled: true}, nil
 }
 
-func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
-	session, err := c.CreateSession()
+func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	currentSession, err := c.GetSession(sessionID)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to get current session: %w", err)
+	}
+
+	session, err := c.CreateSession(currentSession.AgentID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to create new session: %w", err)
 	}
@@ -200,7 +207,7 @@ func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }
 
-func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
@@ -237,7 +244,7 @@ func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID 
 	return CommandResult{Handled: true}, nil
 }
 
-func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := c.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
@@ -259,7 +266,7 @@ func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID
 	return CommandResult{Handled: true}, nil
 }
 
-func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) == 0 {
 		return CommandResult{Handled: true}, fmt.Errorf("usage: /model [provider-name/model-name]")
 	}
@@ -273,9 +280,80 @@ func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	return CommandResult{Handled: true, NewModelID: resolvedID}, nil
 }
 
-func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	PrintCommandHints()
 	return CommandResult{Handled: true}, nil
+}
+
+func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) == 0 {
+		if agentID == uuid.Nil {
+			pterm.Info.Println("No agent selected")
+		} else {
+			agent, err := c.GetAgent(agentID)
+			if err != nil {
+				pterm.Info.Printf("Current agent ID: %s\n", agentID)
+			} else {
+				pterm.Info.Printf("Current agent: %s\n", pterm.FgCyan.Sprint(agent.Name))
+			}
+		}
+		pterm.Info.Println("Usage: /agent [agent-name]")
+		return CommandResult{Handled: true}, nil
+	}
+
+	agentName := strings.TrimSpace(args[0])
+	agents, err := c.ListAgents(1, 100)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to list agents: %w", err)
+	}
+
+	var targetAgentID uuid.UUID
+	for _, a := range agents.Data {
+		if strings.EqualFold(a.Name, agentName) {
+			targetAgentID = a.ID
+			break
+		}
+	}
+	if targetAgentID == uuid.Nil {
+		return CommandResult{Handled: true}, fmt.Errorf("agent '%s' not found", agentName)
+	}
+
+	lastSession, err := c.GetLastSessionByAgent(targetAgentID)
+	var newSessionID uuid.UUID
+	if err == nil && lastSession != nil {
+		newSessionID = lastSession.ID
+		clearScreen()
+		pterm.Success.Printf("Switched to agent: %s\n", pterm.FgCyan.Sprint(agentName))
+		pterm.Info.Printf("Resuming last session: %s\n", newSessionID)
+		fmt.Println()
+
+		if len(lastSession.Messages) > 0 {
+			messageCount := len(lastSession.Messages)
+			startIdx := 0
+			if messageCount > 10 {
+				startIdx = messageCount - 10
+				pterm.Info.Printf("Showing last 10 messages (total: %d). Use /history to view all.\n", messageCount)
+			}
+			pterm.DefaultSection.Println("Previous Messages")
+			printMessageHistory(lastSession.Messages[startIdx:])
+			fmt.Println()
+		}
+	} else {
+		newSession, err := c.CreateSession(targetAgentID)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to create session for agent: %w", err)
+		}
+		newSessionID = newSession.ID
+		clearScreen()
+		pterm.Success.Printf("Switched to agent: %s\n", pterm.FgCyan.Sprint(agentName))
+		pterm.Info.Printf("Started new session: %s\n", newSessionID)
+		fmt.Println()
+	}
+
+	pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
+	fmt.Println()
+
+	return CommandResult{Handled: true, NewAgentID: targetAgentID, NewSessionID: newSessionID}, nil
 }
 
 func clearScreen() {

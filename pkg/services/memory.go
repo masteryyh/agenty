@@ -106,7 +106,7 @@ func normalizeVector(vec []float32) []float32 {
 	})
 }
 
-func (s *MemoryService) SaveMemory(ctx context.Context, content string) (*models.MemoryDto, error) {
+func (s *MemoryService) SaveMemory(ctx context.Context, agentID uuid.UUID, content string) (*models.MemoryDto, error) {
 	embedding, err := s.embed(ctx, content)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to embed memory content", "error", err)
@@ -114,6 +114,7 @@ func (s *MemoryService) SaveMemory(ctx context.Context, content string) (*models
 	}
 
 	memory := &models.Memory{
+		AgentID:   agentID,
 		Content:   content,
 		Embedding: pgvector.NewVector(embedding),
 	}
@@ -126,24 +127,24 @@ func (s *MemoryService) SaveMemory(ctx context.Context, content string) (*models
 	return memory.ToDto(), nil
 }
 
-func (s *MemoryService) SearchMemory(ctx context.Context, query string, limit int) ([]models.MemorySearchResult, error) {
+func (s *MemoryService) SearchMemory(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]models.MemorySearchResult, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 
 	searchLimit := limit * 3
 
-	vectorResults, err := s.vectorSearch(ctx, query, searchLimit)
+	vectorResults, err := s.vectorSearch(ctx, agentID, query, searchLimit)
 	if err != nil {
 		slog.ErrorContext(ctx, "vector search failed", "error", err)
 	}
 
-	fullTextResults, err := s.fullTextSearch(ctx, query, searchLimit)
+	fullTextResults, err := s.fullTextSearch(ctx, agentID, query, searchLimit)
 	if err != nil {
 		slog.ErrorContext(ctx, "full text search failed", "error", err)
 	}
 
-	keywordResults, err := s.keywordSearch(ctx, query, searchLimit)
+	keywordResults, err := s.keywordSearch(ctx, agentID, query, searchLimit)
 	if err != nil {
 		slog.ErrorContext(ctx, "keyword search failed", "error", err)
 	}
@@ -152,7 +153,7 @@ func (s *MemoryService) SearchMemory(ctx context.Context, query string, limit in
 	return merged, nil
 }
 
-func (s *MemoryService) vectorSearch(ctx context.Context, query string, limit int) ([]rankedItem, error) {
+func (s *MemoryService) vectorSearch(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]rankedItem, error) {
 	embedding, err := s.embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
@@ -161,7 +162,7 @@ func (s *MemoryService) vectorSearch(ctx context.Context, query string, limit in
 	var memories []models.Memory
 	queryVec := pgvector.NewVector(embedding)
 	err = s.db.WithContext(ctx).
-		Where("deleted_at IS NULL").
+		Where("deleted_at IS NULL AND agent_id = ?", agentID).
 		Clauses(clause.OrderBy{
 			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []any{queryVec}},
 		}).
@@ -176,12 +177,12 @@ func (s *MemoryService) vectorSearch(ctx context.Context, query string, limit in
 	}), nil
 }
 
-func (s *MemoryService) fullTextSearch(ctx context.Context, query string, limit int) ([]rankedItem, error) {
+func (s *MemoryService) fullTextSearch(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]rankedItem, error) {
 	tsQuery := strings.Join(strings.Fields(query), " | ")
 
 	var memories []models.Memory
 	err := s.db.WithContext(ctx).
-		Where("deleted_at IS NULL AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", tsQuery).
+		Where("deleted_at IS NULL AND agent_id = ? AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", agentID, tsQuery).
 		Clauses(clause.OrderBy{
 			Expression: clause.Expr{
 				SQL:  "ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) DESC",
@@ -199,7 +200,7 @@ func (s *MemoryService) fullTextSearch(ctx context.Context, query string, limit 
 	}), nil
 }
 
-func (s *MemoryService) keywordSearch(ctx context.Context, query string, limit int) ([]rankedItem, error) {
+func (s *MemoryService) keywordSearch(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]rankedItem, error) {
 	words := strings.Fields(query)
 	if len(words) == 0 {
 		return nil, nil
@@ -209,7 +210,7 @@ func (s *MemoryService) keywordSearch(ctx context.Context, query string, limit i
 		return "%" + w + "%"
 	})
 
-	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL")
+	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL AND agent_id = ?", agentID)
 	orConditions := s.db.Where("content ILIKE ?", patterns[0])
 	for _, p := range patterns[1:] {
 		orConditions = orConditions.Or("content ILIKE ?", p)

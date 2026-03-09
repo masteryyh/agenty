@@ -39,4 +39,6 @@ func RegisterAll(registry *tools.Registry) {
 		registry.Register(&SaveMemoryTool{memoryService: memoryService})
 		registry.Register(&SearchMemoryTool{memoryService: memoryService})
 	}
+
+	registry.Register(&UpdateSoulTool{agentService: services.GetAgentService()})
 }

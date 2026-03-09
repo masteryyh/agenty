@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
@@ -44,7 +45,7 @@ func (t *mockTool) Definition() ToolDefinition {
 	}
 }
 
-func (t *mockTool) Execute(_ context.Context, _ string) (string, error) {
+func (t *mockTool) Execute(_ context.Context, _ uuid.UUID, _ string) (string, error) {
 	return t.result, t.err
 }
 
@@ -112,7 +113,7 @@ func TestRegistryExecuteSuccess(t *testing.T) {
 	r := newTestRegistry()
 	r.Register(&mockTool{name: "echo", result: "hello world"})
 
-	result := r.Execute(context.Background(), models.ToolCall{
+	result := r.Execute(context.Background(), uuid.Nil, models.ToolCall{
 		ID:        "call_1",
 		Name:      "echo",
 		Arguments: `{"input":"test"}`,
@@ -132,7 +133,7 @@ func TestRegistryExecuteSuccess(t *testing.T) {
 func TestRegistryExecuteToolNotFound(t *testing.T) {
 	r := newTestRegistry()
 
-	result := r.Execute(context.Background(), models.ToolCall{
+	result := r.Execute(context.Background(), uuid.Nil, models.ToolCall{
 		ID:   "call_1",
 		Name: "nonexistent",
 	})
@@ -149,7 +150,7 @@ func TestRegistryExecuteToolError(t *testing.T) {
 	r := newTestRegistry()
 	r.Register(&mockTool{name: "failing", err: fmt.Errorf("tool execution failed")})
 
-	result := r.Execute(context.Background(), models.ToolCall{
+	result := r.Execute(context.Background(), uuid.Nil, models.ToolCall{
 		ID:        "call_1",
 		Name:      "failing",
 		Arguments: `{}`,

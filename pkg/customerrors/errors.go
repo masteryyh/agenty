@@ -29,6 +29,9 @@ var (
 	ErrInternalServerError = NewBusinessError(http.StatusInternalServerError, "internal server error")
 
 	ErrSessionNotFound       = NewBusinessError(http.StatusNotFound, "session not found")
+	ErrAgentNotFound         = NewBusinessError(http.StatusNotFound, "agent not found")
+	ErrAgentAlreadyExists    = NewBusinessError(http.StatusConflict, "agent already exists")
+	ErrDeletingDefaultAgent  = NewBusinessError(http.StatusBadRequest, "default agent cannot be deleted")
 	ErrModelNotFound         = NewBusinessError(http.StatusNotFound, "model not found")
 	ErrModelAlreadyExists    = NewBusinessError(http.StatusConflict, "model already exists")
 	ErrDeletingDefaultModel  = NewBusinessError(http.StatusBadRequest, "default model cannot be deleted")

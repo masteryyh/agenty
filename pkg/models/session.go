@@ -24,6 +24,7 @@ import (
 
 type ChatSession struct {
 	ID            uuid.UUID `gorm:"type:uuid;default:uuidv7();primaryKey"`
+	AgentID       uuid.UUID `gorm:"type:uuid"`
 	TokenConsumed int64     `gorm:"not null;default:0"`
 	LastUsedModel uuid.UUID `gorm:"type:uuid"`
 	CreatedAt     time.Time `gorm:"autoCreateTime:milli"`
@@ -38,6 +39,7 @@ func (ChatSession) TableName() string {
 func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 	dto := &ChatSessionDto{
 		ID:            m.ID,
+		AgentID:       m.AgentID,
 		TokenConsumed: m.TokenConsumed,
 		LastUsedModel: m.LastUsedModel,
 		CreatedAt:     m.CreatedAt,
@@ -52,9 +54,14 @@ func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 
 type ChatSessionDto struct {
 	ID            uuid.UUID        `json:"id"`
+	AgentID       uuid.UUID        `json:"agentId"`
 	TokenConsumed int64            `json:"tokenConsumed"`
 	Messages      []ChatMessageDto `json:"messages"`
 	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
 	CreatedAt     time.Time        `json:"createdAt"`
 	UpdatedAt     time.Time        `json:"updatedAt"`
+}
+
+type CreateSessionDto struct {
+	AgentID uuid.UUID `json:"agentId" binding:"required"`
 }

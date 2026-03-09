@@ -43,10 +43,54 @@ var chatCmd = &cobra.Command{
 
 		c := GetClient()
 
+		agents, err := c.ListAgents(1, 100)
+		if err != nil {
+			return fmt.Errorf("failed to list agents: %w", err)
+		}
+		if len(agents.Data) == 0 {
+			return fmt.Errorf("no agents available, create one first with: agenty agent create")
+		}
+
+		var agentID uuid.UUID
+		if len(agents.Data) == 1 {
+			agentID = agents.Data[0].ID
+			pterm.Info.Printf("Using agent: %s\n", pterm.FgCyan.Sprint(agents.Data[0].Name))
+		} else {
+			var defaultAgent *models.AgentDto
+			for i := range agents.Data {
+				if agents.Data[i].IsDefault {
+					defaultAgent = &agents.Data[i]
+					break
+				}
+			}
+			if defaultAgent != nil {
+				agentID = defaultAgent.ID
+				pterm.Info.Printf("Using default agent: %s\n", pterm.FgCyan.Sprint(defaultAgent.Name))
+			} else {
+				agentNames := make([]string, 0, len(agents.Data))
+				for _, a := range agents.Data {
+					agentNames = append(agentNames, a.Name)
+				}
+				selectedName, err := pterm.DefaultInteractiveSelect.
+					WithOptions(agentNames).
+					WithDefaultText("Select an agent").
+					Show()
+				if err != nil {
+					return fmt.Errorf("agent selection failed: %w", err)
+				}
+				for _, a := range agents.Data {
+					if a.Name == selectedName {
+						agentID = a.ID
+						break
+					}
+				}
+			}
+		}
+
 		var sessionID uuid.UUID
 		var session *models.ChatSessionDto
 
-		lastSession, err := c.GetLastSession()
+		lastSession, err := c.GetLastSessionByAgent(agentID)
 		if err == nil && lastSession != nil {
 			sessionID = lastSession.ID
 			session = lastSession
@@ -56,7 +100,7 @@ var chatCmd = &cobra.Command{
 				pterm.Warning.Printf("Error occurred when looking for last session: %v\n", err)
 			}
 
-			session, err = c.CreateSession()
+			session, err = c.CreateSession(agentID)
 			if err != nil {
 				return fmt.Errorf("failed to create session: %w", err)
 			}
@@ -103,17 +147,41 @@ var chatCmd = &cobra.Command{
 		pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
 		fmt.Println()
 
-		return runChatLoop(c, sessionID, modelID)
+		return runChatLoop(c, sessionID, modelID, agentID)
 	},
 }
 
-func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
+func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID) error {
 	currentSessionID := sessionID
 	currentModelID := modelID
+	currentAgentID := agentID
 	chatState := &ChatState{}
 	basePrompt := pterm.FgCyan.Sprint("You: ")
 	var cachedModelNames []string
 	var cachedModelAt time.Time
+
+	var cachedAgentNames []string
+	var cachedAgentAt time.Time
+
+	agentProvider := func() []string {
+		if len(cachedAgentNames) > 0 && time.Since(cachedAgentAt) < 30*time.Second {
+			return cachedAgentNames
+		}
+		agents, err := c.ListAgents(1, 100)
+		if err != nil {
+			if len(cachedAgentNames) > 0 {
+				return cachedAgentNames
+			}
+			return nil
+		}
+		names := make([]string, 0, len(agents.Data))
+		for _, a := range agents.Data {
+			names = append(names, a.Name)
+		}
+		cachedAgentNames = names
+		cachedAgentAt = time.Now()
+		return names
+	}
 
 	modelProvider := func() []string {
 		if len(cachedModelNames) > 0 && time.Since(cachedModelAt) < 30*time.Second {
@@ -150,6 +218,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 	}
 	SetArgCompleter("/think", thinkLevelProvider)
 	SetArgCompleter("/model", modelProvider)
+	SetArgCompleter("/agent", agentProvider)
 
 	completer := NewChatCompleter()
 	painter := NewHintPainter(basePrompt)
@@ -192,6 +261,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 			return fmt.Errorf("readline error: %w", err)
 		}
 
+		painter.ClearInlineHint(len(line), rl)
 		rl.Write([]byte("\033[J"))
 
 		input := strings.TrimSpace(line)
@@ -200,7 +270,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 		}
 
 		if strings.HasPrefix(input, "/") {
-			result, err := handleSlashCommand(c, input, currentSessionID, currentModelID, chatState)
+			result, err := handleSlashCommand(c, input, currentSessionID, currentModelID, currentAgentID, chatState)
 			if err != nil {
 				pterm.Error.Printf("Command error: %v\n", err)
 				continue
@@ -208,6 +278,11 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID) error {
 			if result.Handled {
 				if result.ShouldExit {
 					break
+				}
+				if result.NewAgentID != uuid.Nil {
+					currentAgentID = result.NewAgentID
+					cachedAgentNames = nil
+					cachedAgentAt = time.Time{}
 				}
 				if result.NewSessionID != uuid.Nil {
 					currentSessionID = result.NewSessionID

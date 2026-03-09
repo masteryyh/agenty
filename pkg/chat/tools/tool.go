@@ -21,6 +21,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
 )
@@ -44,7 +45,7 @@ type ToolDefinition struct {
 
 type Tool interface {
 	Definition() ToolDefinition
-	Execute(ctx context.Context, arguments string) (string, error)
+	Execute(ctx context.Context, agentID uuid.UUID, arguments string) (string, error)
 }
 
 type Registry struct {
@@ -103,7 +104,7 @@ func (r *Registry) Definitions() []ToolDefinition {
 	return result
 }
 
-func (r *Registry) Execute(ctx context.Context, call models.ToolCall) models.ToolResult {
+func (r *Registry) Execute(ctx context.Context, agentID uuid.UUID, call models.ToolCall) models.ToolResult {
 	tool, ok := r.Get(call.Name)
 	if !ok {
 		return models.ToolResult{
@@ -114,7 +115,7 @@ func (r *Registry) Execute(ctx context.Context, call models.ToolCall) models.Too
 		}
 	}
 
-	content, err := tool.Execute(ctx, call.Arguments)
+	content, err := tool.Execute(ctx, agentID, call.Arguments)
 	if err != nil {
 		return models.ToolResult{
 			CallID:  call.ID,

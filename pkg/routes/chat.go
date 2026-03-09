@@ -52,13 +52,20 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		chatGroup.POST("/session", r.CreateSession)
 		chatGroup.GET("/sessions", r.ListSessions)
 		chatGroup.GET("/session/last", r.GetLastSession)
+		chatGroup.GET("/session/last/:agentId", r.GetLastSessionByAgent)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
 		chatGroup.POST("/chat", r.Chat)
 	}
 }
 
 func (r *ChatRoutes) CreateSession(c *gin.Context) {
-	session, err := r.service.CreateSession(c)
+	var dto models.CreateSessionDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	session, err := r.service.CreateSession(c, &dto)
 	if err != nil {
 		response.Failed(c, err)
 		return
@@ -105,6 +112,27 @@ func (r *ChatRoutes) GetSession(c *gin.Context) {
 
 func (r *ChatRoutes) GetLastSession(c *gin.Context) {
 	session, err := r.service.GetLastSession(c)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, session)
+}
+
+func (r *ChatRoutes) GetLastSessionByAgent(c *gin.Context) {
+	agentIDRaw := c.Param("agentId")
+	if agentIDRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	agentID, err := uuid.Parse(agentIDRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	session, err := r.service.GetLastSessionByAgent(c, agentID)
 	if err != nil {
 		response.Failed(c, err)
 		return

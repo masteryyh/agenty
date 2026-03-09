@@ -18,9 +18,11 @@ package conn
 
 import (
 	"context"
-	json "github.com/bytedance/sonic"
 	"log/slog"
 
+	json "github.com/bytedance/sonic"
+
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/models"
 	"gorm.io/gorm"
 )
@@ -177,6 +179,22 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 				}
 				slog.InfoContext(ctx, "created preset model", "provider", pp.Name, "model", pm.Name, "code", pm.Code)
 			}
+		}
+
+		var agentCount int64
+		if err := tx.Model(&models.Agent{}).Where("deleted_at IS NULL").Count(&agentCount).Error; err != nil {
+			return err
+		}
+		if agentCount == 0 {
+			agent := &models.Agent{
+				Name:      "default",
+				Soul:      consts.DefaultAgentSoul,
+				IsDefault: true,
+			}
+			if err := tx.Create(agent).Error; err != nil {
+				return err
+			}
+			slog.InfoContext(ctx, "created default agent", "name", agent.Name)
 		}
 		return nil
 	}); err != nil {
