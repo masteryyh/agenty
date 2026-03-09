@@ -20,37 +20,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/db"
 )
-
-type ChatSession struct {
-	ID            uuid.UUID `gorm:"type:uuid;default:uuidv7();primaryKey"`
-	AgentID       uuid.UUID `gorm:"type:uuid"`
-	TokenConsumed int64     `gorm:"not null;default:0"`
-	LastUsedModel uuid.UUID `gorm:"type:uuid"`
-	CreatedAt     time.Time `gorm:"autoCreateTime:milli"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime:milli"`
-	DeletedAt     *time.Time
-}
-
-func (ChatSession) TableName() string {
-	return "chat_sessions"
-}
-
-func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
-	dto := &ChatSessionDto{
-		ID:            m.ID,
-		AgentID:       m.AgentID,
-		TokenConsumed: m.TokenConsumed,
-		LastUsedModel: m.LastUsedModel,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-	}
-
-	if messages != nil {
-		dto.Messages = messages
-	}
-	return dto
-}
 
 type ChatSessionDto struct {
 	ID            uuid.UUID        `json:"id"`
@@ -60,6 +31,21 @@ type ChatSessionDto struct {
 	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
 	CreatedAt     time.Time        `json:"createdAt"`
 	UpdatedAt     time.Time        `json:"updatedAt"`
+}
+
+func ChatSessionRowToDto(row db.ChatSession, messages []ChatMessageDto) *ChatSessionDto {
+	dto := &ChatSessionDto{
+		ID:            row.ID,
+		AgentID:       row.AgentID,
+		TokenConsumed: row.TokenConsumed,
+		LastUsedModel: row.LastUsedModel,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
+	}
+	if messages != nil {
+		dto.Messages = messages
+	}
+	return dto
 }
 
 type CreateSessionDto struct {

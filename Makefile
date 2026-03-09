@@ -1,4 +1,4 @@
-.PHONY: all build-server build-cli clean test vet fmt
+.PHONY: sqlc all build-server build-cli clean test vet fmt
 
 all: build-server build-cli
 
@@ -25,3 +25,7 @@ vet:
 fmt:
 	@echo "Running go fmt..."
 	go fmt ./...
+
+sqlc:
+	@echo "Generating sqlc..."
+	sqlc generate

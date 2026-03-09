@@ -18,6 +18,8 @@ package services
 
 import (
 	"context"
+	"database/sql"
+	stdjson "encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -27,14 +29,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/customerrors"
+	"github.com/masteryyh/agenty/pkg/db"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/samber/lo"
-	"gorm.io/gorm"
 )
 
 type ModelService struct {
-	db *gorm.DB
+	db      *sql.DB
+	queries *db.Queries
 }
 
 var (
@@ -44,102 +47,103 @@ var (
 
 func GetModelService() *ModelService {
 	modelOnce.Do(func() {
+		sqlDB := conn.GetSQLDB()
 		modelService = &ModelService{
-			db: conn.GetDB(),
+			db:      sqlDB,
+			queries: db.New(sqlDB),
 		}
 	})
 	return modelService
 }
 
 func (s *ModelService) GetDefault(ctx context.Context) (*models.ModelDto, error) {
-	model, err := gorm.G[models.Model](s.db).
-		Where("default_model IS TRUE AND deleted_at IS NULL").
-		First(ctx)
+	modelRow, err := s.queries.GetDefaultModel(ctx)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, customerrors.ErrModelNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find default model", "error", err)
 		return nil, err
 	}
 
-	provider, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-		First(ctx)
+	providerRow, err := s.queries.GetProviderById(ctx, modelRow.ProviderID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, customerrors.ErrProviderNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find provider for default model", "error", err, "provider_id", model.ProviderID)
+		slog.ErrorContext(ctx, "failed to find provider for default model", "error", err, "provider_id", modelRow.ProviderID)
 		return nil, err
 	}
-	return model.ToDto(provider.ToDto()), nil
+	return models.ModelRowToDto(modelRow, models.ModelProviderRowToDto(providerRow)), nil
 }
 
 func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelDto) (*models.ModelDto, error) {
-	var result *models.ModelDto
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		provider, err := gorm.G[models.ModelProvider](tx).
-			Where("id = ? AND deleted_at IS NULL", dto.ProviderID).
-			First(ctx)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return customerrors.ErrProviderNotFound
-			}
-			return err
-		}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to begin transaction", "error", err)
+		return nil, err
+	}
+	defer tx.Rollback()
 
-		nameExists, err := gorm.G[models.Model](tx).
-			Where("name = ? AND provider_id = ? AND deleted_at IS NULL", dto.Name, dto.ProviderID).
-			Count(ctx, "id")
-		if err != nil {
-			return err
-		}
-		if nameExists > 0 {
-			return customerrors.ErrModelAlreadyExists
-		}
+	qtx := s.queries.WithTx(tx)
 
-		codeExists, err := gorm.G[models.Model](tx).
-			Where("code = ? AND provider_id = ? AND deleted_at IS NULL", dto.Code, dto.ProviderID).
-			Count(ctx, "id")
-		if err != nil {
-			return err
-		}
-		if codeExists > 0 {
-			return customerrors.ErrModelAlreadyExists
-		}
-
-		model := &models.Model{
-			ProviderID: dto.ProviderID,
-			Name:       dto.Name,
-			Code:       dto.Code,
-			Thinking:   dto.Thinking,
-		}
-
-		if dto.Thinking && len(dto.ThinkingLevels) > 0 {
-			thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
-			if err != nil {
-				return err
-			}
-			model.ThinkingLevels = thinkingLevels
-		}
-
-		if dto.Thinking && provider.Type == "anthropic" && dto.AnthropicAdaptiveThinking {
-			model.AnthropicAdaptiveThinking = true
-		}
-
-		if err := gorm.G[models.Model](tx).Create(ctx, model); err != nil {
-			return err
-		}
-		result = model.ToDto(nil)
-		return nil
-	}); err != nil {
-		if customerrors.GetBusinessError(err) == nil {
-			slog.ErrorContext(ctx, "failed to create model", "error", err)
+	providerRow, err := qtx.GetProviderById(ctx, dto.ProviderID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, customerrors.ErrProviderNotFound
 		}
 		return nil, err
 	}
-	return result, nil
+
+	nameCount, err := qtx.CountModelsByName(ctx, db.CountModelsByNameParams{
+		Name:       dto.Name,
+		ProviderID: dto.ProviderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if nameCount > 0 {
+		return nil, customerrors.ErrModelAlreadyExists
+	}
+
+	codeCount, err := qtx.CountModelsByCode(ctx, db.CountModelsByCodeParams{
+		Code:       dto.Code,
+		ProviderID: dto.ProviderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if codeCount > 0 {
+		return nil, customerrors.ErrModelAlreadyExists
+	}
+
+	thinkingLevels := stdjson.RawMessage("[]")
+	if dto.Thinking && len(dto.ThinkingLevels) > 0 {
+		if tl, merr := json.Marshal(dto.ThinkingLevels); merr == nil {
+			thinkingLevels = tl
+		}
+	}
+
+	adaptiveThinking := dto.Thinking && providerRow.Type == string(models.APITypeAnthropic) && dto.AnthropicAdaptiveThinking
+
+	row, err := qtx.CreateModel(ctx, db.CreateModelParams{
+		ProviderID:                dto.ProviderID,
+		Name:                      dto.Name,
+		Code:                      dto.Code,
+		DefaultModel:              false,
+		Thinking:                  dto.Thinking,
+		ThinkingLevels:            thinkingLevels,
+		AnthropicAdaptiveThinking: adaptiveThinking,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.ErrorContext(ctx, "failed to create model", "error", err)
+		return nil, err
+	}
+	return models.ModelRowToDto(row, nil), nil
 }
 
 func (s *ModelService) UpdateByName(ctx context.Context, name string, dto *models.UpdateModelDto) error {
@@ -153,199 +157,182 @@ func (s *ModelService) UpdateByName(ctx context.Context, name string, dto *model
 	}
 	providerName, modelName := parts[0], parts[1]
 
-	provider, err := gorm.G[models.ModelProvider](s.db).
-		Where("name = ? AND deleted_at IS NULL", providerName).
-		First(ctx)
+	providerRow, err := s.queries.GetProviderByName(ctx, providerName)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return customerrors.ErrProviderNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find provider", "error", err, "providerName", providerName)
 		return err
 	}
 
-	model, err := gorm.G[models.Model](s.db).
-		Where("name = ? AND provider_id = ? AND deleted_at IS NULL", modelName, provider.ID).
-		First(ctx)
+	modelRow, err := s.queries.GetModelByNameAndProvider(ctx, db.GetModelByNameAndProviderParams{
+		Name:       modelName,
+		ProviderID: providerRow.ID,
+	})
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return customerrors.ErrModelNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelName", modelName, "providerId", provider.ID)
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelName", modelName, "providerId", providerRow.ID)
 		return err
 	}
-	return s.UpdateModel(ctx, model.ID, dto)
+	return s.UpdateModel(ctx, modelRow.ID, dto)
 }
 
 func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *models.UpdateModelDto) error {
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		model, err := gorm.G[models.Model](tx).
-			Where("id = ? AND deleted_at IS NULL", modelID).
-			First(ctx)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := s.queries.WithTx(tx)
+
+	modelRow, err := qtx.GetModelById(ctx, modelID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return customerrors.ErrModelNotFound
+		}
+		return err
+	}
+
+	name := modelRow.Name
+	if dto.Name != "" && dto.Name != modelRow.Name {
+		count, err := qtx.CountModelsByNameExcluding(ctx, db.CountModelsByNameExcludingParams{
+			Name:       dto.Name,
+			ProviderID: modelRow.ProviderID,
+			ID:         modelID,
+		})
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return customerrors.ErrModelNotFound
-			}
 			return err
 		}
+		if count > 0 {
+			return customerrors.ErrModelAlreadyExists
+		}
+		name = dto.Name
+	}
 
-		if dto.Name != "" && dto.Name != model.Name {
-			exists, err := gorm.G[models.Model](tx).
-				Where("name = ? AND provider_id = ? AND id != ? AND deleted_at IS NULL", dto.Name, model.ProviderID, modelID).
-				Count(ctx, "id")
-			if err != nil {
+	if !dto.DefaultModel {
+		if err := qtx.SetModelDefaultFalse(ctx, modelID); err != nil {
+			return err
+		}
+	} else {
+		currentDefault, err := qtx.GetCurrentDefaultExcluding(ctx, modelID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if currentDefault.ID != uuid.Nil {
+			if err := qtx.SetModelDefaultFalse(ctx, currentDefault.ID); err != nil {
 				return err
 			}
-
-			if exists > 0 {
-				return customerrors.ErrModelAlreadyExists
-			}
-			model.Name = dto.Name
 		}
-
-		if !dto.DefaultModel {
-			model.DefaultModel = false
-		} else {
-			currentDefaultModel, err := gorm.G[models.Model](tx).
-				Where("default_model IS TRUE AND id != ? AND deleted_at IS NULL", modelID).
-				First(ctx)
-			if err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return err
-				}
-			}
-
-			if currentDefaultModel.ID != uuid.Nil {
-				_, err := gorm.G[models.Model](tx).
-					Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
-					Update(ctx, "default_model", false)
-				if err != nil {
-					return err
-				}
-			}
-			model.DefaultModel = true
-		}
-
-		model.Thinking = dto.Thinking
-		if !dto.Thinking {
-			model.ThinkingLevels = nil
-			model.AnthropicAdaptiveThinking = false
-		} else {
-			if len(dto.ThinkingLevels) > 0 {
-				thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
-				if err != nil {
-					return err
-				}
-				model.ThinkingLevels = thinkingLevels
-			}
-
-			if dto.AnthropicAdaptiveThinking {
-				provider, err := gorm.G[models.ModelProvider](tx).
-					Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-					First(ctx)
-				if err != nil {
-					if errors.Is(err, gorm.ErrRecordNotFound) {
-						return customerrors.ErrProviderNotFound
-					}
-					return err
-				}
-				if provider.Type == models.APITypeAnthropic {
-					model.AnthropicAdaptiveThinking = true
-				}
-			} else {
-				model.AnthropicAdaptiveThinking = false
-			}
-		}
-
-		if _, err := gorm.G[models.Model](tx).
-			Where("id = ? AND deleted_at IS NULL", modelID).
-			Updates(ctx, model); err != nil {
+		if err := qtx.SetModelAsDefault(ctx, modelID); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		if customerrors.GetBusinessError(err) == nil {
-			slog.ErrorContext(ctx, "failed to update model", "error", err, "modelId", modelID)
+	}
+
+	thinkingLevels := stdjson.RawMessage("[]")
+	if dto.Thinking && len(dto.ThinkingLevels) > 0 {
+		if tl, merr := json.Marshal(dto.ThinkingLevels); merr == nil {
+			thinkingLevels = tl
 		}
+	}
+
+	adaptiveThinking := false
+	if dto.Thinking && dto.AnthropicAdaptiveThinking {
+		providerRow, err := qtx.GetProviderById(ctx, modelRow.ProviderID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return customerrors.ErrProviderNotFound
+			}
+			return err
+		}
+		if providerRow.Type == string(models.APITypeAnthropic) {
+			adaptiveThinking = true
+		}
+	}
+
+	if err := qtx.UpdateModelFields(ctx, db.UpdateModelFieldsParams{
+		ID:                        modelID,
+		Name:                      name,
+		Thinking:                  dto.Thinking,
+		ThinkingLevels:            thinkingLevels,
+		AnthropicAdaptiveThinking: adaptiveThinking,
+	}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.ErrorContext(ctx, "failed to update model", "error", err, "modelId", modelID)
 		return err
 	}
 	return nil
 }
 
 func (s *ModelService) GetModel(ctx context.Context, modelID uuid.UUID) (*models.ModelDto, error) {
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		First(ctx)
+	modelRow, err := s.queries.GetModelById(ctx, modelID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, customerrors.ErrModelNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return nil, err
 	}
 
-	provider, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-		First(ctx)
+	providerRow, err := s.queries.GetProviderById(ctx, modelRow.ProviderID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, customerrors.ErrProviderNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find provider for model", "error", err, "provider_id", model.ProviderID)
+		slog.ErrorContext(ctx, "failed to find provider for model", "error", err, "provider_id", modelRow.ProviderID)
 		return nil, err
 	}
-	return model.ToDto(provider.ToDto()), nil
+	return models.ModelRowToDto(modelRow, models.ModelProviderRowToDto(providerRow)), nil
 }
 
 func (s *ModelService) ListModels(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.ModelDto], error) {
-	modelsResult, err := gorm.G[models.Model](s.db).
-		Where("deleted_at IS NULL").
-		Offset((request.Page - 1) * request.PageSize).
-		Limit(request.PageSize).
-		Order("created_at DESC").
-		Find(ctx)
+	rows, err := s.queries.ListModels(ctx, db.ListModelsParams{
+		Limit:  int32(request.PageSize),
+		Offset: int32((request.Page - 1) * request.PageSize),
+	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to list models", "error", err)
 		return nil, err
 	}
 
-	countResult, err := gorm.G[models.Model](s.db).
-		Where("deleted_at IS NULL").
-		Count(ctx, "id")
+	total, err := s.queries.CountModels(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to count models", "error", err)
 		return nil, err
 	}
 
-	if len(modelsResult) == 0 {
+	if len(rows) == 0 {
 		return &pagination.PagedResponse[models.ModelDto]{
-			Total:    countResult,
+			Total:    total,
 			PageSize: request.PageSize,
 			Page:     request.Page,
 			Data:     []models.ModelDto{},
 		}, nil
 	}
 
-	providerIds := lo.Uniq(lo.Map(modelsResult, func(m models.Model, _ int) uuid.UUID {
-		return m.ProviderID
-	}))
-	providers, err := gorm.G[models.ModelProvider](s.db).
-		Where("id IN ? AND deleted_at IS NULL", providerIds).
-		Find(ctx)
+	providerIDs := lo.Uniq(lo.Map(rows, func(r db.Model, _ int) uuid.UUID { return r.ProviderID }))
+	providerMap := make(map[uuid.UUID]*models.ModelProviderDto, len(providerIDs))
+	providerRows, err := s.queries.ListProvidersByIds(ctx, providerIDs)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to find model providers", "error", err)
 		return nil, err
 	}
-	providerMap := lo.Associate(providers, func(p models.ModelProvider) (uuid.UUID, *models.ModelProviderDto) {
-		return p.ID, p.ToDto()
-	})
+	for _, prow := range providerRows {
+		providerMap[prow.ID] = models.ModelProviderRowToDto(prow)
+	}
 
-	dtos := lo.Map(modelsResult, func(m models.Model, _ int) models.ModelDto {
-		return *m.ToDto(providerMap[m.ProviderID])
+	dtos := lo.Map(rows, func(r db.Model, _ int) models.ModelDto {
+		return *models.ModelRowToDto(r, providerMap[r.ProviderID])
 	})
 
 	return &pagination.PagedResponse[models.ModelDto]{
-		Total:    countResult,
+		Total:    total,
 		PageSize: request.PageSize,
 		Page:     request.Page,
 		Data:     dtos,
@@ -353,42 +340,32 @@ func (s *ModelService) ListModels(ctx context.Context, request *pagination.PageR
 }
 
 func (s *ModelService) ListModelsByProvider(ctx context.Context, providerID uuid.UUID, request *pagination.PageRequest) (*pagination.PagedResponse[models.ModelDto], error) {
-	providerExists, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", providerID).
-		Count(ctx, "id")
-	if err != nil {
+	if _, err := s.queries.GetProviderById(ctx, providerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, customerrors.ErrProviderNotFound
+		}
 		slog.ErrorContext(ctx, "failed to check provider existence", "error", err)
 		return nil, err
 	}
-	if providerExists == 0 {
-		return nil, customerrors.ErrProviderNotFound
-	}
 
-	var dtos []models.ModelDto
-	var total int64
-
-	modelsResult, err := gorm.G[models.Model](s.db).
-		Where("provider_id = ? AND deleted_at IS NULL", providerID).
-		Offset((request.Page - 1) * request.PageSize).
-		Limit(request.PageSize).
-		Order("created_at DESC").
-		Find(ctx)
+	rows, err := s.queries.ListModelsByProvider(ctx, db.ListModelsByProviderParams{
+		ProviderID: providerID,
+		Limit:      int32(request.PageSize),
+		Offset:     int32((request.Page - 1) * request.PageSize),
+	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to find models", "error", err)
 		return nil, err
 	}
 
-	countResult, err := gorm.G[models.Model](s.db).
-		Where("provider_id = ? AND deleted_at IS NULL", providerID).
-		Count(ctx, "id")
+	total, err := s.queries.CountModelsByProvider(ctx, providerID)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to count models", "error", err)
 		return nil, err
 	}
-	total = countResult
 
-	dtos = lo.Map(modelsResult, func(m models.Model, _ int) models.ModelDto {
-		return *m.ToDto(nil)
+	dtos := lo.Map(rows, func(r db.Model, _ int) models.ModelDto {
+		return *models.ModelRowToDto(r, nil)
 	})
 
 	return &pagination.PagedResponse[models.ModelDto]{
@@ -400,27 +377,25 @@ func (s *ModelService) ListModelsByProvider(ctx context.Context, providerID uuid
 }
 
 func (s *ModelService) GetThinkingLevels(ctx context.Context, modelID uuid.UUID) ([]string, error) {
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		First(ctx)
+	modelRow, err := s.queries.GetModelById(ctx, modelID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, customerrors.ErrModelNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return nil, err
 	}
 
-	if !model.Thinking {
+	if !modelRow.Thinking {
 		return []string{}, nil
 	}
 
-	if model.AnthropicAdaptiveThinking {
+	if modelRow.AnthropicAdaptiveThinking {
 		return []string{"adaptive"}, nil
 	}
 
 	var levels []string
-	if err := json.Unmarshal(model.ThinkingLevels, &levels); err != nil {
+	if err := json.Unmarshal(modelRow.ThinkingLevels, &levels); err != nil {
 		return []string{}, nil
 	}
 
@@ -431,28 +406,22 @@ func (s *ModelService) GetThinkingLevels(ctx context.Context, modelID uuid.UUID)
 }
 
 func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error {
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		First(ctx)
+	modelRow, err := s.queries.GetModelById(ctx, modelID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return customerrors.ErrModelNotFound
 		}
-
 		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return err
 	}
 
-	if model.DefaultModel {
+	if modelRow.DefaultModel {
 		return customerrors.ErrDeletingDefaultModel
 	}
 
-	if _, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+	if err := s.queries.SoftDeleteModel(ctx, modelID); err != nil {
 		slog.ErrorContext(ctx, "failed to delete model", "error", err, "modelId", modelID)
 		return err
 	}
-
 	return nil
 }

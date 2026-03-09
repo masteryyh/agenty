@@ -20,22 +20,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pgvector/pgvector-go"
+	"github.com/masteryyh/agenty/pkg/db"
 )
-
-type Memory struct {
-	ID        uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	AgentID   uuid.UUID       `gorm:"type:uuid"`
-	Content   string          `gorm:"type:text;not null"`
-	Embedding pgvector.Vector `gorm:"type:vector(1536);not null"`
-	CreatedAt time.Time       `gorm:"autoCreateTime:milli"`
-	UpdatedAt time.Time       `gorm:"autoUpdateTime:milli"`
-	DeletedAt *time.Time
-}
-
-func (Memory) TableName() string {
-	return "memories"
-}
 
 type MemoryDto struct {
 	ID        uuid.UUID `json:"id"`
@@ -45,13 +31,13 @@ type MemoryDto struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-func (m *Memory) ToDto() *MemoryDto {
+func MemoryRowToDto(row db.CreateMemoryRow) *MemoryDto {
 	return &MemoryDto{
-		ID:        m.ID,
-		AgentID:   m.AgentID,
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		ID:        row.ID,
+		AgentID:   row.AgentID,
+		Content:   row.Content,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
 	}
 }
 
