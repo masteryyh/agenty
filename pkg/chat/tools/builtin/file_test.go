@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	json "github.com/bytedance/sonic"
+	"github.com/google/uuid"
 )
 
 func TestReadFileTool(t *testing.T) {
@@ -35,7 +36,7 @@ func TestReadFileTool(t *testing.T) {
 
 	tool := &ReadFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path})
-	result, err := tool.Execute(context.Background(), args)
+	result, err := tool.Execute(context.Background(), uuid.Nil, args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestReadFileToolNotFound(t *testing.T) {
 
 	tool := &ReadFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path})
-	_, err := tool.Execute(context.Background(), args)
+	_, err := tool.Execute(context.Background(), uuid.Nil, args)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -62,7 +63,7 @@ func TestWriteFileTool(t *testing.T) {
 
 	tool := &WriteFileTool{}
 	args, _ := json.MarshalString(map[string]string{"path": path, "content": "test content"})
-	result, err := tool.Execute(context.Background(), args)
+	result, err := tool.Execute(context.Background(), uuid.Nil, args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestListDirectoryTool(t *testing.T) {
 
 	tool := &ListDirectoryTool{}
 	args, _ := json.MarshalString(map[string]string{"path": dir})
-	result, err := tool.Execute(context.Background(), args)
+	result, err := tool.Execute(context.Background(), uuid.Nil, args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestReadFileToolLineRange(t *testing.T) {
 	tool := &ReadFileTool{}
 
 	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 4})
-	result, err := tool.Execute(context.Background(), string(args))
+	result, err := tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,13 +123,13 @@ func TestReadFileToolLineRange(t *testing.T) {
 	}
 
 	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 10, "endLine": 12})
-	_, err = tool.Execute(context.Background(), string(args))
+	_, err = tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err == nil {
 		t.Fatal("expected error for out-of-range startLine")
 	}
 
 	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 3, "endLine": 2})
-	_, err = tool.Execute(context.Background(), string(args))
+	_, err = tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err == nil {
 		t.Fatal("expected error for startLine > endLine")
 	}
@@ -149,7 +150,7 @@ func TestReplaceInFileTool(t *testing.T) {
 		"endLine":    3,
 		"newContent": "replaced2\nreplaced3",
 	})
-	result, err := tool.Execute(context.Background(), string(args))
+	result, err := tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -177,19 +178,19 @@ func TestReplaceInFileToolErrors(t *testing.T) {
 	tool := &ReplaceInFileTool{}
 
 	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 0, "endLine": 1, "newContent": "x"})
-	_, err := tool.Execute(context.Background(), string(args))
+	_, err := tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err == nil {
 		t.Fatal("expected error for startLine < 1")
 	}
 
 	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 1, "newContent": "x"})
-	_, err = tool.Execute(context.Background(), string(args))
+	_, err = tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err == nil {
 		t.Fatal("expected error for endLine < startLine")
 	}
 
 	args, _ = json.Marshal(map[string]any{"path": filepath.Join(dir, "missing.txt"), "startLine": 1, "endLine": 1, "newContent": "x"})
-	_, err = tool.Execute(context.Background(), string(args))
+	_, err = tool.Execute(context.Background(), uuid.Nil, string(args))
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}

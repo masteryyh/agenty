@@ -34,7 +34,6 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
-	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -43,7 +42,6 @@ import (
 type ChatService struct {
 	chatExecutor  *chat.ChatExecutor
 	db            *gorm.DB
-	memoryService *MemoryService
 }
 
 var (
@@ -56,13 +54,23 @@ func GetChatService() *ChatService {
 		chatService = &ChatService{
 			chatExecutor:  chat.GetChatExecutor(),
 			db:            conn.GetDB(),
-			memoryService: GetMemoryService(),
 		}
 	})
 	return chatService
 }
 
-func (s *ChatService) CreateSession(ctx context.Context) (*models.ChatSessionDto, error) {
+func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessionDto) (*models.ChatSessionDto, error) {
+	_, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", dto.AgentID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrAgentNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find agent for new session", "error", err, "agentId", dto.AgentID)
+		return nil, err
+	}
+
 	defaultModel, err := gorm.G[models.Model](s.db).
 		Where("default_model IS true AND deleted_at IS NULL").
 		First(ctx)
@@ -97,6 +105,7 @@ func (s *ChatService) CreateSession(ctx context.Context) (*models.ChatSessionDto
 	}
 
 	session := &models.ChatSession{
+		AgentID:       dto.AgentID,
 		LastUsedModel: defaultModel.ID,
 	}
 	if err := gorm.G[models.ChatSession](s.db).Create(ctx, session); err != nil {
@@ -199,6 +208,51 @@ func (s *ChatService) GetLastSession(ctx context.Context) (*models.ChatSessionDt
 	return session.ToDto(messageDtos), nil
 }
 
+func (s *ChatService) GetLastSessionByAgent(ctx context.Context, agentID uuid.UUID) (*models.ChatSessionDto, error) {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("agent_id = ? AND deleted_at IS NULL", agentID).
+		Order("updated_at DESC").
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		slog.ErrorContext(ctx, "failed to find last chat session by agent", "error", err, "agentId", agentID)
+		return nil, err
+	}
+
+	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
+		Where("session_id = ? AND deleted_at IS NULL", session.ID).
+		Order("created_at ASC").
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find chat messages", "error", err, "sessionId", session.ID)
+		return nil, err
+	}
+	if len(chatMessages) == 0 {
+		return session.ToDto(nil), nil
+	}
+
+	modelIds := lo.Uniq(lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) uuid.UUID {
+		return cm.ModelID
+	}))
+	chatModels, err := gorm.G[models.Model](s.db).
+		Where("id IN ? AND deleted_at IS NULL", modelIds).
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find models for chat messages", "error", err, "modelIds", modelIds)
+		return nil, err
+	}
+	modelMap := lo.Associate(chatModels, func(m models.Model) (uuid.UUID, *models.ModelDto) {
+		return m.ID, m.ToDto(nil)
+	})
+
+	messageDtos := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) models.ChatMessageDto {
+		return *cm.ToDto(modelMap[cm.ModelID])
+	})
+	return session.ToDto(messageDtos), nil
+}
+
 func (s *ChatService) ListSessions(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.ChatSessionDto], error) {
 	var dtos []models.ChatSessionDto
 	var total int64
@@ -274,6 +328,28 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, customerrors.ErrProviderNotConfigured
 	}
 
+	agent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", session.AgentID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrAgentNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", session.AgentID)
+		return nil, err
+	}
+
+	var systemPromptBuilder strings.Builder
+	if err := consts.AgentBasePrompt.Execute(&systemPromptBuilder, map[string]any{
+		"DateTime":  time.Now().Format(time.RFC3339),
+		"AgentName": agent.Name,
+		"AgentID":   agent.ID,
+		"Soul":      agent.Soul,
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
+		return nil, err
+	}
+
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
 		Where("session_id = ? AND deleted_at IS NULL", session.ID).
 		Order("created_at ASC").
@@ -347,6 +423,10 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 
 		return msg
 	})
+	messages = append([]provider.Message{{
+		Role:    models.RoleSystem,
+		Content: systemPromptBuilder.String(),
+	}}, messages...)
 	messages = append(messages, provider.Message{
 		Role:    models.RoleUser,
 		Content: data.Message,
@@ -354,6 +434,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 
 	newUserMessage := models.ChatMessage{
 		SessionID: session.ID,
+		AgentID:   session.AgentID,
 		Role:      models.RoleUser,
 		Content:   data.Message,
 		ModelID:   model.ID,
@@ -369,6 +450,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		APIKey:                    chatProvider.APIKey,
 		Model:                     model.Code,
 		Messages:                  messages,
+		AgentID:                   session.AgentID,
 		APIType:                   chatProvider.Type,
 		Thinking:                  data.Thinking && model.Thinking,
 		ThinkingLevel:             data.ThinkingLevel,
@@ -400,6 +482,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 
 		chatMsg := models.ChatMessage{
 			SessionID:        session.ID,
+			AgentID:          session.AgentID,
 			Role:             models.MessageRole(m.Role),
 			Content:          m.Content,
 			ToolCalls:        datatypes.JSON(rawCalls),
@@ -493,6 +576,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 
 		return &models.ChatMessageDto{
 			ID:                m.ID,
+			AgentID:           m.AgentID,
 			Role:              m.Role,
 			Content:           m.Content,
 			ToolCalls:         toolCalls,
@@ -502,105 +586,5 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			CreatedAt:         m.CreatedAt,
 		}
 	})
-
-	if s.memoryService.IsEnabled() {
-		safe.GoSafeWithCtx("auto-memory", ctx, func(bgCtx context.Context) {
-			s.evaluateAndSaveMemory(bgCtx, data.Message, result.Messages, chatProvider, model)
-		})
-	}
-
 	return messageDtos, nil
-}
-
-func (s *ChatService) evaluateAndSaveMemory(ctx context.Context, userMessage string, assistantMessages []provider.Message, chatProvider models.ModelProvider, model models.Model) {
-	var sb strings.Builder
-	sb.WriteString("User: ")
-	sb.WriteString(userMessage)
-	sb.WriteString("\n")
-	for _, msg := range assistantMessages {
-		if msg.Role == models.RoleAssistant && msg.Content != "" {
-			sb.WriteString("Assistant: ")
-			sb.WriteString(msg.Content)
-			sb.WriteString("\n")
-		}
-	}
-
-	var promptBuilder strings.Builder
-	if err := consts.MemoryEvalPrompt.Execute(&promptBuilder, map[string]any{
-		"DateTime": time.Now().Format(time.RFC3339),
-	}); err != nil {
-		slog.ErrorContext(ctx, "failed to execute memory evaluation prompt", "error", err)
-		return
-	}
-
-	evalMessages := []provider.Message{
-		{Role: models.RoleSystem, Content: promptBuilder.String()},
-		{Role: models.RoleUser, Content: sb.String()},
-	}
-
-	responseFormat := &provider.ResponseFormat{Type: "json_object"}
-	if chatProvider.Type == models.APITypeOpenAI || chatProvider.Type == models.APITypeOpenAILegacy {
-		responseFormat = &provider.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &provider.JSONSchemaFormat{
-				Name:        "memory_evaluation",
-				Description: "Extract facts from conversation for long-term memory",
-				Strict:      true,
-				Schema: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"facts": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "string",
-							},
-						},
-					},
-					"required":             []string{"facts"},
-					"additionalProperties": false,
-				},
-			},
-		}
-	}
-
-	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:        chatProvider.BaseURL,
-		APIKey:         chatProvider.APIKey,
-		Model:          model.Code,
-		Messages:       evalMessages,
-		APIType:        chatProvider.Type,
-		ResponseFormat: responseFormat,
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "memory evaluation failed", "error", err)
-		return
-	}
-
-	for _, msg := range result.Messages {
-		if msg.Role == models.RoleAssistant && msg.Content != "" {
-			var evalResult struct {
-				Facts []string `json:"facts"`
-			}
-			if err := json.Unmarshal([]byte(msg.Content), &evalResult); err != nil {
-				slog.ErrorContext(ctx, "failed to parse memory evaluation result", "error", err, "content", msg.Content)
-				return
-			}
-
-			if len(evalResult.Facts) == 0 {
-				return
-			}
-
-			for _, fact := range evalResult.Facts {
-				fact = strings.TrimSpace(fact)
-				if fact != "" {
-					if _, err := s.memoryService.SaveMemory(ctx, fact); err != nil {
-						slog.ErrorContext(ctx, "failed to auto-save memory", "error", err, "fact", fact)
-					} else {
-						slog.InfoContext(ctx, "auto-saved memory", "fact", fact)
-					}
-				}
-			}
-			return
-		}
-	}
 }

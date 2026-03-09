@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
@@ -65,6 +66,7 @@ func GetChatExecutor() *ChatExecutor {
 type ChatParams struct {
 	Messages                  []provider.Message
 	Model                     string
+	AgentID                   uuid.UUID
 	Thinking                  bool
 	ThinkingLevel             string
 	AnthropicAdaptiveThinking bool
@@ -128,7 +130,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 		for _, tc := range resp.ToolCalls {
 			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
-			result := ce.registry.Execute(ctx, tc)
+			result := ce.registry.Execute(ctx, params.AgentID, tc)
 
 			toolMsg := provider.Message{
 				Role:       models.RoleTool,

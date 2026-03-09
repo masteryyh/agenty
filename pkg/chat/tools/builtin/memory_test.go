@@ -19,6 +19,8 @@ package builtin
 import (
 	"context"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestSaveMemoryToolDefinition(t *testing.T) {
@@ -53,7 +55,7 @@ func TestSearchMemoryToolDefinition(t *testing.T) {
 
 func TestSaveMemoryToolEmptyContent(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(context.Background(), `{"content": ""}`)
+	_, err := tool.Execute(context.Background(), uuid.Nil, `{"content": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty content")
 	}
@@ -61,7 +63,7 @@ func TestSaveMemoryToolEmptyContent(t *testing.T) {
 
 func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(context.Background(), `invalid json`)
+	_, err := tool.Execute(context.Background(), uuid.Nil, `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -69,7 +71,7 @@ func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 
 func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), `{"query": ""}`)
+	_, err := tool.Execute(context.Background(), uuid.Nil, `{"query": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty query")
 	}
@@ -77,7 +79,7 @@ func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 
 func TestSearchMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), `invalid json`)
+	_, err := tool.Execute(context.Background(), uuid.Nil, `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}

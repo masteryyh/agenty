@@ -149,8 +149,8 @@ func (c *Client) ListSessions(page, pageSize int) (*pagination.PagedResponse[mod
 	return doRequest[pagination.PagedResponse[models.ChatSessionDto]](c, "GET", fmt.Sprintf("/api/v1/chats/sessions?page=%d&pageSize=%d", page, pageSize), nil)
 }
 
-func (c *Client) CreateSession() (*models.ChatSessionDto, error) {
-	return doRequest[models.ChatSessionDto](c, "POST", "/api/v1/chats/session", nil)
+func (c *Client) CreateSession(agentID uuid.UUID) (*models.ChatSessionDto, error) {
+	return doRequest[models.ChatSessionDto](c, "POST", "/api/v1/chats/session", &models.CreateSessionDto{AgentID: agentID})
 }
 
 func (c *Client) GetSession(sessionID uuid.UUID) (*models.ChatSessionDto, error) {
@@ -161,10 +161,36 @@ func (c *Client) GetLastSession() (*models.ChatSessionDto, error) {
 	return doRequest[models.ChatSessionDto](c, "GET", "/api/v1/chats/session/last", nil)
 }
 
+func (c *Client) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDto, error) {
+	return doRequest[models.ChatSessionDto](c, "GET", fmt.Sprintf("/api/v1/chats/session/last/%s", agentID), nil)
+}
+
 func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
 }
 
 func (c *Client) GetModelThinkingLevels(modelID uuid.UUID) (*[]string, error) {
 	return doRequest[[]string](c, "GET", fmt.Sprintf("/api/v1/models/%s/thinking-levels", modelID), nil)
+}
+
+func (c *Client) ListAgents(page, pageSize int) (*pagination.PagedResponse[models.AgentDto], error) {
+	return doRequest[pagination.PagedResponse[models.AgentDto]](c, "GET", fmt.Sprintf("/api/v1/agents?page=%d&pageSize=%d", page, pageSize), nil)
+}
+
+func (c *Client) GetAgent(agentID uuid.UUID) (*models.AgentDto, error) {
+	return doRequest[models.AgentDto](c, "GET", fmt.Sprintf("/api/v1/agents/%s", agentID), nil)
+}
+
+func (c *Client) CreateAgent(dto *models.CreateAgentDto) (*models.AgentDto, error) {
+	return doRequest[models.AgentDto](c, "POST", "/api/v1/agents", dto)
+}
+
+func (c *Client) UpdateAgent(agentID uuid.UUID, dto *models.UpdateAgentDto) error {
+	_, err := doRequest[any](c, "PUT", fmt.Sprintf("/api/v1/agents/%s", agentID), dto)
+	return err
+}
+
+func (c *Client) DeleteAgent(agentID uuid.UUID) error {
+	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/agents/%s", agentID), nil)
+	return err
 }

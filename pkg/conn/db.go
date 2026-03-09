@@ -59,6 +59,7 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 				&models.ModelProvider{},
 				&models.Model{},
 				&models.Memory{},
+				&models.Agent{},
 			); migrateErr != nil {
 			err = migrateErr
 			return

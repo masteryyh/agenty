@@ -25,6 +25,7 @@ import (
 
 type Memory struct {
 	ID        uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	AgentID   uuid.UUID       `gorm:"type:uuid"`
 	Content   string          `gorm:"type:text;not null"`
 	Embedding pgvector.Vector `gorm:"type:vector(1536);not null"`
 	CreatedAt time.Time       `gorm:"autoCreateTime:milli"`
@@ -38,6 +39,7 @@ func (Memory) TableName() string {
 
 type MemoryDto struct {
 	ID        uuid.UUID `json:"id"`
+	AgentID   uuid.UUID `json:"agentId"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -46,6 +48,7 @@ type MemoryDto struct {
 func (m *Memory) ToDto() *MemoryDto {
 	return &MemoryDto{
 		ID:        m.ID,
+		AgentID:   m.AgentID,
 		Content:   m.Content,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,

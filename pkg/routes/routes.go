@@ -29,6 +29,7 @@ type V1Routes struct {
 	chatRoutes     *ChatRoutes
 	providerRoutes *ProviderRoutes
 	modelRoutes    *ModelRoutes
+	agentRoutes    *AgentRoutes
 }
 
 var (
@@ -42,6 +43,7 @@ func GetV1Routes() *V1Routes {
 			chatRoutes:     GetChatRoutes(),
 			providerRoutes: GetProviderRoutes(),
 			modelRoutes:    GetModelRoutes(),
+			agentRoutes:    GetAgentRoutes(),
 		}
 	})
 	return v1Routes
@@ -60,5 +62,6 @@ func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) error {
 	r.chatRoutes.RegisterRoutes(routerGroup)
 	r.providerRoutes.RegisterRoutes(routerGroup)
 	r.modelRoutes.RegisterRoutes(routerGroup)
+	r.agentRoutes.RegisterRoutes(routerGroup)
 	return nil
 }

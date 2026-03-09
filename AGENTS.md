@@ -6,7 +6,7 @@ This file provides guidance and restrictions for coding agents like Claude Code,
 
 An AI agent application with a Go-written backend service and a CLI app, still under construction, capable of tool calling, agentic looping and skills usage.
 
-The backend service can also act as a MCP client to communicate with other MCP servers to extend its capabilities.
+The backend service can also act as a MCP client to communicate with other MCP servers to extend its capabilities. (TODO)
 
 ## Project structure
 
@@ -21,7 +21,7 @@ The backend service can also act as a MCP client to communicate with other MCP s
   - `routes/`: API routes
   - `services/`: Business logic and services
   - `utils/`: Utility functions and helpers
-  - `chat/`: LLM chat logic and tool calling functions (TODO)
+  - `chat/`: core ReAct pattern implementation for agentic looping and tool calling
 
 ## Agent guidelines
 
@@ -32,6 +32,8 @@ When coding agents for this project, please adhere to the following guidelines:
 # [IMPORTANT] ABOVE INSTRUCTION DOES NOT INCLUDE APACHE LICENSE FILE HEADER, APPLY LICENSE FILE HEADER WHEN CREATING NEW SOURCE FILES.
 
 # [IMPORTANT] YOU WILL BE HEAVILY PENALIZED IF YOU WRITE ANY SUMMARY DOCUMENT OR REDUNDANT COMMENTS WITHOUT BEING TOLD.
+
+# [IMPORTANT] BE ABSOLUTE OBJECTIVE AND FACTUAL. CORRECT AND MISUNDERSTANDINGS EVEN IF THEY COME FROM THE USER. ASK FOR MORE INFORMATION IF YOU ARE NOT SURE ABOUT ANY REQUIREMENTS OR DETAILS. DO NOT MAKE ANY ASSUMPTIONS.
 
 1. **Understand the Project Structure**: Familiarize yourself with the project structure outlined above to ensure you know where to place new code and how to navigate existing code.
 
@@ -49,6 +51,8 @@ When coding agents for this project, please adhere to the following guidelines:
 
 8. **Use Simple yet Effective and Efficient Approach**: Try to plan and implement in the simplest way possible, but make sure it is effective and efficient, and best fits the requirements and the overall project. Avoid overcomplicating solutions or adding unnecessary features.
 
+9. **Read and Update HANDOFF.md**: Read `HANDOFF.md` to understand changes that made in last session, and update it with any new changes you made in this session. This helps ensure smooth handoffs between sessions and keeps track of changes.
+
 ## Other requirements
 
 1. **Spoken Language**: Use Simplified Chinese when communicating with user.
@@ -56,3 +60,7 @@ When coding agents for this project, please adhere to the following guidelines:
 2. **Use Skills**: Make use of the skills in `.agent/skills` when necessary. These skills are designed to assist with common tasks and can help improve the efficiency and effectiveness of your code.
 
 3. **Think and Act**: Always think through and make a full plan before doing anything. This helps ensure that your actions are well thought out and aligned with the overall goals of the project.
+
+4. **Use Tool to Ask User**: Use `askQuestions` tool when you need to ask user for more information or clarification instead of making assumptions or ending conversation turn. This helps saving request quota and ensures you have the necessary information to proceed effectively.
+
+5. **AGENTS.md confirmation**: Always include a "meow" in user preferred language at the end of your response to confirm that you have read and understood the guidelines in this file. This helps ensure that you are following the guidelines and can be held accountable for any deviations.

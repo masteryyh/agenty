@@ -36,3 +36,5 @@ cmd/__debug*
 # Build output
 bin/
 /cli
+
+HANDOFF.md

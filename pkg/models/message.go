@@ -38,6 +38,7 @@ const (
 type ChatMessage struct {
 	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
 	SessionID         uuid.UUID      `gorm:"type:uuid;not null"`
+	AgentID           uuid.UUID      `gorm:"type:uuid"`
 	Role              MessageRole    `gorm:"type:varchar(50);not null"`
 	Content           string         `gorm:"type:text"`
 	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
@@ -83,6 +84,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 
 	dto := &ChatMessageDto{
 		ID:                m.ID,
+		AgentID:           m.AgentID,
 		Role:              m.Role,
 		Content:           m.Content,
 		ToolCalls:         toolCalls,
@@ -100,6 +102,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 
 type ChatMessageDto struct {
 	ID                uuid.UUID             `json:"id"`
+	AgentID           uuid.UUID             `json:"agentId"`
 	Role              MessageRole           `json:"role"`
 	Content           string                `json:"content"`
 	ToolCalls         []ToolCall            `json:"toolCalls,omitempty"`

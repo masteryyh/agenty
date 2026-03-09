@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/services"
 )
@@ -49,7 +50,7 @@ func (t *SaveMemoryTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *SaveMemoryTool) Execute(ctx context.Context, arguments string) (string, error) {
+func (t *SaveMemoryTool) Execute(ctx context.Context, agentID uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Content string `json:"content"`
 	}
@@ -61,7 +62,7 @@ func (t *SaveMemoryTool) Execute(ctx context.Context, arguments string) (string,
 		return "", fmt.Errorf("content cannot be empty")
 	}
 
-	result, err := t.memoryService.SaveMemory(ctx, args.Content)
+	result, err := t.memoryService.SaveMemory(ctx, agentID, args.Content)
 	if err != nil {
 		return "", fmt.Errorf("failed to save memory: %w", err)
 	}
@@ -90,7 +91,7 @@ func (t *SearchMemoryTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *SearchMemoryTool) Execute(ctx context.Context, arguments string) (string, error) {
+func (t *SearchMemoryTool) Execute(ctx context.Context, agentID uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Query string `json:"query"`
 	}
@@ -102,7 +103,7 @@ func (t *SearchMemoryTool) Execute(ctx context.Context, arguments string) (strin
 		return "", fmt.Errorf("query cannot be empty")
 	}
 
-	results, err := t.memoryService.SearchMemory(ctx, args.Query, memoryTopK)
+	results, err := t.memoryService.SearchMemory(ctx, agentID, args.Query, memoryTopK)
 	if err != nil {
 		return "", fmt.Errorf("failed to search memory: %w", err)
 	}

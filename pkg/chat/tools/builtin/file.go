@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
@@ -56,7 +57,7 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReadFileTool) Execute(_ context.Context, arguments string) (string, error) {
+func (t *ReadFileTool) Execute(_ context.Context, _ uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Path      string `json:"path"`
 		StartLine int    `json:"startLine,omitempty"`
@@ -151,7 +152,7 @@ func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *WriteFileTool) Execute(_ context.Context, arguments string) (string, error) {
+func (t *WriteFileTool) Execute(_ context.Context, _ uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -207,7 +208,7 @@ func (t *ReplaceInFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReplaceInFileTool) Execute(_ context.Context, arguments string) (string, error) {
+func (t *ReplaceInFileTool) Execute(_ context.Context, _ uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Path       string `json:"path"`
 		StartLine  int    `json:"startLine"`
@@ -283,7 +284,7 @@ func (t *ListDirectoryTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ListDirectoryTool) Execute(_ context.Context, arguments string) (string, error) {
+func (t *ListDirectoryTool) Execute(_ context.Context, _ uuid.UUID, arguments string) (string, error) {
 	var args struct {
 		Path string `json:"path"`
 	}

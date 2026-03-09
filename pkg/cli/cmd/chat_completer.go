@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -44,6 +45,7 @@ var commands = []Command{
 	},
 	{Name: "/help", Description: "Show available commands", Usage: "/help"},
 	{Name: "/exit", Description: "Quit the chat", Usage: "/exit"},
+	{Name: "/agent", Description: "Switch to a different agent", Usage: "/agent [agent-name]"},
 }
 
 func SetArgCompleter(cmdName string, completer func() []string) {
@@ -86,7 +88,9 @@ func NewChatCompleter() readline.AutoCompleter {
 }
 
 type HintPainter struct {
-	promptWidth int
+	promptWidth    int
+	lastHadHint    bool
+	lastPanelLines int
 }
 
 func stripANSIWidth(s string) int {
@@ -112,11 +116,23 @@ func NewHintPainter(prompt string) *HintPainter {
 	return &HintPainter{promptWidth: stripANSIWidth(prompt)}
 }
 
+func (p *HintPainter) ClearInlineHint(inputLen int, w io.Writer) {
+	if !p.lastHadHint && p.lastPanelLines == 0 {
+		return
+	}
+	col := p.promptWidth + inputLen + 1
+	fmt.Fprintf(w, "\033[1A\033[%dG\033[J\n", col)
+	p.lastHadHint = false
+	p.lastPanelLines = 0
+}
+
 func (p *HintPainter) Paint(line []rune, pos int) []rune {
 	input := string(line)
 	trimmed := strings.TrimSpace(input)
 
 	if !strings.HasPrefix(trimmed, "/") {
+		p.lastHadHint = false
+		p.lastPanelLines = 0
 		return line
 	}
 
@@ -124,8 +140,13 @@ func (p *HintPainter) Paint(line []rune, pos int) []rune {
 	panelLines := p.buildPanel(trimmed)
 
 	if inlineHint == "" && len(panelLines) == 0 {
+		p.lastHadHint = false
+		p.lastPanelLines = 0
 		return line
 	}
+
+	p.lastHadHint = inlineHint != ""
+	p.lastPanelLines = len(panelLines)
 
 	var buf strings.Builder
 	buf.WriteString(input)
