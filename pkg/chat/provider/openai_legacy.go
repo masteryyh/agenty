@@ -147,10 +147,7 @@ func buildOpenAITools(defs []tools.ToolDefinition) []openai.ChatCompletionToolUn
 	return lo.Map(defs, func(def tools.ToolDefinition, _ int) openai.ChatCompletionToolUnionParam {
 		properties := make(map[string]shared.FunctionParameters)
 		for name, prop := range def.Parameters.Properties {
-			properties[name] = shared.FunctionParameters{
-				"type":        prop.Type,
-				"description": prop.Description,
-			}
+			properties[name] = shared.FunctionParameters(prop.ToMap())
 		}
 		return openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name:        def.Name,

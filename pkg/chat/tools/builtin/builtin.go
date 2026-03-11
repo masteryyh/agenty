@@ -41,4 +41,6 @@ func RegisterAll(registry *tools.Registry) {
 	}
 
 	registry.Register(&UpdateSoulTool{agentService: services.GetAgentService()})
+
+	registry.Register(&TodoTool{})
 }

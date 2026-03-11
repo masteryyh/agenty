@@ -4,7 +4,6 @@ import (
 	"context"
 
 	json "github.com/bytedance/sonic"
-	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
@@ -27,7 +26,7 @@ func (t *DebugTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *DebugTool) Execute(ctx context.Context, _ uuid.UUID, arguments string) (string, error) {
+func (t *DebugTool) Execute(ctx context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Message string `json:"message"`
 	}

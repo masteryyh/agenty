@@ -189,10 +189,7 @@ func buildGeminiTools(defs []tools.ToolDefinition) []*genai.Tool {
 	decls := lo.Map(defs, func(def tools.ToolDefinition, _ int) *genai.FunctionDeclaration {
 		properties := make(map[string]*genai.Schema)
 		for name, prop := range def.Parameters.Properties {
-			properties[name] = &genai.Schema{
-				Type:        genai.Type(prop.Type),
-				Description: prop.Description,
-			}
+			properties[name] = propToGeminiSchema(prop)
 		}
 		return &genai.FunctionDeclaration{
 			Name:        def.Name,
@@ -205,6 +202,17 @@ func buildGeminiTools(defs []tools.ToolDefinition) []*genai.Tool {
 		}
 	})
 	return []*genai.Tool{{FunctionDeclarations: decls}}
+}
+
+func propToGeminiSchema(prop tools.ParameterProperty) *genai.Schema {
+	s := &genai.Schema{
+		Type:        genai.Type(prop.Type),
+		Description: prop.Description,
+	}
+	if prop.Items != nil {
+		s.Items = propToGeminiSchema(*prop.Items)
+	}
+	return s
 }
 
 func buildGeminiThoughtChain(blocks []ReasoningBlock) []*genai.Part {

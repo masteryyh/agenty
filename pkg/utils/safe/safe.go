@@ -10,7 +10,7 @@ import (
 )
 
 func GoSafe(name string, fn func(ctx context.Context)) {
-	GoSafeWithCtx(name, nil, fn)
+	GoSafeWithCtx(name, signal.GetBaseContext(), fn)
 }
 
 func GoSafeWithCtx(name string, ctx context.Context, fn func(ctx context.Context)) {

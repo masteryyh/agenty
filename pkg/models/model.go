@@ -21,8 +21,50 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/db"
+	"gorm.io/datatypes"
 )
+
+type Model struct {
+	ID                        uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	ProviderID                uuid.UUID      `gorm:"type:uuid;not null"`
+	Name                      string         `gorm:"type:varchar(255);not null"`
+	Code                      string         `gorm:"type:varchar(255);not null"`
+	DefaultModel              bool           `gorm:"default:false"`
+	Thinking                  bool           `gorm:"default:false"`
+	ThinkingLevels            datatypes.JSON `gorm:"type:jsonb;default:'[]'::jsonb"`
+	AnthropicAdaptiveThinking bool           `gorm:"default:false"`
+	CreatedAt                 time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt                 time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt                 *time.Time
+}
+
+func (Model) TableName() string {
+	return "models"
+}
+
+func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
+	var thinkingLevels []string
+	if err := json.Unmarshal(m.ThinkingLevels, &thinkingLevels); err != nil {
+		thinkingLevels = []string{}
+	}
+
+	dto := &ModelDto{
+		ID:                        m.ID,
+		Name:                      m.Name,
+		Code:                      m.Code,
+		DefaultModel:              m.DefaultModel,
+		Thinking:                  m.Thinking,
+		ThinkingLevels:            thinkingLevels,
+		AnthropicAdaptiveThinking: m.AnthropicAdaptiveThinking,
+		CreatedAt:                 m.CreatedAt,
+		UpdatedAt:                 m.UpdatedAt,
+	}
+
+	if provider != nil {
+		dto.Provider = provider
+	}
+	return dto
+}
 
 type ModelDto struct {
 	ID                        uuid.UUID         `json:"id"`
@@ -35,30 +77,6 @@ type ModelDto struct {
 	AnthropicAdaptiveThinking bool              `json:"anthropicAdaptiveThinking"`
 	CreatedAt                 time.Time         `json:"createdAt"`
 	UpdatedAt                 time.Time         `json:"updatedAt"`
-}
-
-func ModelRowToDto(row db.Model, provider *ModelProviderDto) *ModelDto {
-	var thinkingLevels []string
-	if err := json.Unmarshal(row.ThinkingLevels, &thinkingLevels); err != nil {
-		thinkingLevels = []string{}
-	}
-
-	dto := &ModelDto{
-		ID:                        row.ID,
-		Name:                      row.Name,
-		Code:                      row.Code,
-		DefaultModel:              row.DefaultModel,
-		Thinking:                  row.Thinking,
-		ThinkingLevels:            thinkingLevels,
-		AnthropicAdaptiveThinking: row.AnthropicAdaptiveThinking,
-		CreatedAt:                 row.CreatedAt,
-		UpdatedAt:                 row.UpdatedAt,
-	}
-
-	if provider != nil {
-		dto.Provider = provider
-	}
-	return dto
 }
 
 type CreateModelDto struct {

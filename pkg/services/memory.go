@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -29,12 +28,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
-	"github.com/masteryyh/agenty/pkg/db"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -42,9 +42,8 @@ const (
 )
 
 type MemoryService struct {
-	sqlDB   *sql.DB
-	queries *db.Queries
-	cfg     *config.EmbeddingConfig
+	db  *gorm.DB
+	cfg *config.EmbeddingConfig
 }
 
 var (
@@ -54,11 +53,9 @@ var (
 
 func GetMemoryService() *MemoryService {
 	memoryOnce.Do(func() {
-		sqlDB := conn.GetSQLDB()
 		memoryService = &MemoryService{
-			sqlDB:   sqlDB,
-			queries: db.New(sqlDB),
-			cfg:     config.GetConfigManager().GetConfig().Embedding,
+			db:  conn.GetDB(),
+			cfg: config.GetConfigManager().GetConfig().Embedding,
 		}
 	})
 	return memoryService
@@ -116,17 +113,18 @@ func (s *MemoryService) SaveMemory(ctx context.Context, agentID uuid.UUID, conte
 		return nil, fmt.Errorf("failed to embed content: %w", err)
 	}
 
-	row, err := s.queries.CreateMemory(ctx, db.CreateMemoryParams{
+	memory := &models.Memory{
 		AgentID:   agentID,
 		Content:   content,
 		Embedding: pgvector.NewVector(embedding),
-	})
-	if err != nil {
+	}
+
+	if err := s.db.WithContext(ctx).Create(memory).Error; err != nil {
 		slog.ErrorContext(ctx, "failed to save memory", "error", err)
 		return nil, fmt.Errorf("failed to save memory: %w", err)
 	}
 
-	return models.MemoryRowToDto(row), nil
+	return memory.ToDto(), nil
 }
 
 func (s *MemoryService) SearchMemory(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]models.MemorySearchResult, error) {
@@ -161,42 +159,44 @@ func (s *MemoryService) vectorSearch(ctx context.Context, agentID uuid.UUID, que
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
 
-	rows, err := s.queries.VectorSearchMemories(ctx, db.VectorSearchMemoriesParams{
-		AgentID:   agentID,
-		Embedding: pgvector.NewVector(embedding),
-		Limit:     int32(limit),
-	})
+	var memories []models.Memory
+	queryVec := pgvector.NewVector(embedding)
+	err = s.db.WithContext(ctx).
+		Where("deleted_at IS NULL AND agent_id = ?", agentID).
+		Clauses(clause.OrderBy{
+			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []any{queryVec}},
+		}).
+		Limit(limit).
+		Find(&memories).Error
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
 
-	return lo.Map(rows, func(r db.VectorSearchMemoriesRow, i int) rankedItem {
-		return rankedItem{
-			id:     r.ID,
-			memory: &models.MemoryDto{ID: r.ID, AgentID: r.AgentID, Content: r.Content, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
-			rank:   i + 1,
-		}
+	return lo.Map(memories, func(m models.Memory, i int) rankedItem {
+		return rankedItem{id: m.ID, memory: m.ToDto(), rank: i + 1}
 	}), nil
 }
 
 func (s *MemoryService) fullTextSearch(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]rankedItem, error) {
 	tsQuery := strings.Join(strings.Fields(query), " | ")
 
-	rows, err := s.queries.FullTextSearchMemories(ctx, db.FullTextSearchMemoriesParams{
-		AgentID:        agentID,
-		PlaintoTsquery: tsQuery,
-		Limit:          int32(limit),
-	})
+	var memories []models.Memory
+	err := s.db.WithContext(ctx).
+		Where("deleted_at IS NULL AND agent_id = ? AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", agentID, tsQuery).
+		Clauses(clause.OrderBy{
+			Expression: clause.Expr{
+				SQL:  "ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) DESC",
+				Vars: []any{tsQuery},
+			},
+		}).
+		Limit(limit).
+		Find(&memories).Error
 	if err != nil {
 		return nil, fmt.Errorf("full text search failed: %w", err)
 	}
 
-	return lo.Map(rows, func(r db.FullTextSearchMemoriesRow, i int) rankedItem {
-		return rankedItem{
-			id:     r.ID,
-			memory: &models.MemoryDto{ID: r.ID, AgentID: r.AgentID, Content: r.Content, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
-			rank:   i + 1,
-		}
+	return lo.Map(memories, func(m models.Memory, i int) rankedItem {
+		return rankedItem{id: m.ID, memory: m.ToDto(), rank: i + 1}
 	}), nil
 }
 
@@ -210,36 +210,21 @@ func (s *MemoryService) keywordSearch(ctx context.Context, agentID uuid.UUID, qu
 		return "%" + w + "%"
 	})
 
-	var q strings.Builder
-	q.WriteString(`SELECT id, agent_id, content, created_at, updated_at FROM memories WHERE deleted_at IS NULL AND agent_id = $1 AND (`)
-	args := []any{agentID}
-	for i, p := range patterns {
-		if i > 0 {
-			q.WriteString(" OR ")
-		}
-		fmt.Fprintf(&q, "content ILIKE $%d", i+2)
-		args = append(args, p)
+	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL AND agent_id = ?", agentID)
+	orConditions := s.db.Where("content ILIKE ?", patterns[0])
+	for _, p := range patterns[1:] {
+		orConditions = orConditions.Or("content ILIKE ?", p)
 	}
-	fmt.Fprintf(&q, ") LIMIT $%d ORDER BY created_at DESC", len(args)+1)
-	args = append(args, limit)
+	tx = tx.Where(orConditions).Order("created_at DESC")
 
-	rows, err := s.sqlDB.QueryContext(ctx, q.String(), args...)
-	if err != nil {
+	var memories []models.Memory
+	if err := tx.Limit(limit).Find(&memories).Error; err != nil {
 		return nil, fmt.Errorf("keyword search failed: %w", err)
 	}
-	defer rows.Close()
 
-	var items []rankedItem
-	rank := 1
-	for rows.Next() {
-		var m models.MemoryDto
-		if err := rows.Scan(&m.ID, &m.AgentID, &m.Content, &m.CreatedAt, &m.UpdatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, rankedItem{id: m.ID, memory: &m, rank: rank})
-		rank++
-	}
-	return items, rows.Err()
+	return lo.Map(memories, func(m models.Memory, i int) rankedItem {
+		return rankedItem{id: m.ID, memory: m.ToDto(), rank: i + 1}
+	}), nil
 }
 
 type rankedItem struct {

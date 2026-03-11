@@ -67,6 +67,8 @@ type ChatParams struct {
 	Messages                  []provider.Message
 	Model                     string
 	AgentID                   uuid.UUID
+	SessionID                 uuid.UUID
+	ModelID                   uuid.UUID
 	Thinking                  bool
 	ThinkingLevel             string
 	AnthropicAdaptiveThinking bool
@@ -128,9 +130,16 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 		slog.InfoContext(ctx, "executing tool calls", "count", len(resp.ToolCalls), "iteration", i+1)
 
+		tcc := tools.ToolCallContext{
+			AgentID:   params.AgentID,
+			SessionID: params.SessionID,
+			ModelID:   params.ModelID,
+			ModelCode: params.Model,
+		}
+
 		for _, tc := range resp.ToolCalls {
 			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
-			result := ce.registry.Execute(ctx, params.AgentID, tc)
+			result := ce.registry.Execute(ctx, tcc, tc)
 
 			toolMsg := provider.Message{
 				Role:       models.RoleTool,

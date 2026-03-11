@@ -23,7 +23,7 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/db"
+	"gorm.io/datatypes"
 )
 
 type MessageRole string
@@ -34,6 +34,71 @@ const (
 	RoleTool      MessageRole = "tool"
 	RoleSystem    MessageRole = "system"
 )
+
+type ChatMessage struct {
+	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	SessionID         uuid.UUID      `gorm:"type:uuid;not null"`
+	AgentID           uuid.UUID      `gorm:"type:uuid;not null"`
+	Role              MessageRole    `gorm:"type:varchar(50);not null"`
+	Content           string         `gorm:"type:text"`
+	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
+	ToolResults       datatypes.JSON `gorm:"type:jsonb"`
+	ModelID           uuid.UUID      `gorm:"type:uuid;not null"`
+	ReasoningContent  string         `gorm:"type:text"`
+	ProviderSpecifics datatypes.JSON `gorm:"type:jsonb"`
+	CreatedAt         time.Time      `gorm:"autoCreateTime:milli"`
+	DeletedAt         *time.Time
+}
+
+func (ChatMessage) TableName() string {
+	return "chat_messages"
+}
+
+func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
+	var toolCalls []ToolCall
+	if len(m.ToolCalls) > 0 {
+		if err := json.Unmarshal(m.ToolCalls, &toolCalls); err != nil {
+			slog.Error("failed to unmarshal tool calls", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		}
+	}
+
+	var toolResult *ToolResult
+	if len(m.ToolResults) > 0 {
+		var tr ToolResult
+		if err := json.Unmarshal(m.ToolResults, &tr); err != nil {
+			slog.Error("failed to unmarshal tool result", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		} else {
+			toolResult = &tr
+		}
+	}
+
+	var providerSpecifics *ProviderSpecificData
+	if len(m.ProviderSpecifics) > 0 {
+		var ps ProviderSpecificData
+		if err := json.Unmarshal(m.ProviderSpecifics, &ps); err != nil {
+			slog.Error("failed to unmarshal provider specifics", "error", err, "sessionId", m.SessionID, "messageId", m.ID)
+		} else {
+			providerSpecifics = &ps
+		}
+	}
+
+	dto := &ChatMessageDto{
+		ID:                m.ID,
+		AgentID:           m.AgentID,
+		Role:              m.Role,
+		Content:           m.Content,
+		ToolCalls:         toolCalls,
+		ToolResult:        toolResult,
+		ProviderSpecifics: providerSpecifics,
+		ReasoningContent:  m.ReasoningContent,
+		CreatedAt:         m.CreatedAt,
+	}
+
+	if model != nil {
+		dto.Model = model
+	}
+	return dto
+}
 
 type ChatMessageDto struct {
 	ID                uuid.UUID             `json:"id"`
@@ -46,52 +111,6 @@ type ChatMessageDto struct {
 	ReasoningContent  string                `json:"reasoningContent,omitempty"`
 	ProviderSpecifics *ProviderSpecificData `json:"providerSpecifics,omitempty"`
 	CreatedAt         time.Time             `json:"createdAt"`
-}
-
-func ChatMessageRowToDto(row db.ChatMessage, model *ModelDto) *ChatMessageDto {
-	var toolCalls []ToolCall
-	if row.ToolCalls.Valid && len(row.ToolCalls.RawMessage) > 0 {
-		if err := json.Unmarshal(row.ToolCalls.RawMessage, &toolCalls); err != nil {
-			slog.Error("failed to unmarshal tool calls", "error", err, "sessionId", row.SessionID, "messageId", row.ID)
-		}
-	}
-
-	var toolResult *ToolResult
-	if row.ToolResults.Valid && len(row.ToolResults.RawMessage) > 0 {
-		var tr ToolResult
-		if err := json.Unmarshal(row.ToolResults.RawMessage, &tr); err != nil {
-			slog.Error("failed to unmarshal tool result", "error", err, "sessionId", row.SessionID, "messageId", row.ID)
-		} else {
-			toolResult = &tr
-		}
-	}
-
-	var providerSpecifics *ProviderSpecificData
-	if row.ProviderSpecifics.Valid && len(row.ProviderSpecifics.RawMessage) > 0 {
-		var ps ProviderSpecificData
-		if err := json.Unmarshal(row.ProviderSpecifics.RawMessage, &ps); err != nil {
-			slog.Error("failed to unmarshal provider specifics", "error", err, "sessionId", row.SessionID, "messageId", row.ID)
-		} else {
-			providerSpecifics = &ps
-		}
-	}
-
-	dto := &ChatMessageDto{
-		ID:                row.ID,
-		AgentID:           row.AgentID,
-		Role:              MessageRole(row.Role),
-		Content:           row.Content,
-		ToolCalls:         toolCalls,
-		ToolResult:        toolResult,
-		ProviderSpecifics: providerSpecifics,
-		ReasoningContent:  row.ReasoningContent,
-		CreatedAt:         row.CreatedAt,
-	}
-
-	if model != nil {
-		dto.Model = model
-	}
-	return dto
 }
 
 type ChatDto struct {

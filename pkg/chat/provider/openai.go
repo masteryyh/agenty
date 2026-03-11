@@ -193,10 +193,7 @@ func buildResponseTools(defs []tools.ToolDefinition) []responses.ToolUnionParam 
 	return lo.Map(defs, func(def tools.ToolDefinition, _ int) responses.ToolUnionParam {
 		properties := make(map[string]any)
 		for name, prop := range def.Parameters.Properties {
-			properties[name] = map[string]any{
-				"type":        prop.Type,
-				"description": prop.Description,
-			}
+			properties[name] = prop.ToMap()
 		}
 		tool := responses.ToolParamOfFunction(def.Name, map[string]any{
 			"type":       def.Parameters.Type,

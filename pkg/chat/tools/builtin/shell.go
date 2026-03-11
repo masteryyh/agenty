@@ -27,7 +27,6 @@ import (
 	"time"
 
 	json "github.com/bytedance/sonic"
-	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
@@ -58,7 +57,7 @@ func (t *RunShellCommandTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *RunShellCommandTool) Execute(ctx context.Context, _ uuid.UUID, arguments string) (string, error) {
+func (t *RunShellCommandTool) Execute(ctx context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Command string `json:"command"`
 		Workdir string `json:"workdir,omitempty"`

@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/db"
 )
 
 type APIType string
@@ -33,6 +32,40 @@ const (
 	APITypeGemini       APIType = "gemini"
 )
 
+type ModelProvider struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	Name      string    `gorm:"type:varchar(255);not null"`
+	Type      APIType   `gorm:"type:varchar(50);not null"`
+	BaseURL   string    `gorm:"type:varchar(255);not null"`
+	APIKey    string    `gorm:"type:varchar(255);not null;default:''" json:"-"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+	DeletedAt *time.Time
+}
+
+func (ModelProvider) TableName() string {
+	return "model_providers"
+}
+
+func (p *ModelProvider) ToDto() *ModelProviderDto {
+	censored := "****"
+	if len(p.APIKey) > 10 {
+		censored = p.APIKey[:4] + "****" + p.APIKey[len(p.APIKey)-2:]
+	} else if p.APIKey == "" {
+		censored = "<not set>"
+	}
+
+	return &ModelProviderDto{
+		ID:             p.ID,
+		Name:           p.Name,
+		Type:           p.Type,
+		BaseURL:        p.BaseURL,
+		APIKeyCensored: censored,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
+	}
+}
+
 type ModelProviderDto struct {
 	ID             uuid.UUID `json:"id"`
 	Name           string    `json:"name"`
@@ -41,25 +74,6 @@ type ModelProviderDto struct {
 	APIKeyCensored string    `json:"apiKeyCensored"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
-}
-
-func ModelProviderRowToDto(row db.ModelProvider) *ModelProviderDto {
-	censored := "****"
-	if len(row.ApiKey) > 10 {
-		censored = row.ApiKey[:4] + "****" + row.ApiKey[len(row.ApiKey)-2:]
-	} else if row.ApiKey == "" {
-		censored = "<not set>"
-	}
-
-	return &ModelProviderDto{
-		ID:             row.ID,
-		Name:           row.Name,
-		Type:           APIType(row.Type),
-		BaseURL:        row.BaseUrl,
-		APIKeyCensored: censored,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
-	}
 }
 
 type CreateModelProviderDto struct {

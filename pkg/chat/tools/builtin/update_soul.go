@@ -49,7 +49,7 @@ func (t *UpdateSoulTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *UpdateSoulTool) Execute(ctx context.Context, agentID uuid.UUID, arguments string) (string, error) {
+func (t *UpdateSoulTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Soul string `json:"soul"`
 	}
@@ -57,7 +57,7 @@ func (t *UpdateSoulTool) Execute(ctx context.Context, agentID uuid.UUID, argumen
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	if agentID == uuid.Nil {
+	if tcc.AgentID == uuid.Nil {
 		return "", fmt.Errorf("agent ID is required")
 	}
 
@@ -65,7 +65,7 @@ func (t *UpdateSoulTool) Execute(ctx context.Context, agentID uuid.UUID, argumen
 		return "", fmt.Errorf("soul cannot be empty")
 	}
 
-	if err := t.agentService.UpdateAgent(ctx, agentID, &models.UpdateAgentDto{Soul: &args.Soul}); err != nil {
+	if err := t.agentService.UpdateAgent(ctx, tcc.AgentID, &models.UpdateAgentDto{Soul: &args.Soul}); err != nil {
 		return "", fmt.Errorf("failed to update soul: %w", err)
 	}
 

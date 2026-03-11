@@ -27,8 +27,20 @@ import (
 )
 
 type ParameterProperty struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Type        string             `json:"type"`
+	Description string             `json:"description"`
+	Items       *ParameterProperty `json:"items,omitempty"`
+}
+
+func (p ParameterProperty) ToMap() map[string]any {
+	m := map[string]any{
+		"type":        p.Type,
+		"description": p.Description,
+	}
+	if p.Items != nil {
+		m["items"] = p.Items.ToMap()
+	}
+	return m
 }
 
 type ToolParameters struct {
@@ -43,9 +55,16 @@ type ToolDefinition struct {
 	Parameters  ToolParameters `json:"parameters"`
 }
 
+type ToolCallContext struct {
+	AgentID   uuid.UUID
+	SessionID uuid.UUID
+	ModelID   uuid.UUID
+	ModelCode string
+}
+
 type Tool interface {
 	Definition() ToolDefinition
-	Execute(ctx context.Context, agentID uuid.UUID, arguments string) (string, error)
+	Execute(ctx context.Context, tcc ToolCallContext, arguments string) (string, error)
 }
 
 type Registry struct {
@@ -104,7 +123,7 @@ func (r *Registry) Definitions() []ToolDefinition {
 	return result
 }
 
-func (r *Registry) Execute(ctx context.Context, agentID uuid.UUID, call models.ToolCall) models.ToolResult {
+func (r *Registry) Execute(ctx context.Context, tcc ToolCallContext, call models.ToolCall) models.ToolResult {
 	tool, ok := r.Get(call.Name)
 	if !ok {
 		return models.ToolResult{
@@ -115,7 +134,7 @@ func (r *Registry) Execute(ctx context.Context, agentID uuid.UUID, call models.T
 		}
 	}
 
-	content, err := tool.Execute(ctx, agentID, call.Arguments)
+	content, err := tool.Execute(ctx, tcc, call.Arguments)
 	if err != nil {
 		return models.ToolResult{
 			CallID:  call.ID,
