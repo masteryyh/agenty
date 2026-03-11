@@ -253,10 +253,7 @@ func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
 	return lo.Map(defs, func(def tools.ToolDefinition, _ int) kimiTool {
 		properties := make(map[string]any)
 		for name, prop := range def.Parameters.Properties {
-			properties[name] = map[string]any{
-				"type":        prop.Type,
-				"description": prop.Description,
-			}
+			properties[name] = prop.ToMap()
 		}
 		return kimiTool{
 			Type: kimiToolTypeFunc,

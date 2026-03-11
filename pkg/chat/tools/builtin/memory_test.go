@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
 func TestSaveMemoryToolDefinition(t *testing.T) {
@@ -55,7 +55,7 @@ func TestSearchMemoryToolDefinition(t *testing.T) {
 
 func TestSaveMemoryToolEmptyContent(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(context.Background(), uuid.Nil, `{"content": ""}`)
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `{"content": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty content")
 	}
@@ -63,7 +63,7 @@ func TestSaveMemoryToolEmptyContent(t *testing.T) {
 
 func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SaveMemoryTool{}
-	_, err := tool.Execute(context.Background(), uuid.Nil, `invalid json`)
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -71,7 +71,7 @@ func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 
 func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), uuid.Nil, `{"query": ""}`)
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `{"query": ""}`)
 	if err == nil {
 		t.Fatal("expected error for empty query")
 	}
@@ -79,7 +79,7 @@ func TestSearchMemoryToolEmptyQuery(t *testing.T) {
 
 func TestSearchMemoryToolInvalidJSON(t *testing.T) {
 	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), uuid.Nil, `invalid json`)
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `invalid json`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}

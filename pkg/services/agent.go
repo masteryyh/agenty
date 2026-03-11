@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"sync"
@@ -27,15 +26,14 @@ import (
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
-	"github.com/masteryyh/agenty/pkg/db"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/samber/lo"
+	"gorm.io/gorm"
 )
 
 type AgentService struct {
-	db      *sql.DB
-	queries *db.Queries
+	db *gorm.DB
 }
 
 var (
@@ -45,17 +43,17 @@ var (
 
 func GetAgentService() *AgentService {
 	agentOnce.Do(func() {
-		sqlDB := conn.GetSQLDB()
 		agentService = &AgentService{
-			db:      sqlDB,
-			queries: db.New(sqlDB),
+			db: conn.GetDB(),
 		}
 	})
 	return agentService
 }
 
 func (s *AgentService) CreateAgent(ctx context.Context, dto *models.CreateAgentDto) (*models.AgentDto, error) {
-	nameExists, err := s.queries.CountAgentsByName(ctx, dto.Name)
+	nameExists, err := gorm.G[models.Agent](s.db).
+		Where("name = ? AND deleted_at IS NULL", dto.Name).
+		Count(ctx, "id")
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to check agent name existence", "error", err)
 		return nil, err
@@ -69,71 +67,68 @@ func (s *AgentService) CreateAgent(ctx context.Context, dto *models.CreateAgentD
 		soul = *dto.Soul
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	qtx := s.queries.WithTx(tx)
-
-	if dto.IsDefault {
-		if err := qtx.ClearAllDefaultAgents(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	row, err := qtx.CreateAgent(ctx, db.CreateAgentParams{
+	agent := &models.Agent{
 		Name:      dto.Name,
 		Soul:      soul,
 		IsDefault: dto.IsDefault,
-	})
-	if err != nil {
+	}
+
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if agent.IsDefault {
+			if _, err := gorm.G[models.Agent](tx).
+				Where("deleted_at IS NULL").
+				Update(ctx, "is_default", false); err != nil {
+				return err
+			}
+		}
+		return gorm.G[models.Agent](tx).Create(ctx, agent)
+	}); err != nil {
 		slog.ErrorContext(ctx, "failed to create agent", "error", err)
 		return nil, err
 	}
-
-	if err := tx.Commit(); err != nil {
-		slog.ErrorContext(ctx, "failed to commit create agent", "error", err)
-		return nil, err
-	}
-	return models.AgentRowToDto(row), nil
+	return agent.ToDto(), nil
 }
 
 func (s *AgentService) GetAgent(ctx context.Context, agentID uuid.UUID) (*models.AgentDto, error) {
-	row, err := s.queries.GetAgentById(ctx, agentID)
+	agent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", agentID).
+		First(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customerrors.ErrAgentNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", agentID)
 		return nil, err
 	}
-	return models.AgentRowToDto(row), nil
+	return agent.ToDto(), nil
 }
 
 func (s *AgentService) ListAgents(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.AgentDto], error) {
-	rows, err := s.queries.ListAgents(ctx, db.ListAgentsParams{
-		Limit:  int32(request.PageSize),
-		Offset: int32((request.Page - 1) * request.PageSize),
-	})
+	agentsResult, err := gorm.G[models.Agent](s.db).
+		Where("deleted_at IS NULL").
+		Offset((request.Page - 1) * request.PageSize).
+		Limit(request.PageSize).
+		Order("created_at DESC").
+		Find(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to list agents", "error", err)
 		return nil, err
 	}
 
-	total, err := s.queries.CountAgents(ctx)
+	countResult, err := gorm.G[models.Agent](s.db).
+		Where("deleted_at IS NULL").
+		Count(ctx, "id")
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to count agents", "error", err)
 		return nil, err
 	}
 
-	dtos := lo.Map(rows, func(a db.Agent, _ int) models.AgentDto {
-		return *models.AgentRowToDto(a)
+	dtos := lo.Map(agentsResult, func(a models.Agent, _ int) models.AgentDto {
+		return *a.ToDto()
 	})
 
 	return &pagination.PagedResponse[models.AgentDto]{
-		Total:    total,
+		Total:    countResult,
 		PageSize: request.PageSize,
 		Page:     request.Page,
 		Data:     dtos,
@@ -141,23 +136,21 @@ func (s *AgentService) ListAgents(ctx context.Context, request *pagination.PageR
 }
 
 func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *models.UpdateAgentDto) error {
-	row, err := s.queries.GetAgentById(ctx, agentID)
+	agent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", agentID).
+		First(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return customerrors.ErrAgentNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", agentID)
 		return err
 	}
 
-	name := row.Name
-	soul := row.Soul
-
-	if dto.Name != nil && *dto.Name != row.Name {
-		nameExists, err := s.queries.CountAgentsByNameExcluding(ctx, db.CountAgentsByNameExcludingParams{
-			Name: *dto.Name,
-			ID:   agentID,
-		})
+	if dto.Name != nil && *dto.Name != agent.Name {
+		nameExists, err := gorm.G[models.Agent](s.db).
+			Where("name = ? AND id != ? AND deleted_at IS NULL", *dto.Name, agentID).
+			Count(ctx, "id")
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to check agent name existence", "error", err)
 			return err
@@ -165,88 +158,93 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 		if nameExists > 0 {
 			return customerrors.ErrAgentAlreadyExists
 		}
-		name = *dto.Name
+		agent.Name = *dto.Name
 	}
 
 	if dto.Soul != nil {
-		soul = *dto.Soul
+		agent.Soul = *dto.Soul
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	qtx := s.queries.WithTx(tx)
-
-	if err := qtx.UpdateAgentFields(ctx, db.UpdateAgentFieldsParams{
-		ID:   agentID,
-		Name: name,
-		Soul: soul,
-	}); err != nil {
+	if _, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", agentID).
+		Updates(ctx, agent); err != nil {
 		slog.ErrorContext(ctx, "failed to update agent", "error", err, "agentId", agentID)
 		return err
 	}
 
 	if dto.IsDefault != nil {
 		if *dto.IsDefault {
-			if err := qtx.ClearAllDefaultAgents(ctx); err != nil {
-				return err
-			}
-			if err := qtx.SetAgentDefault(ctx, agentID); err != nil {
+			if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if _, err := gorm.G[models.Agent](tx).
+					Where("id != ? AND deleted_at IS NULL", agentID).
+					Update(ctx, "is_default", false); err != nil {
+					return err
+				}
+				if _, err := gorm.G[models.Agent](tx).
+					Where("id = ? AND deleted_at IS NULL", agentID).
+					Update(ctx, "is_default", true); err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				slog.ErrorContext(ctx, "failed to update agent default flag", "error", err, "agentId", agentID)
 				return err
 			}
 		} else {
-			if err := qtx.SetAgentNotDefault(ctx, agentID); err != nil {
+			if _, err := gorm.G[models.Agent](s.db).
+				Where("id = ? AND deleted_at IS NULL", agentID).
+				Update(ctx, "is_default", false); err != nil {
+				slog.ErrorContext(ctx, "failed to clear agent default flag", "error", err, "agentId", agentID)
 				return err
 			}
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		slog.ErrorContext(ctx, "failed to commit update agent", "error", err, "agentId", agentID)
-		return err
-	}
 	return nil
 }
 
 func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
-	row, err := s.queries.GetAgentById(ctx, agentID)
+	currentAgent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", agentID).
+		First(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return customerrors.ErrAgentNotFound
 		}
 		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", agentID)
 		return err
 	}
 
-	if row.IsDefault {
+	if currentAgent.IsDefault {
 		return customerrors.ErrDeletingDefaultAgent
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := gorm.G[models.ChatMessage](tx).
+			Where("agent_id = ? AND deleted_at IS NULL", agentID).
+			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			return err
+		}
 
-	qtx := s.queries.WithTx(tx)
+		if _, err := gorm.G[models.ChatSession](tx).
+			Where("agent_id = ? AND deleted_at IS NULL", agentID).
+			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			return err
+		}
 
-	if err := qtx.SoftDeleteMessagesByAgent(ctx, agentID); err != nil {
-		return err
-	}
-	if err := qtx.SoftDeleteSessionsByAgent(ctx, agentID); err != nil {
-		return err
-	}
-	if err := qtx.SoftDeleteMemoriesByAgent(ctx, agentID); err != nil {
-		return err
-	}
-	if err := qtx.SoftDeleteAgent(ctx, agentID); err != nil {
-		return err
-	}
+		if _, err := gorm.G[models.Memory](tx).
+			Where("agent_id = ? AND deleted_at IS NULL", agentID).
+			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			return err
+		}
 
-	if err := tx.Commit(); err != nil {
+		if _, err := gorm.G[models.Agent](tx).
+			Where("id = ? AND deleted_at IS NULL", agentID).
+			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		slog.ErrorContext(ctx, "failed to delete agent", "error", err, "agentId", agentID)
 		return err
 	}

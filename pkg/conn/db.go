@@ -18,19 +18,18 @@ package conn
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/masteryyh/agenty/pkg/config"
-	sqlschema "github.com/masteryyh/agenty/sql/schema"
+	"github.com/masteryyh/agenty/pkg/models"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 var (
-	sqlDB  *sql.DB
+	db     *gorm.DB
 	dbOnce sync.Once
 )
 
@@ -40,42 +39,35 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
 			cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
-		dbConn, connErr := sql.Open("postgres", dsn)
+		dbConn, connErr := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if connErr != nil {
 			err = connErr
 			return
 		}
 
-		if pingErr := dbConn.PingContext(timeoutCtx); pingErr != nil {
-			err = pingErr
+		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; extErr != nil {
+			err = extErr
 			return
 		}
 
-		entries, readErr := sqlschema.FS.ReadDir(".")
-		if readErr != nil {
-			err = fmt.Errorf("failed to read schema directory: %w", readErr)
+		if migrateErr := dbConn.WithContext(timeoutCtx).
+			AutoMigrate(
+				&models.ChatSession{},
+				&models.ChatMessage{},
+				&models.ModelProvider{},
+				&models.Model{},
+				&models.Memory{},
+				&models.Agent{},
+			); migrateErr != nil {
+			err = migrateErr
 			return
 		}
 
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].Name() < entries[j].Name()
-		})
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			ddl, readFileErr := sqlschema.FS.ReadFile(entry.Name())
-			if readFileErr != nil {
-				err = fmt.Errorf("failed to read schema file %s: %w", entry.Name(), readFileErr)
-				return
-			}
-			if _, execErr := dbConn.ExecContext(timeoutCtx, string(ddl)); execErr != nil {
-				err = fmt.Errorf("failed to execute schema file %s: %w", entry.Name(), execErr)
-				return
-			}
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`).Error; idxErr != nil {
+			err = idxErr
+			return
 		}
 
 		if seedErr := seedPresets(timeoutCtx, dbConn); seedErr != nil {
@@ -83,14 +75,14 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
-		sqlDB = dbConn
+		db = dbConn
 	})
 	return err
 }
 
-func GetSQLDB() *sql.DB {
-	if sqlDB == nil {
+func GetDB() *gorm.DB {
+	if db == nil {
 		panic("database not initialized, call InitDB first")
 	}
-	return sqlDB
+	return db
 }

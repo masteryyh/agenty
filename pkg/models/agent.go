@@ -4,8 +4,32 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/db"
 )
+
+type Agent struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	Name      string    `gorm:"type:varchar(255);not null"`
+	Soul      string    `gorm:"type:text;not null"`
+	IsDefault bool      `gorm:"type:boolean;default:false"`
+	CreatedAt time.Time `gorm:"autoCreateTime:milli"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime:milli"`
+	DeletedAt *time.Time
+}
+
+func (Agent) TableName() string {
+	return "agents"
+}
+
+func (a *Agent) ToDto() *AgentDto {
+	return &AgentDto{
+		ID:        a.ID,
+		Name:      a.Name,
+		Soul:      a.Soul,
+		IsDefault: a.IsDefault,
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
+	}
+}
 
 type AgentDto struct {
 	ID        uuid.UUID `json:"id"`
@@ -14,17 +38,6 @@ type AgentDto struct {
 	IsDefault bool      `json:"isDefault"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-func AgentRowToDto(row db.Agent) *AgentDto {
-	return &AgentDto{
-		ID:        row.ID,
-		Name:      row.Name,
-		Soul:      row.Soul,
-		IsDefault: row.IsDefault,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-	}
 }
 
 type CreateAgentDto struct {

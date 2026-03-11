@@ -18,13 +18,13 @@ package conn
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"log/slog"
 
+	json "github.com/bytedance/sonic"
+
 	"github.com/masteryyh/agenty/pkg/consts"
-	"github.com/masteryyh/agenty/pkg/db"
 	"github.com/masteryyh/agenty/pkg/models"
+	"gorm.io/gorm"
 )
 
 type presetProvider struct {
@@ -136,76 +136,68 @@ var presetProviders = []presetProvider{
 	},
 }
 
-func seedPresets(ctx context.Context, sqlDB *sql.DB) error {
-	tx, err := sqlDB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	q := db.New(sqlDB).WithTx(tx)
-
-	for _, pp := range presetProviders {
-		count, err := q.CountProvidersByNameAndType(ctx, db.CountProvidersByNameAndTypeParams{
-			Name: pp.Name,
-			Type: string(pp.Type),
-		})
-		if err != nil {
-			return err
-		}
-		if count > 0 {
-			continue
-		}
-
-		provider, err := q.CreateProvider(ctx, db.CreateProviderParams{
-			Name:    pp.Name,
-			Type:    string(pp.Type),
-			BaseUrl: pp.BaseURL,
-			ApiKey:  "",
-		})
-		if err != nil {
-			return err
-		}
-		slog.InfoContext(ctx, "created preset provider", "name", pp.Name)
-
-		for _, pm := range pp.Models {
-			thinkingLevels := json.RawMessage("[]")
-			if len(pm.ThinkingLevels) > 0 {
-				thinkingLevels, _ = json.Marshal(pm.ThinkingLevels)
-			}
-			_, err := q.CreateModel(ctx, db.CreateModelParams{
-				ProviderID:                provider.ID,
-				Name:                      pm.Name,
-				Code:                      pm.Code,
-				DefaultModel:              pm.DefaultModel,
-				Thinking:                  pm.Thinking,
-				ThinkingLevels:            thinkingLevels,
-				AnthropicAdaptiveThinking: pm.AnthropicAdaptiveThinking,
-			})
-			if err != nil {
+func seedPresets(ctx context.Context, db *gorm.DB) error {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, pp := range presetProviders {
+			var count int64
+			if err := tx.Model(&models.ModelProvider{}).
+				Where("name = ? AND type = ? AND deleted_at IS NULL", pp.Name, pp.Type).
+				Count(&count).Error; err != nil {
 				return err
 			}
-			slog.InfoContext(ctx, "created preset model", "provider", pp.Name, "model", pm.Name, "code", pm.Code)
-		}
-	}
+			if count > 0 {
+				continue
+			}
 
-	agentCount, err := q.CountAgents(ctx)
-	if err != nil {
-		return err
-	}
-	if agentCount == 0 {
-		agent, err := q.CreateAgent(ctx, db.CreateAgentParams{
-			Name:      "default",
-			Soul:      consts.DefaultAgentSoul,
-			IsDefault: true,
-		})
-		if err != nil {
+			provider := &models.ModelProvider{
+				Name:    pp.Name,
+				Type:    pp.Type,
+				BaseURL: pp.BaseURL,
+				APIKey:  "",
+			}
+			if err := tx.Create(provider).Error; err != nil {
+				return err
+			}
+			slog.InfoContext(ctx, "created preset provider", "name", pp.Name)
+
+			for _, pm := range pp.Models {
+				thinkingLevels := []byte("[]")
+				if len(pm.ThinkingLevels) > 0 {
+					thinkingLevels, _ = json.Marshal(pm.ThinkingLevels)
+				}
+				model := &models.Model{
+					ProviderID:                provider.ID,
+					Name:                      pm.Name,
+					Code:                      pm.Code,
+					DefaultModel:              pm.DefaultModel,
+					Thinking:                  pm.Thinking,
+					ThinkingLevels:            thinkingLevels,
+					AnthropicAdaptiveThinking: pm.AnthropicAdaptiveThinking,
+				}
+				if err := tx.Create(model).Error; err != nil {
+					return err
+				}
+				slog.InfoContext(ctx, "created preset model", "provider", pp.Name, "model", pm.Name, "code", pm.Code)
+			}
+		}
+
+		var agentCount int64
+		if err := tx.Model(&models.Agent{}).Where("deleted_at IS NULL").Count(&agentCount).Error; err != nil {
 			return err
 		}
-		slog.InfoContext(ctx, "created default agent", "name", agent.Name)
-	}
-
-	if err := tx.Commit(); err != nil {
+		if agentCount == 0 {
+			agent := &models.Agent{
+				Name:      "default",
+				Soul:      consts.DefaultAgentSoul,
+				IsDefault: true,
+			}
+			if err := tx.Create(agent).Error; err != nil {
+				return err
+			}
+			slog.InfoContext(ctx, "created default agent", "name", agent.Name)
+		}
+		return nil
+	}); err != nil {
 		slog.ErrorContext(ctx, "failed to seed preset providers and models", "error", err)
 		return err
 	}
