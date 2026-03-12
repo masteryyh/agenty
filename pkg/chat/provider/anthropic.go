@@ -18,6 +18,8 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
@@ -25,6 +27,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 )
 
@@ -40,32 +43,7 @@ func (p *AnthropicProvider) Name() string {
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
-
-	systemPrompts, messages := buildAnthropicMessages(req.Messages)
-	params := anthropic.MessageNewParams{
-		Model:    anthropic.Model(req.Model),
-		System:   systemPrompts,
-		Messages: messages,
-	}
-
-	if req.MaxTokens > 0 {
-		params.MaxTokens = req.MaxTokens
-	}
-
-	if len(req.Tools) > 0 {
-		params.Tools = buildAnthropicTools(req.Tools)
-	}
-
-	if req.Thinking {
-		if req.AnthropicAdaptiveThinking {
-			adaptive := anthropic.NewThinkingConfigAdaptiveParam()
-			params.Thinking = anthropic.ThinkingConfigParamUnion{
-				OfAdaptive: &adaptive,
-			}
-		} else {
-			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(31999)
-		}
-	}
+	params := p.buildMessageParams(req)
 
 	resp, err := client.Messages.New(ctx, params)
 	if err != nil {
@@ -186,4 +164,193 @@ func buildAnthropicTools(defs []tools.ToolDefinition) []anthropic.ToolUnionParam
 		tool.OfTool.Description = param.NewOpt(def.Description)
 		return tool
 	})
+}
+
+func (p *AnthropicProvider) buildMessageParams(req *ChatRequest) anthropic.MessageNewParams {
+	systemPrompts, messages := buildAnthropicMessages(req.Messages)
+	params := anthropic.MessageNewParams{
+		Model:    anthropic.Model(req.Model),
+		System:   systemPrompts,
+		Messages: messages,
+	}
+
+	if req.MaxTokens > 0 {
+		params.MaxTokens = req.MaxTokens
+	}
+
+	if len(req.Tools) > 0 {
+		params.Tools = buildAnthropicTools(req.Tools)
+	}
+
+	if req.Thinking {
+		if req.AnthropicAdaptiveThinking {
+			adaptive := anthropic.NewThinkingConfigAdaptiveParam()
+			params.Thinking = anthropic.ThinkingConfigParamUnion{
+				OfAdaptive: &adaptive,
+			}
+		} else {
+			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(31999)
+		}
+	}
+
+	return params
+}
+
+func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
+	params := p.buildMessageParams(req)
+
+	stream := client.Messages.NewStreaming(ctx, params)
+
+	ch := make(chan StreamEvent, 64)
+
+	safe.GoOnce("anthropic-stream", func() {
+		defer close(ch)
+		var currentThinkingContent strings.Builder
+		var currentSignature string
+		var toolCalls []models.ToolCall
+		var textParts []string
+		var currentToolID, currentToolName string
+		var currentToolArgs strings.Builder
+		var totalTokens int64
+		var reasoningBlocks []ReasoningBlock
+
+		type blockInfo struct {
+			blockType string
+		}
+		blockMap := make(map[int64]*blockInfo)
+
+		for stream.Next() {
+			event := stream.Current()
+
+			switch variant := event.AsAny().(type) {
+			case anthropic.ContentBlockStartEvent:
+				bi := &blockInfo{blockType: variant.ContentBlock.Type}
+				blockMap[variant.Index] = bi
+
+				switch variant.ContentBlock.Type {
+				case "tool_use":
+					currentToolID = variant.ContentBlock.ID
+					currentToolName = variant.ContentBlock.Name
+					currentToolArgs.Reset()
+					ch <- StreamEvent{
+						Type:     EventToolCallStart,
+						ToolCall: &models.ToolCall{ID: currentToolID, Name: currentToolName},
+					}
+				case "thinking":
+					currentThinkingContent.Reset()
+					currentSignature = ""
+				}
+
+			case anthropic.ContentBlockDeltaEvent:
+				switch deltaVariant := variant.Delta.AsAny().(type) {
+				case anthropic.TextDelta:
+					ch <- StreamEvent{
+						Type:    EventContentDelta,
+						Content: deltaVariant.Text,
+					}
+					textParts = append(textParts, deltaVariant.Text)
+
+				case anthropic.ThinkingDelta:
+					ch <- StreamEvent{
+						Type:      EventReasoningDelta,
+						Reasoning: deltaVariant.Thinking,
+					}
+					currentThinkingContent.WriteString(deltaVariant.Thinking)
+
+				case anthropic.InputJSONDelta:
+					currentToolArgs.WriteString(deltaVariant.PartialJSON)
+					ch <- StreamEvent{
+						Type:     EventToolCallDelta,
+						ToolCall: &models.ToolCall{ID: currentToolID, Name: currentToolName, Arguments: deltaVariant.PartialJSON},
+					}
+
+				case anthropic.SignatureDelta:
+					currentSignature = deltaVariant.Signature
+				}
+
+			case anthropic.ContentBlockStopEvent:
+				bi, ok := blockMap[variant.Index]
+				if !ok {
+					continue
+				}
+				switch bi.blockType {
+				case "tool_use":
+					tc := models.ToolCall{
+						ID:        currentToolID,
+						Name:      currentToolName,
+						Arguments: currentToolArgs.String(),
+					}
+					toolCalls = append(toolCalls, tc)
+					ch <- StreamEvent{
+						Type:     EventToolCallDone,
+						ToolCall: &tc,
+					}
+				case "thinking":
+					block := ReasoningBlock{
+						Summary:   currentThinkingContent.String(),
+						Signature: currentSignature,
+					}
+					reasoningBlocks = append(reasoningBlocks, block)
+				case "redacted_thinking":
+					block := ReasoningBlock{
+						Redacted:  true,
+						Signature: currentSignature,
+					}
+					reasoningBlocks = append(reasoningBlocks, block)
+				}
+
+			case anthropic.MessageDeltaEvent:
+				if variant.Usage.OutputTokens > 0 {
+					totalTokens += variant.Usage.OutputTokens
+				}
+
+			case anthropic.MessageStartEvent:
+				if variant.Message.Usage.InputTokens > 0 {
+					totalTokens += variant.Message.Usage.InputTokens
+				}
+			}
+		}
+
+		if err := stream.Err(); err != nil {
+			ch <- StreamEvent{
+				Type:  EventError,
+				Error: fmt.Sprintf("Anthropic streaming error: %v", err),
+			}
+			return
+		}
+
+		ch <- StreamEvent{
+			Type:  EventUsage,
+			Usage: &StreamUsage{TotalTokens: totalTokens},
+		}
+
+		var content string
+		if len(textParts) > 0 {
+			content = strings.Join(textParts, "")
+		}
+
+		msg := &Message{
+			Role:            models.RoleAssistant,
+			Content:         content,
+			ToolCalls:       toolCalls,
+			ReasoningBlocks: reasoningBlocks,
+		}
+		if len(reasoningBlocks) > 0 {
+			var summaryBuilder strings.Builder
+			for _, block := range reasoningBlocks {
+				if !block.Redacted {
+					summaryBuilder.WriteString(block.Summary)
+					summaryBuilder.WriteString("\n")
+				}
+			}
+			msg.ReasoningContent = summaryBuilder.String()
+		}
+		ch <- StreamEvent{
+			Type:    EventMessageDone,
+			Message: msg,
+		}
+	})
+
+	return ch, nil
 }

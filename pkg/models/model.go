@@ -89,9 +89,9 @@ type CreateModelDto struct {
 }
 
 type UpdateModelDto struct {
-	Name                      string   `json:"name" binding:"omitempty"`
-	DefaultModel              bool     `json:"defaultModel" binding:"omitempty"`
-	Thinking                  bool     `json:"thinking" binding:"omitempty"`
+	Name                      *string   `json:"name" binding:"omitempty"`
+	DefaultModel              *bool     `json:"defaultModel" binding:"omitempty"`
+	Thinking                  *bool     `json:"thinking" binding:"omitempty"`
 	ThinkingLevels            []string `json:"thinkingLevels" binding:"omitempty"`
-	AnthropicAdaptiveThinking bool     `json:"anthropicAdaptiveThinking" binding:"omitempty"`
+	AnthropicAdaptiveThinking *bool     `json:"anthropicAdaptiveThinking" binding:"omitempty"`
 }

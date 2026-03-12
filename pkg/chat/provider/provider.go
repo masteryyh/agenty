@@ -74,5 +74,6 @@ type ChatResponse struct {
 
 type ChatProvider interface {
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
+	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
 	Name() string
 }

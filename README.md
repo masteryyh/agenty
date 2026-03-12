@@ -2,6 +2,8 @@
 
 A self-hosted AI agent framework with ReAct-pattern agentic looping, multi-provider LLM support, tool calling, and long-term memory.
 
+This project is still under construction, expect frequent updates and breaking changes.
+
 ## Quick Start
 
 ### Prerequisites

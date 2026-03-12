@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 )
 
@@ -56,6 +58,7 @@ type kimiRequest struct {
 	Tools          []kimiTool          `json:"tools,omitempty"`
 	Thinking       *kimiThinking       `json:"thinking,omitempty"`
 	ResponseFormat *kimiResponseFormat `json:"response_format,omitempty"`
+	Stream         bool                `json:"stream,omitempty"`
 }
 
 type kimiResponseFormat struct {
@@ -121,25 +124,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		baseURL = kimiDefaultBaseURL
 	}
 
-	messages := buildKimiMessages(req.Messages)
-	apiReq := kimiRequest{
-		Model:    req.Model,
-		Messages: messages,
-	}
-
-	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
-		strings.HasPrefix(req.Model, "kimi-k2")
-	if !isThinkingModel {
-		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOff}
-	}
-
-	if len(req.Tools) > 0 {
-		apiReq.Tools = buildKimiTools(req.Tools)
-	}
-
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
-		apiReq.ResponseFormat = &kimiResponseFormat{Type: "json_object"}
-	}
+	apiReq := p.buildKimiRequest(req, false)
 
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -268,4 +253,204 @@ func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
 			},
 		}
 	})
+}
+
+type kimiStreamChunk struct {
+	Choices []kimiStreamChoice `json:"choices"`
+	Usage   *kimiUsage         `json:"usage,omitempty"`
+}
+
+type kimiStreamChoice struct {
+	Delta kimiStreamDelta `json:"delta"`
+}
+
+type kimiStreamDelta struct {
+	Content          string         `json:"content,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []kimiToolCall `json:"tool_calls,omitempty"`
+	Role             string         `json:"role,omitempty"`
+}
+
+func (p *KimiProvider) buildKimiRequest(req *ChatRequest, stream bool) kimiRequest {
+	messages := buildKimiMessages(req.Messages)
+	apiReq := kimiRequest{
+		Model:    req.Model,
+		Messages: messages,
+		Stream:   stream,
+	}
+
+	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
+		strings.HasPrefix(req.Model, "kimi-k2")
+	if !isThinkingModel {
+		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOff}
+	}
+
+	if len(req.Tools) > 0 {
+		apiReq.Tools = buildKimiTools(req.Tools)
+	}
+
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
+		apiReq.ResponseFormat = &kimiResponseFormat{Type: "json_object"}
+	}
+
+	return apiReq
+}
+
+func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = kimiDefaultBaseURL
+	}
+
+	apiReq := p.buildKimiRequest(req, true)
+
+	body, err := json.Marshal(apiReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	httpResp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		defer httpResp.Body.Close()
+		respBody, _ := io.ReadAll(httpResp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+	}
+
+	ch := make(chan StreamEvent, 64)
+
+	safe.GoOnce("kimi-stream", func() {
+		defer close(ch)
+		defer httpResp.Body.Close()
+
+		type toolCallAccum struct {
+			id          string
+			name        string
+			argsBuilder strings.Builder
+		}
+
+		var contentBuilder strings.Builder
+		var reasoningBuilder strings.Builder
+		tcMap := make(map[int]*toolCallAccum)
+		var totalTokens int64
+
+		scanner := bufio.NewScanner(httpResp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk kimiStreamChunk
+			if err := json.UnmarshalString(data, &chunk); err != nil {
+				continue
+			}
+
+			if chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
+				totalTokens = chunk.Usage.TotalTokens
+			}
+
+			if len(chunk.Choices) == 0 {
+				continue
+			}
+
+			delta := chunk.Choices[0].Delta
+
+			if delta.Content != "" {
+				ch <- StreamEvent{
+					Type:    EventContentDelta,
+					Content: delta.Content,
+				}
+				contentBuilder.WriteString(delta.Content)
+			}
+
+			if delta.ReasoningContent != "" {
+				ch <- StreamEvent{
+					Type:      EventReasoningDelta,
+					Reasoning: delta.ReasoningContent,
+				}
+				reasoningBuilder.WriteString(delta.ReasoningContent)
+			}
+
+			for i, tc := range delta.ToolCalls {
+				acc, ok := tcMap[i]
+				if !ok {
+					acc = &toolCallAccum{
+						id:   tc.ID,
+						name: tc.Function.Name,
+					}
+					tcMap[i] = acc
+					if tc.ID != "" {
+						ch <- StreamEvent{
+							Type:     EventToolCallStart,
+							ToolCall: &models.ToolCall{ID: tc.ID, Name: tc.Function.Name},
+						}
+					}
+				}
+				if tc.ID != "" && acc.id == "" {
+					acc.id = tc.ID
+				}
+				if tc.Function.Name != "" && acc.name == "" {
+					acc.name = tc.Function.Name
+				}
+				if tc.Function.Arguments != "" {
+					acc.argsBuilder.WriteString(tc.Function.Arguments)
+					ch <- StreamEvent{
+						Type:     EventToolCallDelta,
+						ToolCall: &models.ToolCall{ID: acc.id, Name: acc.name, Arguments: tc.Function.Arguments},
+					}
+				}
+			}
+		}
+
+		if totalTokens > 0 {
+			ch <- StreamEvent{
+				Type:  EventUsage,
+				Usage: &StreamUsage{TotalTokens: totalTokens},
+			}
+		}
+
+		var toolCalls []models.ToolCall
+		for _, acc := range tcMap {
+			tc := models.ToolCall{
+				ID:        acc.id,
+				Name:      acc.name,
+				Arguments: acc.argsBuilder.String(),
+			}
+			toolCalls = append(toolCalls, tc)
+			ch <- StreamEvent{
+				Type:     EventToolCallDone,
+				ToolCall: &tc,
+			}
+		}
+
+		msg := &Message{
+			Role:             models.RoleAssistant,
+			Content:          contentBuilder.String(),
+			ToolCalls:        toolCalls,
+			ReasoningContent: reasoningBuilder.String(),
+		}
+		ch <- StreamEvent{
+			Type:    EventMessageDone,
+			Message: msg,
+		}
+	})
+
+	return ch, nil
 }

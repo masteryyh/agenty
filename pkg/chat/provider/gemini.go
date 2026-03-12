@@ -27,6 +27,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 	"google.golang.org/genai"
 )
@@ -48,22 +49,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	}
 
 	contents := buildGeminiContents(req.Messages)
-	config := &genai.GenerateContentConfig{}
-	if len(req.Tools) > 0 {
-		config.Tools = buildGeminiTools(req.Tools)
-	}
-
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
-		config.ResponseMIMEType = "application/json"
-	}
-
-	if req.Thinking {
-		thinkingConfig := &genai.ThinkingConfig{
-			IncludeThoughts: true,
-			ThinkingLevel:   validateThinkingLevel(req.ThinkingLevel),
-		}
-		config.ThinkingConfig = thinkingConfig
-	}
+	config := p.buildContentConfig(req)
 
 	resp, err := client.Models.GenerateContent(ctx, req.Model, contents, config)
 	if err != nil {
@@ -238,4 +224,136 @@ func validateThinkingLevel(level string) genai.ThinkingLevel {
 	default:
 		return genai.ThinkingLevelMedium
 	}
+}
+
+func (p *GeminiProvider) buildContentConfig(req *ChatRequest) *genai.GenerateContentConfig {
+	config := &genai.GenerateContentConfig{}
+	if len(req.Tools) > 0 {
+		config.Tools = buildGeminiTools(req.Tools)
+	}
+
+	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
+		config.ResponseMIMEType = "application/json"
+	}
+
+	if req.Thinking {
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			IncludeThoughts: true,
+			ThinkingLevel:   validateThinkingLevel(req.ThinkingLevel),
+		}
+	}
+
+	return config
+}
+
+func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+	client, err := conn.GetGeminiClient(ctx, req.BaseURL, req.APIKey)
+	if err != nil {
+		return nil, err
+	}
+
+	contents := buildGeminiContents(req.Messages)
+	config := p.buildContentConfig(req)
+
+	ch := make(chan StreamEvent, 64)
+
+	safe.GoOnce("gemini-stream", func() {
+		defer close(ch)
+		var contentBuilder strings.Builder
+		var toolCalls []models.ToolCall
+		var totalTokens int64
+		var reasoningBlocks []ReasoningBlock
+
+		for result, err := range client.Models.GenerateContentStream(ctx, req.Model, contents, config) {
+			if err != nil {
+				ch <- StreamEvent{
+					Type:  EventError,
+					Error: fmt.Sprintf("Gemini streaming error: %v", err),
+				}
+				return
+			}
+
+			if result.UsageMetadata != nil {
+				totalTokens = int64(result.UsageMetadata.TotalTokenCount)
+			}
+
+			if len(result.Candidates) > 0 && result.Candidates[0].Content != nil {
+				for _, part := range result.Candidates[0].Content.Parts {
+					if part.Text != "" {
+						if part.Thought {
+							ch <- StreamEvent{
+								Type:      EventReasoningDelta,
+								Reasoning: part.Text,
+							}
+						} else {
+							ch <- StreamEvent{
+								Type:    EventContentDelta,
+								Content: part.Text,
+							}
+							contentBuilder.WriteString(part.Text)
+						}
+					}
+
+					if part.FunctionCall != nil {
+						argsJSON, jsonErr := json.MarshalString(part.FunctionCall.Args)
+						if jsonErr != nil {
+							argsJSON = "{}"
+						}
+						id := part.FunctionCall.ID
+						if id == "" {
+							id = fmt.Sprintf("gemini_call_%s_%s", part.FunctionCall.Name, strings.ReplaceAll(uuid.NewString(), "-", ""))
+						}
+						tc := models.ToolCall{
+							ID:        id,
+							Name:      part.FunctionCall.Name,
+							Arguments: argsJSON,
+						}
+						toolCalls = append(toolCalls, tc)
+						ch <- StreamEvent{
+							Type:     EventToolCallStart,
+							ToolCall: &tc,
+						}
+						ch <- StreamEvent{
+							Type:     EventToolCallDone,
+							ToolCall: &tc,
+						}
+					}
+
+					if len(part.ThoughtSignature) > 0 {
+						sig := base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+						block := ReasoningBlock{Signature: sig}
+						reasoningBlocks = append(reasoningBlocks, block)
+					}
+				}
+			}
+		}
+
+		ch <- StreamEvent{
+			Type:  EventUsage,
+			Usage: &StreamUsage{TotalTokens: totalTokens},
+		}
+
+		msg := &Message{
+			Role:            models.RoleAssistant,
+			Content:         contentBuilder.String(),
+			ToolCalls:       toolCalls,
+			ReasoningBlocks: reasoningBlocks,
+		}
+		if len(reasoningBlocks) > 0 {
+			var summaryBuilder strings.Builder
+			for _, block := range reasoningBlocks {
+				if !block.Redacted {
+					summaryBuilder.WriteString(block.Summary)
+					summaryBuilder.WriteString("\n")
+				}
+			}
+			msg.ReasoningContent = summaryBuilder.String()
+		}
+		ch <- StreamEvent{
+			Type:    EventMessageDone,
+			Message: msg,
+		}
+	})
+
+	return ch, nil
 }

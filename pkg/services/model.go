@@ -189,71 +189,77 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 			return err
 		}
 
-		if dto.Name != "" && dto.Name != model.Name {
-			exists, err := gorm.G[models.Model](tx).
-				Where("name = ? AND provider_id = ? AND id != ? AND deleted_at IS NULL", dto.Name, model.ProviderID, modelID).
-				Count(ctx, "id")
-			if err != nil {
-				return err
-			}
-
-			if exists > 0 {
-				return customerrors.ErrModelAlreadyExists
-			}
-			model.Name = dto.Name
-		}
-
-		if !dto.DefaultModel {
-			model.DefaultModel = false
-		} else {
-			currentDefaultModel, err := gorm.G[models.Model](tx).
-				Where("default_model IS TRUE AND id != ? AND deleted_at IS NULL", modelID).
-				First(ctx)
-			if err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return err
-				}
-			}
-
-			if currentDefaultModel.ID != uuid.Nil {
-				_, err := gorm.G[models.Model](tx).
-					Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
-					Update(ctx, "default_model", false)
+		if dto.Name != nil {
+			if *dto.Name != "" && *dto.Name != model.Name {
+				exists, err := gorm.G[models.Model](tx).
+					Where("name = ? AND provider_id = ? AND id != ? AND deleted_at IS NULL", *dto.Name, model.ProviderID, modelID).
+					Count(ctx, "id")
 				if err != nil {
 					return err
 				}
+
+				if exists > 0 {
+					return customerrors.ErrModelAlreadyExists
+				}
+				model.Name = *dto.Name
 			}
-			model.DefaultModel = true
 		}
 
-		model.Thinking = dto.Thinking
-		if !dto.Thinking {
-			model.ThinkingLevels = nil
-			model.AnthropicAdaptiveThinking = false
-		} else {
-			if len(dto.ThinkingLevels) > 0 {
-				thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
-				if err != nil {
-					return err
-				}
-				model.ThinkingLevels = thinkingLevels
-			}
-
-			if dto.AnthropicAdaptiveThinking {
-				provider, err := gorm.G[models.ModelProvider](tx).
-					Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+		if dto.DefaultModel != nil {
+			if !*dto.DefaultModel {
+				model.DefaultModel = false
+			} else {
+				currentDefaultModel, err := gorm.G[models.Model](tx).
+					Where("default_model IS TRUE AND id != ? AND deleted_at IS NULL", modelID).
 					First(ctx)
 				if err != nil {
-					if errors.Is(err, gorm.ErrRecordNotFound) {
-						return customerrors.ErrProviderNotFound
+					if !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
 					}
-					return err
 				}
-				if provider.Type == models.APITypeAnthropic {
-					model.AnthropicAdaptiveThinking = true
+
+				if currentDefaultModel.ID != uuid.Nil {
+					_, err := gorm.G[models.Model](tx).
+						Where("id = ? AND deleted_at IS NULL", currentDefaultModel.ID).
+						Update(ctx, "default_model", false)
+					if err != nil {
+						return err
+					}
 				}
-			} else {
+				model.DefaultModel = true
+			}
+		}
+
+		if dto.Thinking != nil {
+			model.Thinking = *dto.Thinking
+			if !*dto.Thinking {
+				model.ThinkingLevels = nil
 				model.AnthropicAdaptiveThinking = false
+			} else {
+				if len(dto.ThinkingLevels) > 0 {
+					thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
+					if err != nil {
+						return err
+					}
+					model.ThinkingLevels = thinkingLevels
+				}
+
+				if dto.AnthropicAdaptiveThinking != nil && *dto.AnthropicAdaptiveThinking {
+					provider, err := gorm.G[models.ModelProvider](tx).
+						Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+						First(ctx)
+					if err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return customerrors.ErrProviderNotFound
+						}
+						return err
+					}
+					if provider.Type == models.APITypeAnthropic {
+						model.AnthropicAdaptiveThinking = true
+					}
+				} else {
+					model.AnthropicAdaptiveThinking = false
+				}
 			}
 		}
 

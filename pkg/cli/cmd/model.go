@@ -205,7 +205,7 @@ var modelUpdateCmd = &cobra.Command{
 			return nil
 		}
 
-		if err := c.UpdateModel(target.ID, &models.UpdateModelDto{Name: newName, DefaultModel: setDefault}); err != nil {
+		if err := c.UpdateModel(target.ID, &models.UpdateModelDto{Name: &newName, DefaultModel: &setDefault}); err != nil {
 			return err
 		}
 		pterm.Success.Printf("Model updated: %s\n", newName)

@@ -302,6 +302,24 @@ var (
 	markdownRendererOnce sync.Once
 )
 
+func printStreamText(text string, color pterm.Color, indent string, atLineStart *bool) {
+	if text == "" {
+		return
+	}
+	parts := strings.Split(text, "\n")
+	for i, part := range parts {
+		if i > 0 {
+			fmt.Println()
+			*atLineStart = true
+		}
+		if *atLineStart && part != "" {
+			fmt.Print(indent)
+			*atLineStart = false
+		}
+		fmt.Print(color.Sprint(part))
+	}
+}
+
 func renderMarkdown(text string) string {
 	markdownRendererOnce.Do(func() {
 		r, err := glamour.NewTermRenderer(
