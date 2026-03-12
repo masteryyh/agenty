@@ -17,6 +17,7 @@ limitations under the License.
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
@@ -300,28 +302,139 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 			continue
 		}
 
-		spinner, _ := pterm.DefaultSpinner.Start("Thinking...")
+		fmt.Println(pterm.FgGreen.Sprint("🤖 Assistant:"))
 
-		messages, err := c.Chat(currentSessionID, &models.ChatDto{
+		var (
+			hasReasoning   bool
+			hasToolSection bool
+			hadToolCalls   bool
+			hasContent     bool
+			atLineStart    = true
+		)
+
+		err = c.StreamChat(context.Background(), currentSessionID, &models.ChatDto{
 			ModelID:       currentModelID,
 			Message:       input,
 			Thinking:      chatState.Thinking,
 			ThinkingLevel: chatState.ThinkingLevel,
+		}, func(evt provider.StreamEvent) error {
+			switch evt.Type {
+			case provider.EventReasoningDelta:
+				if !hasReasoning {
+					hasReasoning = true
+					fmt.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
+					atLineStart = true
+				}
+				printStreamText(evt.Reasoning, pterm.FgGray, "  ", &atLineStart)
+
+			case provider.EventContentDelta:
+				if !hasContent {
+					hasContent = true
+					if !atLineStart {
+						fmt.Println()
+						atLineStart = true
+					}
+					if hadToolCalls {
+						fmt.Println()
+						fmt.Println(pterm.FgGreen.Sprint("  📝 Final Response:"))
+					} else if hasReasoning {
+						fmt.Println()
+					}
+					atLineStart = true
+				}
+				for i, part := range strings.Split(evt.Content, "\n") {
+					if i > 0 {
+						fmt.Println()
+						atLineStart = true
+					}
+					if atLineStart && part != "" {
+						fmt.Print("  ")
+						atLineStart = false
+					}
+					fmt.Print(part)
+				}
+
+			case provider.EventToolCallStart:
+				if !hasToolSection {
+					if hasContent {
+						if !atLineStart {
+							fmt.Println()
+							atLineStart = true
+						}
+						fmt.Println()
+					} else if hasReasoning {
+						if !atLineStart {
+							fmt.Println()
+							atLineStart = true
+						}
+						fmt.Println()
+					}
+					fmt.Println(pterm.FgYellow.Sprint("  🔧 Tool Execution:"))
+					hasToolSection = true
+					hadToolCalls = true
+				}
+				name := ""
+				if evt.ToolCall != nil {
+					name = evt.ToolCall.Name
+				}
+				fmt.Printf("  • %s ", pterm.FgCyan.Sprint(name))
+				atLineStart = false
+
+			case provider.EventToolCallDelta:
+				if evt.ToolCall != nil {
+					fmt.Print(pterm.FgGray.Sprint(evt.ToolCall.Arguments))
+				}
+
+			case provider.EventToolCallDone:
+				fmt.Println()
+				atLineStart = true
+
+			case provider.EventToolResult:
+				if evt.ToolResult != nil {
+					if evt.ToolResult.IsError {
+						fmt.Printf("    %s\n", pterm.FgRed.Sprint("❌ Error"))
+					} else {
+						fmt.Printf("    %s\n", pterm.FgGreen.Sprint("✅ Success"))
+					}
+					preview := evt.ToolResult.Content
+					if len(preview) > 100 {
+						preview = preview[:97] + "..."
+					}
+					fmt.Printf("    %s\n", pterm.FgGray.Sprint(preview))
+					atLineStart = true
+				}
+
+			case provider.EventMessageDone:
+				if hasContent {
+					if !atLineStart {
+						fmt.Println()
+						atLineStart = true
+					}
+				} else if hasReasoning && !atLineStart {
+					fmt.Println()
+				}
+
+				hasReasoning = false
+				hasToolSection = false
+				hasContent = false
+				atLineStart = true
+
+			case provider.EventError:
+				if !atLineStart {
+					fmt.Println()
+				}
+				fmt.Printf("  %s\n", pterm.FgRed.Sprintf("Error: %s", evt.Error))
+			}
+			return nil
 		})
 
-		spinner.Stop()
+		fmt.Println()
 
 		if err != nil {
 			pterm.Error.Printf("Error: %v\n", err)
 			continue
 		}
 
-		fmt.Println()
-		if messages != nil {
-			for _, msg := range *messages {
-				printMessage(msg)
-			}
-		}
 		fmt.Println()
 	}
 

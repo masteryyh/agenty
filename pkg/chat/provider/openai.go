@@ -18,11 +18,13 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -41,59 +43,7 @@ func (p *OpenAIProvider) Name() string {
 
 func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	client := conn.GetOpenAIClient(req.BaseURL, req.APIKey)
-
-	input := buildResponseInput(req.Messages)
-
-	params := responses.ResponseNewParams{
-		Model: shared.ResponsesModel(req.Model),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: input,
-		},
-		Include: []responses.ResponseIncludable{
-			responses.ResponseIncludableReasoningEncryptedContent,
-		},
-		Store: param.NewOpt(false),
-	}
-
-	if len(req.Tools) > 0 {
-		params.Tools = buildResponseTools(req.Tools)
-	}
-
-	if req.Thinking {
-		effort := validateReasoningEffort(req.ThinkingLevel)
-		params.Reasoning = shared.ReasoningParam{
-			Effort:  effort,
-			Summary: shared.ReasoningSummaryAuto,
-		}
-	}
-
-	if req.ResponseFormat != nil {
-		switch req.ResponseFormat.Type {
-		case "json_object":
-			params.Text = responses.ResponseTextConfigParam{
-				Format: responses.ResponseFormatTextConfigUnionParam{
-					OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
-				},
-			}
-		case "json_schema":
-			if req.ResponseFormat.JSONSchema != nil {
-				schema := req.ResponseFormat.JSONSchema
-				schemaParam := responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:   schema.Name,
-					Schema: schema.Schema,
-					Strict: param.NewOpt(schema.Strict),
-				}
-				if schema.Description != "" {
-					schemaParam.Description = param.NewOpt(schema.Description)
-				}
-				params.Text = responses.ResponseTextConfigParam{
-					Format: responses.ResponseFormatTextConfigUnionParam{
-						OfJSONSchema: &schemaParam,
-					},
-				}
-			}
-		}
-	}
+	params := p.buildResponseParams(req)
 
 	resp, err := client.Responses.New(ctx, params)
 	if err != nil {
@@ -222,4 +172,193 @@ func validateReasoningEffort(level string) shared.ReasoningEffort {
 	default:
 		return shared.ReasoningEffortMedium
 	}
+}
+
+func (p *OpenAIProvider) buildResponseParams(req *ChatRequest) responses.ResponseNewParams {
+	input := buildResponseInput(req.Messages)
+	params := responses.ResponseNewParams{
+		Model: shared.ResponsesModel(req.Model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		},
+		Include: []responses.ResponseIncludable{
+			responses.ResponseIncludableReasoningEncryptedContent,
+		},
+		Store: param.NewOpt(false),
+	}
+
+	if len(req.Tools) > 0 {
+		params.Tools = buildResponseTools(req.Tools)
+	}
+
+	if req.Thinking {
+		effort := validateReasoningEffort(req.ThinkingLevel)
+		params.Reasoning = shared.ReasoningParam{
+			Effort:  effort,
+			Summary: shared.ReasoningSummaryAuto,
+		}
+	}
+
+	if req.ResponseFormat != nil {
+		switch req.ResponseFormat.Type {
+		case "json_object":
+			params.Text = responses.ResponseTextConfigParam{
+				Format: responses.ResponseFormatTextConfigUnionParam{
+					OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
+				},
+			}
+		case "json_schema":
+			if req.ResponseFormat.JSONSchema != nil {
+				schema := req.ResponseFormat.JSONSchema
+				schemaParam := responses.ResponseFormatTextJSONSchemaConfigParam{
+					Name:   schema.Name,
+					Schema: schema.Schema,
+					Strict: param.NewOpt(schema.Strict),
+				}
+				if schema.Description != "" {
+					schemaParam.Description = param.NewOpt(schema.Description)
+				}
+				params.Text = responses.ResponseTextConfigParam{
+					Format: responses.ResponseFormatTextConfigUnionParam{
+						OfJSONSchema: &schemaParam,
+					},
+				}
+			}
+		}
+	}
+
+	return params
+}
+
+func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+	client := conn.GetOpenAIClient(req.BaseURL, req.APIKey)
+	params := p.buildResponseParams(req)
+
+	stream := client.Responses.NewStreaming(ctx, params)
+
+	ch := make(chan StreamEvent, 64)
+
+	safe.GoOnce("openai-stream", func() {
+		defer close(ch)
+		toolCalls := make(map[string]*models.ToolCall)
+		var reasoningBlocks []ReasoningBlock
+		var contentBuilder strings.Builder
+
+		for stream.Next() {
+			event := stream.Current()
+
+			switch event.Type {
+			case "response.output_text.delta":
+				ch <- StreamEvent{
+					Type:    EventContentDelta,
+					Content: event.Delta,
+				}
+				contentBuilder.WriteString(event.Delta)
+
+			case "response.reasoning_summary_text.delta":
+				ch <- StreamEvent{
+					Type:      EventReasoningDelta,
+					Reasoning: event.Delta,
+				}
+
+			case "response.function_call_arguments.delta":
+				tc, ok := toolCalls[event.ItemID]
+				if ok {
+					tc.Arguments += event.Delta
+					ch <- StreamEvent{
+						Type:     EventToolCallDelta,
+						ToolCall: &models.ToolCall{ID: tc.ID, Name: tc.Name, Arguments: event.Delta},
+					}
+				}
+
+			case "response.output_item.added":
+				item := event.Item
+				switch item.Type {
+				case "function_call":
+					fc := item.AsFunctionCall()
+					tc := &models.ToolCall{
+						ID:   fc.CallID,
+						Name: fc.Name,
+					}
+					toolCalls[fc.ID] = tc
+					ch <- StreamEvent{
+						Type:     EventToolCallStart,
+						ToolCall: &models.ToolCall{ID: fc.CallID, Name: fc.Name},
+					}
+				}
+
+			case "response.output_item.done":
+				item := event.Item
+				switch item.Type {
+				case "function_call":
+					fc := item.AsFunctionCall()
+					tc := &models.ToolCall{
+						ID:        fc.CallID,
+						Name:      fc.Name,
+						Arguments: fc.Arguments,
+					}
+					ch <- StreamEvent{
+						Type:     EventToolCallDone,
+						ToolCall: tc,
+					}
+				case "reasoning":
+					reasoning := item.AsReasoning()
+					block := ReasoningBlock{
+						Signature: reasoning.EncryptedContent,
+					}
+					var summaryParts []string
+					for _, s := range reasoning.Summary {
+						summaryParts = append(summaryParts, s.Text)
+					}
+					block.Summary = strings.Join(summaryParts, "\n")
+					reasoningBlocks = append(reasoningBlocks, block)
+				}
+
+			case "response.completed":
+				completed := event.AsResponseCompleted()
+				ch <- StreamEvent{
+					Type: EventUsage,
+					Usage: &StreamUsage{
+						TotalTokens: completed.Response.Usage.TotalTokens,
+					},
+				}
+			}
+		}
+
+		if err := stream.Err(); err != nil {
+			ch <- StreamEvent{
+				Type:  EventError,
+				Error: fmt.Sprintf("OpenAI streaming error: %v", err),
+			}
+			return
+		}
+
+		finalToolCalls := make([]models.ToolCall, 0, len(toolCalls))
+		for _, tc := range toolCalls {
+			finalToolCalls = append(finalToolCalls, *tc)
+		}
+
+		msg := &Message{
+			Role:            models.RoleAssistant,
+			Content:         contentBuilder.String(),
+			ToolCalls:       finalToolCalls,
+			ReasoningBlocks: reasoningBlocks,
+		}
+		if len(reasoningBlocks) > 0 {
+			var summaryBuilder strings.Builder
+			for _, block := range reasoningBlocks {
+				if !block.Redacted {
+					summaryBuilder.WriteString(block.Summary)
+					summaryBuilder.WriteString("\n")
+				}
+			}
+			msg.ReasoningContent = summaryBuilder.String()
+		}
+		ch <- StreamEvent{
+			Type:    EventMessageDone,
+			Message: msg,
+		}
+	})
+
+	return ch, nil
 }

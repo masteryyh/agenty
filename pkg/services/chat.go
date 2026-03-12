@@ -35,6 +35,8 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/samber/lo"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -248,6 +250,149 @@ func (s *ChatService) ListSessions(ctx context.Context, request *pagination.Page
 }
 
 func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) ([]*models.ChatMessageDto, error) {
+	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, err := buildSystemPrompt(&res.agent)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
+		return nil, err
+	}
+
+	messages, err := s.loadHistoryMessages(ctx, res.session.ID, data.ModelID, data.Thinking)
+	if err != nil {
+		return nil, err
+	}
+	messages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
+	messages = append(messages, provider.Message{Role: models.RoleUser, Content: data.Message})
+
+	if err := s.saveUserMessage(ctx, &res.session, res.model.ID, data.Message); err != nil {
+		return nil, err
+	}
+
+	result, err := s.chatExecutor.Chat(ctx, buildChatParams(res, messages, data))
+	if err != nil {
+		slog.ErrorContext(ctx, "chat completion failed", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	baseTime := time.Now()
+	newMessages := make([]models.ChatMessage, 0, len(result.Messages))
+	for i, m := range result.Messages {
+		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), data.ThinkingLevel))
+	}
+
+	if err := s.saveMessagesAndUpdateSession(ctx, &res.session, res.model.ID, newMessages, result.TotalToken); err != nil {
+		slog.ErrorContext(ctx, "failed to save chat messages and update session", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	messageDtos := lo.Map(newMessages, func(m models.ChatMessage, _ int) *models.ChatMessageDto {
+		return m.ToDto(nil)
+	})
+	return messageDtos, nil
+}
+
+func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (<-chan provider.StreamEvent, error) {
+	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, err := buildSystemPrompt(&res.agent)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
+		return nil, err
+	}
+
+	messages, err := s.loadHistoryMessages(ctx, res.session.ID, data.ModelID, data.Thinking)
+	if err != nil {
+		return nil, err
+	}
+	messages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
+	messages = append(messages, provider.Message{Role: models.RoleUser, Content: data.Message})
+
+	if err := s.saveUserMessage(ctx, &res.session, res.model.ID, data.Message); err != nil {
+		return nil, err
+	}
+
+	executorCh, err := s.chatExecutor.StreamChat(ctx, buildChatParams(res, messages, data))
+	if err != nil {
+		slog.ErrorContext(ctx, "stream chat failed", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	out := make(chan provider.StreamEvent, 64)
+
+	safe.GoOnce("chat-service-stream", func() {
+		defer close(out)
+
+		var collectedMessages []provider.Message
+		var totalTokens int64
+
+		for evt := range executorCh {
+			if evt.Type == provider.EventMessageDone && evt.Message != nil {
+				collectedMessages = append(collectedMessages, *evt.Message)
+			}
+			if evt.Type == provider.EventToolResult && evt.ToolResult != nil {
+				collectedMessages = append(collectedMessages, provider.Message{
+					Role:       models.RoleTool,
+					Content:    evt.ToolResult.Content,
+					ToolResult: evt.ToolResult,
+				})
+			}
+			if evt.Type == provider.EventUsage && evt.Usage != nil {
+				totalTokens = evt.Usage.TotalTokens
+			}
+
+			if evt.Type == provider.EventDone {
+				s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+
+				select {
+				case out <- evt:
+				case <-ctx.Done():
+				}
+				return
+			}
+
+			select {
+			case out <- evt:
+			case <-ctx.Done():
+				s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+				return
+			}
+		}
+	})
+
+	return out, nil
+}
+
+func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResources, collectedMessages []provider.Message, totalTokens int64, thinkingLevel string) {
+	baseTime := time.Now()
+	newMessages := make([]models.ChatMessage, 0, len(collectedMessages))
+	for i, m := range collectedMessages {
+		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), thinkingLevel))
+	}
+
+	if len(newMessages) == 0 {
+		return
+	}
+
+	if err := s.saveMessagesAndUpdateSession(ctx, &res.session, res.model.ID, newMessages, totalTokens); err != nil {
+		slog.ErrorContext(ctx, "failed to persist stream messages", "error", err, "sessionId", res.session.ID)
+	}
+}
+
+type chatResources struct {
+	session      models.ChatSession
+	model        models.Model
+	chatProvider models.ModelProvider
+	agent        models.Agent
+}
+
+func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID uuid.UUID) (*chatResources, error) {
 	session, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ? AND deleted_at IS NULL", sessionID).
 		First(ctx)
@@ -260,13 +405,13 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", data.ModelID).
+		Where("id = ? AND deleted_at IS NULL", modelID).
 		First(ctx)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customerrors.ErrModelNotFound
 		}
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", data.ModelID)
+		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return nil, err
 	}
 
@@ -296,19 +441,30 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	var systemPromptBuilder strings.Builder
-	if err := consts.AgentBasePrompt.Execute(&systemPromptBuilder, map[string]any{
+	return &chatResources{
+		session:      session,
+		model:        model,
+		chatProvider: chatProvider,
+		agent:        agent,
+	}, nil
+}
+
+func buildSystemPrompt(agent *models.Agent) (string, error) {
+	var sb strings.Builder
+	if err := consts.AgentBasePrompt.Execute(&sb, map[string]any{
 		"DateTime":  time.Now().Format(time.RFC3339),
 		"AgentName": agent.Name,
 		"AgentID":   agent.ID,
 		"Soul":      agent.Soul,
 	}); err != nil {
-		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
-		return nil, err
+		return "", err
 	}
+	return sb.String(), nil
+}
 
+func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelID uuid.UUID, thinking bool) ([]provider.Message, error) {
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
-		Where("session_id = ? AND deleted_at IS NULL", session.ID).
+		Where("session_id = ? AND deleted_at IS NULL", sessionID).
 		Order("created_at ASC").
 		Find(ctx)
 	if err != nil {
@@ -341,37 +497,25 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 			ToolResult: toolResult,
 		}
 
-		if data.ModelID == cm.ModelID {
+		if modelID == cm.ModelID {
 			msg.ReasoningContent = cm.ReasoningContent
-			if data.Thinking && len(cm.ProviderSpecifics) > 0 {
+			if thinking && len(cm.ProviderSpecifics) > 0 {
 				var ps models.ProviderSpecificData
 				if err := json.Unmarshal(cm.ProviderSpecifics, &ps); err == nil {
 					if len(ps.AnthropicThinkingBlocks) > 0 {
 						msg.ReasoningBlocks = lo.Map(ps.AnthropicThinkingBlocks, func(b models.AnthropicThinkingBlock, _ int) provider.ReasoningBlock {
 							if b.Type == "redacted_thinking" {
-								return provider.ReasoningBlock{
-									Signature: b.Data,
-									Redacted:  true,
-								}
+								return provider.ReasoningBlock{Signature: b.Data, Redacted: true}
 							}
-							return provider.ReasoningBlock{
-								Summary:   b.Thinking,
-								Signature: b.Signature,
-							}
+							return provider.ReasoningBlock{Summary: b.Thinking, Signature: b.Signature}
 						})
 					} else if len(ps.GeminiThinkingBlocks) > 0 {
 						msg.ReasoningBlocks = lo.Map(ps.GeminiThinkingBlocks, func(b models.GeminiThinkingData, _ int) provider.ReasoningBlock {
-							return provider.ReasoningBlock{
-								Summary:   b.Summary,
-								Signature: b.ThoughtSignature,
-							}
+							return provider.ReasoningBlock{Summary: b.Summary, Signature: b.ThoughtSignature}
 						})
 					} else if len(ps.OpenAIReasoningBlocks) > 0 {
 						msg.ReasoningBlocks = lo.Map(ps.OpenAIReasoningBlocks, func(b models.OpenAIReasoningBlock, _ int) provider.ReasoningBlock {
-							return provider.ReasoningBlock{
-								Summary:   b.Summary,
-								Signature: b.EncryptedContent,
-							}
+							return provider.ReasoningBlock{Summary: b.Summary, Signature: b.EncryptedContent}
 						})
 					}
 				}
@@ -380,143 +524,114 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 
 		return msg
 	})
-	messages = append([]provider.Message{{
-		Role:    models.RoleSystem,
-		Content: systemPromptBuilder.String(),
-	}}, messages...)
-	messages = append(messages, provider.Message{
-		Role:    models.RoleUser,
-		Content: data.Message,
-	})
+	return messages, nil
+}
 
-	newUserMessage := models.ChatMessage{
+func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatSession, modelID uuid.UUID, content string) error {
+	msg := models.ChatMessage{
 		SessionID: session.ID,
 		AgentID:   session.AgentID,
 		Role:      models.RoleUser,
-		Content:   data.Message,
-		ModelID:   model.ID,
+		Content:   content,
+		ModelID:   modelID,
 	}
-
-	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &newUserMessage); err != nil {
-		slog.ErrorContext(ctx, "failed to save user message", "error", err, "sessionId", sessionID)
-		return nil, err
+	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &msg); err != nil {
+		slog.ErrorContext(ctx, "failed to save user message", "error", err, "sessionId", session.ID)
+		return err
 	}
+	return nil
+}
 
-	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
-		BaseURL:                   chatProvider.BaseURL,
-		APIKey:                    chatProvider.APIKey,
-		Model:                     model.Code,
+func buildChatParams(res *chatResources, messages []provider.Message, data *models.ChatDto) *chat.ChatParams {
+	return &chat.ChatParams{
+		BaseURL:                   res.chatProvider.BaseURL,
+		APIKey:                    res.chatProvider.APIKey,
+		Model:                     res.model.Code,
 		Messages:                  messages,
-		AgentID:                   session.AgentID,
-		SessionID:                 session.ID,
-		ModelID:                   model.ID,
-		APIType:                   chatProvider.Type,
-		Thinking:                  data.Thinking && model.Thinking,
+		AgentID:                   res.session.AgentID,
+		SessionID:                 res.session.ID,
+		ModelID:                   res.model.ID,
+		APIType:                   res.chatProvider.Type,
+		Thinking:                  data.Thinking && res.model.Thinking,
 		ThinkingLevel:             data.ThinkingLevel,
-		AnthropicAdaptiveThinking: model.AnthropicAdaptiveThinking,
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "chat completion failed", "error", err, "sessionId", sessionID)
-		return nil, err
+		AnthropicAdaptiveThinking: res.model.AnthropicAdaptiveThinking,
+	}
+}
+
+func buildChatMessage(m provider.Message, sessionID, agentID, modelID uuid.UUID, providerType models.APIType, timestamp time.Time, thinkingLevel string) models.ChatMessage {
+	var rawCalls []byte
+	if len(m.ToolCalls) > 0 {
+		if d, err := json.Marshal(m.ToolCalls); err != nil {
+			slog.Error("failed to marshal tool calls", "error", err, "sessionId", sessionID)
+		} else {
+			rawCalls = d
+		}
 	}
 
-	baseTime := time.Now()
-	newMessages := make([]models.ChatMessage, 0, len(result.Messages))
-	for i, m := range result.Messages {
-		var rawCalls []byte
-		if len(m.ToolCalls) > 0 {
-			if d, err := json.Marshal(m.ToolCalls); err != nil {
-				slog.ErrorContext(ctx, "failed to marshal tool calls", "error", err, "sessionId", sessionID)
-			} else {
-				rawCalls = d
-			}
+	var rawCallResult []byte
+	if m.ToolResult != nil {
+		if d, err := json.Marshal(m.ToolResult); err != nil {
+			slog.Error("failed to marshal tool result", "error", err, "sessionId", sessionID)
+		} else {
+			rawCallResult = d
 		}
-
-		var rawCallResult []byte
-		if m.ToolResult != nil {
-			if d, err := json.Marshal(m.ToolResult); err != nil {
-				slog.ErrorContext(ctx, "failed to marshal tool result", "error", err, "sessionId", sessionID)
-			} else {
-				rawCallResult = d
-			}
-		}
-
-		chatMsg := models.ChatMessage{
-			SessionID:        session.ID,
-			AgentID:          session.AgentID,
-			Role:             models.MessageRole(m.Role),
-			Content:          m.Content,
-			ToolCalls:        datatypes.JSON(rawCalls),
-			ToolResults:      datatypes.JSON(rawCallResult),
-			ModelID:          model.ID,
-			ReasoningContent: m.ReasoningContent,
-			CreatedAt:        baseTime.Add(time.Duration(i) * time.Millisecond),
-		}
-
-		if m.Role == models.RoleAssistant && len(m.ReasoningBlocks) > 0 {
-			var specificData models.ProviderSpecificData
-			switch chatProvider.Type {
-			case models.APITypeAnthropic:
-				specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
-					if b.Redacted {
-						return models.AnthropicThinkingBlock{
-							Type: "redacted_thinking",
-							Data: b.Signature,
-						}
-					}
-					return models.AnthropicThinkingBlock{
-						Type:      "thinking",
-						Thinking:  b.Summary,
-						Signature: b.Signature,
-					}
-				})
-			case models.APITypeGemini:
-				specificData.GeminiThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.GeminiThinkingData {
-					return models.GeminiThinkingData{
-						ThoughtSignature: b.Signature,
-						ThinkingLevel:    data.ThinkingLevel,
-						Summary:          b.Summary,
-					}
-				})
-			case models.APITypeOpenAI:
-				specificData.OpenAIReasoningBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.OpenAIReasoningBlock {
-					return models.OpenAIReasoningBlock{
-						Summary:          b.Summary,
-						EncryptedContent: b.Signature,
-					}
-				})
-			}
-			if raw, err := json.Marshal(specificData); err == nil {
-				chatMsg.ProviderSpecifics = datatypes.JSON(raw)
-			}
-		}
-
-		newMessages = append(newMessages, chatMsg)
 	}
 
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&newMessages).Error; err != nil {
+	chatMsg := models.ChatMessage{
+		SessionID:        sessionID,
+		AgentID:          agentID,
+		Role:             models.MessageRole(m.Role),
+		Content:          m.Content,
+		ToolCalls:        datatypes.JSON(rawCalls),
+		ToolResults:      datatypes.JSON(rawCallResult),
+		ModelID:          modelID,
+		ReasoningContent: m.ReasoningContent,
+		CreatedAt:        timestamp,
+	}
+
+	if m.Role == models.RoleAssistant && len(m.ReasoningBlocks) > 0 {
+		var specificData models.ProviderSpecificData
+		switch providerType {
+		case models.APITypeAnthropic:
+			specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
+				if b.Redacted {
+					return models.AnthropicThinkingBlock{Type: "redacted_thinking", Data: b.Signature}
+				}
+				return models.AnthropicThinkingBlock{Type: "thinking", Thinking: b.Summary, Signature: b.Signature}
+			})
+		case models.APITypeGemini:
+			specificData.GeminiThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.GeminiThinkingData {
+				return models.GeminiThinkingData{ThoughtSignature: b.Signature, ThinkingLevel: thinkingLevel, Summary: b.Summary}
+			})
+		case models.APITypeOpenAI:
+			specificData.OpenAIReasoningBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.OpenAIReasoningBlock {
+				return models.OpenAIReasoningBlock{Summary: b.Summary, EncryptedContent: b.Signature}
+			})
+		}
+		if raw, err := json.Marshal(specificData); err == nil {
+			chatMsg.ProviderSpecifics = datatypes.JSON(raw)
+		}
+	}
+
+	return chatMsg
+}
+
+func (s *ChatService) saveMessagesAndUpdateSession(ctx context.Context, session *models.ChatSession, modelID uuid.UUID, messages []models.ChatMessage, totalTokens int64) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&messages).Error; err != nil {
 			return fmt.Errorf("failed to save assistant messages: %w", err)
 		}
 
-		session.TokenConsumed += result.TotalToken
-		session.LastUsedModel = model.ID
+		session.TokenConsumed += totalTokens
+		session.LastUsedModel = modelID
 		if err := tx.Model(&models.ChatSession{}).
 			Where("id = ?", session.ID).
 			Updates(map[string]any{
-				"token_consumed": session.TokenConsumed,
+				"token_consumed":  session.TokenConsumed,
 				"last_used_model": session.LastUsedModel,
 			}).Error; err != nil {
 			return fmt.Errorf("failed to update chat session: %w", err)
 		}
 		return nil
-	}); err != nil {
-		slog.ErrorContext(ctx, "failed to save chat messages and update session", "error", err, "sessionId", sessionID)
-		return nil, err
-	}
-
-	messageDtos := lo.Map(newMessages, func(m models.ChatMessage, _ int) *models.ChatMessageDto {
-		return m.ToDto(nil)
 	})
-	return messageDtos, nil
 }

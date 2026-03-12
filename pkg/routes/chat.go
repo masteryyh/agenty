@@ -17,10 +17,13 @@ limitations under the License.
 package routes
 
 import (
+	"io"
 	"sync"
 
+	json "github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
@@ -55,6 +58,7 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		chatGroup.GET("/session/last/:agentId", r.GetLastSessionByAgent)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
 		chatGroup.POST("/chat", r.Chat)
+		chatGroup.POST("/stream", r.StreamChat)
 	}
 }
 
@@ -165,4 +169,49 @@ func (r *ChatRoutes) Chat(c *gin.Context) {
 		return
 	}
 	response.OK(c, result)
+}
+
+func (r *ChatRoutes) StreamChat(c *gin.Context) {
+	sessionIDRaw := c.Query("sessionId")
+	if sessionIDRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	sessionID, err := uuid.Parse(sessionIDRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	var data *models.ChatDto
+	if err := c.ShouldBindJSON(&data); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	events, err := r.service.StreamChat(c.Request.Context(), sessionID, data)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				return false
+			}
+			data, _ := json.Marshal(evt)
+			c.SSEvent(string(evt.Type), string(data))
+			return evt.Type != provider.EventDone
+		case <-c.Request.Context().Done():
+			return false
+		}
+	})
 }

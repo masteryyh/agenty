@@ -17,14 +17,18 @@ limitations under the License.
 package api
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/response"
@@ -167,6 +171,69 @@ func (c *Client) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDt
 
 func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
+}
+
+func (c *Client) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event provider.StreamEvent) error) error {
+	jsonData, err := json.Marshal(dto)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+fmt.Sprintf("/api/v1/chats/stream?sessionId=%s", sessionID), bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	if c.username != "" && c.password != "" {
+		req.SetBasicAuth(c.username, c.password)
+	}
+
+	sseClient := &http.Client{Timeout: 0}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+
+	var currentData string
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "data:") {
+			currentData = strings.TrimPrefix(line, "data:")
+			currentData = strings.TrimSpace(currentData)
+			continue
+		}
+
+		if line == "" && currentData != "" {
+			var evt provider.StreamEvent
+			if err := json.UnmarshalString(currentData, &evt); err != nil {
+				currentData = ""
+				continue
+			}
+			currentData = ""
+
+			if err := handler(evt); err != nil {
+				return err
+			}
+
+			if evt.Type == provider.EventDone {
+				return nil
+			}
+		}
+	}
+
+	return scanner.Err()
 }
 
 func (c *Client) GetModelThinkingLevels(modelID uuid.UUID) (*[]string, error) {
