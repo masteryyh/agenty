@@ -17,11 +17,13 @@ limitations under the License.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/cli/api"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 )
 
@@ -41,14 +43,16 @@ type CommandResult struct {
 type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
-	"/new":     handleNewCmd,
-	"/status":  handleStatusCmd,
-	"/history": handleHistoryCmd,
-	"/model":   handleModelCmd,
-	"/think":   handleThinkCmd,
-	"/help":    handleHelpCmd,
-	"/exit":    handleExitCmd,
-	"/agent":   handleAgentCmd,
+	"/new":      handleNewCmd,
+	"/status":   handleStatusCmd,
+	"/history":  handleHistoryCmd,
+	"/model":    handleModelCmd,
+	"/think":    handleThinkCmd,
+	"/help":     handleHelpCmd,
+	"/exit":     handleExitCmd,
+	"/agent":    handleAgentCmd,
+	"/provider": handleProviderCmd,
+	"/mcp":      handleMCPCmd,
 }
 
 func parseSlashInput(input string) []string {
@@ -274,42 +278,715 @@ func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID
 	return CommandResult{Handled: true}, nil
 }
 
-func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	if len(args) == 0 {
-		return CommandResult{Handled: true}, fmt.Errorf("usage: /model [provider-name/model-name]")
-	}
-
-	resolvedID, displayName, err := resolveModel(c, args[0])
-	if err != nil {
-		return CommandResult{Handled: true}, err
-	}
-
-	pterm.Success.Printf("Switched to model: %s\n", displayName)
-	return CommandResult{Handled: true, NewModelID: resolvedID}, nil
-}
-
 func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	PrintCommandHints()
 	return CommandResult{Handled: true}, nil
 }
 
-func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	if len(args) == 0 {
-		if agentID == uuid.Nil {
-			pterm.Info.Println("No agent selected")
-		} else {
-			agent, err := c.GetAgent(agentID)
-			if err != nil {
-				pterm.Info.Printf("Current agent ID: %s\n", agentID)
-			} else {
-				pterm.Info.Printf("Current agent: %s\n", pterm.FgCyan.Sprint(agent.Name))
-			}
+func clearScreen() {
+	fmt.Print("\033[2J\033[H")
+}
+
+var listHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  Ctrl+D delete  ·  Esc back"
+
+// --- /model ---
+
+func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) > 0 {
+		resolvedID, displayName, err := resolveModel(c, args[0])
+		if err != nil {
+			return CommandResult{Handled: true}, err
 		}
-		pterm.Info.Println("Usage: /agent [agent-name]")
-		return CommandResult{Handled: true}, nil
+		pterm.Success.Printf("Switched to model: %s\n", displayName)
+		return CommandResult{Handled: true, NewModelID: resolvedID}, nil
 	}
 
-	agentName := strings.TrimSpace(args[0])
+	for {
+		result, err := c.ListModels(1, 100)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to list models: %w", err)
+		}
+
+		if len(result.Data) == 0 {
+			pterm.Warning.Println("No models found")
+			fmt.Printf("  %s\n", pterm.FgGray.Sprint("Press 'a' to add a model, or Esc to go back"))
+			res, err := showInteractiveList("Models", []string{"(no models)"}, "a add  ·  Esc back")
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if res.Action == ListActionAdd {
+				if err := doCreateModel(c); err != nil && !errors.Is(err, ErrCancelled) {
+					pterm.Error.Printf("Failed to create model: %v\n", err)
+				}
+				continue
+			}
+			return CommandResult{Handled: true}, nil
+		}
+
+		items := make([]string, len(result.Data))
+		for i, m := range result.Data {
+			items[i] = modelLabel(m)
+		}
+
+		res, err := showInteractiveList("Models  "+pterm.FgGray.Sprint("(select to switch)"), items, listHints)
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+
+		switch res.Action {
+		case ListActionSelect:
+			target := result.Data[res.Index]
+			pterm.Success.Printf("Switched to model: %s\n", modelDisplayName(target))
+			return CommandResult{Handled: true, NewModelID: target.ID}, nil
+
+		case ListActionAdd:
+			if err := doCreateModel(c); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to create model: %v\n", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateModel(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to update model: %v\n", err)
+			}
+			continue
+
+		case ListActionDelete:
+			target := result.Data[res.Index]
+			confirmed, err := showConfirm(fmt.Sprintf("Delete model '%s/%s'?", target.Provider.Name, target.Name))
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if confirmed {
+				if err := c.DeleteModel(target.ID); err != nil {
+					pterm.Error.Printf("Failed to delete model: %v\n", err)
+				} else {
+					pterm.Success.Printf("Model deleted: %s/%s\n", target.Provider.Name, target.Name)
+				}
+			}
+			continue
+
+		case ListActionCancel:
+			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func modelLabel(m models.ModelDto) string {
+	providerName := ""
+	if m.Provider != nil {
+		providerName = m.Provider.Name
+	}
+	marker := ""
+	if m.DefaultModel {
+		marker = " [default]"
+	}
+	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, marker)
+}
+
+func doCreateModel(c *api.Client) error {
+	fmt.Print("\033[?25h")
+	printSection("Create Model")
+
+	providers, err := c.ListProviders(1, 100)
+	if err != nil {
+		return fmt.Errorf("failed to list providers: %w", err)
+	}
+	if len(providers.Data) == 0 {
+		pterm.Warning.Println("No providers available. Use /provider to create one first.")
+		return nil
+	}
+
+	providerOptions := make([]string, len(providers.Data))
+	for i, p := range providers.Data {
+		providerOptions[i] = providerLabel(p)
+	}
+	idx, err := selectOption("Select provider", providerOptions, 0)
+	if err != nil {
+		return err
+	}
+	selectedProvider := providerOptions[idx]
+	var targetProvider models.ModelProviderDto
+	for _, p := range providers.Data {
+		if providerLabel(p) == selectedProvider {
+			targetProvider = p
+			break
+		}
+	}
+
+	name, err := readInput("Model display name", "")
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+
+	code, err := readInput("Model API code/ID", "")
+	if err != nil {
+		return err
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("code cannot be empty")
+	}
+
+	model, err := c.CreateModel(&models.CreateModelDto{
+		Name:       name,
+		Code:       code,
+		ProviderID: targetProvider.ID,
+	})
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("Model created: %s (%s) under %s\n", model.Name, model.Code, targetProvider.Name)
+	return nil
+}
+
+func doUpdateModel(c *api.Client, target models.ModelDto) error {
+	fmt.Print("\033[?25h")
+	printSection("Update Model")
+
+	newName, err := readInput("Model display name", target.Name)
+	if err != nil {
+		return err
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		newName = target.Name
+	}
+
+	setDefault, err := showConfirm("Set as default model?")
+	if err != nil {
+		return err
+	}
+
+	if target.Name == newName && target.DefaultModel == setDefault {
+		pterm.Info.Println("No changes detected, skipping update")
+		return nil
+	}
+
+	if err := c.UpdateModel(target.ID, &models.UpdateModelDto{Name: &newName, DefaultModel: &setDefault}); err != nil {
+		return err
+	}
+	pterm.Success.Printf("Model updated: %s\n", newName)
+	return nil
+}
+
+// --- /provider ---
+
+var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi"}
+
+var providerDefaultBaseURLs = map[string]string{
+	"openai":    "https://api.openai.com/v1",
+	"anthropic": "https://api.anthropic.com",
+	"gemini":    "https://generativelanguage.googleapis.com",
+	"kimi":      "https://api.moonshot.cn/v1",
+}
+
+func providerLabel(p models.ModelProviderDto) string {
+	return fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
+}
+
+func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	for {
+		result, err := c.ListProviders(1, 100)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to list providers: %w", err)
+		}
+
+		if len(result.Data) == 0 {
+			pterm.Warning.Println("No providers found")
+			res, err := showInteractiveList("Providers", []string{"(no providers)"}, "a add  ·  Esc back")
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if res.Action == ListActionAdd {
+				if err := doCreateProvider(c); err != nil && !errors.Is(err, ErrCancelled) {
+					pterm.Error.Printf("Failed to create provider: %v\n", err)
+				}
+				continue
+			}
+			return CommandResult{Handled: true}, nil
+		}
+
+		items := make([]string, len(result.Data))
+		for i, p := range result.Data {
+			items[i] = fmt.Sprintf("%s  %s  %s", providerLabel(p), pterm.FgGray.Sprint(p.BaseURL), pterm.FgGray.Sprint(p.APIKeyCensored))
+		}
+
+		res, err := showInteractiveList("Providers", items, listHints)
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+
+		switch res.Action {
+		case ListActionSelect:
+			target := result.Data[res.Index]
+			fmt.Println()
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Name"), target.Name)
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Type"), string(target.Type))
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Base URL"), target.BaseURL)
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("API Key"), target.APIKeyCensored)
+			fmt.Println()
+			continue
+
+		case ListActionAdd:
+			if err := doCreateProvider(c); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to create provider: %v\n", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateProvider(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to update provider: %v\n", err)
+			}
+			continue
+
+		case ListActionDelete:
+			target := result.Data[res.Index]
+			confirmed, err := showConfirm(fmt.Sprintf("Delete provider '%s' and all its models?", target.Name))
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if confirmed {
+				if err := c.DeleteProvider(target.ID, true); err != nil {
+					pterm.Error.Printf("Failed to delete provider: %v\n", err)
+				} else {
+					pterm.Success.Printf("Provider deleted: %s\n", target.Name)
+				}
+			}
+			continue
+
+		case ListActionCancel:
+			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func doCreateProvider(c *api.Client) error {
+	fmt.Print("\033[?25h")
+	printSection("Create Provider")
+
+	name, err := readInput("Provider name", "")
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+
+	idx, err := selectOption("Provider type", providerTypeOptions, 0)
+	if err != nil {
+		return err
+	}
+	selectedType := providerTypeOptions[idx]
+
+	baseURL, err := readInput("Base URL", providerDefaultBaseURLs[selectedType])
+	if err != nil {
+		return err
+	}
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return fmt.Errorf("base URL cannot be empty")
+	}
+
+	apiKey, err := readPassword("API key")
+	if err != nil {
+		return err
+	}
+
+	provider, err := c.CreateProvider(&models.CreateModelProviderDto{
+		Name:    name,
+		Type:    models.APIType(selectedType),
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+	})
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("Provider created: %s\n", provider.Name)
+	return nil
+}
+
+func doUpdateProvider(c *api.Client, target models.ModelProviderDto) error {
+	fmt.Print("\033[?25h")
+	printSection("Update Provider")
+
+	newName, err := readInput("Name", target.Name)
+	if err != nil {
+		return err
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		newName = target.Name
+	}
+
+	defaultTypeIdx := 0
+	for i, opt := range providerTypeOptions {
+		if opt == string(target.Type) {
+			defaultTypeIdx = i
+			break
+		}
+	}
+	idx, err := selectOption("Provider type", providerTypeOptions, defaultTypeIdx)
+	if err != nil {
+		return err
+	}
+	newType := providerTypeOptions[idx]
+
+	newBaseURL, err := readInput("Base URL", target.BaseURL)
+	if err != nil {
+		return err
+	}
+	newBaseURL = strings.TrimSpace(newBaseURL)
+	if newBaseURL == "" {
+		newBaseURL = target.BaseURL
+	}
+
+	newAPIKey, err := readPassword("API key (leave empty to keep unchanged)")
+	if err != nil {
+		return err
+	}
+	newAPIKey = strings.TrimSpace(newAPIKey)
+
+	if target.Name == newName && string(target.Type) == newType && target.BaseURL == newBaseURL && newAPIKey == "" {
+		pterm.Info.Println("No changes detected, skipping update")
+		return nil
+	}
+
+	updated, err := c.UpdateProvider(target.ID, &models.UpdateModelProviderDto{
+		Name:    newName,
+		Type:    models.APIType(newType),
+		BaseURL: newBaseURL,
+		APIKey:  newAPIKey,
+	})
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("Provider updated: %s\n", updated.Name)
+	return nil
+}
+
+// --- /mcp ---
+
+var mcpTransportOptions = []string{"stdio", "sse", "streamable-http"}
+
+func mcpServerLabel(s models.MCPServerDto) string {
+	target := s.URL
+	if s.Transport == models.MCPTransportStdio {
+		target = s.Command
+	}
+	return fmt.Sprintf("%s (%s → %s)", s.Name, s.Transport, target)
+}
+
+func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	for {
+		result, err := c.ListMCPServers(1, 100)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to list MCP servers: %w", err)
+		}
+
+		if len(result.Data) == 0 {
+			pterm.Warning.Println("No MCP servers found")
+			res, err := showInteractiveList("MCP Servers", []string{"(no servers)"}, "a add  ·  Esc back")
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if res.Action == ListActionAdd {
+				if err := doCreateMCPServer(c); err != nil && !errors.Is(err, ErrCancelled) {
+					pterm.Error.Printf("Failed to register MCP server: %v\n", err)
+				}
+				continue
+			}
+			return CommandResult{Handled: true}, nil
+		}
+
+		items := make([]string, len(result.Data))
+		for i, s := range result.Data {
+			statusIcon := "⚪"
+			switch s.Status {
+			case "connected":
+				statusIcon = "🟢"
+			case "error":
+				statusIcon = "🔴"
+			case "connecting":
+				statusIcon = "🟡"
+			case "disconnected":
+				statusIcon = "⚫"
+			}
+			enabled := "✓"
+			if !s.Enabled {
+				enabled = "✗"
+			}
+			items[i] = fmt.Sprintf("%s %s  %s  enabled:%s", statusIcon, mcpServerLabel(s), pterm.FgGray.Sprint(s.Status), enabled)
+		}
+
+		res, err := showInteractiveList("MCP Servers", items, listHints)
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+
+		switch res.Action {
+		case ListActionSelect:
+			target := result.Data[res.Index]
+			fmt.Println()
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Name"), target.Name)
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Transport"), string(target.Transport))
+			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Status"), target.Status)
+			if target.Transport == models.MCPTransportStdio {
+				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Command"), target.Command)
+			} else {
+				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("URL"), target.URL)
+			}
+			if len(target.Tools) > 0 {
+				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Tools"), strings.Join(target.Tools, "  ·  "))
+			}
+			if target.Error != "" {
+				fmt.Printf("  %-16s %s\n", pterm.FgRed.Sprint("Error"), target.Error)
+			}
+			fmt.Println()
+			continue
+
+		case ListActionAdd:
+			if err := doCreateMCPServer(c); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to register MCP server: %v\n", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateMCPServer(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to update MCP server: %v\n", err)
+			}
+			continue
+
+		case ListActionDelete:
+			target := result.Data[res.Index]
+			confirmed, err := showConfirm(fmt.Sprintf("Delete MCP server '%s'?", target.Name))
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if confirmed {
+				if err := c.DeleteMCPServer(target.ID); err != nil {
+					pterm.Error.Printf("Failed to delete MCP server: %v\n", err)
+				} else {
+					pterm.Success.Printf("MCP server deleted: %s\n", target.Name)
+				}
+			}
+			continue
+
+		case ListActionCancel:
+			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func doCreateMCPServer(c *api.Client) error {
+	fmt.Print("\033[?25h")
+	printSection("Register MCP Server")
+
+	name, err := readInput("Server name", "")
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+
+	idx, err := selectOption("Transport type", mcpTransportOptions, 0)
+	if err != nil {
+		return err
+	}
+	selectedTransport := mcpTransportOptions[idx]
+
+	dto := &models.CreateMCPServerDto{
+		Name:      name,
+		Transport: models.MCPTransportType(selectedTransport),
+	}
+
+	switch models.MCPTransportType(selectedTransport) {
+	case models.MCPTransportStdio:
+		command, err := readInput("Command (e.g., npx, node, python)", "")
+		if err != nil {
+			return err
+		}
+		dto.Command = strings.TrimSpace(command)
+
+		argsStr, err := readInput("Arguments (space-separated, leave empty for none)", "")
+		if err != nil {
+			return err
+		}
+		argsStr = strings.TrimSpace(argsStr)
+		if argsStr != "" {
+			dto.Args = strings.Fields(argsStr)
+		}
+
+	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
+		url, err := readInput("Server URL", "")
+		if err != nil {
+			return err
+		}
+		dto.URL = strings.TrimSpace(url)
+	}
+
+	server, err := c.CreateMCPServer(dto)
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("MCP server registered: %s\n", server.Name)
+
+	autoConnect, err := showConfirm("Connect now?")
+	if err != nil {
+		return err
+	}
+	if autoConnect {
+		if err := c.ConnectMCPServer(server.ID); err != nil {
+			pterm.Warning.Printf("Connection failed: %s\n", err)
+		} else {
+			pterm.Success.Println("Connected")
+		}
+	}
+
+	return nil
+}
+
+func doUpdateMCPServer(c *api.Client, target models.MCPServerDto) error {
+	fmt.Print("\033[?25h")
+	printSection("Update MCP Server")
+
+	newName, err := readInput("Name", target.Name)
+	if err != nil {
+		return err
+	}
+	newName = strings.TrimSpace(newName)
+
+	defaultEnabledIdx := 1
+	if target.Enabled {
+		defaultEnabledIdx = 0
+	}
+	enabledIdx, err := selectOption("Enabled", []string{"true", "false"}, defaultEnabledIdx)
+	if err != nil {
+		return err
+	}
+	enabled := enabledIdx == 0
+
+	dto := &models.UpdateMCPServerDto{
+		Name:    newName,
+		Enabled: &enabled,
+	}
+
+	switch target.Transport {
+	case models.MCPTransportStdio:
+		newCmd, err := readInput("Command", target.Command)
+		if err != nil {
+			return err
+		}
+		dto.Command = strings.TrimSpace(newCmd)
+	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
+		newURL, err := readInput("URL", target.URL)
+		if err != nil {
+			return err
+		}
+		dto.URL = strings.TrimSpace(newURL)
+	}
+
+	updated, err := c.UpdateMCPServer(target.ID, dto)
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("MCP server updated: %s\n", updated.Name)
+	return nil
+}
+
+// --- /agent ---
+
+func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) > 0 {
+		return switchToAgent(c, args[0])
+	}
+
+	for {
+		agents, err := c.ListAgents(1, 100)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to list agents: %w", err)
+		}
+
+		if len(agents.Data) == 0 {
+			pterm.Warning.Println("No agents found")
+			res, err := showInteractiveList("Agents", []string{"(no agents)"}, "a add  ·  Esc back")
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if res.Action == ListActionAdd {
+				if err := doCreateAgent(c); err != nil && !errors.Is(err, ErrCancelled) {
+					pterm.Error.Printf("Failed to create agent: %v\n", err)
+				}
+				continue
+			}
+			return CommandResult{Handled: true}, nil
+		}
+
+		items := make([]string, len(agents.Data))
+		for i, a := range agents.Data {
+			marker := ""
+			if a.IsDefault {
+				marker = " [default]"
+			}
+			current := ""
+			if a.ID == agentID {
+				current = " ← current"
+			}
+			items[i] = fmt.Sprintf("%s%s%s", a.Name, marker, pterm.FgGray.Sprint(current))
+		}
+
+		res, err := showInteractiveList("Agents  "+pterm.FgGray.Sprint("(select to switch)"), items, listHints)
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+
+		switch res.Action {
+		case ListActionSelect:
+			target := agents.Data[res.Index]
+			return switchToAgent(c, target.Name)
+
+		case ListActionAdd:
+			if err := doCreateAgent(c); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to create agent: %v\n", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateAgent(c, agents.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				pterm.Error.Printf("Failed to update agent: %v\n", err)
+			}
+			continue
+
+		case ListActionDelete:
+			target := agents.Data[res.Index]
+			confirmed, err := showConfirm(fmt.Sprintf("Delete agent '%s'? This will also delete all sessions, messages and memories.", target.Name))
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if confirmed {
+				if err := c.DeleteAgent(target.ID); err != nil {
+					pterm.Error.Printf("Failed to delete agent: %v\n", err)
+				} else {
+					pterm.Success.Printf("Agent deleted: %s\n", target.Name)
+				}
+			}
+			continue
+
+		case ListActionCancel:
+			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func switchToAgent(c *api.Client, agentName string) (CommandResult, error) {
+	agentName = strings.TrimSpace(agentName)
 	agents, err := c.ListAgents(1, 100)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to list agents: %w", err)
@@ -367,6 +1044,81 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	return CommandResult{Handled: true, NewAgentID: targetAgentID, NewSessionID: newSessionID}, nil
 }
 
-func clearScreen() {
-	fmt.Print("\033[2J\033[H")
+func doCreateAgent(c *api.Client) error {
+	fmt.Print("\033[?25h")
+	printSection("Create Agent")
+
+	name, err := readInput("Agent name", "")
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+
+	soul, err := readInput("Agent soul (system prompt, leave empty for default)", "")
+	if err != nil {
+		return err
+	}
+	soul = strings.TrimSpace(soul)
+
+	isDefault, err := showConfirm("Set as default agent?")
+	if err != nil {
+		return err
+	}
+
+	agent, err := c.CreateAgent(&models.CreateAgentDto{
+		Name:      name,
+		Soul:      &soul,
+		IsDefault: isDefault,
+	})
+	if err != nil {
+		return err
+	}
+	pterm.Success.Printf("Agent created: %s (%s)\n", agent.Name, agent.ID)
+	return nil
+}
+
+func doUpdateAgent(c *api.Client, target models.AgentDto) error {
+	fmt.Print("\033[?25h")
+	printSection("Update Agent")
+
+	newName, err := readInput("Agent name", target.Name)
+	if err != nil {
+		return err
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		newName = target.Name
+	}
+
+	newSoul, err := readInput("Agent soul (system prompt)", target.Soul)
+	if err != nil {
+		return err
+	}
+	newSoul = strings.TrimSpace(newSoul)
+	if newSoul == "" {
+		newSoul = target.Soul
+	}
+
+	newIsDefault, err := showConfirm("Set as default agent?")
+	if err != nil {
+		return err
+	}
+
+	if newName == target.Name && newSoul == target.Soul && newIsDefault == target.IsDefault {
+		pterm.Info.Println("No changes detected, skipping update")
+		return nil
+	}
+
+	if err := c.UpdateAgent(target.ID, &models.UpdateAgentDto{
+		Name:      &newName,
+		Soul:      &newSoul,
+		IsDefault: &newIsDefault,
+	}); err != nil {
+		return err
+	}
+	pterm.Success.Printf("Agent updated: %s\n", newName)
+	return nil
 }

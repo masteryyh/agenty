@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 
 	"github.com/masteryyh/agenty/pkg/cli/api"
@@ -26,6 +27,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -37,7 +39,10 @@ var (
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("must be run in an interactive terminal")
+			}
+			return startChat()
 		},
 	}
 )

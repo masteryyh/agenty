@@ -31,154 +31,157 @@ import (
 	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
-	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
-var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start an interactive chat session",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("must be run in an interactive terminal")
+func startChat() error {
+	showBanner()
+
+	c := GetClient()
+
+	agents, err := c.ListAgents(1, 100)
+	if err != nil {
+		return fmt.Errorf("failed to list agents: %w", err)
+	}
+	if len(agents.Data) == 0 {
+		pterm.Warning.Println("No agents available, creating a default agent...")
+		defaultSoul := ""
+		_, err := c.CreateAgent(&models.CreateAgentDto{
+			Name:      "default",
+			Soul:      &defaultSoul,
+			IsDefault: true,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create default agent: %w", err)
 		}
-
-		showBanner()
-
-		c := GetClient()
-
-		agents, err := c.ListAgents(1, 100)
+		agents, err = c.ListAgents(1, 100)
 		if err != nil {
 			return fmt.Errorf("failed to list agents: %w", err)
 		}
-		if len(agents.Data) == 0 {
-			return fmt.Errorf("no agents available, create one first with: agenty agent create")
-		}
+	}
 
-		var agentID uuid.UUID
-		var agentName string
-		if len(agents.Data) == 1 {
-			agentID = agents.Data[0].ID
-			agentName = agents.Data[0].Name
+	var agentID uuid.UUID
+	var agentName string
+	if len(agents.Data) == 1 {
+		agentID = agents.Data[0].ID
+		agentName = agents.Data[0].Name
+	} else {
+		var defaultAgent *models.AgentDto
+		for i := range agents.Data {
+			if agents.Data[i].IsDefault {
+				defaultAgent = &agents.Data[i]
+				break
+			}
+		}
+		if defaultAgent != nil {
+			agentID = defaultAgent.ID
+			agentName = defaultAgent.Name
 		} else {
-			var defaultAgent *models.AgentDto
-			for i := range agents.Data {
-				if agents.Data[i].IsDefault {
-					defaultAgent = &agents.Data[i]
+			agentNames := make([]string, 0, len(agents.Data))
+			for _, a := range agents.Data {
+				agentNames = append(agentNames, a.Name)
+			}
+			selectedName, err := pterm.DefaultInteractiveSelect.
+				WithOptions(agentNames).
+				WithDefaultText("Select an agent").
+				Show()
+			if err != nil {
+				return fmt.Errorf("agent selection failed: %w", err)
+			}
+			for _, a := range agents.Data {
+				if a.Name == selectedName {
+					agentID = a.ID
+					agentName = a.Name
 					break
 				}
 			}
-			if defaultAgent != nil {
-				agentID = defaultAgent.ID
-				agentName = defaultAgent.Name
-			} else {
-				agentNames := make([]string, 0, len(agents.Data))
-				for _, a := range agents.Data {
-					agentNames = append(agentNames, a.Name)
-				}
-				selectedName, err := pterm.DefaultInteractiveSelect.
-					WithOptions(agentNames).
-					WithDefaultText("Select an agent").
-					Show()
-				if err != nil {
-					return fmt.Errorf("agent selection failed: %w", err)
-				}
-				for _, a := range agents.Data {
-					if a.Name == selectedName {
-						agentID = a.ID
-						agentName = a.Name
-						break
-					}
-				}
-			}
+		}
+	}
+
+	var sessionID uuid.UUID
+	var session *models.ChatSessionDto
+	var isResumed bool
+
+	lastSession, err := c.GetLastSessionByAgent(agentID)
+	if err == nil && lastSession != nil {
+		sessionID = lastSession.ID
+		session = lastSession
+		isResumed = true
+	} else {
+		if err != nil {
+			pterm.Warning.Printf("Could not find last session: %v\n", err)
 		}
 
-		var sessionID uuid.UUID
-		var session *models.ChatSessionDto
-		var isResumed bool
+		session, err = c.CreateSession(agentID)
+		if err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+		sessionID = session.ID
+	}
 
-		lastSession, err := c.GetLastSessionByAgent(agentID)
-		if err == nil && lastSession != nil {
-			sessionID = lastSession.ID
-			session = lastSession
-			isResumed = true
+	var modelID uuid.UUID
+	var modelInfo string
+	if session.LastUsedModel == uuid.Nil {
+		defaultModel, err := c.GetDefaultModel()
+		if err == nil && defaultModel != nil {
+			modelID = defaultModel.ID
+			modelInfo = modelDisplayName(*defaultModel)
 		} else {
+			modelsList, err := c.ListModels(1, 1)
 			if err != nil {
-				pterm.Warning.Printf("Could not find last session: %v\n", err)
+				return fmt.Errorf("failed to list models: %w", err)
 			}
-
-			session, err = c.CreateSession(agentID)
-			if err != nil {
-				return fmt.Errorf("failed to create session: %w", err)
-			}
-			sessionID = session.ID
-		}
-
-		var modelID uuid.UUID
-		var modelInfo string
-		if session.LastUsedModel == uuid.Nil {
-			defaultModel, err := c.GetDefaultModel()
-			if err == nil && defaultModel != nil {
-				modelID = defaultModel.ID
-				modelInfo = modelDisplayName(*defaultModel)
+			if len(modelsList.Data) > 0 {
+				modelID = modelsList.Data[0].ID
+				modelInfo = modelDisplayName(modelsList.Data[0])
 			} else {
-				modelsList, err := c.ListModels(1, 1)
-				if err != nil {
-					return fmt.Errorf("failed to list models: %w", err)
-				}
-				if len(modelsList.Data) > 0 {
-					modelID = modelsList.Data[0].ID
-					modelInfo = modelDisplayName(modelsList.Data[0])
-				} else {
-					return fmt.Errorf("no models available to use")
-				}
-			}
-		} else {
-			modelID = session.LastUsedModel
-			if allModels, err := c.ListModels(1, 100); err == nil {
-				for _, m := range allModels.Data {
-					if m.ID == modelID {
-						modelInfo = modelDisplayName(m)
-						break
-					}
-				}
-			}
-			if modelInfo == "" {
-				modelInfo = modelID.String()[:8] + "…"
+				return fmt.Errorf("no models available, use /model to create one")
 			}
 		}
+	} else {
+		modelID = session.LastUsedModel
+		if allModels, err := c.ListModels(1, 100); err == nil {
+			for _, m := range allModels.Data {
+				if m.ID == modelID {
+					modelInfo = modelDisplayName(m)
+					break
+				}
+			}
+		}
+		if modelInfo == "" {
+			modelInfo = modelID.String()[:8] + "…"
+		}
+	}
 
-		sessionDesc := "new"
-		if isResumed {
-			sessionDesc = fmt.Sprintf("resumed · %d messages", len(session.Messages))
+	sessionDesc := "new"
+	if isResumed {
+		sessionDesc = fmt.Sprintf("resumed · %d messages", len(session.Messages))
+	}
+
+	fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
+	fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Model"), pterm.FgMagenta.Sprint(modelInfo))
+	fmt.Printf("  %-10s %s  %s\n", pterm.FgGray.Sprint("Session"),
+		pterm.FgGray.Sprint(sessionID.String()[:8]+"…"),
+		pterm.FgGray.Sprint("("+sessionDesc+")"))
+	fmt.Println()
+
+	if len(session.Messages) > 0 {
+		messageCount := len(session.Messages)
+		startIdx := 0
+
+		if messageCount > 10 {
+			startIdx = messageCount - 10
+			fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Showing last 10 of %d messages  ·  /history to view all", messageCount))
 		}
 
-		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
-		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Model"), pterm.FgMagenta.Sprint(modelInfo))
-		fmt.Printf("  %-10s %s  %s\n", pterm.FgGray.Sprint("Session"),
-			pterm.FgGray.Sprint(sessionID.String()[:8]+"…"),
-			pterm.FgGray.Sprint("("+sessionDesc+")"))
+		fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Chat History"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+		printMessageHistory(session.Messages[startIdx:])
 		fmt.Println()
+	}
 
-		if len(session.Messages) > 0 {
-			messageCount := len(session.Messages)
-			startIdx := 0
+	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
+		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
 
-			if messageCount > 10 {
-				startIdx = messageCount - 10
-				fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Showing last 10 of %d messages  ·  /history to view all", messageCount))
-			}
-
-			fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Chat History"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
-			printMessageHistory(session.Messages[startIdx:])
-			fmt.Println()
-		}
-
-		fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
-			pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
-
-		return runChatLoop(c, sessionID, modelID, agentID)
-	},
+	return runChatLoop(c, sessionID, modelID, agentID)
 }
 
 func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID) error {
@@ -469,6 +472,3 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 	return nil
 }
 
-func init() {
-	rootCmd.AddCommand(chatCmd)
-}

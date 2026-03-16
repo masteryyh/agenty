@@ -36,5 +36,6 @@ cmd/__debug*
 # Build output
 bin/
 /cli
+/agenty
 
 HANDOFF.md
