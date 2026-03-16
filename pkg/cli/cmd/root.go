@@ -18,65 +18,91 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"strings"
 
-	"github.com/masteryyh/agenty/pkg/cli/api"
+	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/chat/tools/builtin"
+	"github.com/masteryyh/agenty/pkg/config"
+	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
+	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 var (
-	cfgFile string
-	baseURL string
-	rootCmd = &cobra.Command{
+	cfgFile    string
+	daemonMode bool
+	rootCmd    = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := config.Init(cfgFile); err != nil {
+				return fmt.Errorf("failed to load configuration: %w", err)
+			}
+			cfg := config.GetConfigManager().GetConfig()
+			cfg.Daemon = daemonMode
+			if err := config.GetConfigManager().Validate(); err != nil {
+				return fmt.Errorf("invalid configuration: %w", err)
+			}
+
+			if daemonMode {
+				return startDaemon()
+			}
+
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return fmt.Errorf("must be run in an interactive terminal")
 			}
-			return startChat()
+
+			if cfg.IsRemoteMode() {
+				b := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
+				return startChat(b)
+			}
+
+			return startLocalMode()
 		},
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&baseURL, "url", "", "Backend API base URL (overrides config file)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./agenty.yaml)")
+	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
 
 	pterm.DefaultInteractiveSelect.Selector = "❯"
 	pterm.DefaultInteractiveSelect.MaxHeight = 8
 }
 
-func GetBaseURL() string {
-	if baseURL != "" {
-		return baseURL
+func startLocalMode() error {
+	cfg := config.GetConfigManager().GetConfig()
+
+	baseCtx, cancel := signal.SetupContext()
+	defer cancel()
+
+	slog.InfoContext(baseCtx, "initializing database connection...")
+	if err := conn.InitDB(baseCtx, cfg.DB); err != nil {
+		return fmt.Errorf("failed to initialize database connection: %w", err)
 	}
 
-	cfg := GetCLIConfig()
-	if cfg.BaseURL != "" {
-		return cfg.BaseURL
-	}
+	slog.InfoContext(baseCtx, "registering built-in tools...")
+	registry := tools.GetRegistry()
+	builtin.RegisterAll(registry)
 
-	return "http://localhost:8080"
-}
+	slog.InfoContext(baseCtx, "initializing MCP manager...")
+	mcpManager := mcppkg.InitManager(baseCtx, registry)
+	mcpManager.Start()
+	defer mcpManager.Close()
 
-func GetClient() *api.Client {
-	cfg := GetCLIConfig()
-	url := GetBaseURL()
-
-	if cfg.Username != "" && cfg.Password != "" {
-		return api.NewClientWithAuth(url, cfg.Username, cfg.Password)
-	}
-
-	return api.NewClient(url)
+	b := backend.NewLocalBackend()
+	return startChat(b)
 }
 
 func Execute() error {

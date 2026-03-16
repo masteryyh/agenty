@@ -1,14 +1,10 @@
-.PHONY: all build-server build-cli clean test vet fmt
+.PHONY: all build clean test vet fmt
 
-all: build-server build-cli
+all: build
 
-build-server:
-	@echo "Building server..."
-	go build -o bin/agenty-server cmd/server.go
-
-build-cli:
-	@echo "Building CLI..."
-	go build -o bin/agenty-cli cmd/cli/main.go
+build:
+	@echo "Building agenty..."
+	go build -o bin/agenty cmd/main.go
 
 clean:
 	@echo "Cleaning..."

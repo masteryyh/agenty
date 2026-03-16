@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/cli/api"
+	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 )
@@ -40,7 +40,7 @@ type CommandResult struct {
 	ShouldExit   bool
 }
 
-type CommandHandler func(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
+type CommandHandler func(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
 	"/new":      handleNewCmd,
@@ -81,7 +81,7 @@ func parseSlashInput(input string) []string {
 	return parts
 }
 
-func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleSlashCommand(b backend.Backend, input string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	parts := parseSlashInput(input)
 	if len(parts) == 0 {
 		return CommandResult{}, nil
@@ -94,10 +94,10 @@ func handleSlashCommand(c *api.Client, input string, sessionID uuid.UUID, modelI
 		return CommandResult{}, nil
 	}
 
-	return handler(c, parts[1:], sessionID, modelID, agentID, state)
+	return handler(b, parts[1:], sessionID, modelID, agentID, state)
 }
 
-func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
+func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error) {
 	parts := strings.Split(modelSpec, "/")
 	if len(parts) != 2 {
 		return uuid.Nil, "", fmt.Errorf("invalid format, use: provider-name/model-name")
@@ -106,7 +106,7 @@ func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 	providerName := strings.TrimSpace(parts[0])
 	modelName := strings.TrimSpace(parts[1])
 
-	providers, err := c.ListProviders(1, 100)
+	providers, err := b.ListProviders(1, 100)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to list providers: %w", err)
 	}
@@ -122,7 +122,7 @@ func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 		return uuid.Nil, "", fmt.Errorf("provider '%s' not found", providerName)
 	}
 
-	modelsList, err := c.ListModels(1, 100)
+	modelsList, err := b.ListModels(1, 100)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to list models: %w", err)
 	}
@@ -136,12 +136,12 @@ func resolveModel(c *api.Client, modelSpec string) (uuid.UUID, string, error) {
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
 }
 
-func handleExitCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleExitCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	pterm.Info.Println("Goodbye!")
 	return CommandResult{Handled: true, ShouldExit: true}, nil
 }
 
-func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleThinkCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) == 0 {
 		if state.Thinking {
 			if state.ThinkingLevel != "" {
@@ -164,7 +164,7 @@ func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 		return CommandResult{Handled: true}, nil
 	}
 
-	supportedLevelsPtr, _ := c.GetModelThinkingLevels(modelID)
+	supportedLevelsPtr, _ := b.GetModelThinkingLevels(modelID)
 	var supportedLevels []string
 	if supportedLevelsPtr != nil {
 		supportedLevels = *supportedLevelsPtr
@@ -191,13 +191,13 @@ func handleThinkCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	return CommandResult{Handled: true}, nil
 }
 
-func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	currentSession, err := c.GetSession(sessionID)
+func handleNewCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	currentSession, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get current session: %w", err)
 	}
 
-	session, err := c.CreateSession(currentSession.AgentID)
+	session, err := b.CreateSession(currentSession.AgentID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to create new session: %w", err)
 	}
@@ -210,14 +210,14 @@ func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }
 
-func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	session, err := c.GetSession(sessionID)
+func handleStatusCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	session, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	var currentModelInfo string
-	if allModels, err := c.ListModels(1, 100); err == nil {
+	if allModels, err := b.ListModels(1, 100); err == nil {
 		for _, m := range allModels.Data {
 			if m.ID == modelID {
 				if m.Provider != nil {
@@ -256,8 +256,8 @@ func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID 
 	return CommandResult{Handled: true}, nil
 }
 
-func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	session, err := c.GetSession(sessionID)
+func handleHistoryCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	session, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -278,7 +278,7 @@ func handleHistoryCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID
 	return CommandResult{Handled: true}, nil
 }
 
-func handleHelpCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleHelpCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	PrintCommandHints()
 	return CommandResult{Handled: true}, nil
 }
@@ -291,9 +291,9 @@ var listHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  
 
 // --- /model ---
 
-func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleModelCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) > 0 {
-		resolvedID, displayName, err := resolveModel(c, args[0])
+		resolvedID, displayName, err := resolveModel(b, args[0])
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -302,7 +302,7 @@ func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	}
 
 	for {
-		result, err := c.ListModels(1, 100)
+		result, err := b.ListModels(1, 100)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to list models: %w", err)
 		}
@@ -315,7 +315,7 @@ func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 				return CommandResult{Handled: true}, err
 			}
 			if res.Action == ListActionAdd {
-				if err := doCreateModel(c); err != nil && !errors.Is(err, ErrCancelled) {
+				if err := doCreateModel(b); err != nil && !errors.Is(err, ErrCancelled) {
 					pterm.Error.Printf("Failed to create model: %v\n", err)
 				}
 				continue
@@ -340,13 +340,13 @@ func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 			return CommandResult{Handled: true, NewModelID: target.ID}, nil
 
 		case ListActionAdd:
-			if err := doCreateModel(c); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doCreateModel(b); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to create model: %v\n", err)
 			}
 			continue
 
 		case ListActionEdit:
-			if err := doUpdateModel(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doUpdateModel(b, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to update model: %v\n", err)
 			}
 			continue
@@ -358,7 +358,7 @@ func handleModelCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
-				if err := c.DeleteModel(target.ID); err != nil {
+				if err := b.DeleteModel(target.ID); err != nil {
 					pterm.Error.Printf("Failed to delete model: %v\n", err)
 				} else {
 					pterm.Success.Printf("Model deleted: %s/%s\n", target.Provider.Name, target.Name)
@@ -384,11 +384,11 @@ func modelLabel(m models.ModelDto) string {
 	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, marker)
 }
 
-func doCreateModel(c *api.Client) error {
+func doCreateModel(b backend.Backend) error {
 	fmt.Print("\033[?25h")
 	printSection("Create Model")
 
-	providers, err := c.ListProviders(1, 100)
+	providers, err := b.ListProviders(1, 100)
 	if err != nil {
 		return fmt.Errorf("failed to list providers: %w", err)
 	}
@@ -432,7 +432,7 @@ func doCreateModel(c *api.Client) error {
 		return fmt.Errorf("code cannot be empty")
 	}
 
-	model, err := c.CreateModel(&models.CreateModelDto{
+	model, err := b.CreateModel(&models.CreateModelDto{
 		Name:       name,
 		Code:       code,
 		ProviderID: targetProvider.ID,
@@ -444,7 +444,7 @@ func doCreateModel(c *api.Client) error {
 	return nil
 }
 
-func doUpdateModel(c *api.Client, target models.ModelDto) error {
+func doUpdateModel(b backend.Backend, target models.ModelDto) error {
 	fmt.Print("\033[?25h")
 	printSection("Update Model")
 
@@ -467,7 +467,7 @@ func doUpdateModel(c *api.Client, target models.ModelDto) error {
 		return nil
 	}
 
-	if err := c.UpdateModel(target.ID, &models.UpdateModelDto{Name: &newName, DefaultModel: &setDefault}); err != nil {
+	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{Name: &newName, DefaultModel: &setDefault}); err != nil {
 		return err
 	}
 	pterm.Success.Printf("Model updated: %s\n", newName)
@@ -489,9 +489,9 @@ func providerLabel(p models.ModelProviderDto) string {
 	return fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
 }
 
-func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleProviderCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	for {
-		result, err := c.ListProviders(1, 100)
+		result, err := b.ListProviders(1, 100)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to list providers: %w", err)
 		}
@@ -503,7 +503,7 @@ func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelI
 				return CommandResult{Handled: true}, err
 			}
 			if res.Action == ListActionAdd {
-				if err := doCreateProvider(c); err != nil && !errors.Is(err, ErrCancelled) {
+				if err := doCreateProvider(b); err != nil && !errors.Is(err, ErrCancelled) {
 					pterm.Error.Printf("Failed to create provider: %v\n", err)
 				}
 				continue
@@ -533,13 +533,13 @@ func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelI
 			continue
 
 		case ListActionAdd:
-			if err := doCreateProvider(c); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doCreateProvider(b); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to create provider: %v\n", err)
 			}
 			continue
 
 		case ListActionEdit:
-			if err := doUpdateProvider(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doUpdateProvider(b, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to update provider: %v\n", err)
 			}
 			continue
@@ -551,7 +551,7 @@ func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelI
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
-				if err := c.DeleteProvider(target.ID, true); err != nil {
+				if err := b.DeleteProvider(target.ID, true); err != nil {
 					pterm.Error.Printf("Failed to delete provider: %v\n", err)
 				} else {
 					pterm.Success.Printf("Provider deleted: %s\n", target.Name)
@@ -565,7 +565,7 @@ func handleProviderCmd(c *api.Client, args []string, sessionID uuid.UUID, modelI
 	}
 }
 
-func doCreateProvider(c *api.Client) error {
+func doCreateProvider(b backend.Backend) error {
 	fmt.Print("\033[?25h")
 	printSection("Create Provider")
 
@@ -598,7 +598,7 @@ func doCreateProvider(c *api.Client) error {
 		return err
 	}
 
-	provider, err := c.CreateProvider(&models.CreateModelProviderDto{
+	provider, err := b.CreateProvider(&models.CreateModelProviderDto{
 		Name:    name,
 		Type:    models.APIType(selectedType),
 		BaseURL: baseURL,
@@ -611,7 +611,7 @@ func doCreateProvider(c *api.Client) error {
 	return nil
 }
 
-func doUpdateProvider(c *api.Client, target models.ModelProviderDto) error {
+func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
 	fmt.Print("\033[?25h")
 	printSection("Update Provider")
 
@@ -657,7 +657,7 @@ func doUpdateProvider(c *api.Client, target models.ModelProviderDto) error {
 		return nil
 	}
 
-	updated, err := c.UpdateProvider(target.ID, &models.UpdateModelProviderDto{
+	updated, err := b.UpdateProvider(target.ID, &models.UpdateModelProviderDto{
 		Name:    newName,
 		Type:    models.APIType(newType),
 		BaseURL: newBaseURL,
@@ -682,9 +682,9 @@ func mcpServerLabel(s models.MCPServerDto) string {
 	return fmt.Sprintf("%s (%s → %s)", s.Name, s.Transport, target)
 }
 
-func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleMCPCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	for {
-		result, err := c.ListMCPServers(1, 100)
+		result, err := b.ListMCPServers(1, 100)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to list MCP servers: %w", err)
 		}
@@ -696,7 +696,7 @@ func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 				return CommandResult{Handled: true}, err
 			}
 			if res.Action == ListActionAdd {
-				if err := doCreateMCPServer(c); err != nil && !errors.Is(err, ErrCancelled) {
+				if err := doCreateMCPServer(b); err != nil && !errors.Is(err, ErrCancelled) {
 					pterm.Error.Printf("Failed to register MCP server: %v\n", err)
 				}
 				continue
@@ -751,13 +751,13 @@ func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 			continue
 
 		case ListActionAdd:
-			if err := doCreateMCPServer(c); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doCreateMCPServer(b); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to register MCP server: %v\n", err)
 			}
 			continue
 
 		case ListActionEdit:
-			if err := doUpdateMCPServer(c, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doUpdateMCPServer(b, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to update MCP server: %v\n", err)
 			}
 			continue
@@ -769,7 +769,7 @@ func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
-				if err := c.DeleteMCPServer(target.ID); err != nil {
+				if err := b.DeleteMCPServer(target.ID); err != nil {
 					pterm.Error.Printf("Failed to delete MCP server: %v\n", err)
 				} else {
 					pterm.Success.Printf("MCP server deleted: %s\n", target.Name)
@@ -783,7 +783,7 @@ func handleMCPCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 	}
 }
 
-func doCreateMCPServer(c *api.Client) error {
+func doCreateMCPServer(b backend.Backend) error {
 	fmt.Print("\033[?25h")
 	printSection("Register MCP Server")
 
@@ -832,7 +832,7 @@ func doCreateMCPServer(c *api.Client) error {
 		dto.URL = strings.TrimSpace(url)
 	}
 
-	server, err := c.CreateMCPServer(dto)
+	server, err := b.CreateMCPServer(dto)
 	if err != nil {
 		return err
 	}
@@ -843,7 +843,7 @@ func doCreateMCPServer(c *api.Client) error {
 		return err
 	}
 	if autoConnect {
-		if err := c.ConnectMCPServer(server.ID); err != nil {
+		if err := b.ConnectMCPServer(server.ID); err != nil {
 			pterm.Warning.Printf("Connection failed: %s\n", err)
 		} else {
 			pterm.Success.Println("Connected")
@@ -853,7 +853,7 @@ func doCreateMCPServer(c *api.Client) error {
 	return nil
 }
 
-func doUpdateMCPServer(c *api.Client, target models.MCPServerDto) error {
+func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
 	fmt.Print("\033[?25h")
 	printSection("Update MCP Server")
 
@@ -893,7 +893,7 @@ func doUpdateMCPServer(c *api.Client, target models.MCPServerDto) error {
 		dto.URL = strings.TrimSpace(newURL)
 	}
 
-	updated, err := c.UpdateMCPServer(target.ID, dto)
+	updated, err := b.UpdateMCPServer(target.ID, dto)
 	if err != nil {
 		return err
 	}
@@ -903,13 +903,13 @@ func doUpdateMCPServer(c *api.Client, target models.MCPServerDto) error {
 
 // --- /agent ---
 
-func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleAgentCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) > 0 {
-		return switchToAgent(c, args[0])
+		return switchToAgent(b, args[0])
 	}
 
 	for {
-		agents, err := c.ListAgents(1, 100)
+		agents, err := b.ListAgents(1, 100)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to list agents: %w", err)
 		}
@@ -921,7 +921,7 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 				return CommandResult{Handled: true}, err
 			}
 			if res.Action == ListActionAdd {
-				if err := doCreateAgent(c); err != nil && !errors.Is(err, ErrCancelled) {
+				if err := doCreateAgent(b); err != nil && !errors.Is(err, ErrCancelled) {
 					pterm.Error.Printf("Failed to create agent: %v\n", err)
 				}
 				continue
@@ -950,16 +950,16 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 		switch res.Action {
 		case ListActionSelect:
 			target := agents.Data[res.Index]
-			return switchToAgent(c, target.Name)
+			return switchToAgent(b, target.Name)
 
 		case ListActionAdd:
-			if err := doCreateAgent(c); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doCreateAgent(b); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to create agent: %v\n", err)
 			}
 			continue
 
 		case ListActionEdit:
-			if err := doUpdateAgent(c, agents.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+			if err := doUpdateAgent(b, agents.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
 				pterm.Error.Printf("Failed to update agent: %v\n", err)
 			}
 			continue
@@ -971,7 +971,7 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
-				if err := c.DeleteAgent(target.ID); err != nil {
+				if err := b.DeleteAgent(target.ID); err != nil {
 					pterm.Error.Printf("Failed to delete agent: %v\n", err)
 				} else {
 					pterm.Success.Printf("Agent deleted: %s\n", target.Name)
@@ -985,9 +985,9 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	}
 }
 
-func switchToAgent(c *api.Client, agentName string) (CommandResult, error) {
+func switchToAgent(b backend.Backend, agentName string) (CommandResult, error) {
 	agentName = strings.TrimSpace(agentName)
-	agents, err := c.ListAgents(1, 100)
+	agents, err := b.ListAgents(1, 100)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to list agents: %w", err)
 	}
@@ -1003,7 +1003,7 @@ func switchToAgent(c *api.Client, agentName string) (CommandResult, error) {
 		return CommandResult{Handled: true}, fmt.Errorf("agent '%s' not found", agentName)
 	}
 
-	lastSession, err := c.GetLastSessionByAgent(targetAgentID)
+	lastSession, err := b.GetLastSessionByAgent(targetAgentID)
 	var newSessionID uuid.UUID
 	if err == nil && lastSession != nil {
 		newSessionID = lastSession.ID
@@ -1026,7 +1026,7 @@ func switchToAgent(c *api.Client, agentName string) (CommandResult, error) {
 			fmt.Println()
 		}
 	} else {
-		newSession, err := c.CreateSession(targetAgentID)
+		newSession, err := b.CreateSession(targetAgentID)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to create session for agent: %w", err)
 		}
@@ -1044,7 +1044,7 @@ func switchToAgent(c *api.Client, agentName string) (CommandResult, error) {
 	return CommandResult{Handled: true, NewAgentID: targetAgentID, NewSessionID: newSessionID}, nil
 }
 
-func doCreateAgent(c *api.Client) error {
+func doCreateAgent(b backend.Backend) error {
 	fmt.Print("\033[?25h")
 	printSection("Create Agent")
 
@@ -1068,7 +1068,7 @@ func doCreateAgent(c *api.Client) error {
 		return err
 	}
 
-	agent, err := c.CreateAgent(&models.CreateAgentDto{
+	agent, err := b.CreateAgent(&models.CreateAgentDto{
 		Name:      name,
 		Soul:      &soul,
 		IsDefault: isDefault,
@@ -1080,7 +1080,7 @@ func doCreateAgent(c *api.Client) error {
 	return nil
 }
 
-func doUpdateAgent(c *api.Client, target models.AgentDto) error {
+func doUpdateAgent(b backend.Backend, target models.AgentDto) error {
 	fmt.Print("\033[?25h")
 	printSection("Update Agent")
 
@@ -1112,7 +1112,7 @@ func doUpdateAgent(c *api.Client, target models.AgentDto) error {
 		return nil
 	}
 
-	if err := c.UpdateAgent(target.ID, &models.UpdateAgentDto{
+	if err := b.UpdateAgent(target.ID, &models.UpdateAgentDto{
 		Name:      &newName,
 		Soul:      &newSoul,
 		IsDefault: &newIsDefault,

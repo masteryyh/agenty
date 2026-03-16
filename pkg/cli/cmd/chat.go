@@ -27,25 +27,23 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/chat/provider"
-	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 )
 
-func startChat() error {
+func startChat(b backend.Backend) error {
 	showBanner()
 
-	c := GetClient()
-
-	agents, err := c.ListAgents(1, 100)
+	agents, err := b.ListAgents(1, 100)
 	if err != nil {
 		return fmt.Errorf("failed to list agents: %w", err)
 	}
 	if len(agents.Data) == 0 {
 		pterm.Warning.Println("No agents available, creating a default agent...")
 		defaultSoul := ""
-		_, err := c.CreateAgent(&models.CreateAgentDto{
+		_, err := b.CreateAgent(&models.CreateAgentDto{
 			Name:      "default",
 			Soul:      &defaultSoul,
 			IsDefault: true,
@@ -53,7 +51,7 @@ func startChat() error {
 		if err != nil {
 			return fmt.Errorf("failed to create default agent: %w", err)
 		}
-		agents, err = c.ListAgents(1, 100)
+		agents, err = b.ListAgents(1, 100)
 		if err != nil {
 			return fmt.Errorf("failed to list agents: %w", err)
 		}
@@ -101,7 +99,7 @@ func startChat() error {
 	var session *models.ChatSessionDto
 	var isResumed bool
 
-	lastSession, err := c.GetLastSessionByAgent(agentID)
+	lastSession, err := b.GetLastSessionByAgent(agentID)
 	if err == nil && lastSession != nil {
 		sessionID = lastSession.ID
 		session = lastSession
@@ -111,7 +109,7 @@ func startChat() error {
 			pterm.Warning.Printf("Could not find last session: %v\n", err)
 		}
 
-		session, err = c.CreateSession(agentID)
+		session, err = b.CreateSession(agentID)
 		if err != nil {
 			return fmt.Errorf("failed to create session: %w", err)
 		}
@@ -121,12 +119,12 @@ func startChat() error {
 	var modelID uuid.UUID
 	var modelInfo string
 	if session.LastUsedModel == uuid.Nil {
-		defaultModel, err := c.GetDefaultModel()
+		defaultModel, err := b.GetDefaultModel()
 		if err == nil && defaultModel != nil {
 			modelID = defaultModel.ID
 			modelInfo = modelDisplayName(*defaultModel)
 		} else {
-			modelsList, err := c.ListModels(1, 1)
+			modelsList, err := b.ListModels(1, 1)
 			if err != nil {
 				return fmt.Errorf("failed to list models: %w", err)
 			}
@@ -139,7 +137,7 @@ func startChat() error {
 		}
 	} else {
 		modelID = session.LastUsedModel
-		if allModels, err := c.ListModels(1, 100); err == nil {
+		if allModels, err := b.ListModels(1, 100); err == nil {
 			for _, m := range allModels.Data {
 				if m.ID == modelID {
 					modelInfo = modelDisplayName(m)
@@ -181,10 +179,10 @@ func startChat() error {
 	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
 		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
 
-	return runChatLoop(c, sessionID, modelID, agentID)
+	return runChatLoop(b, sessionID, modelID, agentID)
 }
 
-func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID) error {
+func runChatLoop(b backend.Backend, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID) error {
 	currentSessionID := sessionID
 	currentModelID := modelID
 	currentAgentID := agentID
@@ -200,7 +198,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 		if len(cachedAgentNames) > 0 && time.Since(cachedAgentAt) < 30*time.Second {
 			return cachedAgentNames
 		}
-		agents, err := c.ListAgents(1, 100)
+		agents, err := b.ListAgents(1, 100)
 		if err != nil {
 			if len(cachedAgentNames) > 0 {
 				return cachedAgentNames
@@ -221,7 +219,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 			return cachedModelNames
 		}
 
-		models, err := c.ListModels(1, 100)
+		models, err := b.ListModels(1, 100)
 		if err != nil {
 			if len(cachedModelNames) > 0 {
 				return cachedModelNames
@@ -240,7 +238,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 	}
 
 	thinkLevelProvider := func() []string {
-		levels, err := c.GetModelThinkingLevels(currentModelID)
+		levels, err := b.GetModelThinkingLevels(currentModelID)
 		if err != nil || levels == nil || len(*levels) == 0 {
 			return []string{"off"}
 		}
@@ -303,7 +301,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 		}
 
 		if strings.HasPrefix(input, "/") {
-			result, err := handleSlashCommand(c, input, currentSessionID, currentModelID, currentAgentID, chatState)
+			result, err := handleSlashCommand(b, input, currentSessionID, currentModelID, currentAgentID, chatState)
 			if err != nil {
 				pterm.Error.Printf("Command error: %v\n", err)
 				continue
@@ -343,7 +341,7 @@ func runChatLoop(c *api.Client, sessionID uuid.UUID, modelID uuid.UUID, agentID 
 			atLineStart    = true
 		)
 
-		err = c.StreamChat(context.Background(), currentSessionID, &models.ChatDto{
+		err = b.StreamChat(context.Background(), currentSessionID, &models.ChatDto{
 			ModelID:       currentModelID,
 			Message:       input,
 			Thinking:      chatState.Thinking,

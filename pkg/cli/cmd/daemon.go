@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package cmd
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -35,23 +36,17 @@ import (
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
-func main() {
-	slog.Info("starting agenty server...")
-
-	slog.Info("loading configuration...")
-	if err := config.Init(); err != nil {
-		slog.Error("failed to load configuration", "error", err)
-		return
-	}
+func startDaemon() error {
 	cfg := config.GetConfigManager().GetConfig()
+
+	slog.Info("starting agenty daemon...")
 
 	baseCtx, cancel := signal.SetupContext()
 	defer cancel()
 
 	slog.InfoContext(baseCtx, "initializing database connection...")
 	if err := conn.InitDB(baseCtx, cfg.DB); err != nil {
-		slog.ErrorContext(baseCtx, "failed to initialize database connection", "error", err)
-		return
+		return fmt.Errorf("failed to initialize database connection: %w", err)
 	}
 
 	slog.InfoContext(baseCtx, "registering built-in tools...")
@@ -80,8 +75,7 @@ func main() {
 	apiRoute := engine.Group("/api")
 	v1Route := routes.GetV1Routes()
 	if err := v1Route.RegisterRoutes(apiRoute.Group("/v1")); err != nil {
-		slog.ErrorContext(baseCtx, "failed to register routes", "error", err)
-		return
+		return fmt.Errorf("failed to register routes: %w", err)
 	}
 
 	safe.GoSafeWithCtx("http-server", baseCtx, func(ctx context.Context) {
@@ -89,11 +83,11 @@ func main() {
 		slog.InfoContext(ctx, "starting http server", "port", port)
 		if err := engine.Run(":" + strconv.Itoa(port)); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.ErrorContext(ctx, "failed to start http server", "error", err)
-			return
 		}
 	})
 
 	<-baseCtx.Done()
 	slog.InfoContext(baseCtx, "shutting down server")
 	mcpManager.Close()
+	return nil
 }
