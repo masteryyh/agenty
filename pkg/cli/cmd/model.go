@@ -37,6 +37,7 @@ var modelListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all models",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printSection("Models")
 		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
@@ -67,7 +68,7 @@ var modelListCmd = &cobra.Command{
 			tableData = append(tableData, []string{m.Name, m.Code, providerName, isDefault})
 		}
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
+		fmt.Printf("  %s\n", pterm.FgGray.Sprintf("Total: %d  ·  Page %d/%d", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize)))
 		return nil
 	},
 }
@@ -92,6 +93,7 @@ var modelCreateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Create Model")
 		c := GetClient()
 
 		providers, err := c.ListProviders(1, 100)
@@ -158,6 +160,7 @@ var modelUpdateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Update Model")
 		c := GetClient()
 
 		result, err := c.ListModels(1, 100)
@@ -221,6 +224,7 @@ var modelDeleteCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Delete Model")
 		c := GetClient()
 
 		result, err := c.ListModels(1, 100)

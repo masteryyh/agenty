@@ -19,28 +19,23 @@ package cmd
 import (
 	"fmt"
 	"math/rand/v2"
+	"strings"
 
 	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfgFile     string
-	baseURL     string
-	bannerShown bool
-	rootCmd     = &cobra.Command{
+	cfgFile string
+	baseURL string
+	rootCmd = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			if !bannerShown {
-				showBanner()
-				bannerShown = true
-			}
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -50,6 +45,9 @@ agentic looping and skills usage capabilities.`,
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&baseURL, "url", "", "Backend API base URL (overrides config file)")
+
+	pterm.DefaultInteractiveSelect.Selector = "❯"
+	pterm.DefaultInteractiveSelect.MaxHeight = 8
 }
 
 func GetBaseURL() string {
@@ -82,8 +80,19 @@ func Execute() error {
 
 func showBanner() {
 	index := rand.IntN(len(consts.ASCIIArts))
-	banner := consts.ASCIIArts[index]
-
-	pterm.DefaultCenter.Println(pterm.DefaultHeader.WithBackgroundStyle(pterm.NewStyle(pterm.BgDarkGray)).WithTextStyle(pterm.NewStyle(pterm.FgLightCyan)).Sprint(banner))
+	banner := strings.Trim(consts.ASCIIArts[index], "\n")
+	fmt.Println(pterm.FgLightCyan.Sprint(banner))
+	fmt.Println(pterm.FgGray.Sprint("  AI Agent Platform"))
 	fmt.Println()
+}
+
+func printSection(title string) {
+	fmt.Printf("\n  %s\n  %s\n\n", pterm.Bold.Sprint(title), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+}
+
+func modelDisplayName(m models.ModelDto) string {
+	if m.Provider != nil {
+		return m.Provider.Name + "/" + m.Name
+	}
+	return m.Name
 }

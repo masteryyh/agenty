@@ -39,6 +39,7 @@ var mcpListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all MCP servers",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printSection("MCP Servers")
 		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
@@ -73,7 +74,7 @@ var mcpListCmd = &cobra.Command{
 			tableData = append(tableData, []string{s.Name, string(s.Transport), enabled, target, status})
 		}
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
+		fmt.Printf("  %s\n", pterm.FgGray.Sprintf("Total: %d  ·  Page %d/%d", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize)))
 		return nil
 	},
 }
@@ -86,6 +87,7 @@ var mcpCreateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Register MCP Server")
 		c := GetClient()
 
 		name, err := pterm.DefaultInteractiveTextInput.Show("Server name")
@@ -172,6 +174,7 @@ var mcpUpdateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Update MCP Server")
 		c := GetClient()
 
 		result, err := c.ListMCPServers(1, 100)
@@ -253,6 +256,7 @@ var mcpDeleteCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Delete MCP Server")
 		c := GetClient()
 
 		result, err := c.ListMCPServers(1, 100)
@@ -301,6 +305,7 @@ var mcpStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show MCP server connection status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printSection("MCP Server Status")
 		c := GetClient()
 
 		result, err := c.ListMCPServers(1, 100)
@@ -326,12 +331,12 @@ var mcpStatusCmd = &cobra.Command{
 				statusIcon = "⚫"
 			}
 
-			pterm.Printf("%s %s (%s)\n", statusIcon, s.Name, s.Transport)
+			fmt.Printf("  %s  %s  %s\n", statusIcon, pterm.Bold.Sprint(s.Name), pterm.FgGray.Sprintf("(%s)", s.Transport))
 			if len(s.Tools) > 0 {
-				pterm.Printf("   Tools: %s\n", strings.Join(s.Tools, ", "))
+				fmt.Printf("     %s  %s\n", pterm.FgGray.Sprint("tools"), pterm.FgGray.Sprint(strings.Join(s.Tools, "  ·  ")))
 			}
 			if s.Error != "" {
-				pterm.Printf("   Error: %s\n", s.Error)
+				fmt.Printf("     %s  %s\n", pterm.FgRed.Sprint("error"), pterm.FgGray.Sprint(s.Error))
 			}
 		}
 

@@ -300,31 +300,21 @@ func PrintMatchingCommandHints(input string) {
 	trimmed := strings.TrimSpace(input)
 	matches := matchingCommands(trimmed)
 	if len(matches) == 0 {
-		pterm.Warning.Printf("Unknown command: %s\n", trimmed)
-		pterm.Info.Println("Type /help to see available commands")
+		fmt.Printf("  %s  %s\n", pterm.FgRed.Sprint("✗"), pterm.FgGray.Sprintf("Unknown command: %s  ·  type /help to see available commands", trimmed))
 		return
 	}
 
-	pterm.Warning.Printf("Unknown command: %s\n", trimmed)
-	pterm.Info.Println("Did you mean:")
+	fmt.Printf("  %s  %s\n", pterm.FgYellow.Sprint("?"), pterm.FgGray.Sprintf("Unknown command: %s  ·  did you mean:", trimmed))
 	for _, cmd := range matches {
-		pterm.Printf("  %s  %s\n",
-			pterm.FgCyan.Sprint(fmt.Sprintf("%-24s", cmd.Usage)),
-			pterm.FgLightWhite.Sprint(cmd.Description))
+		fmt.Printf("    %-24s %s\n", pterm.FgCyan.Sprint(cmd.Usage), pterm.FgGray.Sprint(cmd.Description))
 	}
-	pterm.Println()
+	fmt.Println()
 }
 
 func PrintCommandHints() {
-	pterm.Info.Println("Commands")
-	pterm.Println()
+	fmt.Printf("\n  %s\n  %s\n\n", pterm.Bold.Sprint("Commands"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
 	for _, cmd := range commands {
-		pterm.Printf("  %s  %s\n",
-			pterm.FgCyan.Sprint(fmt.Sprintf("%-24s", cmd.Usage)),
-			pterm.FgLightWhite.Sprint(cmd.Description))
+		fmt.Printf("  %-24s  %s\n", pterm.FgCyan.Sprint(cmd.Usage), pterm.FgGray.Sprint(cmd.Description))
 	}
-	pterm.Println()
-	pterm.DefaultBasicText.Printf("Type %s then press %s to see completions\n",
-		pterm.FgYellow.Sprint("/"),
-		pterm.FgYellow.Sprint("TAB"))
+	fmt.Printf("\n  %s\n\n", pterm.FgGray.Sprintf("Press %s after / to autocomplete", pterm.FgWhite.Sprint("Tab")))
 }

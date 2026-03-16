@@ -199,10 +199,9 @@ func handleNewCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID uui
 	}
 
 	clearScreen()
-	pterm.Success.Printf("Started new session: %s\n", session.ID)
-	fmt.Println()
-	pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
-	fmt.Println()
+	fmt.Printf("  %s  %s\n\n", pterm.FgGray.Sprint("Session"), pterm.FgGray.Sprint(session.ID.String()[:8]+"…  (new)"))
+	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
+		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
 
 	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }
@@ -213,10 +212,9 @@ func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID 
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	modelsList, err := c.ListModels(1, 100)
 	var currentModelInfo string
-	if err == nil {
-		for _, m := range modelsList.Data {
+	if allModels, err := c.ListModels(1, 100); err == nil {
+		for _, m := range allModels.Data {
 			if m.ID == modelID {
 				if m.Provider != nil {
 					currentModelInfo = fmt.Sprintf("%s/%s", m.Provider.Name, m.Name)
@@ -231,14 +229,24 @@ func handleStatusCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID 
 		currentModelInfo = modelID.String()
 	}
 
+	thinkStatus := pterm.FgGray.Sprint("off")
+	if state.Thinking {
+		if state.ThinkingLevel != "" {
+			thinkStatus = pterm.FgGreen.Sprint("on") + pterm.FgGray.Sprintf("  (%s)", state.ThinkingLevel)
+		} else {
+			thinkStatus = pterm.FgGreen.Sprint("on")
+		}
+	}
+
 	fmt.Println()
-	pterm.DefaultHeader.Println("📊 Session Status")
-	pterm.Printf("  Session ID: %s\n", pterm.FgCyan.Sprint(session.ID))
-	pterm.Printf("  Current Model: %s\n", pterm.FgMagenta.Sprint(currentModelInfo))
-	pterm.Printf("  Token Consumed: %s\n", pterm.FgYellow.Sprint(session.TokenConsumed))
-	pterm.Printf("  Messages: %s\n", pterm.FgGreen.Sprint(len(session.Messages)))
-	pterm.Printf("  Created: %s\n", pterm.FgGray.Sprint(session.CreatedAt.Format("2006-01-02 15:04:05")))
-	pterm.Printf("  Updated: %s\n", pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
+	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Session Status"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Session"), pterm.FgCyan.Sprint(session.ID))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Model"), pterm.FgMagenta.Sprint(currentModelInfo))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Thinking"), thinkStatus)
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Tokens used"), pterm.FgYellow.Sprint(session.TokenConsumed))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Messages"), pterm.FgGreen.Sprint(len(session.Messages)))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Created"), pterm.FgGray.Sprint(session.CreatedAt.Format("2006-01-02 15:04:05")))
+	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Updated"), pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
 	fmt.Println()
 
 	return CommandResult{Handled: true}, nil
@@ -322,19 +330,21 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 	var newSessionID uuid.UUID
 	if err == nil && lastSession != nil {
 		newSessionID = lastSession.ID
+		sessionDesc := fmt.Sprintf("resumed · %d messages", len(lastSession.Messages))
 		clearScreen()
-		pterm.Success.Printf("Switched to agent: %s\n", pterm.FgCyan.Sprint(agentName))
-		pterm.Info.Printf("Resuming last session: %s\n", newSessionID)
-		fmt.Println()
+		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
+		fmt.Printf("  %-10s %s  %s\n\n", pterm.FgGray.Sprint("Session"),
+			pterm.FgGray.Sprint(newSessionID.String()[:8]+"…"),
+			pterm.FgGray.Sprint("("+sessionDesc+")"))
 
 		if len(lastSession.Messages) > 0 {
 			messageCount := len(lastSession.Messages)
 			startIdx := 0
 			if messageCount > 10 {
 				startIdx = messageCount - 10
-				pterm.Info.Printf("Showing last 10 messages (total: %d). Use /history to view all.\n", messageCount)
+				fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Showing last 10 of %d messages  ·  /history to view all", messageCount))
 			}
-			pterm.DefaultSection.Println("Previous Messages")
+			fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Chat History"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
 			printMessageHistory(lastSession.Messages[startIdx:])
 			fmt.Println()
 		}
@@ -345,13 +355,14 @@ func handleAgentCmd(c *api.Client, args []string, sessionID uuid.UUID, modelID u
 		}
 		newSessionID = newSession.ID
 		clearScreen()
-		pterm.Success.Printf("Switched to agent: %s\n", pterm.FgCyan.Sprint(agentName))
-		pterm.Info.Printf("Started new session: %s\n", newSessionID)
-		fmt.Println()
+		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
+		fmt.Printf("  %-10s %s  %s\n\n", pterm.FgGray.Sprint("Session"),
+			pterm.FgGray.Sprint(newSessionID.String()[:8]+"…"),
+			pterm.FgGray.Sprint("(new)"))
 	}
 
-	pterm.Info.Printf("Type %s to see available commands, %s to exit\n", pterm.FgYellow.Sprint("/help"), pterm.FgYellow.Sprint("/exit"))
-	fmt.Println()
+	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
+		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
 
 	return CommandResult{Handled: true, NewAgentID: targetAgentID, NewSessionID: newSessionID}, nil
 }

@@ -37,6 +37,7 @@ var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all agents",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printSection("Agents")
 		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
@@ -63,7 +64,7 @@ var agentListCmd = &cobra.Command{
 			tableData = append(tableData, []string{a.Name, defaultMark, a.ID.String(), a.CreatedAt.Format("2006-01-02 15:04:05")})
 		}
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
+		fmt.Printf("  %s\n", pterm.FgGray.Sprintf("Total: %d  ·  Page %d/%d", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize)))
 		return nil
 	},
 }
@@ -76,6 +77,7 @@ var agentCreateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Create Agent")
 		c := GetClient()
 
 		name, err := pterm.DefaultInteractiveTextInput.Show("Agent name")
@@ -121,6 +123,7 @@ var agentUpdateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Update Agent")
 		c := GetClient()
 
 		result, err := c.ListAgents(1, 100)
@@ -198,6 +201,7 @@ var agentDeleteCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Delete Agent")
 		c := GetClient()
 
 		result, err := c.ListAgents(1, 100)

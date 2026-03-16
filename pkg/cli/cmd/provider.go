@@ -37,6 +37,7 @@ var providerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all providers",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printSection("Providers")
 		c := GetClient()
 
 		page, _ := cmd.Flags().GetInt("page")
@@ -59,7 +60,7 @@ var providerListCmd = &cobra.Command{
 			tableData = append(tableData, []string{p.Name, string(p.Type), p.BaseURL, p.APIKeyCensored})
 		}
 		pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-		pterm.Info.Printf("Total: %d, Page: %d/%d\n", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize))
+		fmt.Printf("  %s\n", pterm.FgGray.Sprintf("Total: %d  ·  Page %d/%d", result.Total, result.Page, (result.Total+int64(result.PageSize)-1)/int64(result.PageSize)))
 		return nil
 	},
 }
@@ -95,6 +96,7 @@ var providerCreateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Create Provider")
 		c := GetClient()
 
 		name, err := pterm.DefaultInteractiveTextInput.Show("Provider name")
@@ -151,6 +153,7 @@ var providerUpdateCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Update Provider")
 		c := GetClient()
 
 		result, err := c.ListProviders(1, 100)
@@ -239,6 +242,7 @@ var providerDeleteCmd = &cobra.Command{
 			return fmt.Errorf("must be run in an interactive terminal")
 		}
 
+		printSection("Delete Provider")
 		c := GetClient()
 
 		result, err := c.ListProviders(1, 100)
