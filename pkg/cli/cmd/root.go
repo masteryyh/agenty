@@ -31,6 +31,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/consts"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -54,6 +55,11 @@ agentic looping and skills usage capabilities.`,
 			if err := config.GetConfigManager().Validate(); err != nil {
 				return fmt.Errorf("invalid configuration: %w", err)
 			}
+
+			if err := logger.Init(cfg.Daemon, cfg.Debug, ""); err != nil {
+				return fmt.Errorf("failed to initialize logger: %w", err)
+			}
+			defer logger.Close()
 
 			if daemonMode {
 				return startDaemon()

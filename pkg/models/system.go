@@ -16,10 +16,14 @@ limitations under the License.
 
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type SystemSettings struct {
-	ID          uint      `gorm:"primaryKey;autoIncrement"`
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey"`
 	Initialized bool      `gorm:"not null;default:false"`
 	CreatedAt   time.Time `gorm:"autoCreateTime:milli"`
 	UpdatedAt   time.Time `gorm:"autoUpdateTime:milli"`

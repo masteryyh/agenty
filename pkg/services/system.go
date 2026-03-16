@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
 	"gorm.io/gorm"
@@ -50,7 +51,9 @@ func (s *SystemService) getOrCreate(ctx context.Context) (*models.SystemSettings
 	if result.Error != gorm.ErrRecordNotFound {
 		return nil, result.Error
 	}
-	settings = models.SystemSettings{Initialized: false}
+
+	fixedID := uuid.MustParse("019cf9b7-a1f4-78f8-9110-15bbe177e7bc")
+	settings = models.SystemSettings{ID: fixedID, Initialized: false}
 	if err := s.db.WithContext(ctx).Create(&settings).Error; err != nil {
 		return nil, err
 	}

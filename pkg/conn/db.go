@@ -41,7 +41,9 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 
 		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
 			cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
-		dbConn, connErr := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		dbConn, connErr := gorm.Open(postgres.Open(dsn), &gorm.Config{
+			TranslateError: true,
+		})
 		if connErr != nil {
 			err = connErr
 			return
