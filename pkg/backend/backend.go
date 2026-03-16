@@ -59,4 +59,7 @@ type Backend interface {
 	DeleteMCPServer(serverID uuid.UUID) error
 	ConnectMCPServer(serverID uuid.UUID) error
 	DisconnectMCPServer(serverID uuid.UUID) error
+
+	IsInitialized() (bool, error)
+	SetInitialized() error
 }

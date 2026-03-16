@@ -288,3 +288,13 @@ func (c *Client) DisconnectMCPServer(serverID uuid.UUID) error {
 	_, err := doRequest[any](c, "POST", fmt.Sprintf("/api/v1/mcp/servers/%s/disconnect", serverID), nil)
 	return err
 }
+
+func (c *Client) GetSystemSettings() (*models.SystemSettingsDto, error) {
+	return doRequest[models.SystemSettingsDto](c, "GET", "/api/v1/system/settings", nil)
+}
+
+func (c *Client) SetSystemInitialized() error {
+	initialized := true
+	_, err := doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", &models.UpdateSystemSettingsDto{Initialized: &initialized})
+	return err
+}

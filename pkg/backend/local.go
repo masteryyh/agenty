@@ -189,3 +189,11 @@ func (l *LocalBackend) DisconnectMCPServer(serverID uuid.UUID) error {
 	}
 	return mgr.Disconnect(serverID)
 }
+
+func (l *LocalBackend) IsInitialized() (bool, error) {
+	return services.GetSystemService().IsInitialized(context.Background())
+}
+
+func (l *LocalBackend) SetInitialized() error {
+	return services.GetSystemService().SetInitialized(context.Background())
+}

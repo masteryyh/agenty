@@ -36,6 +36,10 @@ import (
 func startChat(b backend.Backend) error {
 	showBanner()
 
+	if err := runWizardIfNeeded(b); err != nil {
+		return err
+	}
+
 	agents, err := b.ListAgents(1, 100)
 	if err != nil {
 		return fmt.Errorf("failed to list agents: %w", err)

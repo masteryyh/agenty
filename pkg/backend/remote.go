@@ -151,3 +151,15 @@ func (r *RemoteBackend) ConnectMCPServer(serverID uuid.UUID) error {
 func (r *RemoteBackend) DisconnectMCPServer(serverID uuid.UUID) error {
 	return r.client.DisconnectMCPServer(serverID)
 }
+
+func (r *RemoteBackend) IsInitialized() (bool, error) {
+	dto, err := r.client.GetSystemSettings()
+	if err != nil {
+		return false, err
+	}
+	return dto.Initialized, nil
+}
+
+func (r *RemoteBackend) SetInitialized() error {
+	return r.client.SetSystemInitialized()
+}

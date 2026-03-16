@@ -479,10 +479,11 @@ func doUpdateModel(b backend.Backend, target models.ModelDto) error {
 var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi"}
 
 var providerDefaultBaseURLs = map[string]string{
-	"openai":    "https://api.openai.com/v1",
-	"anthropic": "https://api.anthropic.com",
-	"gemini":    "https://generativelanguage.googleapis.com",
-	"kimi":      "https://api.moonshot.cn/v1",
+	"openai":        "https://api.openai.com/v1",
+	"openai-legacy": "https://api.openai.com/v1",
+	"anthropic":     "https://api.anthropic.com",
+	"gemini":        "https://generativelanguage.googleapis.com/v1beta",
+	"kimi":          "https://api.moonshot.cn/v1",
 }
 
 func providerLabel(p models.ModelProviderDto) string {

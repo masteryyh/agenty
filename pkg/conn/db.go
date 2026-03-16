@@ -54,6 +54,7 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 
 		if migrateErr := dbConn.WithContext(timeoutCtx).
 			AutoMigrate(
+				&models.SystemSettings{},
 				&models.ChatSession{},
 				&models.ChatMessage{},
 				&models.ModelProvider{},

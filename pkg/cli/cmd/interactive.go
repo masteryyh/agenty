@@ -242,19 +242,16 @@ func readInput(prompt, defaultValue string) (string, error) {
 			return "", err
 		}
 
-		if n >= 3 && buf[0] == 27 && buf[1] == 91 {
+		if n >= 2 && buf[0] == 27 {
 			continue
 		}
 
-		if n == 1 {
-			switch buf[0] {
+		var done bool
+		for i := 0; i < n; i++ {
+			b := buf[i]
+			switch b {
 			case 13:
-				rawWriteln("")
-				result := strings.TrimSpace(string(input))
-				if result == "" {
-					return defaultValue, nil
-				}
-				return result, nil
+				done = true
 			case 27, 3:
 				rawWriteln("")
 				return "", ErrCancelled
@@ -264,11 +261,22 @@ func readInput(prompt, defaultValue string) (string, error) {
 					rawWrite("\b \b")
 				}
 			default:
-				if buf[0] >= 32 {
-					input = append(input, rune(buf[0]))
-					rawWrite(string(buf[0]))
+				if b >= 32 {
+					input = append(input, rune(b))
+					rawWrite(string(b))
 				}
 			}
+			if done {
+				break
+			}
+		}
+		if done {
+			rawWriteln("")
+			result := strings.TrimSpace(string(input))
+			if result == "" {
+				return defaultValue, nil
+			}
+			return result, nil
 		}
 	}
 }
@@ -293,15 +301,20 @@ func readPassword(prompt string) (string, error) {
 			return "", err
 		}
 
-		if n >= 3 && buf[0] == 27 && buf[1] == 91 {
+		if n >= 2 && buf[0] == 27 {
 			continue
 		}
 
-		if n == 1 {
-			switch buf[0] {
+		var done bool
+		for i := 0; i < n; i++ {
+			b := buf[i]
+			switch b {
 			case 13:
-				rawWriteln("")
-				return strings.TrimSpace(string(input)), nil
+				if len(input) == 0 {
+					// skip spurious Enter left over from a prior interaction
+					continue
+				}
+				done = true
 			case 27, 3:
 				rawWriteln("")
 				return "", ErrCancelled
@@ -311,11 +324,18 @@ func readPassword(prompt string) (string, error) {
 					rawWrite("\b \b")
 				}
 			default:
-				if buf[0] >= 32 {
-					input = append(input, rune(buf[0]))
+				if b >= 32 {
+					input = append(input, rune(b))
 					rawWrite("*")
 				}
 			}
+			if done {
+				break
+			}
+		}
+		if done {
+			rawWriteln("")
+			return strings.TrimSpace(string(input)), nil
 		}
 	}
 }
