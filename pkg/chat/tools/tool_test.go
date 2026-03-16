@@ -159,3 +159,85 @@ func TestRegistryExecuteToolError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestUnregister(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "tool_a"})
+	r.Register(&mockTool{name: "tool_b"})
+
+	r.Unregister("tool_a")
+
+	if _, ok := r.Get("tool_a"); ok {
+		t.Fatal("expected tool_a to be removed")
+	}
+	if _, ok := r.Get("tool_b"); !ok {
+		t.Fatal("expected tool_b to remain")
+	}
+}
+
+func TestUnregisterNonExistent(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "tool_a"})
+
+	r.Unregister("nonexistent")
+
+	if _, ok := r.Get("tool_a"); !ok {
+		t.Fatal("expected tool_a to remain after unregistering nonexistent tool")
+	}
+}
+
+func TestUnregisterByPrefix(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "ns_tool_a"})
+	r.Register(&mockTool{name: "ns_tool_b"})
+	r.Register(&mockTool{name: "other_tool"})
+
+	r.UnregisterByPrefix("ns_")
+
+	if _, ok := r.Get("ns_tool_a"); ok {
+		t.Fatal("expected ns_tool_a to be removed")
+	}
+	if _, ok := r.Get("ns_tool_b"); ok {
+		t.Fatal("expected ns_tool_b to be removed")
+	}
+	if _, ok := r.Get("other_tool"); !ok {
+		t.Fatal("expected other_tool to remain")
+	}
+}
+
+func TestUnregisterByPrefixNoMatch(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "tool_a"})
+	r.Register(&mockTool{name: "tool_b"})
+
+	r.UnregisterByPrefix("xyz_")
+
+	if len(r.All()) != 2 {
+		t.Fatalf("expected 2 tools to remain, got %d", len(r.All()))
+	}
+}
+
+func TestUnregisterByPrefixEmptyPrefix(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "tool_a"})
+	r.Register(&mockTool{name: "tool_b"})
+	r.Register(&mockTool{name: "tool_c"})
+
+	r.UnregisterByPrefix("")
+
+	if len(r.All()) != 0 {
+		t.Fatalf("expected all tools to be removed, got %d", len(r.All()))
+	}
+}
+
+func TestUnregisterByPrefixExactMatch(t *testing.T) {
+	r := newTestRegistry()
+	r.Register(&mockTool{name: "tool"})
+	r.Register(&mockTool{name: "toolbox"})
+
+	r.UnregisterByPrefix("tool")
+
+	if len(r.All()) != 0 {
+		t.Fatalf("expected all tools to be removed, got %d", len(r.All()))
+	}
+}

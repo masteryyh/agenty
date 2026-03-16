@@ -39,6 +39,11 @@ var (
 	ErrProviderAlreadyExists = NewBusinessError(http.StatusConflict, "provider already exists")
 	ErrProviderInUse         = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")
 	ErrProviderNotConfigured = NewBusinessError(http.StatusBadRequest, "provider is not configured")
+
+	ErrMCPServerNotFound         = NewBusinessError(http.StatusNotFound, "mcp server not found")
+	ErrMCPServerAlreadyExists    = NewBusinessError(http.StatusConflict, "mcp server already exists")
+	ErrMCPServerConnectionFailed = NewBusinessError(http.StatusBadGateway, "mcp server connection failed")
+	ErrMCPServerNotConnected     = NewBusinessError(http.StatusBadRequest, "mcp server not connected")
 )
 
 func GetBusinessError(err error) *BusinessError {

@@ -20,6 +20,25 @@ import (
 	"fmt"
 )
 
+// MCPConfig holds runtime parameters for MCP client connections
+type MCPConfig struct {
+	HealthCheckInterval int `mapstructure:"healthCheckInterval"`
+	ConnectTimeout      int `mapstructure:"connectTimeout"`
+}
+
+func (c *MCPConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.HealthCheckInterval <= 0 {
+		c.HealthCheckInterval = 30
+	}
+	if c.ConnectTimeout <= 0 {
+		c.ConnectTimeout = 15
+	}
+	return nil
+}
+
 // AppConfig is the config definition for this app
 type AppConfig struct {
 	// Debug mode enabled or not
@@ -36,6 +55,9 @@ type AppConfig struct {
 
 	// Auth configuration for HTTP Basic Auth
 	Auth *AuthConfig `mapstructure:"auth"`
+
+	// MCP client runtime configuration
+	MCP *MCPConfig `mapstructure:"mcp"`
 }
 
 // AuthConfig is the config definition for HTTP Basic Auth
@@ -133,6 +155,10 @@ func (c *AppConfig) Validate() error {
 
 	if err := c.Auth.Validate(); err != nil {
 		return fmt.Errorf("invalid auth config: %w", err)
+	}
+
+	if err := c.MCP.Validate(); err != nil {
+		return fmt.Errorf("invalid mcp config: %w", err)
 	}
 
 	return c.DB.Validate()

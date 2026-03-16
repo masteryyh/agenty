@@ -26,10 +26,11 @@ import (
 )
 
 type V1Routes struct {
-	chatRoutes     *ChatRoutes
-	providerRoutes *ProviderRoutes
-	modelRoutes    *ModelRoutes
-	agentRoutes    *AgentRoutes
+	chatRoutes      *ChatRoutes
+	providerRoutes  *ProviderRoutes
+	modelRoutes     *ModelRoutes
+	agentRoutes     *AgentRoutes
+	mcpServerRoutes *MCPServerRoutes
 }
 
 var (
@@ -40,10 +41,11 @@ var (
 func GetV1Routes() *V1Routes {
 	v1Once.Do(func() {
 		v1Routes = &V1Routes{
-			chatRoutes:     GetChatRoutes(),
-			providerRoutes: GetProviderRoutes(),
-			modelRoutes:    GetModelRoutes(),
-			agentRoutes:    GetAgentRoutes(),
+			chatRoutes:      GetChatRoutes(),
+			providerRoutes:  GetProviderRoutes(),
+			modelRoutes:     GetModelRoutes(),
+			agentRoutes:     GetAgentRoutes(),
+			mcpServerRoutes: GetMCPServerRoutes(),
 		}
 	})
 	return v1Routes
@@ -63,5 +65,6 @@ func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) error {
 	r.providerRoutes.RegisterRoutes(routerGroup)
 	r.modelRoutes.RegisterRoutes(routerGroup)
 	r.agentRoutes.RegisterRoutes(routerGroup)
+	r.mcpServerRoutes.RegisterRoutes(routerGroup)
 	return nil
 }
