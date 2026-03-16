@@ -28,6 +28,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
+	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/middleware"
 	"github.com/masteryyh/agenty/pkg/routes"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
@@ -57,6 +58,11 @@ func main() {
 	registry := tools.GetRegistry()
 	builtin.RegisterAll(registry)
 	slog.InfoContext(baseCtx, "built-in tools registered", "count", len(registry.All()))
+
+	slog.InfoContext(baseCtx, "initializing MCP manager...")
+	mcpManager := mcppkg.InitManager(baseCtx, registry)
+	mcpManager.Start()
+	slog.InfoContext(baseCtx, "MCP manager initialized")
 
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
@@ -89,4 +95,5 @@ func main() {
 
 	<-baseCtx.Done()
 	slog.InfoContext(baseCtx, "shutting down server")
+	mcpManager.Close()
 }

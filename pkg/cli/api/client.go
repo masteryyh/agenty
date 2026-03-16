@@ -261,3 +261,30 @@ func (c *Client) DeleteAgent(agentID uuid.UUID) error {
 	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/agents/%s", agentID), nil)
 	return err
 }
+
+func (c *Client) ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error) {
+	return doRequest[pagination.PagedResponse[models.MCPServerDto]](c, "GET", fmt.Sprintf("/api/v1/mcp/servers?page=%d&pageSize=%d", page, pageSize), nil)
+}
+
+func (c *Client) CreateMCPServer(dto *models.CreateMCPServerDto) (*models.MCPServerDto, error) {
+	return doRequest[models.MCPServerDto](c, "POST", "/api/v1/mcp/servers", dto)
+}
+
+func (c *Client) UpdateMCPServer(serverID uuid.UUID, dto *models.UpdateMCPServerDto) (*models.MCPServerDto, error) {
+	return doRequest[models.MCPServerDto](c, "PUT", fmt.Sprintf("/api/v1/mcp/servers/%s", serverID), dto)
+}
+
+func (c *Client) DeleteMCPServer(serverID uuid.UUID) error {
+	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/mcp/servers/%s", serverID), nil)
+	return err
+}
+
+func (c *Client) ConnectMCPServer(serverID uuid.UUID) error {
+	_, err := doRequest[any](c, "POST", fmt.Sprintf("/api/v1/mcp/servers/%s/connect", serverID), nil)
+	return err
+}
+
+func (c *Client) DisconnectMCPServer(serverID uuid.UUID) error {
+	_, err := doRequest[any](c, "POST", fmt.Sprintf("/api/v1/mcp/servers/%s/disconnect", serverID), nil)
+	return err
+}

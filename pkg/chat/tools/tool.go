@@ -109,6 +109,22 @@ func (r *Registry) All() []Tool {
 	return result
 }
 
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
+func (r *Registry) UnregisterByPrefix(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name := range r.tools {
+		if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
+			delete(r.tools, name)
+		}
+	}
+}
+
 func (r *Registry) Definitions() []ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
