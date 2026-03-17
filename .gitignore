@@ -36,5 +36,10 @@ cmd/__debug*
 # Build output
 bin/
 /cli
+/agenty
 
+# Handoff documents
 HANDOFF.md
+
+# Logs
+*.log

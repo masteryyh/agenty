@@ -8,7 +8,7 @@ This project is still under construction, expect frequent updates and breaking c
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26+
 - PostgreSQL 18 with the [pgvector](https://github.com/pgvector/pgvector) extension enabled
 - At least one LLM provider API key
 
@@ -17,12 +17,11 @@ This project is still under construction, expect frequent updates and breaking c
 ```bash
 git clone https://github.com/masteryyh/agenty.git
 cd agenty
-make all
+make build
 ```
 
-This produces:
-- `bin/agenty-server` — the backend REST API server
-- `bin/agenty-cli` — the interactive CLI client
+This produces a single binary:
+- `bin/agenty` — the unified binary (backend server + interactive CLI)
 
 ### Configuration
 
@@ -44,7 +43,7 @@ db:
   password: your_password
   database: agenty
 
-# Optional: HTTP Basic Auth
+# Optional: HTTP Basic Auth (for daemon mode)
 auth:
   enabled: false
   username: admin
@@ -55,27 +54,36 @@ embedding:
   baseUrl: https://api.openai.com/v1
   apiKey: sk-...
   model: text-embedding-3-small
+
+# Optional: Connect to a remote backend instead of running locally
+# server:
+#   url: http://your-server:8080
+#   username: admin   # if auth is enabled on the remote server
+#   password: secret
 ```
 
-### Running the Server
+### Running Modes
+
+Agenty ships as a single binary with three operating modes:
+
+**Daemon mode** — run the backend HTTP API server:
 
 ```bash
-./bin/agenty-server --config my-config.yaml
+./bin/agenty --daemon --config my-config.yaml
 ```
 
 On first start, Agenty auto-provisions preset providers and models and creates a default agent.
 
-### Using the CLI
+**Local mode** — interactive CLI that connects directly to a local database (no separate server process needed):
 
 ```bash
-# Configure the CLI (saved to ~/.agenty/config.yaml)
-./bin/agenty-cli config set
+./bin/agenty --config my-config.yaml
+```
 
-# Start an interactive chat session
-./bin/agenty-cli chat
+**Remote mode** — interactive CLI that connects to a remote backend server. Configure `server.url` in your config file:
 
-# Or point to a remote server
-./bin/agenty-cli --url http://your-server:8080 chat
+```bash
+./bin/agenty --config my-config.yaml
 ```
 
 ## Supported LLM Providers
@@ -98,21 +106,24 @@ All providers support **extended thinking** configuration with per-model thinkin
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `port` | `8080` | HTTP server listen port |
+| `port` | `8080` | HTTP server listen port (daemon mode only) |
 | `debug` | `false` | Enable debug mode and the debug tool |
 | `db.host` | `127.0.0.1` | PostgreSQL host |
 | `db.port` | `5432` | PostgreSQL port |
 | `db.username` | `postgres` | PostgreSQL user |
 | `db.password` | *(required)* | PostgreSQL password |
 | `db.database` | `agenty` | PostgreSQL database name |
-| `auth.enabled` | `false` | Enable HTTP Basic Auth |
+| `auth.enabled` | `false` | Enable HTTP Basic Auth (daemon mode only) |
 | `auth.username` | — | Basic auth username |
 | `auth.password` | — | Basic auth password |
 | `embedding.baseUrl` | — | Embedding API base URL |
 | `embedding.apiKey` | — | Embedding API key |
 | `embedding.model` | `text-embedding-3-small` | Embedding model name |
+| `server.url` | — | Remote backend URL (enables remote mode) |
+| `server.username` | — | Remote backend Basic Auth username |
+| `server.password` | — | Remote backend Basic Auth password |
 
-All settings can be overridden with environment variables using the `AGENTY_` prefix (e.g., `AGENTY_DB_PASSWORD=secret`).
+All settings can be overridden with environment variables using the `AGENTY_` prefix (e.g., `AGENTY_DB_PASSWORD=secret`, `AGENTY_SERVER_URL=http://remote:8080`).
 
 ## Database Setup
 

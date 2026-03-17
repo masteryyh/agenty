@@ -39,9 +39,24 @@ func (c *MCPConfig) Validate() error {
 	return nil
 }
 
+// ServerConfig holds configuration for connecting to a remote agenty server in non-daemon mode
+type ServerConfig struct {
+	// URL of the remote server (e.g. http://localhost:8080)
+	URL string `mapstructure:"url"`
+
+	// Username for authentication with the remote server
+	Username string `mapstructure:"username"`
+
+	// Password for authentication with the remote server
+	Password string `mapstructure:"password"`
+}
+
 // AppConfig is the config definition for this app
 type AppConfig struct {
-	// Debug mode enabled or not
+	// Daemon indicates whether to run in daemon mode
+	Daemon bool `mapstructure:"-"`
+
+	// Debug mode enables more verbose logging and other debug features
 	Debug bool `mapstructure:"debug"`
 
 	// Port of the HTTP server
@@ -58,6 +73,13 @@ type AppConfig struct {
 
 	// MCP client runtime configuration
 	MCP *MCPConfig `mapstructure:"mcp"`
+
+	// Server configuration for remote mode
+	Server *ServerConfig `mapstructure:"server"`
+}
+
+func (c *AppConfig) IsRemoteMode() bool {
+	return !c.Daemon && c.Server != nil && c.Server.URL != ""
 }
 
 // AuthConfig is the config definition for HTTP Basic Auth
@@ -145,21 +167,43 @@ func (c *AuthConfig) Validate() error {
 }
 
 func (c *AppConfig) Validate() error {
-	if c.Port <= 0 || c.Port > 65535 {
-		return fmt.Errorf("invalid port number: %d", c.Port)
+	if c.Daemon {
+		if c.Port <= 0 || c.Port > 65535 {
+			return fmt.Errorf("invalid port number: %d", c.Port)
+		}
+		if c.DB == nil {
+			return fmt.Errorf("database configuration is required in daemon mode")
+		}
+		if err := c.DB.Validate(); err != nil {
+			return fmt.Errorf("invalid db config: %w", err)
+		}
+		if err := c.Auth.Validate(); err != nil {
+			return fmt.Errorf("invalid auth config: %w", err)
+		}
+		if err := c.Embedding.Validate(); err != nil {
+			return fmt.Errorf("invalid embedding config: %w", err)
+		}
+		if err := c.MCP.Validate(); err != nil {
+			return fmt.Errorf("invalid mcp config: %w", err)
+		}
+		return nil
 	}
 
+	if c.IsRemoteMode() {
+		return nil
+	}
+
+	if c.DB == nil {
+		return fmt.Errorf("database configuration is required (or configure server.url for remote mode)")
+	}
+	if err := c.DB.Validate(); err != nil {
+		return fmt.Errorf("invalid db config: %w", err)
+	}
 	if err := c.Embedding.Validate(); err != nil {
 		return fmt.Errorf("invalid embedding config: %w", err)
 	}
-
-	if err := c.Auth.Validate(); err != nil {
-		return fmt.Errorf("invalid auth config: %w", err)
-	}
-
 	if err := c.MCP.Validate(); err != nil {
 		return fmt.Errorf("invalid mcp config: %w", err)
 	}
-
-	return c.DB.Validate()
+	return nil
 }

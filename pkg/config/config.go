@@ -29,8 +29,9 @@ import (
 )
 
 type ConfigManager struct {
-	cfg    *AppConfig
-	vipers *viper.Viper
+	cfg           *AppConfig
+	vipers        *viper.Viper
+	configFileSet bool
 }
 
 func NewConfigManager() *ConfigManager {
@@ -54,12 +55,15 @@ func (cm *ConfigManager) BindEnvVariables() {
 	cm.vipers.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	envs := map[string]string{
-		"port":        "AGENTY_PORT",
-		"db.host":     "AGENTY_DB_HOST",
-		"db.port":     "AGENTY_DB_PORT",
-		"db.username": "AGENTY_DB_USERNAME",
-		"db.password": "AGENTY_DB_PASSWORD",
-		"db.database": "AGENTY_DB_DATABASE",
+		"port":            "AGENTY_PORT",
+		"db.host":         "AGENTY_DB_HOST",
+		"db.port":         "AGENTY_DB_PORT",
+		"db.username":     "AGENTY_DB_USERNAME",
+		"db.password":     "AGENTY_DB_PASSWORD",
+		"db.database":     "AGENTY_DB_DATABASE",
+		"server.url":      "AGENTY_SERVER_URL",
+		"server.username": "AGENTY_SERVER_USERNAME",
+		"server.password": "AGENTY_SERVER_PASSWORD",
 	}
 
 	for key, env := range envs {
@@ -75,23 +79,29 @@ func (cm *ConfigManager) SetDefaults() {
 	cm.vipers.SetDefault("db.database", "agenty")
 }
 
-func (cm *ConfigManager) LoadConfig(configPaths ...string) error {
+func (cm *ConfigManager) SetConfigFile(path string) {
+	cm.vipers.SetConfigFile(path)
+	cm.configFileSet = true
+}
+
+func (cm *ConfigManager) LoadConfig() error {
 	cm.SetDefaults()
 
-	cm.vipers.SetConfigName("agenty")
-	cm.vipers.SetConfigType("yaml")
+	if !cm.configFileSet {
+		cm.vipers.SetConfigName("agenty")
+		cm.vipers.SetConfigType("yaml")
 
-	defaultPaths := []string{
-		".",
-		"./config",
-		"./configs",
-		"/etc/agenty",
-		"$HOME/.agenty",
-	}
+		defaultPaths := []string{
+			".",
+			"./config",
+			"./configs",
+			"/etc/agenty",
+			"$HOME/.agenty",
+		}
 
-	allPaths := append(configPaths, defaultPaths...)
-	for _, path := range allPaths {
-		cm.vipers.AddConfigPath(path)
+		for _, path := range defaultPaths {
+			cm.vipers.AddConfigPath(path)
+		}
 	}
 
 	if err := cm.vipers.ReadInConfig(); err != nil {
@@ -253,17 +263,17 @@ var (
 	once                sync.Once
 )
 
-func Init(files ...string) error {
+func Init(configFile string) error {
 	var err error
 	once.Do(func() {
 		globalConfigManager = NewConfigManager()
 		globalConfigManager.BindEnvVariables()
 
-		if err = globalConfigManager.LoadConfig(files...); err != nil {
-			return
+		if configFile != "" {
+			globalConfigManager.SetConfigFile(configFile)
 		}
 
-		err = globalConfigManager.Validate()
+		err = globalConfigManager.LoadConfig()
 	})
 	return err
 }

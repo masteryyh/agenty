@@ -37,7 +37,10 @@ var commands = []Command{
 	{Name: "/new", Description: "Start a new chat session", Usage: "/new"},
 	{Name: "/status", Description: "Show current session status", Usage: "/status"},
 	{Name: "/history", Description: "Browse message history", Usage: "/history"},
-	{Name: "/model", Description: "Switch to a different model", Usage: "/model [provider/model]"},
+	{Name: "/model", Description: "Manage and switch models", Usage: "/model [provider/model]"},
+	{Name: "/provider", Description: "Manage model providers", Usage: "/provider"},
+	{Name: "/mcp", Description: "Manage MCP servers", Usage: "/mcp"},
+	{Name: "/agent", Description: "Manage and switch agents", Usage: "/agent [agent-name]"},
 	{
 		Name:        "/think",
 		Description: "Set thinking mode",
@@ -45,7 +48,6 @@ var commands = []Command{
 	},
 	{Name: "/help", Description: "Show available commands", Usage: "/help"},
 	{Name: "/exit", Description: "Quit the chat", Usage: "/exit"},
-	{Name: "/agent", Description: "Switch to a different agent", Usage: "/agent [agent-name]"},
 }
 
 func SetArgCompleter(cmdName string, completer func() []string) {

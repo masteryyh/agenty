@@ -31,6 +31,7 @@ type V1Routes struct {
 	modelRoutes     *ModelRoutes
 	agentRoutes     *AgentRoutes
 	mcpServerRoutes *MCPServerRoutes
+	systemRoutes    *SystemRoutes
 }
 
 var (
@@ -46,6 +47,7 @@ func GetV1Routes() *V1Routes {
 			modelRoutes:     GetModelRoutes(),
 			agentRoutes:     GetAgentRoutes(),
 			mcpServerRoutes: GetMCPServerRoutes(),
+			systemRoutes:    GetSystemRoutes(),
 		}
 	})
 	return v1Routes
@@ -66,5 +68,6 @@ func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) error {
 	r.modelRoutes.RegisterRoutes(routerGroup)
 	r.agentRoutes.RegisterRoutes(routerGroup)
 	r.mcpServerRoutes.RegisterRoutes(routerGroup)
+	r.systemRoutes.RegisterRoutes(routerGroup)
 	return nil
 }
