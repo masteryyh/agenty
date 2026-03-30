@@ -1,4 +1,4 @@
-name: Build images
+name: Build images (arm64)
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 jobs:
   detect-changes:
     name: Detect changes in images/prag
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}
     steps:
@@ -43,7 +43,7 @@ jobs:
     name: Build prag
     needs: detect-changes
     if: needs.detect-changes.outputs.has_changes == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     permissions:
       packages: read
       contents: read
@@ -54,9 +54,6 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.1
-
-      - name: Initialize QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Initialize Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -76,7 +73,7 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/prag:latest
             ${{ secrets.DOCKER_USERNAME }}/prag:18-alpine
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -1,0 +1,82 @@
+name: Build images (amd64)
+
+on:
+  push:
+    tags:
+      - v*.*.*
+    branches:
+      - main
+
+jobs:
+  detect-changes:
+    name: Detect changes in images/prag
+    runs-on: ubuntu-24.04
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: changed
+        run: |
+          BEFORE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+          ZERO="0000000000000000000000000000000000000000"
+
+          if [ "$BEFORE" = "$ZERO" ]; then
+            BASE=$(git hash-object -t tree /dev/null)
+          else
+            BASE=$(git merge-base "$BEFORE" "$HEAD" 2>/dev/null || echo "$BEFORE")
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- images/prag/)
+          if [ -n "$CHANGED" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build prag
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.1
+
+      - name: Initialize Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker registry
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v6
+        with:
+          context: images/prag
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/prag:latest
+            ${{ secrets.DOCKER_USERNAME }}/prag:18-alpine
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign Docker image
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cosign sign --yes ${{ secrets.DOCKER_USERNAME }}/prag@${{ steps.build-push.outputs.digest }}
