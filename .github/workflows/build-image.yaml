@@ -35,7 +35,7 @@ jobs:
             BASE=$(git merge-base "$BEFORE" "$HEAD" 2>/dev/null || echo "$BEFORE")
           fi
 
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- images/prag/)
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- images/prag/ .github/workflows/)
           if [ -n "$CHANGED" ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
@@ -130,9 +130,11 @@ jobs:
 
       - name: Create and push multi-arch manifest
         run: |
+          skopeo copy oci-archive:prag-amd64.tar containers-storage:localhost/prag:amd64
+          skopeo copy oci-archive:prag-arm64.tar containers-storage:localhost/prag:arm64
           buildah manifest create prag-multiarch
-          buildah manifest add prag-multiarch oci-archive:prag-amd64.tar
-          buildah manifest add prag-multiarch oci-archive:prag-arm64.tar
+          buildah manifest add prag-multiarch localhost/prag:amd64
+          buildah manifest add prag-multiarch localhost/prag:arm64
           buildah manifest push --all prag-multiarch \
             docker://docker.io/${{ secrets.DOCKER_USERNAME }}/prag:latest
           buildah manifest push --all prag-multiarch \
