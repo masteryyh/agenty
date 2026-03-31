@@ -163,3 +163,11 @@ func (r *RemoteBackend) IsInitialized() (bool, error) {
 func (r *RemoteBackend) SetInitialized() error {
 	return r.client.SetSystemInitialized()
 }
+
+func (r *RemoteBackend) GetSystemSettings() (*models.SystemSettingsDto, error) {
+	return r.client.GetSystemSettings()
+}
+
+func (r *RemoteBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
+	return r.client.UpdateSystemSettings(dto)
+}

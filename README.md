@@ -49,12 +49,6 @@ auth:
   username: admin
   password: secret
 
-# Optional: Enable long-term memory tools
-embedding:
-  baseUrl: https://api.openai.com/v1
-  apiKey: sk-...
-  model: text-embedding-3-small
-
 # Optional: Connect to a remote backend instead of running locally
 # server:
 #   url: http://your-server:8080
@@ -116,9 +110,6 @@ All providers support **extended thinking** configuration with per-model thinkin
 | `auth.enabled` | `false` | Enable HTTP Basic Auth (daemon mode only) |
 | `auth.username` | — | Basic auth username |
 | `auth.password` | — | Basic auth password |
-| `embedding.baseUrl` | — | Embedding API base URL |
-| `embedding.apiKey` | — | Embedding API key |
-| `embedding.model` | `text-embedding-3-small` | Embedding model name |
 | `server.url` | — | Remote backend URL (enables remote mode) |
 | `server.username` | — | Remote backend Basic Auth username |
 | `server.password` | — | Remote backend Basic Auth password |

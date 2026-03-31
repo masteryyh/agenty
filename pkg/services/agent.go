@@ -147,6 +147,8 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 		return err
 	}
 
+	updates := make(map[string]any)
+
 	if dto.Name != nil && *dto.Name != agent.Name {
 		nameExists, err := gorm.G[models.Agent](s.db).
 			Where("name = ? AND id != ? AND deleted_at IS NULL", *dto.Name, agentID).
@@ -158,16 +160,17 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 		if nameExists > 0 {
 			return customerrors.ErrAgentAlreadyExists
 		}
-		agent.Name = *dto.Name
+		updates["name"] = *dto.Name
 	}
 
 	if dto.Soul != nil {
-		agent.Soul = *dto.Soul
+		updates["soul"] = *dto.Soul
 	}
 
-	if _, err := gorm.G[models.Agent](s.db).
+	if err := s.db.WithContext(ctx).
+		Model(&models.Agent{}).
 		Where("id = ? AND deleted_at IS NULL", agentID).
-		Updates(ctx, agent); err != nil {
+		Updates(updates).Error; err != nil {
 		slog.ErrorContext(ctx, "failed to update agent", "error", err, "agentId", agentID)
 		return err
 	}

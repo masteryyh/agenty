@@ -17,7 +17,6 @@ limitations under the License.
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +29,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/pterm/pterm"
 )
 
@@ -345,7 +345,7 @@ func runChatLoop(b backend.Backend, sessionID uuid.UUID, modelID uuid.UUID, agen
 			atLineStart    = true
 		)
 
-		err = b.StreamChat(context.Background(), currentSessionID, &models.ChatDto{
+		err = b.StreamChat(signal.GetBaseContext(), currentSessionID, &models.ChatDto{
 			ModelID:       currentModelID,
 			Message:       input,
 			Thinking:      chatState.Thinking,
@@ -473,4 +473,3 @@ func runChatLoop(b backend.Backend, sessionID uuid.UUID, modelID uuid.UUID, agen
 
 	return nil
 }
-

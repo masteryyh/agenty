@@ -18,11 +18,16 @@ package services
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"sync"
 
-	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/safe"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"gorm.io/gorm"
 )
 
@@ -43,18 +48,17 @@ func GetSystemService() *SystemService {
 }
 
 func (s *SystemService) getOrCreate(ctx context.Context) (*models.SystemSettings, error) {
-	var settings models.SystemSettings
-	result := s.db.WithContext(ctx).First(&settings)
-	if result.Error == nil {
+	settings, err := gorm.G[models.SystemSettings](s.db).
+		Where("id = ?", consts.DefaultSystemSettingsID).
+		First(ctx)
+	if err == nil {
 		return &settings, nil
-	}
-	if result.Error != gorm.ErrRecordNotFound {
-		return nil, result.Error
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
-	fixedID := uuid.MustParse("019cf9b7-a1f4-78f8-9110-15bbe177e7bc")
-	settings = models.SystemSettings{ID: fixedID, Initialized: false}
-	if err := s.db.WithContext(ctx).Create(&settings).Error; err != nil {
+	settings = models.SystemSettings{ID: consts.DefaultSystemSettingsID, Initialized: false}
+	if err := gorm.G[models.SystemSettings](s.db).Create(ctx, &settings); err != nil {
 		return nil, err
 	}
 	return &settings, nil
@@ -73,7 +77,11 @@ func (s *SystemService) SetInitialized(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(settings).Update("initialized", true).Error
+
+	_, err = gorm.G[models.SystemSettings](s.db).
+		Where("id = ?", settings.ID).
+		Update(ctx, "initialized", true)
+	return err
 }
 
 func (s *SystemService) GetSettings(ctx context.Context) (*models.SystemSettingsDto, error) {
@@ -84,16 +92,82 @@ func (s *SystemService) GetSettings(ctx context.Context) (*models.SystemSettings
 	return settings.ToDto(), nil
 }
 
+func (s *SystemService) setEmbeddingMigrating(ctx context.Context, dbConn *gorm.DB, migrating bool) error {
+	settings, err := s.getOrCreate(ctx)
+	if err != nil {
+		return err
+	}
+
+	db := s.db.WithContext(ctx)
+	if dbConn != nil {
+		db = dbConn
+	}
+
+	_, err = gorm.G[models.SystemSettings](db).
+		Where("id = ?", settings.ID).
+		Update(ctx, "embedding_migrating", migrating)
+	return err
+}
+
 func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
 	settings, err := s.getOrCreate(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	updates := make(map[string]any)
+
 	if dto.Initialized != nil {
-		if err := s.db.WithContext(ctx).Model(settings).Update("initialized", *dto.Initialized).Error; err != nil {
+		updates["initialized"] = *dto.Initialized
+	}
+
+	triggerReEmbed := false
+	if dto.EmbeddingModelID != nil {
+		model, err := gorm.G[models.Model](s.db).
+			Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *dto.EmbeddingModelID).
+			First(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, customerrors.ErrModelNotFound
+			}
+			slog.ErrorContext(ctx, "failed to find embedding model", "error", err, "modelId", *dto.EmbeddingModelID)
 			return nil, err
 		}
-		settings.Initialized = *dto.Initialized
+		if settings.EmbeddingModelID == nil || *settings.EmbeddingModelID != model.ID {
+			triggerReEmbed = true
+		}
+		updates["embedding_model_id"] = model.ID
 	}
+
+	if dto.ContextCompressionModelID != nil {
+		model, err := gorm.G[models.Model](s.db).
+			Where("id = ? AND deleted_at IS NULL AND context_compression_model IS TRUE", *dto.ContextCompressionModelID).
+			First(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, customerrors.ErrModelNotFound
+			}
+			slog.ErrorContext(ctx, "failed to find context compression model", "error", err, "modelId", *dto.ContextCompressionModelID)
+			return nil, err
+		}
+		updates["context_compression_model_id"] = model.ID
+	}
+
+	if err := s.db.WithContext(ctx).
+		Model(&models.SystemSettings{}).
+		Where("id = ?", settings.ID).
+		Updates(updates).Error; err != nil {
+		slog.ErrorContext(ctx, "failed to update system settings", "error", err)
+		return nil, err
+	}
+
+	if triggerReEmbed {
+		safe.GoOnce("memory-re-embed", func() {
+			if err := GetMemoryService().ReEmbedAll(signal.GetBaseContext()); err != nil {
+				slog.Error("background re-embedding failed", "error", err)
+			}
+		})
+	}
+
 	return settings.ToDto(), nil
 }

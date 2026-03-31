@@ -251,6 +251,11 @@ func handleStatusCmd(b backend.Backend, args []string, sessionID uuid.UUID, mode
 	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Messages"), pterm.FgGreen.Sprint(len(session.Messages)))
 	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Created"), pterm.FgGray.Sprint(session.CreatedAt.Format("2006-01-02 15:04:05")))
 	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Updated"), pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
+
+	if sysSettings, err := b.GetSystemSettings(); err == nil && sysSettings.EmbeddingMigrating {
+		fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Re-embedding"), pterm.FgYellow.Sprint("in progress..."))
+	}
+
 	fmt.Println()
 
 	return CommandResult{Handled: true}, nil
@@ -336,6 +341,10 @@ func handleModelCmd(b backend.Backend, args []string, sessionID uuid.UUID, model
 		switch res.Action {
 		case ListActionSelect:
 			target := result.Data[res.Index]
+			if target.EmbeddingModel {
+				pterm.Warning.Println("Embedding models cannot be used as chat models.")
+				continue
+			}
 			pterm.Success.Printf("Switched to model: %s\n", modelDisplayName(target))
 			return CommandResult{Handled: true, NewModelID: target.ID}, nil
 
@@ -377,17 +386,24 @@ func modelLabel(m models.ModelDto) string {
 	if m.Provider != nil {
 		providerName = m.Provider.Name
 	}
-	marker := ""
+	var tags []string
 	if m.DefaultModel {
-		marker = " [default]"
+		tags = append(tags, pterm.FgGreen.Sprint("[D]"))
 	}
-	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, marker)
+	if m.EmbeddingModel {
+		tags = append(tags, pterm.FgCyan.Sprint("[E]"))
+	}
+	if m.ContextCompressionModel {
+		tags = append(tags, pterm.FgYellow.Sprint("[CC]"))
+	}
+	tagStr := ""
+	if len(tags) > 0 {
+		tagStr = " " + strings.Join(tags, "")
+	}
+	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, tagStr)
 }
 
 func doCreateModel(b backend.Backend) error {
-	fmt.Print("\033[?25h")
-	printSection("Create Model")
-
 	providers, err := b.ListProviders(1, 100)
 	if err != nil {
 		return fmt.Errorf("failed to list providers: %w", err)
@@ -401,76 +417,164 @@ func doCreateModel(b backend.Backend) error {
 	for i, p := range providers.Data {
 		providerOptions[i] = providerLabel(p)
 	}
-	idx, err := selectOption("Select provider", providerOptions, 0)
-	if err != nil {
-		return err
-	}
-	selectedProvider := providerOptions[idx]
-	var targetProvider models.ModelProviderDto
-	for _, p := range providers.Data {
-		if providerLabel(p) == selectedProvider {
-			targetProvider = p
-			break
-		}
+
+	fields := []*FormField{
+		SelectField("Provider", providerOptions, 0),
+		TextField("Name", "", true),
+		TextField("Code", "", true),
+		SelectField("Type", []string{"Chat", "Chat + Context compression", "Embedding"}, 0),
 	}
 
-	name, err := readInput("Model display name", "")
+	submitted, err := ShowForm("Create Model", fields)
 	if err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("name cannot be empty")
+	if !submitted {
+		return ErrCancelled
 	}
 
-	code, err := readInput("Model API code/ID", "")
-	if err != nil {
-		return err
-	}
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return fmt.Errorf("code cannot be empty")
-	}
+	targetProvider := providers.Data[fields[0].SelIdx]
+	name := fields[1].Value
+	code := fields[2].Value
+	typeIdx := fields[3].SelIdx
+	embeddingModel := typeIdx == 2
+	contextCompressionModel := typeIdx == 1
 
 	model, err := b.CreateModel(&models.CreateModelDto{
-		Name:       name,
-		Code:       code,
-		ProviderID: targetProvider.ID,
+		Name:                    name,
+		Code:                    code,
+		ProviderID:              targetProvider.ID,
+		EmbeddingModel:          embeddingModel,
+		ContextCompressionModel: contextCompressionModel,
 	})
 	if err != nil {
 		return err
 	}
 	pterm.Success.Printf("Model created: %s (%s) under %s\n", model.Name, model.Code, targetProvider.Name)
+
+	if embeddingModel {
+		if err := offerSetActiveEmbeddingModel(b, model.ID); err != nil {
+			return err
+		}
+	}
+
+	if contextCompressionModel {
+		setActive, err := showConfirm("Set as active context compression model in system settings?")
+		if err != nil {
+			return err
+		}
+		if setActive {
+			if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{ContextCompressionModelID: &model.ID}); err != nil {
+				pterm.Warning.Printf("Failed to set active context compression model: %v\n", err)
+			} else {
+				pterm.Success.Println("Active context compression model updated.")
+			}
+		}
+	}
+
 	return nil
 }
 
 func doUpdateModel(b backend.Backend, target models.ModelDto) error {
-	fmt.Print("\033[?25h")
-	printSection("Update Model")
+	currentTypeIdx := 0
+	if target.ContextCompressionModel {
+		currentTypeIdx = 1
+	} else if target.EmbeddingModel {
+		currentTypeIdx = 2
+	}
 
-	newName, err := readInput("Model display name", target.Name)
+	fields := []*FormField{
+		TextField("Name", target.Name, true),
+		ToggleField("Default model", target.DefaultModel),
+		SelectField("Type", []string{"Chat", "Chat + Context compression", "Embedding"}, currentTypeIdx),
+	}
+
+	submitted, err := ShowForm("Update Model  "+pterm.FgGray.Sprint(target.Code), fields)
 	if err != nil {
 		return err
 	}
-	newName = strings.TrimSpace(newName)
-	if newName == "" {
-		newName = target.Name
+	if !submitted {
+		return ErrCancelled
 	}
 
-	setDefault, err := showConfirm("Set as default model?")
-	if err != nil {
-		return err
-	}
+	newName := fields[0].Value
+	setDefault := fields[1].BoolValue()
+	typeIdx := fields[2].SelIdx
+	embeddingModel := typeIdx == 2
+	contextCompressionModel := typeIdx == 1
 
-	if target.Name == newName && target.DefaultModel == setDefault {
+	if newName == target.Name && setDefault == target.DefaultModel &&
+		embeddingModel == target.EmbeddingModel && contextCompressionModel == target.ContextCompressionModel {
 		pterm.Info.Println("No changes detected, skipping update")
 		return nil
 	}
 
-	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{Name: &newName, DefaultModel: &setDefault}); err != nil {
+	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{
+		Name:                    &newName,
+		DefaultModel:            &setDefault,
+		EmbeddingModel:          &embeddingModel,
+		ContextCompressionModel: &contextCompressionModel,
+	}); err != nil {
 		return err
 	}
 	pterm.Success.Printf("Model updated: %s\n", newName)
+
+	if embeddingModel && !target.EmbeddingModel {
+		if err := offerSetActiveEmbeddingModel(b, target.ID); err != nil {
+			return err
+		}
+	}
+
+	if contextCompressionModel && !target.ContextCompressionModel {
+		setActive, err := showConfirm("Set as active context compression model in system settings?")
+		if err != nil {
+			return err
+		}
+		if setActive {
+			if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{ContextCompressionModelID: &target.ID}); err != nil {
+				pterm.Warning.Printf("Failed to set active context compression model: %v\n", err)
+			} else {
+				pterm.Success.Println("Active context compression model updated.")
+			}
+		}
+	}
+
+	return nil
+}
+
+func offerSetActiveEmbeddingModel(b backend.Backend, modelID uuid.UUID) error {
+	setActive, err := showConfirm("Set as active embedding model in system settings?")
+	if err != nil {
+		return err
+	}
+	if !setActive {
+		return nil
+	}
+
+	settings, err := b.GetSystemSettings()
+	if err != nil {
+		pterm.Warning.Printf("Failed to get system settings: %v\n", err)
+		return nil
+	}
+
+	if settings.EmbeddingModelID != nil && *settings.EmbeddingModelID != modelID {
+		pterm.Warning.Println("Switching the embedding model will trigger re-generation of ALL existing")
+		pterm.Warning.Println("embedding data in the background. This may take time and incur API costs.")
+		confirmed, err := showConfirm("Proceed with switching the active embedding model?")
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &modelID}); err != nil {
+		pterm.Warning.Printf("Failed to set active embedding model: %v\n", err)
+		return nil
+	}
+	pterm.Success.Println("Active embedding model updated.")
+	pterm.Info.Println("Re-embedding in progress in background.")
 	return nil
 }
 
@@ -567,37 +671,44 @@ func handleProviderCmd(b backend.Backend, args []string, sessionID uuid.UUID, mo
 }
 
 func doCreateProvider(b backend.Backend) error {
-	fmt.Print("\033[?25h")
-	printSection("Create Provider")
+	typeField := SelectField("Type", providerTypeOptions, 0)
+	urlField := TextField("Base URL", providerDefaultBaseURLs[providerTypeOptions[0]], true)
+	const urlFieldIdx = 2
 
-	name, err := readInput("Provider name", "")
+	typeField.OnChange = func(selIdx int, inputs [][]rune, update func(int, string)) {
+		typeName := providerTypeOptions[selIdx]
+		newDefault, hasDefault := providerDefaultBaseURLs[typeName]
+		if !hasDefault {
+			return
+		}
+		currentURL := strings.TrimSpace(string(inputs[urlFieldIdx]))
+		for _, u := range providerDefaultBaseURLs {
+			if currentURL == u || currentURL == "" {
+				update(urlFieldIdx, newDefault)
+				return
+			}
+		}
+	}
+
+	fields := []*FormField{
+		TextField("Name", "", true),
+		typeField,
+		urlField,
+		PasswordField("API key"),
+	}
+
+	submitted, err := ShowForm("Create Provider", fields)
 	if err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("name cannot be empty")
+	if !submitted {
+		return ErrCancelled
 	}
 
-	idx, err := selectOption("Provider type", providerTypeOptions, 0)
-	if err != nil {
-		return err
-	}
-	selectedType := providerTypeOptions[idx]
-
-	baseURL, err := readInput("Base URL", providerDefaultBaseURLs[selectedType])
-	if err != nil {
-		return err
-	}
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return fmt.Errorf("base URL cannot be empty")
-	}
-
-	apiKey, err := readPassword("API key")
-	if err != nil {
-		return err
-	}
+	name := fields[0].Value
+	selectedType := providerTypeOptions[fields[1].SelIdx]
+	baseURL := fields[2].Value
+	apiKey := fields[3].Value
 
 	provider, err := b.CreateProvider(&models.CreateModelProviderDto{
 		Name:    name,
@@ -613,18 +724,6 @@ func doCreateProvider(b backend.Backend) error {
 }
 
 func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
-	fmt.Print("\033[?25h")
-	printSection("Update Provider")
-
-	newName, err := readInput("Name", target.Name)
-	if err != nil {
-		return err
-	}
-	newName = strings.TrimSpace(newName)
-	if newName == "" {
-		newName = target.Name
-	}
-
 	defaultTypeIdx := 0
 	for i, opt := range providerTypeOptions {
 		if opt == string(target.Type) {
@@ -632,26 +731,29 @@ func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
 			break
 		}
 	}
-	idx, err := selectOption("Provider type", providerTypeOptions, defaultTypeIdx)
-	if err != nil {
-		return err
-	}
-	newType := providerTypeOptions[idx]
 
-	newBaseURL, err := readInput("Base URL", target.BaseURL)
-	if err != nil {
-		return err
-	}
-	newBaseURL = strings.TrimSpace(newBaseURL)
-	if newBaseURL == "" {
-		newBaseURL = target.BaseURL
+	apiKeyField := PasswordField("API key")
+	apiKeyField.Placeholder = "leave blank to keep"
+
+	fields := []*FormField{
+		TextField("Name", target.Name, true),
+		SelectField("Type", providerTypeOptions, defaultTypeIdx),
+		TextField("Base URL", target.BaseURL, true),
+		apiKeyField,
 	}
 
-	newAPIKey, err := readPassword("API key (leave empty to keep unchanged)")
+	submitted, err := ShowForm("Update Provider", fields)
 	if err != nil {
 		return err
 	}
-	newAPIKey = strings.TrimSpace(newAPIKey)
+	if !submitted {
+		return ErrCancelled
+	}
+
+	newName := fields[0].Value
+	newType := providerTypeOptions[fields[1].SelIdx]
+	newBaseURL := fields[2].Value
+	newAPIKey := fields[3].Value
 
 	if target.Name == newName && string(target.Type) == newType && target.BaseURL == newBaseURL && newAPIKey == "" {
 		pterm.Info.Println("No changes detected, skipping update")
@@ -785,52 +887,54 @@ func handleMCPCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID
 }
 
 func doCreateMCPServer(b backend.Backend) error {
-	fmt.Print("\033[?25h")
-	printSection("Register MCP Server")
+	commandField := TextField("Command", "", true)
+	argsField := &FormField{
+		Label:       "Arguments",
+		Type:        FormFieldText,
+		Placeholder: "space-separated, leave blank for none",
+	}
+	urlField := TextField("Server URL", "", true)
 
-	name, err := readInput("Server name", "")
+	isStdio := func(fields []*FormField) bool {
+		return models.MCPTransportType(fields[1].Options[fields[1].SelIdx]) == models.MCPTransportStdio
+	}
+	isURLBased := func(fields []*FormField) bool {
+		t := models.MCPTransportType(fields[1].Options[fields[1].SelIdx])
+		return t == models.MCPTransportSSE || t == models.MCPTransportStreamableHTTP
+	}
+	commandField.VisibleWhen = isStdio
+	argsField.VisibleWhen = isStdio
+	urlField.VisibleWhen = isURLBased
+
+	fields := []*FormField{
+		TextField("Name", "", true),
+		SelectField("Transport", mcpTransportOptions, 0),
+		commandField,
+		argsField,
+		urlField,
+	}
+
+	submitted, err := ShowForm("Register MCP Server", fields)
 	if err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("name cannot be empty")
+	if !submitted {
+		return ErrCancelled
 	}
 
-	idx, err := selectOption("Transport type", mcpTransportOptions, 0)
-	if err != nil {
-		return err
-	}
-	selectedTransport := mcpTransportOptions[idx]
-
+	selectedTransport := models.MCPTransportType(mcpTransportOptions[fields[1].SelIdx])
 	dto := &models.CreateMCPServerDto{
-		Name:      name,
-		Transport: models.MCPTransportType(selectedTransport),
+		Name:      fields[0].Value,
+		Transport: selectedTransport,
 	}
-
-	switch models.MCPTransportType(selectedTransport) {
+	switch selectedTransport {
 	case models.MCPTransportStdio:
-		command, err := readInput("Command (e.g., npx, node, python)", "")
-		if err != nil {
-			return err
-		}
-		dto.Command = strings.TrimSpace(command)
-
-		argsStr, err := readInput("Arguments (space-separated, leave empty for none)", "")
-		if err != nil {
-			return err
-		}
-		argsStr = strings.TrimSpace(argsStr)
-		if argsStr != "" {
+		dto.Command = commandField.Value
+		if argsStr := argsField.Value; argsStr != "" {
 			dto.Args = strings.Fields(argsStr)
 		}
-
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		url, err := readInput("Server URL", "")
-		if err != nil {
-			return err
-		}
-		dto.URL = strings.TrimSpace(url)
+		dto.URL = urlField.Value
 	}
 
 	server, err := b.CreateMCPServer(dto)
@@ -855,24 +959,31 @@ func doCreateMCPServer(b backend.Backend) error {
 }
 
 func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
-	fmt.Print("\033[?25h")
-	printSection("Update MCP Server")
+	fields := []*FormField{
+		TextField("Name", target.Name, false),
+		ToggleField("Enabled", target.Enabled),
+	}
 
-	newName, err := readInput("Name", target.Name)
+	switch target.Transport {
+	case models.MCPTransportStdio:
+		fields = append(fields, TextField("Command", target.Command, false))
+	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
+		fields = append(fields, TextField("URL", target.URL, false))
+	}
+
+	submitted, err := ShowForm("Update MCP Server", fields)
 	if err != nil {
 		return err
 	}
-	newName = strings.TrimSpace(newName)
+	if !submitted {
+		return ErrCancelled
+	}
 
-	defaultEnabledIdx := 1
-	if target.Enabled {
-		defaultEnabledIdx = 0
+	newName := fields[0].Value
+	if newName == "" {
+		newName = target.Name
 	}
-	enabledIdx, err := selectOption("Enabled", []string{"true", "false"}, defaultEnabledIdx)
-	if err != nil {
-		return err
-	}
-	enabled := enabledIdx == 0
+	enabled := fields[1].BoolValue()
 
 	dto := &models.UpdateMCPServerDto{
 		Name:    newName,
@@ -881,17 +992,17 @@ func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
 
 	switch target.Transport {
 	case models.MCPTransportStdio:
-		newCmd, err := readInput("Command", target.Command)
-		if err != nil {
-			return err
+		newCmd := fields[2].Value
+		if newCmd == "" {
+			newCmd = target.Command
 		}
-		dto.Command = strings.TrimSpace(newCmd)
+		dto.Command = newCmd
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		newURL, err := readInput("URL", target.URL)
-		if err != nil {
-			return err
+		newURL := fields[2].Value
+		if newURL == "" {
+			newURL = target.URL
 		}
-		dto.URL = strings.TrimSpace(newURL)
+		dto.URL = newURL
 	}
 
 	updated, err := b.UpdateMCPServer(target.ID, dto)
@@ -1046,28 +1157,24 @@ func switchToAgent(b backend.Backend, agentName string) (CommandResult, error) {
 }
 
 func doCreateAgent(b backend.Backend) error {
-	fmt.Print("\033[?25h")
-	printSection("Create Agent")
+	fields := []*FormField{
+		TextField("Name", "", true),
+		TextField("Soul", "", false),
+		ToggleField("Default agent", false),
+	}
+	fields[1].Placeholder = "system prompt, leave blank for default"
 
-	name, err := readInput("Agent name", "")
+	submitted, err := ShowForm("Create Agent", fields)
 	if err != nil {
 		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("name cannot be empty")
+	if !submitted {
+		return ErrCancelled
 	}
 
-	soul, err := readInput("Agent soul (system prompt, leave empty for default)", "")
-	if err != nil {
-		return err
-	}
-	soul = strings.TrimSpace(soul)
-
-	isDefault, err := showConfirm("Set as default agent?")
-	if err != nil {
-		return err
-	}
+	name := fields[0].Value
+	soul := fields[1].Value
+	isDefault := fields[2].BoolValue()
 
 	agent, err := b.CreateAgent(&models.CreateAgentDto{
 		Name:      name,
@@ -1082,31 +1189,24 @@ func doCreateAgent(b backend.Backend) error {
 }
 
 func doUpdateAgent(b backend.Backend, target models.AgentDto) error {
-	fmt.Print("\033[?25h")
-	printSection("Update Agent")
+	fields := []*FormField{
+		TextField("Name", target.Name, true),
+		TextField("Soul", target.Soul, false),
+		ToggleField("Default agent", target.IsDefault),
+	}
+	fields[1].Placeholder = "system prompt"
 
-	newName, err := readInput("Agent name", target.Name)
+	submitted, err := ShowForm("Update Agent", fields)
 	if err != nil {
 		return err
 	}
-	newName = strings.TrimSpace(newName)
-	if newName == "" {
-		newName = target.Name
+	if !submitted {
+		return ErrCancelled
 	}
 
-	newSoul, err := readInput("Agent soul (system prompt)", target.Soul)
-	if err != nil {
-		return err
-	}
-	newSoul = strings.TrimSpace(newSoul)
-	if newSoul == "" {
-		newSoul = target.Soul
-	}
-
-	newIsDefault, err := showConfirm("Set as default agent?")
-	if err != nil {
-		return err
-	}
+	newName := fields[0].Value
+	newSoul := fields[1].Value
+	newIsDefault := fields[2].BoolValue()
 
 	if newName == target.Name && newSoul == target.Soul && newIsDefault == target.IsDefault {
 		pterm.Info.Println("No changes detected, skipping update")

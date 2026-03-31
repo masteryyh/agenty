@@ -60,6 +60,9 @@ type Backend interface {
 	ConnectMCPServer(serverID uuid.UUID) error
 	DisconnectMCPServer(serverID uuid.UUID) error
 
+	GetSystemSettings() (*models.SystemSettingsDto, error)
+	UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error)
+
 	IsInitialized() (bool, error)
 	SetInitialized() error
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
 func RegisterAll(registry *tools.Registry) {
@@ -35,7 +36,7 @@ func RegisterAll(registry *tools.Registry) {
 	}
 
 	memoryService := services.GetMemoryService()
-	if memoryService.IsEnabled() {
+	if memoryService.IsEnabled(signal.GetBaseContext()) {
 		registry.Register(&SaveMemoryTool{memoryService: memoryService})
 		registry.Register(&SearchMemoryTool{memoryService: memoryService})
 	}

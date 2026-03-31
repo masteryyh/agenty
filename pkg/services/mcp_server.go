@@ -195,6 +195,8 @@ func (s *MCPServerService) UpdateMCPServer(ctx context.Context, serverID uuid.UU
 		return nil, err
 	}
 
+	updates := make(map[string]any)
+
 	if dto.Name != "" && server.Name != dto.Name {
 		exists, err := gorm.G[models.MCPServer](s.db).
 			Where("name = ? AND id != ? AND deleted_at IS NULL", dto.Name, serverID).
@@ -205,7 +207,7 @@ func (s *MCPServerService) UpdateMCPServer(ctx context.Context, serverID uuid.UU
 		if exists > 0 {
 			return nil, customerrors.ErrMCPServerAlreadyExists
 		}
-		server.Name = dto.Name
+		updates["name"] = dto.Name
 	}
 
 	effectiveTransport := server.Transport
@@ -232,45 +234,46 @@ func (s *MCPServerService) UpdateMCPServer(ctx context.Context, serverID uuid.UU
 		}
 	}
 
-	server.Transport = effectiveTransport
+	updates["transport"] = effectiveTransport
 	if dto.Enabled != nil {
-		server.Enabled = *dto.Enabled
+		updates["enabled"] = *dto.Enabled
 	}
 
 	switch effectiveTransport {
 	case models.MCPTransportStdio:
 		if dto.Command != "" {
-			server.Command = dto.Command
+			updates["command"] = dto.Command
 		}
 		if dto.Args != nil {
 			if data, err := json.Marshal(dto.Args); err == nil {
-				server.Args = data
+				updates["args"] = data
 			}
 		}
 		if dto.Env != nil {
 			if data, err := json.Marshal(dto.Env); err == nil {
-				server.Env = data
+				updates["env"] = data
 			}
 		}
-		server.URL = ""
-		server.Headers = nil
+		updates["url"] = ""
+		updates["headers"] = nil
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
 		if dto.URL != "" {
-			server.URL = dto.URL
+			updates["url"] = dto.URL
 		}
 		if dto.Headers != nil {
 			if data, err := json.Marshal(dto.Headers); err == nil {
-				server.Headers = data
+				updates["headers"] = data
 			}
 		}
-		server.Command = ""
-		server.Args = nil
-		server.Env = nil
+		updates["command"] = ""
+		updates["args"] = nil
+		updates["env"] = nil
 	}
 
-	if _, err := gorm.G[models.MCPServer](s.db).
-		Select("name", "transport", "enabled", "command", "args", "env", "url", "headers").
-		Updates(ctx, server); err != nil {
+	if err := s.db.WithContext(ctx).
+		Model(&models.MCPServer{}).
+		Where("id = ? AND deleted_at IS NULL", serverID).
+		Updates(updates).Error; err != nil {
 		slog.ErrorContext(ctx, "failed to update mcp server", "error", err, "server_id", serverID)
 		return nil, err
 	}
