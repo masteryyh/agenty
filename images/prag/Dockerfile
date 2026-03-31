@@ -19,7 +19,7 @@ RUN git clone --branch v${PGVECTOR_VERSION} https://github.com/pgvector/pgvector
 FROM builder-base AS pg-search-build
 
 ARG PG_MAJOR_VERSION
-ARG PG_SEARCH_VERSION=0.22.1
+ARG PG_SEARCH_VERSION=0.22.4
 
 WORKDIR /app
 
