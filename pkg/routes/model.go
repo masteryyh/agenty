@@ -53,6 +53,8 @@ func (r *ModelRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		modelGroup.POST("", r.CreateModel)
 		modelGroup.GET("", r.ListModels)
 		modelGroup.GET("/default", r.GetDefaultModel)
+		modelGroup.GET("/embedding", r.ListEmbeddingModels)
+		modelGroup.GET("/context-compression", r.ListContextCompressionModels)
 		modelGroup.GET("/:id", r.GetModel)
 		modelGroup.GET("/:id/thinking-levels", r.GetThinkingLevels)
 		modelGroup.PUT("/by-name", r.UpdateByName)
@@ -229,4 +231,36 @@ func (r *ModelRoutes) DeleteModel(c *gin.Context) {
 		return
 	}
 	response.OK[any](c, nil)
+}
+
+func (r *ModelRoutes) ListEmbeddingModels(c *gin.Context) {
+	var pageRequest pagination.PageRequest
+	if err := c.ShouldBindQuery(&pageRequest); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+	pageRequest.ApplyDefaults()
+
+	result, err := r.service.ListEmbeddingModels(c, &pageRequest)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+func (r *ModelRoutes) ListContextCompressionModels(c *gin.Context) {
+	var pageRequest pagination.PageRequest
+	if err := c.ShouldBindQuery(&pageRequest); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+	pageRequest.ApplyDefaults()
+
+	result, err := r.service.ListContextCompressionModels(c, &pageRequest)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, result)
 }

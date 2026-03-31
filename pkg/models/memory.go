@@ -28,6 +28,7 @@ type Memory struct {
 	AgentID   uuid.UUID       `gorm:"type:uuid;not null"`
 	Content   string          `gorm:"type:text;not null"`
 	Embedding pgvector.Vector `gorm:"type:vector(1536);not null"`
+	Migrated  bool            `gorm:"default:true;not null"`
 	CreatedAt time.Time       `gorm:"autoCreateTime:milli"`
 	UpdatedAt time.Time       `gorm:"autoUpdateTime:milli"`
 	DeletedAt *time.Time
@@ -42,6 +43,7 @@ func (m *Memory) ToDto() *MemoryDto {
 		ID:        m.ID,
 		AgentID:   m.AgentID,
 		Content:   m.Content,
+		Migrated:  m.Migrated,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
@@ -51,6 +53,7 @@ type MemoryDto struct {
 	ID        uuid.UUID `json:"id"`
 	AgentID   uuid.UUID `json:"agentId"`
 	Content   string    `json:"content"`
+	Migrated  bool      `json:"migrated"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

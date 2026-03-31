@@ -25,10 +25,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/allisson/go-pglock/v3"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/pgvector/pgvector-go"
@@ -42,8 +45,7 @@ const (
 )
 
 type MemoryService struct {
-	db  *gorm.DB
-	cfg *config.EmbeddingConfig
+	db *gorm.DB
 }
 
 var (
@@ -54,29 +56,51 @@ var (
 func GetMemoryService() *MemoryService {
 	memoryOnce.Do(func() {
 		memoryService = &MemoryService{
-			db:  conn.GetDB(),
-			cfg: config.GetConfigManager().GetConfig().Embedding,
+			db: conn.GetDB(),
 		}
 	})
 	return memoryService
 }
 
-func (s *MemoryService) IsEnabled() bool {
-	return s.cfg != nil && s.cfg.APIKey != ""
+func (s *MemoryService) IsEnabled(ctx context.Context) bool {
+	settings, err := GetSystemService().getOrCreate(ctx)
+	if err != nil {
+		return false
+	}
+	return settings.EmbeddingModelID != nil
 }
 
 func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, error) {
-	if !s.IsEnabled() {
-		return nil, fmt.Errorf("embedding service is not configured")
+	settings, err := GetSystemService().getOrCreate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system settings: %w", err)
 	}
 
-	client := conn.GetOpenAIClient(s.cfg.BaseURL, s.cfg.APIKey)
+	if settings.EmbeddingModelID == nil {
+		return nil, fmt.Errorf("embedding model is not configured")
+	}
+
+	model, err := gorm.G[models.Model](s.db).
+		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *settings.EmbeddingModelID).
+		First(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find embedding model: %w", err)
+	}
+
+	provider, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+		First(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find embedding model provider: %w", err)
+	}
+
+	client := conn.GetOpenAIClient(provider.BaseURL, provider.APIKey)
 	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: s.cfg.Model,
+		Model: model.Code,
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfString: param.NewOpt(text),
 		},
-		Dimensions: param.NewOpt(int64(1536)),
+		Dimensions: param.NewOpt(int64(consts.DefaultVectorDimension)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding: %w", err)
@@ -90,6 +114,149 @@ func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, erro
 		return float32(v)
 	})
 	return normalizeVector(vec), nil
+}
+
+func (s *MemoryService) embedBatch(ctx context.Context, client *openai.Client, modelCode string, texts []string) ([][]float32, error) {
+	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model: modelCode,
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: texts,
+		},
+		Dimensions: param.NewOpt(int64(consts.DefaultVectorDimension)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create batch embeddings: %w", err)
+	}
+
+	result := make([][]float32, len(resp.Data))
+	for _, item := range resp.Data {
+		if int(item.Index) >= len(result) {
+			continue
+		}
+		vec := lo.Map(item.Embedding, func(v float64, _ int) float32 {
+			return float32(v)
+		})
+		result[item.Index] = normalizeVector(vec)
+	}
+	return result, nil
+}
+
+const reEmbedBatchSize = 100
+
+func (s *MemoryService) ReEmbedAll(ctx context.Context) error {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql DB: %w", err)
+	}
+	locker, err := pglock.NewLock(ctx, 2026, sqlDB)
+	if err != nil {
+		return fmt.Errorf("failed to create lock: %w", err)
+	}
+	locked, err := locker.Lock(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if !locked {
+		return customerrors.ErrEmbeddingMigrating
+	}
+	defer func() {
+		if err := locker.Unlock(context.Background()); err != nil {
+			slog.ErrorContext(ctx, "failed to release lock", "error", err)
+		}
+	}()
+
+	settings, err := GetSystemService().getOrCreate(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get system settings: %w", err)
+	}
+	if settings.EmbeddingModelID == nil {
+		return nil
+	}
+	if settings.EmbeddingMigrating {
+		slog.WarnContext(ctx, "EmbeddingMigrating was true on lock acquisition, treating as stale flag from previous failed migration")
+	}
+
+	var memoryCount int64
+	if err := s.db.WithContext(ctx).Model(&models.Memory{}).Where("deleted_at IS NULL").Count(&memoryCount).Error; err != nil {
+		return fmt.Errorf("failed to count memories: %w", err)
+	}
+	if memoryCount == 0 {
+		return nil
+	}
+
+	model, err := gorm.G[models.Model](s.db).
+		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *settings.EmbeddingModelID).
+		First(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find embedding model: %w", err)
+	}
+
+	provider, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+		First(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find embedding model provider: %w", err)
+	}
+
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := GetSystemService().setEmbeddingMigrating(ctx, tx, true); err != nil {
+			return fmt.Errorf("failed to set migrating flag: %w", err)
+		}
+
+		_, err = gorm.G[models.Memory](tx).
+			Where("deleted_at IS NULL").
+			Update(ctx, "migrated", false)
+		if err != nil {
+			return fmt.Errorf("failed to reset migrated flag: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to initialize migration: %w", err)
+	}
+
+	defer func() {
+		if err := GetSystemService().setEmbeddingMigrating(signal.GetBaseContext(), nil, false); err != nil {
+			slog.ErrorContext(ctx, "failed to clear migrating flag", "error", err)
+		}
+	}()
+
+	client := conn.GetOpenAIClient(provider.BaseURL, provider.APIKey)
+
+	for {
+		batch, err := gorm.G[models.Memory](s.db).
+			Where("deleted_at IS NULL AND migrated IS FALSE").
+			Order("id").
+			Limit(reEmbedBatchSize).
+			Find(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch memories for re-embedding: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+
+		texts := lo.Map(batch, func(m models.Memory, _ int) string { return m.Content })
+		embeddings, batchErr := s.embedBatch(ctx, client, model.Code, texts)
+		if batchErr != nil {
+			return fmt.Errorf("failed to embed batch: %w", batchErr)
+		}
+
+		for i := range batch {
+			vec := make([]float32, consts.DefaultVectorDimension)
+			if i < len(embeddings) && embeddings[i] != nil {
+				copy(vec, embeddings[i])
+			}
+			batch[i].Embedding = pgvector.NewVector(vec)
+			batch[i].Migrated = true
+		}
+
+		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return tx.Save(&batch).Error
+		}); err != nil {
+			return fmt.Errorf("failed to re-embed batch: %w", err)
+		}
+	}
+	return nil
 }
 
 func normalizeVector(vec []float32) []float32 {
@@ -119,11 +286,10 @@ func (s *MemoryService) SaveMemory(ctx context.Context, agentID uuid.UUID, conte
 		Embedding: pgvector.NewVector(embedding),
 	}
 
-	if err := s.db.WithContext(ctx).Create(memory).Error; err != nil {
+	if err := gorm.G[models.Memory](s.db).Create(ctx, memory); err != nil {
 		slog.ErrorContext(ctx, "failed to save memory", "error", err)
-		return nil, fmt.Errorf("failed to save memory: %w", err)
+		return nil, err
 	}
-
 	return memory.ToDto(), nil
 }
 
@@ -160,11 +326,10 @@ func (s *MemoryService) vectorSearch(ctx context.Context, agentID uuid.UUID, que
 	}
 
 	var memories []models.Memory
-	queryVec := pgvector.NewVector(embedding)
 	err = s.db.WithContext(ctx).
-		Where("deleted_at IS NULL AND agent_id = ?", agentID).
+		Where("deleted_at IS NULL AND agent_id = ? AND migrated = TRUE", agentID).
 		Clauses(clause.OrderBy{
-			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []any{queryVec}},
+			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []any{pgvector.NewVector(embedding)}},
 		}).
 		Limit(limit).
 		Find(&memories).Error
@@ -182,7 +347,7 @@ func (s *MemoryService) fullTextSearch(ctx context.Context, agentID uuid.UUID, q
 
 	var memories []models.Memory
 	err := s.db.WithContext(ctx).
-		Where("deleted_at IS NULL AND agent_id = ? AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", agentID, tsQuery).
+		Where("deleted_at IS NULL AND agent_id = ? AND migrated = TRUE AND to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)", agentID, tsQuery).
 		Clauses(clause.OrderBy{
 			Expression: clause.Expr{
 				SQL:  "ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) DESC",
@@ -210,7 +375,7 @@ func (s *MemoryService) keywordSearch(ctx context.Context, agentID uuid.UUID, qu
 		return "%" + w + "%"
 	})
 
-	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL AND agent_id = ?", agentID)
+	tx := s.db.WithContext(ctx).Where("deleted_at IS NULL AND agent_id = ? AND migrated = TRUE", agentID)
 	orConditions := s.db.Where("content ILIKE ?", patterns[0])
 	for _, p := range patterns[1:] {
 		orConditions = orConditions.Or("content ILIKE ?", p)

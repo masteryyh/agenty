@@ -184,9 +184,8 @@ func (p *AnthropicProvider) buildMessageParams(req *ChatRequest) anthropic.Messa
 
 	if req.Thinking {
 		if req.AnthropicAdaptiveThinking {
-			adaptive := anthropic.NewThinkingConfigAdaptiveParam()
 			params.Thinking = anthropic.ThinkingConfigParamUnion{
-				OfAdaptive: &adaptive,
+				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
 			}
 		} else {
 			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(31999)

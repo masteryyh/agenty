@@ -65,9 +65,6 @@ type AppConfig struct {
 	// DB configuration
 	DB *DatabaseConfig `mapstructure:"db"`
 
-	// Embedding configuration for memory features
-	Embedding *EmbeddingConfig `mapstructure:"embedding"`
-
 	// Auth configuration for HTTP Basic Auth
 	Auth *AuthConfig `mapstructure:"auth"`
 
@@ -92,18 +89,6 @@ type AuthConfig struct {
 
 	// Password for HTTP Basic Auth
 	Password string `mapstructure:"password"`
-}
-
-// EmbeddingConfig is the config definition for embedding model used by memory features
-type EmbeddingConfig struct {
-	// BaseURL is the base URL of the embedding API (OpenAI-compatible)
-	BaseURL string `mapstructure:"baseUrl"`
-
-	// APIKey is the API key for the embedding API
-	APIKey string `mapstructure:"apiKey"`
-
-	// Model is the embedding model name
-	Model string `mapstructure:"model"`
 }
 
 // DatabaseConfig is the config definition for database connection, only postgresql is supported for now
@@ -143,16 +128,6 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
-func (c *EmbeddingConfig) Validate() error {
-	if c == nil {
-		return nil
-	}
-	if c.Model == "" {
-		c.Model = "text-embedding-3-small"
-	}
-	return nil
-}
-
 func (c *AuthConfig) Validate() error {
 	if c == nil || !c.Enabled {
 		return nil
@@ -180,9 +155,6 @@ func (c *AppConfig) Validate() error {
 		if err := c.Auth.Validate(); err != nil {
 			return fmt.Errorf("invalid auth config: %w", err)
 		}
-		if err := c.Embedding.Validate(); err != nil {
-			return fmt.Errorf("invalid embedding config: %w", err)
-		}
 		if err := c.MCP.Validate(); err != nil {
 			return fmt.Errorf("invalid mcp config: %w", err)
 		}
@@ -198,9 +170,6 @@ func (c *AppConfig) Validate() error {
 	}
 	if err := c.DB.Validate(); err != nil {
 		return fmt.Errorf("invalid db config: %w", err)
-	}
-	if err := c.Embedding.Validate(); err != nil {
-		return fmt.Errorf("invalid embedding config: %w", err)
 	}
 	if err := c.MCP.Validate(); err != nil {
 		return fmt.Errorf("invalid mcp config: %w", err)

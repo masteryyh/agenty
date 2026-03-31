@@ -23,10 +23,13 @@ import (
 )
 
 type SystemSettings struct {
-	ID          uuid.UUID `gorm:"type:uuid;primaryKey"`
-	Initialized bool      `gorm:"not null;default:false"`
-	CreatedAt   time.Time `gorm:"autoCreateTime:milli"`
-	UpdatedAt   time.Time `gorm:"autoUpdateTime:milli"`
+	ID                        uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	Initialized               bool       `gorm:"not null;default:false"`
+	EmbeddingModelID          *uuid.UUID `gorm:"type:uuid"`
+	ContextCompressionModelID *uuid.UUID `gorm:"type:uuid"`
+	EmbeddingMigrating        bool       `gorm:"not null;default:false"`
+	CreatedAt                 time.Time  `gorm:"autoCreateTime:milli"`
+	UpdatedAt                 time.Time  `gorm:"autoUpdateTime:milli"`
 }
 
 func (SystemSettings) TableName() string {
@@ -35,14 +38,22 @@ func (SystemSettings) TableName() string {
 
 func (s *SystemSettings) ToDto() *SystemSettingsDto {
 	return &SystemSettingsDto{
-		Initialized: s.Initialized,
+		Initialized:               s.Initialized,
+		EmbeddingModelID:          s.EmbeddingModelID,
+		ContextCompressionModelID: s.ContextCompressionModelID,
+		EmbeddingMigrating:        s.EmbeddingMigrating,
 	}
 }
 
 type SystemSettingsDto struct {
-	Initialized bool `json:"initialized"`
+	Initialized               bool       `json:"initialized"`
+	EmbeddingModelID          *uuid.UUID `json:"embeddingModelId,omitempty"`
+	ContextCompressionModelID *uuid.UUID `json:"contextCompressionModelId,omitempty"`
+	EmbeddingMigrating        bool       `json:"embeddingMigrating"`
 }
 
 type UpdateSystemSettingsDto struct {
-	Initialized *bool `json:"initialized" binding:"omitempty"`
+	Initialized               *bool      `json:"initialized" binding:"omitempty"`
+	EmbeddingModelID          *uuid.UUID `json:"embeddingModelId" binding:"omitempty"`
+	ContextCompressionModelID *uuid.UUID `json:"contextCompressionModelId" binding:"omitempty"`
 }

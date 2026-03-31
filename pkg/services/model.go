@@ -109,11 +109,17 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 			return customerrors.ErrModelAlreadyExists
 		}
 
+		if dto.EmbeddingModel && dto.ContextCompressionModel {
+			return customerrors.ErrModelTypeMutuallyExclusive
+		}
+
 		model := &models.Model{
-			ProviderID: dto.ProviderID,
-			Name:       dto.Name,
-			Code:       dto.Code,
-			Thinking:   dto.Thinking,
+			ProviderID:              dto.ProviderID,
+			Name:                    dto.Name,
+			Code:                    dto.Code,
+			EmbeddingModel:          dto.EmbeddingModel,
+			ContextCompressionModel: dto.ContextCompressionModel,
+			Thinking:                dto.Thinking,
 		}
 
 		if dto.Thinking && len(dto.ThinkingLevels) > 0 {
@@ -189,6 +195,8 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 			return err
 		}
 
+		updates := make(map[string]any)
+
 		if dto.Name != nil {
 			if *dto.Name != "" && *dto.Name != model.Name {
 				exists, err := gorm.G[models.Model](tx).
@@ -201,13 +209,13 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 				if exists > 0 {
 					return customerrors.ErrModelAlreadyExists
 				}
-				model.Name = *dto.Name
+				updates["name"] = *dto.Name
 			}
 		}
 
 		if dto.DefaultModel != nil {
 			if !*dto.DefaultModel {
-				model.DefaultModel = false
+				updates["default_model"] = false
 			} else {
 				currentDefaultModel, err := gorm.G[models.Model](tx).
 					Where("default_model IS TRUE AND id != ? AND deleted_at IS NULL", modelID).
@@ -226,22 +234,48 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 						return err
 					}
 				}
-				model.DefaultModel = true
+				updates["default_model"] = true
 			}
 		}
 
+		if dto.EmbeddingModel != nil && *dto.EmbeddingModel != model.EmbeddingModel {
+			if !*dto.EmbeddingModel && model.EmbeddingModel {
+				if _, err := gorm.G[models.SystemSettings](tx).
+					Where("embedding_model_id = ?", modelID).
+					Update(ctx, "embedding_model_id", gorm.Expr("NULL")); err != nil {
+					return err
+				}
+			}
+			updates["embedding_model"] = *dto.EmbeddingModel
+		}
+
+		if dto.ContextCompressionModel != nil && *dto.ContextCompressionModel != model.ContextCompressionModel {
+			if !*dto.ContextCompressionModel && model.ContextCompressionModel {
+				if _, err := gorm.G[models.SystemSettings](tx).
+					Where("context_compression_model_id = ?", modelID).
+					Update(ctx, "context_compression_model_id", gorm.Expr("NULL")); err != nil {
+					return err
+				}
+			}
+			updates["context_compression_model"] = *dto.ContextCompressionModel
+		}
+
+		if model.EmbeddingModel && model.ContextCompressionModel {
+			return customerrors.ErrModelTypeMutuallyExclusive
+		}
+
 		if dto.Thinking != nil {
-			model.Thinking = *dto.Thinking
+			updates["thinking"] = *dto.Thinking
 			if !*dto.Thinking {
-				model.ThinkingLevels = nil
-				model.AnthropicAdaptiveThinking = false
+				updates["thinking_levels"] = nil
+				updates["anthropic_adaptive_thinking"] = false
 			} else {
 				if len(dto.ThinkingLevels) > 0 {
 					thinkingLevels, err := json.Marshal(dto.ThinkingLevels)
 					if err != nil {
 						return err
 					}
-					model.ThinkingLevels = thinkingLevels
+					updates["thinking_levels"] = thinkingLevels
 				}
 
 				if dto.AnthropicAdaptiveThinking != nil && *dto.AnthropicAdaptiveThinking {
@@ -255,20 +289,14 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 						return err
 					}
 					if provider.Type == models.APITypeAnthropic {
-						model.AnthropicAdaptiveThinking = true
+						updates["anthropic_adaptive_thinking"] = true
 					}
 				} else {
-					model.AnthropicAdaptiveThinking = false
+					updates["anthropic_adaptive_thinking"] = false
 				}
 			}
 		}
-
-		if _, err := gorm.G[models.Model](tx).
-			Where("id = ? AND deleted_at IS NULL", modelID).
-			Updates(ctx, model); err != nil {
-			return err
-		}
-		return nil
+		return tx.Model(model).Updates(updates).Error
 	}); err != nil {
 		if customerrors.GetBusinessError(err) == nil {
 			slog.ErrorContext(ctx, "failed to update model", "error", err, "modelId", modelID)
@@ -437,28 +465,109 @@ func (s *ModelService) GetThinkingLevels(ctx context.Context, modelID uuid.UUID)
 }
 
 func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error {
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		First(ctx)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return customerrors.ErrModelNotFound
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		model, err := gorm.G[models.Model](tx).
+			Where("id = ? AND deleted_at IS NULL", modelID).
+			First(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return customerrors.ErrModelNotFound
+			}
+			slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
+			return err
 		}
 
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
-		return err
+		if model.DefaultModel {
+			return customerrors.ErrDeletingDefaultModel
+		}
+
+		if model.EmbeddingModel {
+			if _, err := gorm.G[models.SystemSettings](tx).
+				Where("embedding_model_id = ?", modelID).
+				Update(ctx, "embedding_model_id", gorm.Expr("NULL")); err != nil {
+				slog.ErrorContext(ctx, "failed to clear embedding model reference", "error", err, "modelId", modelID)
+				return err
+			}
+		}
+
+		if model.ContextCompressionModel {
+			if _, err := gorm.G[models.SystemSettings](tx).
+				Where("context_compression_model_id = ?", modelID).
+				Update(ctx, "context_compression_model_id", gorm.Expr("NULL")); err != nil {
+				slog.ErrorContext(ctx, "failed to clear context compression model reference", "error", err, "modelId", modelID)
+				return err
+			}
+		}
+
+		if _, err := gorm.G[models.Model](tx).
+			Where("id = ? AND deleted_at IS NULL", modelID).
+			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			slog.ErrorContext(ctx, "failed to delete model", "error", err, "modelId", modelID)
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *ModelService) listModelsByFilter(ctx context.Context, where string, request *pagination.PageRequest) (*pagination.PagedResponse[models.ModelDto], error) {
+	modelsResult, err := gorm.G[models.Model](s.db).
+		Where(where).
+		Offset((request.Page - 1) * request.PageSize).
+		Limit(request.PageSize).
+		Order("created_at DESC").
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to list models", "error", err)
+		return nil, err
 	}
 
-	if model.DefaultModel {
-		return customerrors.ErrDeletingDefaultModel
+	countResult, err := gorm.G[models.Model](s.db).
+		Where(where).
+		Count(ctx, "id")
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to count models", "error", err)
+		return nil, err
 	}
 
-	if _, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
-		slog.ErrorContext(ctx, "failed to delete model", "error", err, "modelId", modelID)
-		return err
+	if len(modelsResult) == 0 {
+		return &pagination.PagedResponse[models.ModelDto]{
+			Total:    countResult,
+			PageSize: request.PageSize,
+			Page:     request.Page,
+			Data:     []models.ModelDto{},
+		}, nil
 	}
 
-	return nil
+	providerIds := lo.Uniq(lo.Map(modelsResult, func(m models.Model, _ int) uuid.UUID {
+		return m.ProviderID
+	}))
+	providers, err := gorm.G[models.ModelProvider](s.db).
+		Where("id IN ? AND deleted_at IS NULL", providerIds).
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to find model providers", "error", err)
+		return nil, err
+	}
+	providerMap := lo.Associate(providers, func(p models.ModelProvider) (uuid.UUID, *models.ModelProviderDto) {
+		return p.ID, p.ToDto()
+	})
+
+	dtos := lo.Map(modelsResult, func(m models.Model, _ int) models.ModelDto {
+		return *m.ToDto(providerMap[m.ProviderID])
+	})
+
+	return &pagination.PagedResponse[models.ModelDto]{
+		Total:    countResult,
+		PageSize: request.PageSize,
+		Page:     request.Page,
+		Data:     dtos,
+	}, nil
+}
+
+func (s *ModelService) ListEmbeddingModels(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.ModelDto], error) {
+	return s.listModelsByFilter(ctx, "embedding_model IS TRUE AND deleted_at IS NULL", request)
+}
+
+func (s *ModelService) ListContextCompressionModels(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.ModelDto], error) {
+	return s.listModelsByFilter(ctx, "context_compression_model IS TRUE AND deleted_at IS NULL", request)
 }

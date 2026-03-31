@@ -30,6 +30,8 @@ type Model struct {
 	Name                      string         `gorm:"type:varchar(255);not null"`
 	Code                      string         `gorm:"type:varchar(255);not null"`
 	DefaultModel              bool           `gorm:"default:false"`
+	EmbeddingModel            bool           `gorm:"default:false"`
+	ContextCompressionModel   bool           `gorm:"default:false"`
 	Thinking                  bool           `gorm:"default:false"`
 	ThinkingLevels            datatypes.JSON `gorm:"type:jsonb;default:'[]'::jsonb"`
 	AnthropicAdaptiveThinking bool           `gorm:"default:false"`
@@ -53,6 +55,8 @@ func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
 		Name:                      m.Name,
 		Code:                      m.Code,
 		DefaultModel:              m.DefaultModel,
+		EmbeddingModel:            m.EmbeddingModel,
+		ContextCompressionModel:   m.ContextCompressionModel,
 		Thinking:                  m.Thinking,
 		ThinkingLevels:            thinkingLevels,
 		AnthropicAdaptiveThinking: m.AnthropicAdaptiveThinking,
@@ -72,6 +76,8 @@ type ModelDto struct {
 	Name                      string            `json:"name"`
 	Code                      string            `json:"code"`
 	DefaultModel              bool              `json:"defaultModel"`
+	EmbeddingModel            bool              `json:"embeddingModel"`
+	ContextCompressionModel   bool              `json:"contextCompressionModel"`
 	Thinking                  bool              `json:"thinking"`
 	ThinkingLevels            []string          `json:"thinkingLevels"`
 	AnthropicAdaptiveThinking bool              `json:"anthropicAdaptiveThinking"`
@@ -83,15 +89,19 @@ type CreateModelDto struct {
 	ProviderID                uuid.UUID `json:"providerId" binding:"required"`
 	Name                      string    `json:"name" binding:"required"`
 	Code                      string    `json:"code" binding:"required,code"`
-	Thinking                  bool      `json:"thinking" binding:"required"`
+	EmbeddingModel            bool      `json:"embeddingModel" binding:"omitempty"`
+	ContextCompressionModel   bool      `json:"contextCompressionModel" binding:"omitempty"`
+	Thinking                  bool      `json:"thinking" binding:"omitempty"`
 	ThinkingLevels            []string  `json:"thinkingLevels" binding:"omitempty"`
 	AnthropicAdaptiveThinking bool      `json:"anthropicAdaptiveThinking" binding:"omitempty"`
 }
 
 type UpdateModelDto struct {
-	Name                      *string   `json:"name" binding:"omitempty"`
-	DefaultModel              *bool     `json:"defaultModel" binding:"omitempty"`
-	Thinking                  *bool     `json:"thinking" binding:"omitempty"`
+	Name                      *string  `json:"name" binding:"omitempty"`
+	DefaultModel              *bool    `json:"defaultModel" binding:"omitempty"`
+	EmbeddingModel            *bool    `json:"embeddingModel" binding:"omitempty"`
+	ContextCompressionModel   *bool    `json:"contextCompressionModel" binding:"omitempty"`
+	Thinking                  *bool    `json:"thinking" binding:"omitempty"`
 	ThinkingLevels            []string `json:"thinkingLevels" binding:"omitempty"`
-	AnthropicAdaptiveThinking *bool     `json:"anthropicAdaptiveThinking" binding:"omitempty"`
+	AnthropicAdaptiveThinking *bool    `json:"anthropicAdaptiveThinking" binding:"omitempty"`
 }

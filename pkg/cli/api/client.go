@@ -298,3 +298,7 @@ func (c *Client) SetSystemInitialized() error {
 	_, err := doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", &models.UpdateSystemSettingsDto{Initialized: &initialized})
 	return err
 }
+
+func (c *Client) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
+	return doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", dto)
+}

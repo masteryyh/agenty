@@ -140,6 +140,8 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 		return nil, err
 	}
 
+	updates := make(map[string]any)
+
 	if dto.Name != "" && provider.Name != dto.Name {
 		exists, err := gorm.G[models.ModelProvider](s.db).
 			Where("name = ? AND id != ? AND deleted_at IS NULL", dto.Name, providerID).
@@ -151,22 +153,25 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 		if exists > 0 {
 			return nil, customerrors.ErrProviderAlreadyExists
 		}
-		provider.Name = dto.Name
+		updates["name"] = dto.Name
 	}
 
 	if dto.Type != "" {
-		provider.Type = dto.Type
+		updates["type"] = dto.Type
 	}
 
 	if dto.BaseURL != "" {
-		provider.BaseURL = dto.BaseURL
+		updates["base_url"] = dto.BaseURL
 	}
 
 	if dto.APIKey != "" {
-		provider.APIKey = dto.APIKey
+		updates["api_key"] = dto.APIKey
 	}
 
-	if _, err := gorm.G[models.ModelProvider](s.db).Updates(ctx, provider); err != nil {
+	if err := s.db.WithContext(ctx).
+		Model(&models.ModelProvider{}).
+		Where("id = ? AND deleted_at IS NULL", providerID).
+		Updates(updates).Error; err != nil {
 		slog.ErrorContext(ctx, "failed to update provider", "error", err, "provider_id", providerID)
 		return nil, err
 	}
