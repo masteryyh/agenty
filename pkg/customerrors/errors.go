@@ -46,6 +46,9 @@ var (
 	ErrMCPServerAlreadyExists    = NewBusinessError(http.StatusConflict, "mcp server already exists")
 	ErrMCPServerConnectionFailed = NewBusinessError(http.StatusBadGateway, "mcp server connection failed")
 	ErrMCPServerNotConnected     = NewBusinessError(http.StatusBadRequest, "mcp server not connected")
+
+	ErrKnowledgeItemNotFound = NewBusinessError(http.StatusNotFound, "knowledge item not found")
+	ErrKnowledgeContentEmpty = NewBusinessError(http.StatusBadRequest, "knowledge item content is required")
 )
 
 func GetBusinessError(err error) *BusinessError {

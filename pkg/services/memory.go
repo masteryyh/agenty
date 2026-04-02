@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -32,8 +31,6 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -63,82 +60,11 @@ func GetMemoryService() *MemoryService {
 }
 
 func (s *MemoryService) IsEnabled(ctx context.Context) bool {
-	settings, err := GetSystemService().getOrCreate(ctx)
-	if err != nil {
-		return false
-	}
-	return settings.EmbeddingModelID != nil
+	return GetEmbeddingService().IsEnabled(ctx)
 }
 
 func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, error) {
-	settings, err := GetSystemService().getOrCreate(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get system settings: %w", err)
-	}
-
-	if settings.EmbeddingModelID == nil {
-		return nil, fmt.Errorf("embedding model is not configured")
-	}
-
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *settings.EmbeddingModelID).
-		First(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find embedding model: %w", err)
-	}
-
-	provider, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-		First(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find embedding model provider: %w", err)
-	}
-
-	client := conn.GetOpenAIClient(provider.BaseURL, provider.APIKey)
-	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: model.Code,
-		Input: openai.EmbeddingNewParamsInputUnion{
-			OfString: param.NewOpt(text),
-		},
-		Dimensions: param.NewOpt(int64(consts.DefaultVectorDimension)),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding: %w", err)
-	}
-
-	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("empty embedding response")
-	}
-
-	vec := lo.Map(resp.Data[0].Embedding, func(v float64, _ int) float32 {
-		return float32(v)
-	})
-	return normalizeVector(vec), nil
-}
-
-func (s *MemoryService) embedBatch(ctx context.Context, client *openai.Client, modelCode string, texts []string) ([][]float32, error) {
-	resp, err := client.Embeddings.New(ctx, openai.EmbeddingNewParams{
-		Model: modelCode,
-		Input: openai.EmbeddingNewParamsInputUnion{
-			OfArrayOfStrings: texts,
-		},
-		Dimensions: param.NewOpt(int64(consts.DefaultVectorDimension)),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create batch embeddings: %w", err)
-	}
-
-	result := make([][]float32, len(resp.Data))
-	for _, item := range resp.Data {
-		if int(item.Index) >= len(result) {
-			continue
-		}
-		vec := lo.Map(item.Embedding, func(v float64, _ int) float32 {
-			return float32(v)
-		})
-		result[item.Index] = normalizeVector(vec)
-	}
-	return result, nil
+	return GetEmbeddingService().Embed(ctx, text)
 }
 
 const reEmbedBatchSize = 100
@@ -184,20 +110,6 @@ func (s *MemoryService) ReEmbedAll(ctx context.Context) error {
 		return nil
 	}
 
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *settings.EmbeddingModelID).
-		First(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to find embedding model: %w", err)
-	}
-
-	provider, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-		First(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to find embedding model provider: %w", err)
-	}
-
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := GetSystemService().setEmbeddingMigrating(ctx, tx, true); err != nil {
 			return fmt.Errorf("failed to set migrating flag: %w", err)
@@ -220,7 +132,10 @@ func (s *MemoryService) ReEmbedAll(ctx context.Context) error {
 		}
 	}()
 
-	client := conn.GetOpenAIClient(provider.BaseURL, provider.APIKey)
+	client, modelCode, err := GetEmbeddingService().GetClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get embedding client: %w", err)
+	}
 
 	for {
 		batch, err := gorm.G[models.Memory](s.db).
@@ -236,7 +151,7 @@ func (s *MemoryService) ReEmbedAll(ctx context.Context) error {
 		}
 
 		texts := lo.Map(batch, func(m models.Memory, _ int) string { return m.Content })
-		embeddings, batchErr := s.embedBatch(ctx, client, model.Code, texts)
+		embeddings, batchErr := GetEmbeddingService().embedBatchWithClient(ctx, client, modelCode, texts)
 		if batchErr != nil {
 			return fmt.Errorf("failed to embed batch: %w", batchErr)
 		}
@@ -257,20 +172,6 @@ func (s *MemoryService) ReEmbedAll(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func normalizeVector(vec []float32) []float32 {
-	var norm float64
-	for _, v := range vec {
-		norm += float64(v) * float64(v)
-	}
-	norm = math.Sqrt(norm)
-	if norm == 0 {
-		return vec
-	}
-	return lo.Map(vec, func(v float32, _ int) float32 {
-		return float32(float64(v) / norm)
-	})
 }
 
 func (s *MemoryService) SaveMemory(ctx context.Context, agentID uuid.UUID, content string) (*models.MemoryDto, error) {
