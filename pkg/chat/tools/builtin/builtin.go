@@ -35,10 +35,19 @@ func RegisterAll(registry *tools.Registry) {
 		registry.Register(&DebugTool{})
 	}
 
-	memoryService := services.GetMemoryService()
-	if memoryService.IsEnabled(signal.GetBaseContext()) {
-		registry.Register(&SaveMemoryTool{memoryService: memoryService})
-		registry.Register(&SearchMemoryTool{memoryService: memoryService})
+	embeddingSvc := services.GetEmbeddingService()
+	if embeddingSvc.IsEnabled(signal.GetBaseContext()) {
+		knowledgeSvc := services.GetKnowledgeService()
+		webSearchSvc := services.GetWebSearchService()
+		registry.Register(&SaveMemoryTool{
+			memoryService:    services.GetMemoryService(),
+			knowledgeService: knowledgeSvc,
+		})
+		registry.Register(&SearchTool{
+			knowledgeService: knowledgeSvc,
+			webSearchService: webSearchSvc,
+			evaluator:        services.GetSearchEvaluator(),
+		})
 	}
 
 	registry.Register(&UpdateSoulTool{agentService: services.GetAgentService()})

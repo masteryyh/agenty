@@ -38,21 +38,6 @@ func TestSaveMemoryToolDefinition(t *testing.T) {
 	}
 }
 
-func TestSearchMemoryToolDefinition(t *testing.T) {
-	tool := &SearchMemoryTool{}
-	def := tool.Definition()
-
-	if def.Name != "search_memory" {
-		t.Fatalf("expected name 'search_memory', got '%s'", def.Name)
-	}
-	if _, ok := def.Parameters.Properties["query"]; !ok {
-		t.Fatal("expected 'query' parameter in definition")
-	}
-	if len(def.Parameters.Required) != 1 || def.Parameters.Required[0] != "query" {
-		t.Fatalf("expected required=['query'], got %v", def.Parameters.Required)
-	}
-}
-
 func TestSaveMemoryToolEmptyContent(t *testing.T) {
 	tool := &SaveMemoryTool{}
 	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `{"content": ""}`)
@@ -69,18 +54,3 @@ func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestSearchMemoryToolEmptyQuery(t *testing.T) {
-	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `{"query": ""}`)
-	if err == nil {
-		t.Fatal("expected error for empty query")
-	}
-}
-
-func TestSearchMemoryToolInvalidJSON(t *testing.T) {
-	tool := &SearchMemoryTool{}
-	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, `invalid json`)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}

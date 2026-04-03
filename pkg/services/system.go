@@ -153,6 +153,29 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 		updates["context_compression_model_id"] = model.ID
 	}
 
+	if dto.WebSearchProvider != nil {
+		provider := *dto.WebSearchProvider
+		switch provider {
+		case models.WebSearchProviderDisabled, models.WebSearchProviderTavily, models.WebSearchProviderBrave, models.WebSearchProviderFirecrawl:
+			updates["web_search_provider"] = provider
+		default:
+			return nil, customerrors.NewBusinessError(400, "invalid web search provider: "+string(provider))
+		}
+	}
+
+	if dto.BraveAPIKey != nil {
+		updates["brave_api_key"] = *dto.BraveAPIKey
+	}
+	if dto.TavilyAPIKey != nil {
+		updates["tavily_api_key"] = *dto.TavilyAPIKey
+	}
+	if dto.FirecrawlAPIKey != nil {
+		updates["firecrawl_api_key"] = *dto.FirecrawlAPIKey
+	}
+	if dto.FirecrawlBaseURL != nil {
+		updates["firecrawl_base_url"] = *dto.FirecrawlBaseURL
+	}
+
 	if err := s.db.WithContext(ctx).
 		Model(&models.SystemSettings{}).
 		Where("id = ?", settings.ID).
@@ -169,5 +192,9 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 		})
 	}
 
-	return settings.ToDto(), nil
+	updated, err := s.getOrCreate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return updated.ToDto(), nil
 }

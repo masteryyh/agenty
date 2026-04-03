@@ -27,9 +27,11 @@ import (
 )
 
 type ParameterProperty struct {
-	Type        string             `json:"type"`
-	Description string             `json:"description"`
-	Items       *ParameterProperty `json:"items,omitempty"`
+	Type        string                       `json:"type"`
+	Description string                       `json:"description"`
+	Items       *ParameterProperty           `json:"items,omitempty"`
+	Properties  map[string]ParameterProperty `json:"properties,omitempty"`
+	Required    []string                     `json:"required,omitempty"`
 }
 
 func (p ParameterProperty) ToMap() map[string]any {
@@ -39,6 +41,16 @@ func (p ParameterProperty) ToMap() map[string]any {
 	}
 	if p.Items != nil {
 		m["items"] = p.Items.ToMap()
+	}
+	if len(p.Properties) > 0 {
+		props := make(map[string]any, len(p.Properties))
+		for k, v := range p.Properties {
+			props[k] = v.ToMap()
+		}
+		m["properties"] = props
+	}
+	if len(p.Required) > 0 {
+		m["required"] = p.Required
 	}
 	return m
 }

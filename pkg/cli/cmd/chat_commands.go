@@ -53,6 +53,8 @@ var commandRegistry = map[string]CommandHandler{
 	"/agent":    handleAgentCmd,
 	"/provider": handleProviderCmd,
 	"/mcp":      handleMCPCmd,
+	"/settings":  handleSettingsCmd,
+	"/knowledge": handleKnowledgeCmd,
 }
 
 func parseSlashInput(input string) []string {
@@ -1222,4 +1224,295 @@ func doUpdateAgent(b backend.Backend, target models.AgentDto) error {
 	}
 	pterm.Success.Printf("Agent updated: %s\n", newName)
 	return nil
+}
+
+var webSearchProviderOptions = []string{"disabled", "tavily", "brave", "firecrawl"}
+
+func handleSettingsCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	settings, err := b.GetSystemSettings()
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to get settings: %w", err)
+	}
+
+	if len(args) == 0 {
+		printSettings(settings)
+		return CommandResult{Handled: true}, nil
+	}
+
+	switch args[0] {
+	case "edit":
+		if err := doEditSettings(b, settings); err != nil && !errors.Is(err, ErrCancelled) {
+			pterm.Error.Printf("Failed to update settings: %v\n", err)
+		}
+	default:
+		pterm.Warning.Printf("Unknown subcommand: %s\n", args[0])
+		pterm.Info.Println("Usage: /settings [edit]")
+	}
+
+	return CommandResult{Handled: true}, nil
+}
+
+func printSettings(settings *models.SystemSettingsDto) {
+	fmt.Println()
+	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("System Settings"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+
+	embeddingModel := pterm.FgGray.Sprint("not set")
+	if settings.EmbeddingModelID != nil {
+		embeddingModel = pterm.FgCyan.Sprint(settings.EmbeddingModelID.String())
+	}
+	compressionModel := pterm.FgGray.Sprint("not set")
+	if settings.ContextCompressionModelID != nil {
+		compressionModel = pterm.FgCyan.Sprint(settings.ContextCompressionModelID.String())
+	}
+
+	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Embedding Model"), embeddingModel)
+	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Compression Model"), compressionModel)
+	if settings.EmbeddingMigrating {
+		fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Re-embedding"), pterm.FgYellow.Sprint("in progress..."))
+	}
+
+	fmt.Println()
+	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Web Search"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+
+	providerStr := pterm.FgGray.Sprint("disabled")
+	if settings.WebSearchProvider != "" && settings.WebSearchProvider != models.WebSearchProviderDisabled {
+		providerStr = pterm.FgGreen.Sprint(string(settings.WebSearchProvider))
+	}
+	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Provider"), providerStr)
+
+	printAPIKeyField := func(label, val string) {
+		display := pterm.FgGray.Sprint("not set")
+		if val != "" {
+			display = pterm.FgYellow.Sprint(val)
+		}
+		fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint(label), display)
+	}
+
+	printAPIKeyField("Brave API Key", settings.BraveAPIKey)
+	printAPIKeyField("Tavily API Key", settings.TavilyAPIKey)
+	printAPIKeyField("Firecrawl API Key", settings.FirecrawlAPIKey)
+	if settings.FirecrawlBaseURL != "" {
+		fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Firecrawl Base URL"), pterm.FgGray.Sprint(settings.FirecrawlBaseURL))
+	}
+	fmt.Println()
+}
+
+func doEditSettings(b backend.Backend, settings *models.SystemSettingsDto) error {
+	defaultProviderIdx := 0
+	for i, opt := range webSearchProviderOptions {
+		if opt == string(settings.WebSearchProvider) {
+			defaultProviderIdx = i
+			break
+		}
+	}
+
+	fields := []*FormField{
+		SelectField("Web Search Provider", webSearchProviderOptions, defaultProviderIdx),
+		TextField("Brave API Key", "", false),
+		TextField("Tavily API Key", "", false),
+		TextField("Firecrawl API Key", "", false),
+		TextField("Firecrawl Base URL", "", false),
+	}
+
+	fields[1].Placeholder = "leave blank to keep"
+	fields[2].Placeholder = "leave blank to keep"
+	fields[3].Placeholder = "leave blank to keep"
+	fields[4].Placeholder = "leave blank to keep (default: https://api.firecrawl.dev)"
+
+	submitted, err := ShowForm("System Settings", fields)
+	if err != nil {
+		return err
+	}
+	if !submitted {
+		return ErrCancelled
+	}
+
+	provider := models.WebSearchProvider(webSearchProviderOptions[fields[0].SelIdx])
+	dto := &models.UpdateSystemSettingsDto{
+		WebSearchProvider: &provider,
+	}
+
+	if v := fields[1].Value; v != "" {
+		dto.BraveAPIKey = &v
+	}
+	if v := fields[2].Value; v != "" {
+		dto.TavilyAPIKey = &v
+	}
+	if v := fields[3].Value; v != "" {
+		dto.FirecrawlAPIKey = &v
+	}
+	if v := fields[4].Value; v != "" {
+		dto.FirecrawlBaseURL = &v
+	}
+
+	if _, err := b.UpdateSystemSettings(dto); err != nil {
+		return err
+	}
+	pterm.Success.Println("Settings updated successfully")
+	return nil
+}
+
+// --- /knowledge ---
+
+func handleKnowledgeCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) == 0 {
+		return handleKnowledgeList(b, agentID)
+	}
+
+	switch args[0] {
+	case "add":
+		return handleKnowledgeAdd(b, agentID)
+	case "list":
+		return handleKnowledgeList(b, agentID)
+	case "search":
+		query := strings.Join(args[1:], " ")
+		return handleKnowledgeSearch(b, agentID, query)
+	case "delete":
+		if len(args) < 2 {
+			pterm.Error.Println("Usage: /knowledge delete <item-id>")
+			return CommandResult{Handled: true}, nil
+		}
+		return handleKnowledgeDelete(b, agentID, args[1])
+	default:
+		pterm.Warning.Printf("Unknown subcommand: %s\n", args[0])
+		pterm.Info.Println("Available: add, list, search, delete")
+		return CommandResult{Handled: true}, nil
+	}
+}
+
+func handleKnowledgeAdd(b backend.Backend, agentID uuid.UUID) (CommandResult, error) {
+	fields := []*FormField{
+		{Label: "Title", Type: FormFieldText},
+		{Label: "Content", Type: FormFieldText, Required: true},
+		{Label: "Category", Type: FormFieldSelect, Options: []string{"user_document", "llm_memory"}},
+	}
+
+	ok, err := ShowForm("Add Knowledge Item", fields)
+	if err != nil {
+		if errors.Is(err, ErrCancelled) {
+			return CommandResult{Handled: true}, nil
+		}
+		return CommandResult{Handled: true}, err
+	}
+	if !ok {
+		return CommandResult{Handled: true}, nil
+	}
+
+	content := fields[1].Value
+	if content == "" {
+		pterm.Error.Println("Content is required")
+		return CommandResult{Handled: true}, nil
+	}
+
+	dto := &models.CreateKnowledgeItemDto{
+		Title:    fields[0].Value,
+		Content:  content,
+		Category: models.KnowledgeCategory(fields[2].StringValue()),
+	}
+
+	item, err := b.CreateKnowledgeItem(agentID, dto)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to create knowledge item: %w", err)
+	}
+	pterm.Success.Printf("Knowledge item created: %s\n", item.ID)
+	return CommandResult{Handled: true}, nil
+}
+
+func handleKnowledgeList(b backend.Backend, agentID uuid.UUID) (CommandResult, error) {
+	items, err := b.ListKnowledgeItems(agentID, nil)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to list knowledge items: %w", err)
+	}
+
+	if len(items) == 0 {
+		pterm.Info.Println("No knowledge items found for this agent")
+		return CommandResult{Handled: true}, nil
+	}
+
+	tableData := pterm.TableData{{"ID", "Category", "Title", "Preview"}}
+	for _, item := range items {
+		title := item.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		preview := item.Preview
+		if len(preview) > 60 {
+			preview = preview[:60] + "..."
+		}
+		tableData = append(tableData, []string{
+			item.ID.String()[:8],
+			string(item.Category),
+			title,
+			preview,
+		})
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithBoxed().WithData(tableData).Render()
+	return CommandResult{Handled: true}, nil
+}
+
+func handleKnowledgeSearch(b backend.Backend, agentID uuid.UUID, query string) (CommandResult, error) {
+	if query == "" {
+		queryFields := []*FormField{
+			{Label: "Query", Type: FormFieldText, Required: true},
+		}
+		ok, err := ShowForm("Search Knowledge Base", queryFields)
+		if err != nil {
+			if errors.Is(err, ErrCancelled) {
+				return CommandResult{Handled: true}, nil
+			}
+			return CommandResult{Handled: true}, err
+		}
+		if !ok {
+			return CommandResult{Handled: true}, nil
+		}
+		query = queryFields[0].Value
+	}
+
+	if query == "" {
+		pterm.Error.Println("Query is required")
+		return CommandResult{Handled: true}, nil
+	}
+
+	results, err := b.SearchKnowledge(agentID, query, 10)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("knowledge search failed: %w", err)
+	}
+
+	if len(results) == 0 {
+		pterm.Info.Println("No results found")
+		return CommandResult{Handled: true}, nil
+	}
+
+	for i, r := range results {
+		content := r.Content
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		fmt.Printf("\n  %s  %s  %s\n",
+			pterm.FgCyan.Sprintf("#%d", i+1),
+			pterm.FgGray.Sprintf("[%.4f]", r.Score),
+			pterm.FgYellow.Sprint(r.Category),
+		)
+		if r.ItemTitle != "" {
+			fmt.Printf("  %s\n", pterm.Bold.Sprint(r.ItemTitle))
+		}
+		fmt.Printf("  %s\n", content)
+	}
+	fmt.Println()
+	return CommandResult{Handled: true}, nil
+}
+
+func handleKnowledgeDelete(b backend.Backend, agentID uuid.UUID, idStr string) (CommandResult, error) {
+	itemID, err := uuid.Parse(idStr)
+	if err != nil {
+		pterm.Error.Printf("Invalid item ID: %s\n", idStr)
+		return CommandResult{Handled: true}, nil
+	}
+
+	if err := b.DeleteKnowledgeItem(agentID, itemID); err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to delete knowledge item: %w", err)
+	}
+	pterm.Success.Printf("Knowledge item deleted: %s\n", itemID)
+	return CommandResult{Handled: true}, nil
 }

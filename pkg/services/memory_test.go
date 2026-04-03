@@ -26,7 +26,7 @@ import (
 
 func TestNormalizeVector(t *testing.T) {
 	vec := []float32{3.0, 4.0}
-	normalized := normalizeVector(vec)
+	normalized := NormalizeVector(vec)
 
 	var norm float64
 	for _, v := range normalized {
@@ -50,7 +50,7 @@ func TestNormalizeVector(t *testing.T) {
 
 func TestNormalizeVectorZero(t *testing.T) {
 	vec := []float32{0.0, 0.0, 0.0}
-	normalized := normalizeVector(vec)
+	normalized := NormalizeVector(vec)
 
 	for i, v := range normalized {
 		if v != 0 {
