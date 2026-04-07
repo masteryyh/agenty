@@ -54,6 +54,11 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			return
 		}
 
+		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS pg_search").Error; extErr != nil {
+			err = fmt.Errorf("pg_search extension is required but could not be created: %w", extErr)
+			return
+		}
+
 		if migrateErr := dbConn.WithContext(timeoutCtx).
 			AutoMigrate(
 				&models.SystemSettings{},
@@ -61,15 +66,16 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 				&models.ChatMessage{},
 				&models.ModelProvider{},
 				&models.Model{},
-				&models.Memory{},
 				&models.Agent{},
 				&models.MCPServer{},
+				&models.KnowledgeItem{},
+				&models.KnowledgeBaseData{},
 			); migrateErr != nil {
 			err = migrateErr
 			return
 		}
 
-		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops)`).Error; idxErr != nil {
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_text_embedding_hnsw ON kb_data USING hnsw (text_embedding vector_ip_ops)`).Error; idxErr != nil {
 			err = idxErr
 			return
 		}

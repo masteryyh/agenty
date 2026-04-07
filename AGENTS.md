@@ -6,16 +6,20 @@ This file provides guidance and restrictions for coding agents like Claude Code,
 
 An AI agent application with a Go-written backend service and a CLI app, still under construction, capable of tool calling, agentic looping and skills usage.
 
-The backend service can also act as a MCP client to communicate with other MCP servers to extend its capabilities. (TODO)
+The backend service can also act as a MCP client to communicate with other MCP servers to extend its capabilities.
 
 ## Project structure
 
 - `.agent/skills`: Contains skills that is vital for agents that working with this project.
 - `cmd/`: Contains `main.go` for applications
 - `pkg/`: Core codes and libraries used across the project
+  - `backend/`: Backend interface for both local and remote mode for CLI
   - `config/`: Configuration management
+  - `cli/`: CLI implementations, including UI and slash commands
   - `conn/`: Connections and clients
+  - `consts/`: Constants used across the project
   - `customerrors/`: Custom error definitions
+  - `mcp/`: MCP related implementations
   - `middleware/`: Middlewares for GIN framework
   - `models/`: Data models and structures
   - `routes/`: API routes

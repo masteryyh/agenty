@@ -235,7 +235,7 @@ func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 			return err
 		}
 
-		if _, err := gorm.G[models.Memory](tx).
+		if _, err := gorm.G[models.KnowledgeItem](tx).
 			Where("agent_id = ? AND deleted_at IS NULL", agentID).
 			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
 			return err
