@@ -40,12 +40,14 @@ var (
 	ErrProviderAlreadyExists      = NewBusinessError(http.StatusConflict, "provider already exists")
 	ErrProviderInUse              = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")
 	ErrProviderNotConfigured      = NewBusinessError(http.StatusBadRequest, "provider is not configured")
-	ErrEmbeddingMigrating         = NewBusinessError(http.StatusConflict, "embedding migration in progress, please try again later")
 
 	ErrMCPServerNotFound         = NewBusinessError(http.StatusNotFound, "mcp server not found")
 	ErrMCPServerAlreadyExists    = NewBusinessError(http.StatusConflict, "mcp server already exists")
 	ErrMCPServerConnectionFailed = NewBusinessError(http.StatusBadGateway, "mcp server connection failed")
 	ErrMCPServerNotConnected     = NewBusinessError(http.StatusBadRequest, "mcp server not connected")
+
+	ErrKnowledgeItemNotFound = NewBusinessError(http.StatusNotFound, "knowledge item not found")
+	ErrKnowledgeContentEmpty = NewBusinessError(http.StatusBadRequest, "knowledge item content is required")
 )
 
 func GetBusinessError(err error) *BusinessError {

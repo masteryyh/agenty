@@ -59,7 +59,8 @@ jobs:
         with:
           context: images/prag
           push: false
-          outputs: type=oci,dest=prag-amd64.tar
+          tags: ${{ secrets.DOCKER_USERNAME }}/prag:amd64
+          outputs: type=docker,dest=prag-amd64.tar
           platforms: linux/amd64
           cache-from: type=gha,scope=amd64
           cache-to: type=gha,mode=max,scope=amd64
@@ -88,7 +89,8 @@ jobs:
         with:
           context: images/prag
           push: false
-          outputs: type=oci,dest=prag-arm64.tar
+          tags: ${{ secrets.DOCKER_USERNAME }}/prag:arm64
+          outputs: type=docker,dest=prag-arm64.tar
           platforms: linux/arm64
           cache-from: type=gha,scope=arm64
           cache-to: type=gha,mode=max,scope=arm64
@@ -105,7 +107,6 @@ jobs:
     needs: [build-amd64, build-arm64]
     runs-on: ubuntu-24.04
     permissions:
-      packages: read
       contents: read
       id-token: write
     steps:
@@ -128,21 +129,30 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
 
+      - name: Load images and push
+        run: |
+          docker load -i prag-amd64.tar
+          docker load -i prag-arm64.tar
+          docker push ${{ secrets.DOCKER_USERNAME }}/prag:amd64
+          docker push ${{ secrets.DOCKER_USERNAME }}/prag:arm64
+
       - name: Create and push multi-arch manifest
         run: |
-          skopeo copy oci-archive:prag-amd64.tar containers-storage:localhost/prag:amd64
-          skopeo copy oci-archive:prag-arm64.tar containers-storage:localhost/prag:arm64
-          buildah manifest create prag-multiarch
-          buildah manifest add prag-multiarch localhost/prag:amd64
-          buildah manifest add prag-multiarch localhost/prag:arm64
-          buildah manifest push --all prag-multiarch \
-            docker://docker.io/${{ secrets.DOCKER_USERNAME }}/prag:latest
-          buildah manifest push --all prag-multiarch \
-            docker://docker.io/${{ secrets.DOCKER_USERNAME }}/prag:18-alpine
+          docker manifest rm ${{ secrets.DOCKER_USERNAME }}/prag:latest 2>/dev/null || true
+          docker manifest rm ${{ secrets.DOCKER_USERNAME }}/prag:18-alpine 2>/dev/null || true
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/prag:latest \
+            ${{ secrets.DOCKER_USERNAME }}/prag:amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/prag:arm64
+          docker manifest create ${{ secrets.DOCKER_USERNAME }}/prag:18-alpine \
+            ${{ secrets.DOCKER_USERNAME }}/prag:amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/prag:arm64
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/prag:latest
+          docker manifest push ${{ secrets.DOCKER_USERNAME }}/prag:18-alpine
 
       - name: Sign Docker image
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           DIGEST=$(docker buildx imagetools inspect ${{ secrets.DOCKER_USERNAME }}/prag:latest \
-            2>&1 | grep '^Digest:' | awk '{print $2}')
+            2>&1 | awk '/^Digest:/{print $2}')
+          [ -n "$DIGEST" ] || { echo "ERROR: Failed to retrieve image digest"; exit 1; }
           cosign sign --yes ${{ secrets.DOCKER_USERNAME }}/prag@${DIGEST}

@@ -117,6 +117,9 @@ func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessi
 		slog.ErrorContext(ctx, "failed to create chat session", "error", err)
 		return nil, err
 	}
+
+	go s.saveLastSessionAsMemory(dto.AgentID)
+
 	return session.ToDto(nil), nil
 }
 
@@ -634,4 +637,71 @@ func (s *ChatService) saveMessagesAndUpdateSession(ctx context.Context, session 
 		}
 		return nil
 	})
+}
+
+func (s *ChatService) saveLastSessionAsMemory(agentID uuid.UUID) {
+	ctx := signal.GetBaseContext()
+
+	prevSession, err := gorm.G[models.ChatSession](s.db).
+		Where("agent_id = ? AND deleted_at IS NULL", agentID).
+		Order("created_at DESC").
+		Offset(1).
+		First(ctx)
+	if err != nil {
+		return
+	}
+
+	_, err = gorm.G[models.KnowledgeItem](s.db).
+		Where("source_session_id = ? AND deleted_at IS NULL", prevSession.ID).
+		First(ctx)
+	if err == nil {
+		return
+	}
+
+	messages, err := gorm.G[*models.ChatMessage](s.db).
+		Where("session_id = ? AND deleted_at IS NULL", prevSession.ID).
+		Order("created_at ASC").
+		Find(ctx)
+	if err != nil || len(messages) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	for _, msg := range messages {
+		if msg.Role == models.RoleTool || msg.Role == models.RoleSystem {
+			continue
+		}
+		content := msg.Content
+		if content == "" {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
+	}
+
+	sessionText := sb.String()
+	if strings.TrimSpace(sessionText) == "" {
+		return
+	}
+
+	title := fmt.Sprintf("Session %s", prevSession.ID.String()[:8])
+	if firstUserMsg := findFirstUserMessage(messages); firstUserMsg != "" {
+		if len(firstUserMsg) > 100 {
+			firstUserMsg = firstUserMsg[:97] + "..."
+		}
+		title = firstUserMsg
+	}
+
+	_, err = GetKnowledgeService().CreateSessionMemory(ctx, agentID, prevSession.ID, title, sessionText)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to save session as memory", "sessionId", prevSession.ID, "error", err)
+	}
+}
+
+func findFirstUserMessage(messages []*models.ChatMessage) string {
+	for _, msg := range messages {
+		if msg.Role == models.RoleUser && strings.TrimSpace(msg.Content) != "" {
+			return msg.Content
+		}
+	}
+	return ""
 }

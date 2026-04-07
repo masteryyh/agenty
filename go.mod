@@ -3,7 +3,6 @@ module github.com/masteryyh/agenty
 go 1.26
 
 require (
-	github.com/allisson/go-pglock/v3 v3.2.0
 	github.com/anthropics/anthropic-sdk-go v1.27.1
 	github.com/avast/retry-go/v5 v5.0.0
 	github.com/bytedance/sonic v1.15.0

@@ -63,6 +63,12 @@ type Backend interface {
 	GetSystemSettings() (*models.SystemSettingsDto, error)
 	UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error)
 
+	CreateKnowledgeItem(agentID uuid.UUID, dto *models.CreateKnowledgeItemDto) (*models.KnowledgeItemDto, error)
+	GetKnowledgeItem(agentID, itemID uuid.UUID) (*models.KnowledgeItemDto, error)
+	ListKnowledgeItems(agentID uuid.UUID, category *models.KnowledgeCategory) ([]models.KnowledgeItemSummaryDto, error)
+	DeleteKnowledgeItem(agentID, itemID uuid.UUID) error
+	SearchKnowledge(agentID uuid.UUID, query string, limit int) ([]models.KBSearchResult, error)
+
 	IsInitialized() (bool, error)
 	SetInitialized() error
 }
