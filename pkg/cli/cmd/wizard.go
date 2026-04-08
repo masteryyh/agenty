@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/cli/ui"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/pterm/pterm"
 )
@@ -41,24 +42,24 @@ func runWizardIfNeeded(b backend.Backend) error {
 func runWizard(b backend.Backend) error {
 	divider := pterm.FgGray.Sprint(strings.Repeat("─", 58))
 
-	rawWriteln("")
-	rawWriteln("  " + pterm.Bold.Sprint("First-Time Setup"))
-	rawWriteln("  " + divider)
-	rawWriteln("")
-	rawWriteln("  " + pterm.FgGray.Sprint("Agenty comes with preset LLM providers and models."))
-	rawWriteln("  " + pterm.FgGray.Sprint("Let's configure the API keys for the ones you want to use,"))
-	rawWriteln("  " + pterm.FgGray.Sprint("and choose your default model."))
-	rawWriteln("")
-	rawWriteln("  " + pterm.FgGray.Sprintf("Press %s at any time to skip to the next step.",
+	ui.Writeln("")
+	ui.Writeln("  " + pterm.Bold.Sprint("First-Time Setup"))
+	ui.Writeln("  " + divider)
+	ui.Writeln("")
+	ui.Writeln("  " + pterm.FgGray.Sprint("Agenty comes with preset LLM providers and models."))
+	ui.Writeln("  " + pterm.FgGray.Sprint("Let's configure the API keys for the ones you want to use,"))
+	ui.Writeln("  " + pterm.FgGray.Sprint("and choose your default model."))
+	ui.Writeln("")
+	ui.Writeln("  " + pterm.FgGray.Sprintf("Press %s at any time to skip to the next step.",
 		pterm.FgWhite.Sprint("Esc")))
-	rawWriteln("")
+	ui.Writeln("")
 
-	proceed, err := showConfirm("Start setup now?")
-	rawWriteln("")
+	proceed, err := ui.ShowConfirm("Start setup now?")
+	ui.Writeln("")
 	if err != nil || !proceed {
-		rawWriteln("  " + pterm.FgYellow.Sprint("⚠") + "  Skipping setup. The wizard will appear again on next startup.")
-		rawWriteln("     Use " + pterm.FgWhite.Sprint("/provider") + " to configure providers manually.")
-		rawWriteln("")
+		ui.Writeln("  " + pterm.FgYellow.Sprint("⚠") + "  Skipping setup. The wizard will appear again on next startup.")
+		ui.Writeln("     Use " + pterm.FgWhite.Sprint("/provider") + " to configure providers manually.")
+		ui.Writeln("")
 		return nil
 	}
 
@@ -76,59 +77,59 @@ func runWizard(b backend.Backend) error {
 
 		for i := range providers.Data {
 			p := &providers.Data[i]
-			rawWriteln(fmt.Sprintf("  %s  %s",
+			ui.Writeln(fmt.Sprintf("  %s  %s",
 				pterm.FgCyan.Sprintf("[%d/%d]", i+1, len(providers.Data)),
 				pterm.Bold.Sprint(p.Name)+" "+pterm.FgGray.Sprint("("+string(p.Type)+")"),
 			))
-			rawWriteln("  " + pterm.FgGray.Sprint("Base URL: "+p.BaseURL))
-			rawWriteln("")
+			ui.Writeln("  " + pterm.FgGray.Sprint("Base URL: "+p.BaseURL))
+			ui.Writeln("")
 
-			configure, err := showConfirm("Configure API key for " + p.Name + "?")
-			rawWriteln("")
+			configure, err := ui.ShowConfirm("Configure API key for " + p.Name + "?")
+			ui.Writeln("")
 			if err != nil || !configure {
-				rawWriteln("  " + pterm.FgGray.Sprint("Skipped."))
-				rawWriteln("")
+				ui.Writeln("  " + pterm.FgGray.Sprint("Skipped."))
+				ui.Writeln("")
 				continue
 			}
 
-			apiKey, err := readText("API key")
-			rawWriteln("")
+			apiKey, err := ui.ReadText("API key")
+			ui.Writeln("")
 			if err != nil {
-				if errors.Is(err, ErrCancelled) {
-					rawWriteln("  " + pterm.FgGray.Sprint("Skipped."))
-					rawWriteln("")
+				if errors.Is(err, ui.ErrCancelled) {
+					ui.Writeln("  " + pterm.FgGray.Sprint("Skipped."))
+					ui.Writeln("")
 					continue
 				}
 				return err
 			}
 			if apiKey == "" {
-				rawWriteln("  " + pterm.FgYellow.Sprint("⚠") + "  Empty API key, skipping.")
-				rawWriteln("")
+				ui.Writeln("  " + pterm.FgYellow.Sprint("⚠") + "  Empty API key, skipping.")
+				ui.Writeln("")
 				continue
 			}
 
-			rawWrite("  " + pterm.FgGray.Sprint("Saving..."))
+			ui.Write("  " + pterm.FgGray.Sprint("Saving..."))
 			_, err = b.UpdateProvider(p.ID, &models.UpdateModelProviderDto{APIKey: apiKey})
 			if err != nil {
-				rawWriteln("\r" + "  " + pterm.FgRed.Sprint("✗") + " Failed: " + pterm.FgRed.Sprint(err.Error()))
-				rawWriteln("")
+				ui.Writeln("\r" + "  " + pterm.FgRed.Sprint("✗") + " Failed: " + pterm.FgRed.Sprint(err.Error()))
+				ui.Writeln("")
 				continue
 			}
-			rawWriteln("\r" + "  " + pterm.FgGreen.Sprint("✓") + " API key saved for " + pterm.FgCyan.Sprint(p.Name) + ".")
-			rawWriteln("")
+			ui.Writeln("\r" + "  " + pterm.FgGreen.Sprint("✓") + " API key saved for " + pterm.FgCyan.Sprint(p.Name) + ".")
+			ui.Writeln("")
 			configuredIDs[p.ID.String()] = true
 		}
 	}
 
-	if err := wizardSelectDefaultModel(b, configuredIDs); err != nil && !errors.Is(err, ErrCancelled) {
+	if err := wizardSelectDefaultModel(b, configuredIDs); err != nil && !errors.Is(err, ui.ErrCancelled) {
 		return err
 	}
 
 	_ = b.SetInitialized()
 
-	rawWriteln("  " + pterm.FgGreen.Sprint("✓") + " " + pterm.Bold.Sprint("Setup complete!") +
+	ui.Writeln("  " + pterm.FgGreen.Sprint("✓") + " " + pterm.Bold.Sprint("Setup complete!") +
 		" " + pterm.FgGray.Sprint("Starting chat..."))
-	rawWriteln("")
+	ui.Writeln("")
 	return nil
 }
 
@@ -172,34 +173,34 @@ func wizardSelectDefaultModel(b backend.Backend, configuredProviderIDs map[strin
 		}
 	}
 
-	rawWriteln("  " + pterm.FgGray.Sprintf(
+	ui.Writeln("  " + pterm.FgGray.Sprintf(
 		"Providers with %s have a configured API key.",
 		pterm.FgCyan.Sprint("cyan names")))
-	rawWriteln("")
+	ui.Writeln("")
 
-	idx, err := selectOption("Choose a default model", labels, defaultIdx)
-	rawWriteln("")
+	idx, err := ui.SelectOption("Choose a default model", labels, defaultIdx)
+	ui.Writeln("")
 	if err != nil {
 		return err
 	}
 
 	selected := modelList.Data[idx]
 	if selected.DefaultModel {
-		rawWriteln("  " + pterm.FgGray.Sprint("Default model unchanged."))
-		rawWriteln("")
+		ui.Writeln("  " + pterm.FgGray.Sprint("Default model unchanged."))
+		ui.Writeln("")
 		return nil
 	}
 
 	isDefault := true
-	rawWrite("  " + pterm.FgGray.Sprint("Setting default model..."))
+	ui.Write("  " + pterm.FgGray.Sprint("Setting default model..."))
 	if err := b.UpdateModel(selected.ID, &models.UpdateModelDto{DefaultModel: &isDefault}); err != nil {
-		rawWriteln("\r" + "  " + pterm.FgRed.Sprint("✗") + " Failed: " + pterm.FgRed.Sprint(err.Error()))
-		rawWriteln("")
+		ui.Writeln("\r" + "  " + pterm.FgRed.Sprint("✗") + " Failed: " + pterm.FgRed.Sprint(err.Error()))
+		ui.Writeln("")
 		return nil
 	}
-	rawWriteln("\r" + "  " + pterm.FgGreen.Sprint("✓") + " Default model set to " +
+	ui.Writeln("\r" + "  " + pterm.FgGreen.Sprint("✓") + " Default model set to " +
 		pterm.FgMagenta.Sprint(selected.Name) + ".")
-	rawWriteln("")
+	ui.Writeln("")
 	return nil
 }
 

@@ -17,8 +17,8 @@ limitations under the License.
 package cmd
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -59,32 +59,76 @@ func printMessageHistory(messages []models.ChatMessageDto) {
 	}
 }
 
-func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults map[string]*models.ChatMessageDto, finalResponse *models.ChatMessageDto) {
+func writeAssistantHeader(w io.Writer, msg *models.ChatMessageDto) {
 	modelInfo := ""
-	if assistantMsg.Model != nil {
-		modelInfo = fmt.Sprintf(" (%s)", assistantMsg.Model.Name)
+	if msg.Model != nil {
+		modelInfo = fmt.Sprintf(" (%s)", msg.Model.Name)
 	}
+	fmt.Fprintln(w, pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, msg.CreatedAt.Format("15:04:05")))
+}
 
-	pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, assistantMsg.CreatedAt.Format("15:04:05")))
+func writeReasoningBlock(w io.Writer, reasoning string) {
+	reasoning = strings.Trim(reasoning, " \n")
+	if reasoning == "" {
+		return
+	}
+	fmt.Fprintln(w, pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
+	for line := range strings.SplitSeq(reasoning, "\n") {
+		fmt.Fprintln(w, pterm.FgGray.Sprint("  "+line))
+	}
+	fmt.Fprintln(w)
+}
 
-	reasoningContent := strings.Trim(assistantMsg.ReasoningContent, " \n")
-	if reasoningContent != "" {
-		pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
-		for line := range strings.SplitSeq(reasoningContent, "\n") {
-			pterm.Println(pterm.FgGray.Sprint("  " + line))
+func writeRenderedContent(w io.Writer, content string) {
+	rendered := renderMarkdown(content)
+	for line := range strings.SplitSeq(rendered, "\n") {
+		fmt.Fprintln(w, "  "+line)
+	}
+}
+
+func writeToolCalls(w io.Writer, toolCalls []models.ToolCall) {
+	fmt.Fprintln(w, pterm.FgYellow.Sprint("  🔧 Tool Calls:"))
+	for _, tc := range toolCalls {
+		fmt.Fprintf(w, "    • %s", pterm.FgYellow.Sprint(tc.Name))
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
+			argsStr, _ := json.MarshalIndent(args, "      ", "  ")
+			fmt.Fprintln(w, pterm.FgGray.Sprintf("\n      %s", string(argsStr)))
+		} else {
+			fmt.Fprintln(w)
 		}
-		fmt.Println()
 	}
+}
+
+func writeToolResult(w io.Writer, msg *models.ChatMessageDto) {
+	fmt.Fprintln(w, pterm.FgMagenta.Sprintf("🛠️  Tool Result [%s]:", msg.CreatedAt.Format("15:04:05")))
+	if msg.ToolResult == nil {
+		return
+	}
+	if msg.ToolResult.IsError {
+		fmt.Fprintln(w, pterm.FgRed.Sprintf("  ❌ %s (Error)", msg.ToolResult.Name))
+	} else {
+		fmt.Fprintln(w, pterm.FgGreen.Sprintf("  ✅ %s", msg.ToolResult.Name))
+	}
+	contentPreview := msg.ToolResult.Content
+	if len(contentPreview) > 200 {
+		contentPreview = contentPreview[:200] + "..."
+	}
+	fmt.Fprintln(w, pterm.FgGray.Sprint("  "+contentPreview))
+}
+
+func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults map[string]*models.ChatMessageDto, finalResponse *models.ChatMessageDto) {
+	w := os.Stdout
+
+	writeAssistantHeader(w, assistantMsg)
+	writeReasoningBlock(w, assistantMsg.ReasoningContent)
 
 	if assistantMsg.Content != "" {
-		renderedContent := renderMarkdown(assistantMsg.Content)
-		for line := range strings.SplitSeq(renderedContent, "\n") {
-			pterm.Println("  " + line)
-		}
-		fmt.Println()
+		writeRenderedContent(w, assistantMsg.Content)
+		fmt.Fprintln(w)
 	}
 
-	pterm.Println(pterm.FgYellow.Sprint("  🔧 Tool Execution:"))
+	fmt.Fprintln(w, pterm.FgYellow.Sprint("  🔧 Tool Execution:"))
 
 	for tcIdx, tc := range assistantMsg.ToolCalls {
 		isLast := tcIdx == len(assistantMsg.ToolCalls)-1
@@ -93,7 +137,7 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 			prefix = "  └─"
 		}
 
-		pterm.Printf("%s %s ", pterm.FgYellow.Sprint(prefix), pterm.FgCyan.Sprint(tc.Name))
+		fmt.Fprintf(w, "%s %s ", pterm.FgYellow.Sprint(prefix), pterm.FgCyan.Sprint(tc.Name))
 
 		var args map[string]any
 		if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
@@ -102,9 +146,9 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 			if len(argDisplay) > 80 {
 				argDisplay = argDisplay[:77] + "..."
 			}
-			pterm.Println(pterm.FgGray.Sprint(argDisplay))
+			fmt.Fprintln(w, pterm.FgGray.Sprint(argDisplay))
 		} else {
-			pterm.Println()
+			fmt.Fprintln(w)
 		}
 
 		if toolResultMsg, ok := toolResults[tc.ID]; ok {
@@ -114,103 +158,54 @@ func printToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults m
 			}
 
 			if toolResultMsg.ToolResult.IsError {
-				pterm.Printf("%s%s\n", resultPrefix, pterm.FgRed.Sprint("❌ Error"))
-				contentPreview := toolResultMsg.ToolResult.Content
-				if len(contentPreview) > 100 {
-					contentPreview = contentPreview[:97] + "..."
-				}
-				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGray.Sprint(contentPreview))
+				fmt.Fprintf(w, "%s%s\n", resultPrefix, pterm.FgRed.Sprint("❌ Error"))
 			} else {
-				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGreen.Sprint("✅ Success"))
-				contentPreview := toolResultMsg.ToolResult.Content
-				if len(contentPreview) > 100 {
-					contentPreview = contentPreview[:97] + "..."
-				}
-				pterm.Printf("%s%s\n", resultPrefix, pterm.FgGray.Sprint(contentPreview))
+				fmt.Fprintf(w, "%s%s\n", resultPrefix, pterm.FgGreen.Sprint("✅ Success"))
 			}
+			contentPreview := toolResultMsg.ToolResult.Content
+			if len(contentPreview) > 100 {
+				contentPreview = contentPreview[:97] + "..."
+			}
+			fmt.Fprintf(w, "%s%s\n", resultPrefix, pterm.FgGray.Sprint(contentPreview))
 		}
 	}
 
 	if finalResponse != nil && finalResponse.Content != "" {
-		fmt.Println()
-		pterm.Println(pterm.FgGreen.Sprint("  📝 Final Response:"))
-		renderedContent := renderMarkdown(finalResponse.Content)
-		for line := range strings.SplitSeq(renderedContent, "\n") {
-			pterm.Println("  " + line)
-		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, pterm.FgGreen.Sprint("  📝 Final Response:"))
+		writeRenderedContent(w, finalResponse.Content)
 	}
 
-	fmt.Println()
+	fmt.Fprintln(w)
 }
 
 func printMessage(msg *models.ChatMessageDto) {
+	w := os.Stdout
+
 	switch msg.Role {
 	case models.RoleUser:
-		pterm.Println(pterm.FgCyan.Sprintf("👤 User [%s]:", msg.CreatedAt.Format("15:04:05")))
-		rendered := renderMarkdown(msg.Content)
-		for line := range strings.SplitSeq(rendered, "\n") {
-			pterm.Println("  " + line)
-		}
+		fmt.Fprintln(w, pterm.FgCyan.Sprintf("👤 User [%s]:", msg.CreatedAt.Format("15:04:05")))
+		writeRenderedContent(w, msg.Content)
 
 	case models.RoleAssistant:
-		modelInfo := ""
-		if msg.Model != nil {
-			modelInfo = fmt.Sprintf(" (%s)", msg.Model.Name)
-		}
-		pterm.Println(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:", modelInfo, msg.CreatedAt.Format("15:04:05")))
-
-		reasoningContent := strings.Trim(msg.ReasoningContent, " \n")
-		if reasoningContent != "" {
-			pterm.Println(pterm.FgLightBlue.Sprint("  💭 Reasoning:"))
-			for line := range strings.SplitSeq(reasoningContent, "\n") {
-				pterm.Println(pterm.FgGray.Sprint("  " + line))
-			}
-			fmt.Println()
-		}
-
+		writeAssistantHeader(w, msg)
+		writeReasoningBlock(w, msg.ReasoningContent)
 		if msg.Content != "" {
-			rendered := renderMarkdown(msg.Content)
-			for line := range strings.SplitSeq(rendered, "\n") {
-				pterm.Println("  " + line)
-			}
+			writeRenderedContent(w, msg.Content)
 		}
-
 		if len(msg.ToolCalls) > 0 {
-			pterm.Println(pterm.FgYellow.Sprint("  🔧 Tool Calls:"))
-			for _, tc := range msg.ToolCalls {
-				pterm.Printf("    • %s", pterm.FgYellow.Sprint(tc.Name))
-
-				var args map[string]any
-				if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
-					argsStr, _ := json.MarshalIndent(args, "      ", "  ")
-					pterm.Println(pterm.FgGray.Sprintf("\n      %s", string(argsStr)))
-				} else {
-					pterm.Println()
-				}
-			}
+			writeToolCalls(w, msg.ToolCalls)
 		}
 
 	case models.RoleTool:
-		pterm.Println(pterm.FgMagenta.Sprintf("🛠️  Tool Result [%s]:", msg.CreatedAt.Format("15:04:05")))
-		if msg.ToolResult != nil {
-			if msg.ToolResult.IsError {
-				pterm.Println(pterm.FgRed.Sprintf("  ❌ %s (Error)", msg.ToolResult.Name))
-			} else {
-				pterm.Println(pterm.FgGreen.Sprintf("  ✅ %s", msg.ToolResult.Name))
-			}
-			contentPreview := msg.ToolResult.Content
-			if len(contentPreview) > 200 {
-				contentPreview = contentPreview[:200] + "..."
-			}
-			pterm.Println(pterm.FgGray.Sprint("  " + contentPreview))
-		}
+		writeToolResult(w, msg)
 	}
 
-	fmt.Println()
+	fmt.Fprintln(w)
 }
 
 func openHistoryViewer(messages []models.ChatMessageDto) error {
-	var buf bytes.Buffer
+	var buf strings.Builder
 	buf.WriteString(pterm.FgCyan.Sprint("=== Chat History ===") + "\n\n")
 
 	for i, msg := range messages {
@@ -218,62 +213,25 @@ func openHistoryViewer(messages []models.ChatMessageDto) error {
 
 		switch msg.Role {
 		case models.RoleUser:
-			buf.WriteString(pterm.FgCyan.Sprintf("👤 User [%s]:\n", msg.CreatedAt.Format("15:04:05")))
-			renderedContent := renderMarkdown(msg.Content)
-			for line := range strings.SplitSeq(renderedContent, "\n") {
-				buf.WriteString("  " + line + "\n")
-			}
+			fmt.Fprintln(&buf, pterm.FgCyan.Sprintf("👤 User [%s]:", msg.CreatedAt.Format("15:04:05")))
+			writeRenderedContent(&buf, msg.Content)
 			buf.WriteString("\n")
 
 		case models.RoleAssistant:
-			modelInfo := ""
-			if msg.Model != nil {
-				modelInfo = fmt.Sprintf(" (%s)", msg.Model.Name)
-			}
-			buf.WriteString(pterm.FgGreen.Sprintf("🤖 Assistant%s [%s]:\n", modelInfo, msg.CreatedAt.Format("15:04:05")))
-
-			reasoningContent := strings.Trim(msg.ReasoningContent, " \n")
-			if reasoningContent != "" {
-				buf.WriteString(pterm.FgLightBlue.Sprint("  💭 Reasoning:\n"))
-				for line := range strings.SplitSeq(reasoningContent, "\n") {
-					buf.WriteString(pterm.FgGray.Sprint("  " + line + "\n"))
-				}
-				buf.WriteString("\n")
-			}
-
+			writeAssistantHeader(&buf, &msg)
+			writeReasoningBlock(&buf, msg.ReasoningContent)
 			if msg.Content != "" {
-				renderedContent := renderMarkdown(msg.Content)
-				for line := range strings.SplitSeq(renderedContent, "\n") {
-					buf.WriteString("  " + line + "\n")
-				}
+				writeRenderedContent(&buf, msg.Content)
 			}
-
 			if len(msg.ToolCalls) > 0 {
-				buf.WriteString("\n" + pterm.FgYellow.Sprint("  🔧 Tool Calls:\n"))
-				for _, tc := range msg.ToolCalls {
-					buf.WriteString(pterm.FgYellow.Sprintf("    • %s\n", tc.Name))
-					var args map[string]any
-					if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
-						argsStr, _ := json.MarshalIndent(args, "      ", "  ")
-						buf.WriteString(pterm.FgGray.Sprintf("      %s\n", string(argsStr)))
-					}
-				}
+				buf.WriteString("\n")
+				writeToolCalls(&buf, msg.ToolCalls)
 			}
 			buf.WriteString("\n")
 
 		case models.RoleTool:
-			buf.WriteString(pterm.FgMagenta.Sprintf("🛠️  Tool Result [%s]:\n", msg.CreatedAt.Format("15:04:05")))
-			if msg.ToolResult != nil {
-				if msg.ToolResult.IsError {
-					buf.WriteString(pterm.FgRed.Sprintf("  ❌ %s (Error)\n", msg.ToolResult.Name))
-				} else {
-					buf.WriteString(pterm.FgGreen.Sprintf("  ✅ %s\n", msg.ToolResult.Name))
-				}
-				for line := range strings.SplitSeq(msg.ToolResult.Content, "\n") {
-					buf.WriteString(pterm.FgGray.Sprint("  " + line + "\n"))
-				}
-				buf.WriteString("\n")
-			}
+			writeToolResult(&buf, &msg)
+			buf.WriteString("\n")
 		}
 		buf.WriteString("\n")
 	}

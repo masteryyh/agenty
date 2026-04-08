@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cmd
+package ui
 
 import (
 	"fmt"
@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/pterm/pterm"
-	"golang.org/x/term"
 )
 
 type FormFieldType int
@@ -41,13 +40,8 @@ type FormField struct {
 	Options     []string // Select/Toggle: option labels
 	SelIdx      int      // Select/Toggle: current index
 	Required    bool
-	Placeholder string // shown when empty and unfocused (optional)
-	// OnChange is called when SelIdx changes. inputs is the current input state
-	// for all fields; update(fieldIdx, val) updates a text/password field's value.
-	OnChange func(selIdx int, inputs [][]rune, update func(fieldIdx int, val string))
-	// VisibleWhen, if set, is called before each render to decide if the field
-	// should be shown. Hidden fields are skipped in rendering, navigation and
-	// validation. When nil the field is always visible.
+	Placeholder string
+	OnChange    func(selIdx int, inputs [][]rune, update func(fieldIdx int, val string))
 	VisibleWhen func(fields []*FormField) bool
 }
 
@@ -93,17 +87,14 @@ func ToggleField(label string, defaultVal bool) *FormField {
 	}
 }
 
-// ShowForm renders an interactive form with the given title and fields. Returns
-// (true, nil) when submitted, (false, nil) when cancelled via Esc.
 func ShowForm(title string, fields []*FormField) (bool, error) {
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
+	raw, err := EnterRawMode()
 	if err != nil {
-		return false, fmt.Errorf("failed to set raw terminal: %w", err)
+		return false, err
 	}
-	defer term.Restore(fd, oldState)
+	defer raw.Restore()
 
-	rawWrite("\033[?25l")
+	HideCursor()
 
 	inputs := make([][]rune, len(fields))
 	cursors := make([]int, len(fields))
@@ -141,13 +132,13 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 
 	render := func() int {
 		lines := 0
-		rawWriteln("")
+		Writeln("")
 		lines++
-		rawWriteln("  " + pterm.Bold.Sprint(title))
+		Writeln("  " + pterm.Bold.Sprint(title))
 		lines++
-		rawWriteln("  " + pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+		Writeln("  " + pterm.FgGray.Sprint(strings.Repeat("─", 56)))
 		lines++
-		rawWriteln("")
+		Writeln("")
 		lines++
 
 		for i, f := range fields {
@@ -233,39 +224,17 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 				}
 			}
 
-			rawWriteln(pfx + lbl + " " + val)
+			Writeln(pfx + lbl + " " + val)
 			lines++
 		}
 
-		rawWriteln("")
+		Writeln("")
 		lines++
-		rawWrite("  " + pterm.FgGray.Sprint(
+		Write("  " + pterm.FgGray.Sprint(
 			"Tab/Shift+Tab  navigate  ·  ←/→  cycle/cursor  ·  Enter  next  ·  Ctrl+S  submit  ·  Esc  cancel",
 		))
 		lines++
 		return lines
-	}
-
-	clearLines := func(n int) {
-		for i := 0; i < n-1; i++ {
-			rawWrite("\033[A")
-		}
-		rawWrite("\r")
-		for i := range n {
-			rawWrite("\033[2K")
-			if i < n-1 {
-				rawWrite("\033[B")
-			}
-		}
-		for i := 0; i < n-1; i++ {
-			rawWrite("\033[A")
-		}
-		rawWrite("\r")
-	}
-
-	exitClean := func(n int) {
-		clearLines(n)
-		rawWrite("\033[?25h")
 	}
 
 	updateFn := func(fieldIdx int, val string) {
@@ -313,7 +282,7 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 	for {
 		n, err := os.Stdin.Read(buf)
 		if err != nil {
-			exitClean(renderedLines)
+			ExitClean(renderedLines)
 			return false, err
 		}
 		if n == 0 {
@@ -324,14 +293,14 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 
 		if n >= 3 && buf[0] == 27 && buf[1] == '[' {
 			switch buf[2] {
-			case 'A': // Up → prev visible field
+			case 'A': // Up
 				for prev := focus - 1; prev >= 0; prev-- {
 					if isVisible(prev) {
 						focus = prev
 						break
 					}
 				}
-			case 'B': // Down → next visible field
+			case 'B': // Down
 				for next := focus + 1; next < len(fields); next++ {
 					if isVisible(next) {
 						focus = next
@@ -360,14 +329,14 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 				} else if cursors[focus] > 0 {
 					cursors[focus]--
 				}
-			case 'Z': // Shift+Tab → prev visible field
+			case 'Z': // Shift+Tab
 				for prev := focus - 1; prev >= 0; prev-- {
 					if isVisible(prev) {
 						focus = prev
 						break
 					}
 				}
-			case '3': // Delete (ESC[3~)
+			case '3': // Delete
 				if n >= 4 && buf[3] == '~' {
 					if (f.Type == FormFieldText || f.Type == FormFieldPassword) && cursors[focus] < len(inputs[focus]) {
 						inp := inputs[focus]
@@ -393,21 +362,21 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 			}
 		} else if n == 1 {
 			switch buf[0] {
-			case 3, 27: // Ctrl+C or Esc → cancel
-				exitClean(renderedLines)
+			case 3, 27: // Ctrl+C or Esc
+				ExitClean(renderedLines)
 				return false, nil
-			case 9: // Tab → next visible field
+			case 9: // Tab
 				for next := focus + 1; next < len(fields); next++ {
 					if isVisible(next) {
 						focus = next
 						break
 					}
 				}
-			case 13: // Enter → next visible or submit
+			case 13: // Enter
 				next := -1
-				for n := focus + 1; n < len(fields); n++ {
-					if isVisible(n) {
-						next = n
+				for nn := focus + 1; nn < len(fields); nn++ {
+					if isVisible(nn) {
+						next = nn
 						break
 					}
 				}
@@ -415,7 +384,7 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 					focus = next
 				} else {
 					if trySubmit() {
-						exitClean(renderedLines)
+						ExitClean(renderedLines)
 						return true, nil
 					}
 				}
@@ -426,9 +395,9 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 					cursors[focus]--
 					invalid[focus] = false
 				}
-			case 19: // Ctrl+S → submit
+			case 19: // Ctrl+S
 				if trySubmit() {
-					exitClean(renderedLines)
+					ExitClean(renderedLines)
 					return true, nil
 				}
 			default:
@@ -467,7 +436,7 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 			}
 		}
 
-		clearLines(renderedLines)
+		ClearLines(renderedLines)
 		renderedLines = render()
 	}
 }
