@@ -57,6 +57,8 @@ When coding agents for this project, please adhere to the following guidelines:
 
 9. **Read and Update HANDOFF.md**: Read `HANDOFF.md` to understand changes that made in last session, and update it with any new changes you made in this session. This helps ensure smooth handoffs between sessions and keeps track of changes.
 
+10. **Use sub agents**: Do not hesitate to use sub agents or `/fleet` command to create sub agents to assist you in complex tasks, search for information in parallel, or review a large code base.
+
 ## Other requirements
 
 1. **Spoken Language**: Use Simplified Chinese when communicating with user.

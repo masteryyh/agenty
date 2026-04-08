@@ -123,10 +123,6 @@ func showBanner() {
 	fmt.Println()
 }
 
-func printSection(title string) {
-	fmt.Printf("\n  %s\n  %s\n\n", pterm.Bold.Sprint(title), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
-}
-
 func modelDisplayName(m models.ModelDto) string {
 	if m.Provider != nil {
 		return m.Provider.Name + "/" + m.Name

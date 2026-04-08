@@ -172,31 +172,8 @@ func (r *RemoteBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto
 	return r.client.UpdateSystemSettings(dto)
 }
 
-func (r *RemoteBackend) CreateKnowledgeItem(agentID uuid.UUID, dto *models.CreateKnowledgeItemDto) (*models.KnowledgeItemDto, error) {
-	return r.client.CreateKnowledgeItem(agentID, dto)
-}
-
-func (r *RemoteBackend) GetKnowledgeItem(agentID, itemID uuid.UUID) (*models.KnowledgeItemDto, error) {
-	return r.client.GetKnowledgeItem(agentID, itemID)
-}
-
-func (r *RemoteBackend) ListKnowledgeItems(agentID uuid.UUID, category *models.KnowledgeCategory) ([]models.KnowledgeItemSummaryDto, error) {
-	result, err := r.client.ListKnowledgeItems(agentID, category)
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, nil
-	}
-	return *result, nil
-}
-
-func (r *RemoteBackend) DeleteKnowledgeItem(agentID, itemID uuid.UUID) error {
-	return r.client.DeleteKnowledgeItem(agentID, itemID)
-}
-
-func (r *RemoteBackend) SearchKnowledge(agentID uuid.UUID, query string, limit int) ([]models.KBSearchResult, error) {
-	result, err := r.client.SearchKnowledge(agentID, query, limit)
+func (r *RemoteBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error) {
+	result, err := r.client.ListMemories(agentID)
 	if err != nil {
 		return nil, err
 	}

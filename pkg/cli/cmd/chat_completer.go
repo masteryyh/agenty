@@ -41,8 +41,8 @@ var commands = []Command{
 	{Name: "/provider", Description: "Manage model providers", Usage: "/provider"},
 	{Name: "/mcp", Description: "Manage MCP servers", Usage: "/mcp"},
 	{Name: "/agent", Description: "Manage and switch agents", Usage: "/agent [agent-name]"},
-	{Name: "/settings", Description: "Manage system settings", Usage: "/settings"},
-	{Name: "/knowledge", Description: "Manage agent knowledge base", Usage: "/knowledge [add|search|list|delete]"},
+	{Name: "/settings", Description: "Edit system settings", Usage: "/settings [show|edit]"},
+	{Name: "/memory", Description: "View agent long-term memories", Usage: "/memory"},
 	{
 		Name:        "/think",
 		Description: "Set thinking mode",

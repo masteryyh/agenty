@@ -303,30 +303,6 @@ func (c *Client) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*mod
 	return doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", dto)
 }
 
-func (c *Client) CreateKnowledgeItem(agentID uuid.UUID, dto *models.CreateKnowledgeItemDto) (*models.KnowledgeItemDto, error) {
-	return doRequest[models.KnowledgeItemDto](c, "POST", fmt.Sprintf("/api/v1/agents/%s/knowledge", agentID), dto)
-}
-
-func (c *Client) GetKnowledgeItem(agentID, itemID uuid.UUID) (*models.KnowledgeItemDto, error) {
-	return doRequest[models.KnowledgeItemDto](c, "GET", fmt.Sprintf("/api/v1/agents/%s/knowledge/%s", agentID, itemID), nil)
-}
-
-func (c *Client) ListKnowledgeItems(agentID uuid.UUID, category *models.KnowledgeCategory) (*[]models.KnowledgeItemSummaryDto, error) {
-	path := fmt.Sprintf("/api/v1/agents/%s/knowledge", agentID)
-	if category != nil {
-		path += fmt.Sprintf("?category=%s", *category)
-	}
-	return doRequest[[]models.KnowledgeItemSummaryDto](c, "GET", path, nil)
-}
-
-func (c *Client) DeleteKnowledgeItem(agentID, itemID uuid.UUID) error {
-	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/agents/%s/knowledge/%s", agentID, itemID), nil)
-	return err
-}
-
-func (c *Client) SearchKnowledge(agentID uuid.UUID, query string, limit int) (*[]models.KBSearchResult, error) {
-	return doRequest[[]models.KBSearchResult](c, "POST", fmt.Sprintf("/api/v1/agents/%s/knowledge/search", agentID), &models.KBSearchRequest{
-		Query: query,
-		Limit: limit,
-	})
+func (c *Client) ListMemories(agentID uuid.UUID) (*[]models.KnowledgeItemSummaryDto, error) {
+	return doRequest[[]models.KnowledgeItemSummaryDto](c, "GET", fmt.Sprintf("/api/v1/agents/%s/memories", agentID), nil)
 }
