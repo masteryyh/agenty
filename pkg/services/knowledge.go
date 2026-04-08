@@ -265,8 +265,7 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 		var err error
 		client, modelCode, err = embeddingSvc.GetClient(ctx)
 		if err != nil {
-			slog.WarnContext(ctx, "failed to get embedding client, chunks will be saved without embeddings", "error", err)
-			embeddingEnabled = false
+			return fmt.Errorf("failed to get embedding client: %w", err)
 		}
 	}
 

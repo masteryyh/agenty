@@ -207,22 +207,7 @@ func (l *LocalBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto)
 	return services.GetSystemService().UpdateSettings(signal.GetBaseContext(), dto)
 }
 
-func (l *LocalBackend) CreateKnowledgeItem(agentID uuid.UUID, dto *models.CreateKnowledgeItemDto) (*models.KnowledgeItemDto, error) {
-	return services.GetKnowledgeService().CreateItem(signal.GetBaseContext(), agentID, dto)
-}
-
-func (l *LocalBackend) GetKnowledgeItem(agentID, itemID uuid.UUID) (*models.KnowledgeItemDto, error) {
-	return services.GetKnowledgeService().GetItem(signal.GetBaseContext(), agentID, itemID)
-}
-
-func (l *LocalBackend) ListKnowledgeItems(agentID uuid.UUID, category *models.KnowledgeCategory) ([]models.KnowledgeItemSummaryDto, error) {
-	return services.GetKnowledgeService().ListItems(signal.GetBaseContext(), agentID, category)
-}
-
-func (l *LocalBackend) DeleteKnowledgeItem(agentID, itemID uuid.UUID) error {
-	return services.GetKnowledgeService().DeleteItem(signal.GetBaseContext(), agentID, itemID)
-}
-
-func (l *LocalBackend) SearchKnowledge(agentID uuid.UUID, query string, limit int) ([]models.KBSearchResult, error) {
-	return services.GetKnowledgeService().HybridSearch(signal.GetBaseContext(), agentID, query, limit)
+func (l *LocalBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error) {
+	category := models.KnowledgeCategoryLLMMemory
+	return services.GetKnowledgeService().ListItems(signal.GetBaseContext(), agentID, &category)
 }
