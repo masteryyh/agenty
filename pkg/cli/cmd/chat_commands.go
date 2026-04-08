@@ -1231,18 +1231,22 @@ func handleSettingsCmd(b backend.Backend, args []string, sessionID uuid.UUID, mo
 	}
 
 	if len(args) == 0 {
-		printSettings(settings)
+		if err := doEditSettings(b, settings); err != nil && !errors.Is(err, ErrCancelled) {
+			pterm.Error.Printf("Failed to update settings: %v\n", err)
+		}
 		return CommandResult{Handled: true}, nil
 	}
 
 	switch args[0] {
+	case "show":
+		printSettings(settings)
 	case "edit":
 		if err := doEditSettings(b, settings); err != nil && !errors.Is(err, ErrCancelled) {
 			pterm.Error.Printf("Failed to update settings: %v\n", err)
 		}
 	default:
 		pterm.Warning.Printf("Unknown subcommand: %s\n", args[0])
-		pterm.Info.Println("Usage: /settings [edit]")
+		pterm.Info.Println("Usage: /settings [show|edit]")
 	}
 
 	return CommandResult{Handled: true}, nil
@@ -1304,13 +1308,13 @@ func doEditSettings(b backend.Backend, settings *models.SystemSettingsDto) error
 		TextField("Brave API Key", "", false),
 		TextField("Tavily API Key", "", false),
 		TextField("Firecrawl API Key", "", false),
-		TextField("Firecrawl Base URL", "", false),
+		TextField("Firecrawl Base URL", settings.FirecrawlBaseURL, false),
 	}
 
 	fields[1].Placeholder = "leave blank to keep"
 	fields[2].Placeholder = "leave blank to keep"
 	fields[3].Placeholder = "leave blank to keep"
-	fields[4].Placeholder = "leave blank to keep (default: https://api.firecrawl.dev)"
+	fields[4].Placeholder = "leave blank for default (https://api.firecrawl.dev)"
 
 	submitted, err := ShowForm("System Settings", fields)
 	if err != nil {
