@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pterm/pterm"
 	"golang.org/x/term"
@@ -213,75 +214,7 @@ func showConfirm(message string) (bool, error) {
 	}
 }
 
-func readInput(prompt, defaultValue string) (string, error) {
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return "", fmt.Errorf("failed to set raw terminal: %w", err)
-	}
-	defer term.Restore(fd, oldState)
-
-	rawWrite("\033[?25h")
-	rawWrite("  " + pterm.FgYellow.Sprint("?") + " " + pterm.Bold.Sprint(prompt))
-	if defaultValue != "" {
-		rawWrite(" [" + pterm.FgGray.Sprint(defaultValue) + "]: ")
-	} else {
-		rawWrite(": ")
-	}
-
-	input := []rune(defaultValue)
-	for _, ch := range input {
-		rawWrite(string(ch))
-	}
-
-	buf := make([]byte, 64)
-	for {
-		n, err := os.Stdin.Read(buf)
-		if err != nil {
-			rawWriteln("")
-			return "", err
-		}
-
-		if n >= 2 && buf[0] == 27 {
-			continue
-		}
-
-		var done bool
-		for i := 0; i < n; i++ {
-			b := buf[i]
-			switch b {
-			case 13:
-				done = true
-			case 27, 3:
-				rawWriteln("")
-				return "", ErrCancelled
-			case 127, 8:
-				if len(input) > 0 {
-					input = input[:len(input)-1]
-					rawWrite("\b \b")
-				}
-			default:
-				if b >= 32 {
-					input = append(input, rune(b))
-					rawWrite(string(b))
-				}
-			}
-			if done {
-				break
-			}
-		}
-		if done {
-			rawWriteln("")
-			result := strings.TrimSpace(string(input))
-			if result == "" {
-				return defaultValue, nil
-			}
-			return result, nil
-		}
-	}
-}
-
-func readPassword(prompt string) (string, error) {
+func readLine(prompt string, masked bool) (string, error) {
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
@@ -306,28 +239,40 @@ func readPassword(prompt string) (string, error) {
 		}
 
 		var done bool
-		for i := 0; i < n; i++ {
+		for i := 0; i < n; {
 			b := buf[i]
-			switch b {
-			case 13:
+			switch {
+			case b == 13:
 				if len(input) == 0 {
-					// skip spurious Enter left over from a prior interaction
+					i++
 					continue
 				}
 				done = true
-			case 27, 3:
+				i++
+			case b == 27 || b == 3:
 				rawWriteln("")
 				return "", ErrCancelled
-			case 127, 8:
+			case b == 127 || b == 8:
 				if len(input) > 0 {
 					input = input[:len(input)-1]
 					rawWrite("\b \b")
 				}
-			default:
-				if b >= 32 {
-					input = append(input, rune(b))
-					rawWrite("*")
+				i++
+			case b >= 32:
+				r, size := utf8.DecodeRune(buf[i:n])
+				if r == utf8.RuneError && size <= 1 {
+					i++
+					continue
 				}
+				input = append(input, r)
+				if masked {
+					rawWrite("*")
+				} else {
+					rawWrite(string(r))
+				}
+				i += size
+			default:
+				i++
 			}
 			if done {
 				break
@@ -338,6 +283,10 @@ func readPassword(prompt string) (string, error) {
 			return strings.TrimSpace(string(input)), nil
 		}
 	}
+}
+
+func readText(prompt string) (string, error) {
+	return readLine(prompt, false)
 }
 
 func selectOption(title string, options []string, defaultIndex int) (int, error) {

@@ -19,7 +19,6 @@ package builtin
 import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/services"
-	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
 func RegisterAll(registry *tools.Registry) {
@@ -31,17 +30,15 @@ func RegisterAll(registry *tools.Registry) {
 	registry.Register(&UpdateSoulTool{agentService: services.GetAgentService()})
 	registry.Register(&TodoTool{})
 
-	embeddingSvc := services.GetEmbeddingService()
-	if embeddingSvc.IsEnabled(signal.GetBaseContext()) {
-		knowledgeSvc := services.GetKnowledgeService()
-		webSearchSvc := services.GetWebSearchService()
-		registry.Register(&SaveMemoryTool{
-			knowledgeService: knowledgeSvc,
-		})
-		registry.Register(&SearchTool{
-			knowledgeService: knowledgeSvc,
-			webSearchService: webSearchSvc,
-			evaluator:        services.GetSearchEvaluator(),
-		})
-	}
+	knowledgeSvc := services.GetKnowledgeService()
+	registry.Register(&SaveMemoryTool{
+		knowledgeService: knowledgeSvc,
+	})
+
+	webSearchSvc := services.GetWebSearchService()
+	registry.Register(&SearchTool{
+		knowledgeService: knowledgeSvc,
+		webSearchService: webSearchSvc,
+		evaluator:        services.GetSearchEvaluator(),
+	})
 }

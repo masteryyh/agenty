@@ -91,7 +91,7 @@ func runWizard(b backend.Backend) error {
 				continue
 			}
 
-			apiKey, err := readPassword("API key")
+			apiKey, err := readText("API key")
 			rawWriteln("")
 			if err != nil {
 				if errors.Is(err, ErrCancelled) {

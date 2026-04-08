@@ -31,6 +31,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/chunk"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
+	"github.com/openai/openai-go/v3"
 	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -198,11 +199,6 @@ func (s *KnowledgeService) HybridSearch(ctx context.Context, agentID uuid.UUID, 
 		limit = kbSearchLimit
 	}
 
-	embeddingSvc := GetEmbeddingService()
-	if !embeddingSvc.IsEnabled(ctx) {
-		return nil, fmt.Errorf("embedding model is not configured")
-	}
-
 	candidateLimit := limit * 3
 
 	var (
@@ -216,12 +212,20 @@ func (s *KnowledgeService) HybridSearch(ctx context.Context, agentID uuid.UUID, 
 	)
 
 	agentIDStr := agentID.String()
+	embeddingEnabled := GetEmbeddingService().IsEnabled(ctx)
 
-	wg.Add(3)
-	safe.GoOnce("vector-search-"+agentIDStr, func() {
-		defer wg.Done()
-		vectorResults, vectorErr = s.vectorSearch(ctx, agentID, query, candidateLimit)
-	})
+	goroutineCount := 2
+	if embeddingEnabled {
+		goroutineCount = 3
+	}
+	wg.Add(goroutineCount)
+
+	if embeddingEnabled {
+		safe.GoOnce("vector-search-"+agentIDStr, func() {
+			defer wg.Done()
+			vectorResults, vectorErr = s.vectorSearch(ctx, agentID, query, candidateLimit)
+		})
+	}
 	safe.GoOnce("full-text-search-"+agentIDStr, func() {
 		defer wg.Done()
 		fullTextResults, fullTextErr = s.fullTextSearch(ctx, agentID, query, candidateLimit)
@@ -253,24 +257,36 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 	}
 
 	embeddingSvc := GetEmbeddingService()
-	client, modelCode, err := embeddingSvc.GetClient(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get embedding client: %w", err)
+	embeddingEnabled := embeddingSvc.IsEnabled(ctx)
+
+	var client *openai.Client
+	var modelCode string
+	if embeddingEnabled {
+		var err error
+		client, modelCode, err = embeddingSvc.GetClient(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to get embedding client, chunks will be saved without embeddings", "error", err)
+			embeddingEnabled = false
+		}
 	}
 
 	var allData []models.KnowledgeBaseData
 	for i := 0; i < len(chunks); i += kbEmbedBatchSize {
-		end := min(i + kbEmbedBatchSize, len(chunks))
+		end := min(i+kbEmbedBatchSize, len(chunks))
 		batch := chunks[i:end]
 
-		embeddings, err := embeddingSvc.embedBatchWithClient(ctx, client, modelCode, batch)
-		if err != nil {
-			return fmt.Errorf("failed to embed chunk batch: %w", err)
+		var embeddings [][]float32
+		if embeddingEnabled {
+			var err error
+			embeddings, err = embeddingSvc.embedBatchWithClient(ctx, client, modelCode, batch)
+			if err != nil {
+				return fmt.Errorf("failed to embed chunk batch: %w", err)
+			}
 		}
 
 		for j, chunkText := range batch {
 			vec := make([]float32, consts.DefaultVectorDimension)
-			if j < len(embeddings) && embeddings[j] != nil {
+			if embeddingEnabled && j < len(embeddings) && embeddings[j] != nil {
 				copy(vec, embeddings[j])
 			}
 			allData = append(allData, models.KnowledgeBaseData{

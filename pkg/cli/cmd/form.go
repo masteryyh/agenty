@@ -444,6 +444,27 @@ func ShowForm(title string, fields []*FormField) (bool, error) {
 					invalid[focus] = false
 				}
 			}
+		} else if n > 1 && buf[0] != 27 {
+			if f.Type == FormFieldText || f.Type == FormFieldPassword {
+				runes := []rune(string(buf[:n]))
+				cur := cursors[focus]
+				inp := inputs[focus]
+				var printable []rune
+				for _, r := range runes {
+					if r >= 32 && r != 127 {
+						printable = append(printable, r)
+					}
+				}
+				if len(printable) > 0 {
+					newInp := make([]rune, len(inp)+len(printable))
+					copy(newInp, inp[:cur])
+					copy(newInp[cur:], printable)
+					copy(newInp[cur+len(printable):], inp[cur:])
+					inputs[focus] = newInp
+					cursors[focus] += len(printable)
+					invalid[focus] = false
+				}
+			}
 		}
 
 		clearLines(renderedLines)

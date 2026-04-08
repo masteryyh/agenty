@@ -692,7 +692,7 @@ func doCreateProvider(b backend.Backend) error {
 		TextField("Name", "", true),
 		typeField,
 		urlField,
-		PasswordField("API key"),
+		TextField("API key", "", false),
 	}
 
 	submitted, err := ShowForm("Create Provider", fields)
@@ -730,7 +730,7 @@ func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
 		}
 	}
 
-	apiKeyField := PasswordField("API key")
+	apiKeyField := TextField("API key", "", false)
 	apiKeyField.Placeholder = "leave blank to keep"
 
 	fields := []*FormField{
