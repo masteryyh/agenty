@@ -21,16 +21,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/cli/ui"
 	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/pterm/pterm"
 )
 
-func handleAgentCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleAgentCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) > 0 {
-		return switchToAgent(b, args[0])
+		return switchToAgent(b, bridge, args[0])
 	}
 
 	for {
@@ -40,14 +39,14 @@ func handleAgentCmd(b backend.Backend, args []string, sessionID uuid.UUID, model
 		}
 
 		if len(agents.Data) == 0 {
-			pterm.Warning.Println("No agents found")
-			res, err := ui.ShowList("Agents", []string{"(no agents)"}, "a add  ·  Esc back")
+			bridge.Warning("No agents found")
+			res, err := bridge.ShowList("Agents", []string{"(no agents)"}, "a add  ·  Esc back")
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
-			if res.Action == ui.ListActionAdd {
-				if err := doCreateAgent(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-					pterm.Error.Printf("Failed to create agent: %v\n", err)
+			if res.Action == ListActionAdd {
+				if err := doCreateAgent(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+					bridge.Error("Failed to create agent: %v", err)
 				}
 				continue
 			}
@@ -64,53 +63,53 @@ func handleAgentCmd(b backend.Backend, args []string, sessionID uuid.UUID, model
 			if a.ID == agentID {
 				current = " ← current"
 			}
-			items[i] = fmt.Sprintf("%s%s%s", a.Name, marker, pterm.FgGray.Sprint(current))
+			items[i] = fmt.Sprintf("%s%s%s", a.Name, marker, styleGray.Render(current))
 		}
 
-		res, err := ui.ShowList("Agents  "+pterm.FgGray.Sprint("(select to switch)"), items, listHints)
+		res, err := bridge.ShowList("Agents  "+styleGray.Render("(select to switch)"), items, listHints)
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
 
 		switch res.Action {
-		case ui.ListActionSelect:
+		case ListActionSelect:
 			target := agents.Data[res.Index]
-			return switchToAgent(b, target.Name)
+			return switchToAgent(b, bridge, target.Name)
 
-		case ui.ListActionAdd:
-			if err := doCreateAgent(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to create agent: %v\n", err)
+		case ListActionAdd:
+			if err := doCreateAgent(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to create agent: %v", err)
 			}
 			continue
 
-		case ui.ListActionEdit:
-			if err := doUpdateAgent(b, agents.Data[res.Index]); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to update agent: %v\n", err)
+		case ListActionEdit:
+			if err := doUpdateAgent(b, bridge, agents.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update agent: %v", err)
 			}
 			continue
 
-		case ui.ListActionDelete:
+		case ListActionDelete:
 			target := agents.Data[res.Index]
-			confirmed, err := ui.ShowConfirm(fmt.Sprintf("Delete agent '%s'? This will also delete all sessions, messages and memories.", target.Name))
+			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete agent '%s'? This will also delete all sessions, messages and memories.", target.Name))
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
 				if err := b.DeleteAgent(target.ID); err != nil {
-					pterm.Error.Printf("Failed to delete agent: %v\n", err)
+					bridge.Error("Failed to delete agent: %v", err)
 				} else {
-					pterm.Success.Printf("Agent deleted: %s\n", target.Name)
+					bridge.Success("Agent deleted: %s", target.Name)
 				}
 			}
 			continue
 
-		case ui.ListActionCancel:
+		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
 		}
 	}
 }
 
-func switchToAgent(b backend.Backend, agentName string) (CommandResult, error) {
+func switchToAgent(b backend.Backend, bridge *UIBridge, agentName string) (CommandResult, error) {
 	agentName = strings.TrimSpace(agentName)
 	agents, err := b.ListAgents(1, 100)
 	if err != nil {
@@ -128,111 +127,188 @@ func switchToAgent(b backend.Backend, agentName string) (CommandResult, error) {
 		return CommandResult{Handled: true}, fmt.Errorf("agent '%s' not found", agentName)
 	}
 
-	lastSession, err := b.GetLastSessionByAgent(targetAgentID)
-	var newSessionID uuid.UUID
-	if err == nil && lastSession != nil {
-		newSessionID = lastSession.ID
-		sessionDesc := fmt.Sprintf("resumed · %d messages", len(lastSession.Messages))
-		clearScreen()
-		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
-		fmt.Printf("  %-10s %s  %s\n\n", pterm.FgGray.Sprint("Session"),
-			pterm.FgGray.Sprint(newSessionID.String()[:8]+"…"),
-			pterm.FgGray.Sprint("("+sessionDesc+")"))
+	result := CommandResult{Handled: true, NewAgentID: targetAgentID, NewAgentName: agentName}
 
-		if len(lastSession.Messages) > 0 {
-			messageCount := len(lastSession.Messages)
-			startIdx := 0
-			if messageCount > 10 {
-				startIdx = messageCount - 10
-				fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Showing last 10 of %d messages  ·  /history to view all", messageCount))
-			}
-			fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Chat History"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
-			printMessageHistory(lastSession.Messages[startIdx:])
-			fmt.Println()
-		}
+	lastSession, err := b.GetLastSessionByAgent(targetAgentID)
+	if err == nil && lastSession != nil {
+		result.NewSessionID = lastSession.ID
+		result.SessionMessages = lastSession.Messages
+		result.TokenConsumed = lastSession.TokenConsumed
+		sessionDesc := fmt.Sprintf("resumed · %d messages", len(lastSession.Messages))
+		bridge.Printf("  %-10s %s", styleGray.Render("Agent"), styleCyan.Render(agentName))
+		bridge.Printf("  %-10s %s  %s\n", styleGray.Render("Session"),
+			styleGray.Render(lastSession.ID.String()[:8]+"…"),
+			styleGray.Render("("+sessionDesc+")"))
 	} else {
 		newSession, err := b.CreateSession(targetAgentID)
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to create session for agent: %w", err)
 		}
-		newSessionID = newSession.ID
-		clearScreen()
-		fmt.Printf("  %-10s %s\n", pterm.FgGray.Sprint("Agent"), pterm.FgCyan.Sprint(agentName))
-		fmt.Printf("  %-10s %s  %s\n\n", pterm.FgGray.Sprint("Session"),
-			pterm.FgGray.Sprint(newSessionID.String()[:8]+"…"),
-			pterm.FgGray.Sprint("(new)"))
+		result.NewSessionID = newSession.ID
+		bridge.Printf("  %-10s %s", styleGray.Render("Agent"), styleCyan.Render(agentName))
+		bridge.Printf("  %-10s %s  %s\n", styleGray.Render("Session"),
+			styleGray.Render(newSession.ID.String()[:8]+"…"),
+			styleGray.Render("(new)"))
 	}
 
-	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
-		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
+	bridge.Printf("  %s\n", styleGray.Render(fmt.Sprintf("Type %s for commands  ·  %s to quit",
+		styleWhite.Render("/help"), styleWhite.Render("/exit"))))
 
-	return CommandResult{Handled: true, NewAgentID: targetAgentID, NewSessionID: newSessionID}, nil
+	return result, nil
 }
 
-func doCreateAgent(b backend.Backend) error {
-	fields := []*ui.FormField{
-		ui.TextField("Name", "", true),
-		ui.TextField("Soul", "", false),
-		ui.ToggleField("Default agent", false),
-	}
-	fields[1].Placeholder = "system prompt, leave blank for default"
+func doCreateAgent(b backend.Backend, bridge *UIBridge) error {
+	var name, soul string
+	isDefault := false
 
-	submitted, err := ui.ShowForm("Create Agent", fields)
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewInput().Title("Soul").Placeholder("system prompt, leave blank for default").Value(&soul),
+		huh.NewSelect[bool]().Title("Default agent").
+			Options(huh.NewOption("No", false), huh.NewOption("Yes", true)).
+			Value(&isDefault),
+	))
+
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	name := fields[0].Value
-	soul := fields[1].Value
-	isDefault := fields[2].BoolValue()
+	modelIDs, err := selectAgentModels(b, bridge, nil)
+	if err != nil {
+		return err
+	}
 
 	agent, err := b.CreateAgent(&models.CreateAgentDto{
 		Name:      name,
 		Soul:      &soul,
 		IsDefault: isDefault,
+		ModelIDs:  modelIDs,
 	})
 	if err != nil {
 		return err
 	}
-	pterm.Success.Printf("Agent created: %s (%s)\n", agent.Name, agent.ID)
+	bridge.Success("Agent created: %s (%s)", agent.Name, agent.ID)
 	return nil
 }
 
-func doUpdateAgent(b backend.Backend, target models.AgentDto) error {
-	fields := []*ui.FormField{
-		ui.TextField("Name", target.Name, true),
-		ui.TextField("Soul", target.Soul, false),
-		ui.ToggleField("Default agent", target.IsDefault),
-	}
-	fields[1].Placeholder = "system prompt"
+func doUpdateAgent(b backend.Backend, bridge *UIBridge, target models.AgentDto) error {
+	newName := target.Name
+	newSoul := target.Soul
+	newIsDefault := target.IsDefault
 
-	submitted, err := ui.ShowForm("Update Agent", fields)
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&newName).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewInput().Title("Soul").Placeholder("system prompt").Value(&newSoul),
+		huh.NewSelect[bool]().Title("Default agent").
+			Options(huh.NewOption("No", false), huh.NewOption("Yes", true)).
+			Value(&newIsDefault),
+	))
+
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	newName := fields[0].Value
-	newSoul := fields[1].Value
-	newIsDefault := fields[2].BoolValue()
-
-	if newName == target.Name && newSoul == target.Soul && newIsDefault == target.IsDefault {
-		pterm.Info.Println("No changes detected, skipping update")
-		return nil
+	reconfigure, err := bridge.ShowConfirm("Reconfigure models for this agent?")
+	if err != nil {
+		return err
 	}
 
-	if err := b.UpdateAgent(target.ID, &models.UpdateAgentDto{
+	dto := &models.UpdateAgentDto{
 		Name:      &newName,
 		Soul:      &newSoul,
 		IsDefault: &newIsDefault,
-	}); err != nil {
+	}
+
+	if reconfigure {
+		var currentIDs []uuid.UUID
+		for _, m := range target.Models {
+			currentIDs = append(currentIDs, m.ID)
+		}
+		modelIDs, err := selectAgentModels(b, bridge, currentIDs)
+		if err != nil && !errors.Is(err, ErrCancelled) {
+			return err
+		}
+		if err == nil {
+			dto.ModelIDs = &modelIDs
+		}
+	}
+
+	if newName == target.Name && newSoul == target.Soul && newIsDefault == target.IsDefault && dto.ModelIDs == nil {
+		bridge.Info("No changes detected, skipping update")
+		return nil
+	}
+
+	if err := b.UpdateAgent(target.ID, dto); err != nil {
 		return err
 	}
-	pterm.Success.Printf("Agent updated: %s\n", newName)
+	bridge.Success("Agent updated: %s", newName)
 	return nil
+}
+
+func selectAgentModels(b backend.Backend, bridge *UIBridge, currentIDs []uuid.UUID) ([]uuid.UUID, error) {
+	allModels, err := b.ListModels(1, 500)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list models: %w", err)
+	}
+
+	var chatModels []models.ModelDto
+	for _, m := range allModels.Data {
+		if !m.EmbeddingModel && !m.ContextCompressionModel {
+			chatModels = append(chatModels, m)
+		}
+	}
+	if len(chatModels) == 0 {
+		bridge.Warning("No chat models configured yet")
+		return nil, ErrCancelled
+	}
+
+	labels := make([]string, len(chatModels))
+	idToIdx := make(map[uuid.UUID]int, len(chatModels))
+	for i, m := range chatModels {
+		if m.Provider != nil {
+			labels[i] = m.Provider.Name + "/" + m.Name
+		} else {
+			labels[i] = m.Name
+		}
+		idToIdx[m.ID] = i
+	}
+
+	defaultIndices := make([]int, 0, len(currentIDs))
+	for _, id := range currentIDs {
+		if idx, ok := idToIdx[id]; ok {
+			defaultIndices = append(defaultIndices, idx)
+		}
+	}
+
+	selectedIndices, err := bridge.ShowMultiSelect("Select Models  "+styleGray.Render("(★ primary, numbers = fallback order)"), labels, defaultIndices)
+	if err != nil {
+		return nil, err
+	}
+	if selectedIndices == nil {
+		return nil, ErrCancelled
+	}
+
+	ids := make([]uuid.UUID, len(selectedIndices))
+	for i, idx := range selectedIndices {
+		ids[i] = chatModels[idx].ID
+	}
+	return ids, nil
 }

@@ -31,23 +31,36 @@ func (a *Agent) ToDto() *AgentDto {
 	}
 }
 
+type AgentModel struct {
+	AgentID   uuid.UUID `gorm:"type:uuid;primaryKey"`
+	ModelID   uuid.UUID `gorm:"type:uuid;primaryKey"`
+	SortOrder int       `gorm:"not null;default:0"`
+}
+
+func (AgentModel) TableName() string {
+	return "agent_models"
+}
+
 type AgentDto struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Soul      string    `json:"soul"`
-	IsDefault bool      `json:"isDefault"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Soul      string     `json:"soul"`
+	IsDefault bool       `json:"isDefault"`
+	Models    []ModelDto `json:"models,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 type CreateAgentDto struct {
-	Name      string  `json:"name" binding:"required"`
-	Soul      *string `json:"soul" binding:"omitempty"`
-	IsDefault bool    `json:"isDefault"`
+	Name      string      `json:"name" binding:"required"`
+	Soul      *string     `json:"soul" binding:"omitempty"`
+	IsDefault bool        `json:"isDefault"`
+	ModelIDs  []uuid.UUID `json:"modelIds" binding:"omitempty"`
 }
 
 type UpdateAgentDto struct {
-	Name      *string `json:"name" binding:"omitempty"`
-	Soul      *string `json:"soul" binding:"omitempty"`
-	IsDefault *bool   `json:"isDefault" binding:"omitempty"`
+	Name      *string      `json:"name" binding:"omitempty"`
+	Soul      *string      `json:"soul" binding:"omitempty"`
+	IsDefault *bool        `json:"isDefault" binding:"omitempty"`
+	ModelIDs  *[]uuid.UUID `json:"modelIds" binding:"omitempty"`
 }

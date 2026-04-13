@@ -76,18 +76,35 @@ func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessi
 		return nil, err
 	}
 
-	defaultModel, err := gorm.G[models.Model](s.db).
-		Where("default_model IS true AND deleted_at IS NULL").
+	var defaultModel models.Model
+
+	primaryEntry, primaryErr := gorm.G[models.AgentModel](s.db).
+		Where("agent_id = ? AND sort_order = 0", dto.AgentID).
 		First(ctx)
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			slog.ErrorContext(ctx, "failed to find default model for new session", "error", err)
-			return nil, err
+	if primaryErr == nil {
+		m, err := gorm.G[models.Model](s.db).
+			Where("id = ? AND deleted_at IS NULL", primaryEntry.ModelID).
+			First(ctx)
+		if err == nil {
+			defaultModel = m
 		}
 	}
 
 	if defaultModel.ID == uuid.Nil {
-		defaultModel, err = gorm.G[models.Model](s.db).
+		m, err := gorm.G[models.Model](s.db).
+			Where("default_model IS true AND deleted_at IS NULL").
+			First(ctx)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.ErrorContext(ctx, "failed to find default model for new session", "error", err)
+			return nil, err
+		}
+		if err == nil {
+			defaultModel = m
+		}
+	}
+
+	if defaultModel.ID == uuid.Nil {
+		m, err := gorm.G[models.Model](s.db).
 			Where("deleted_at IS NULL").
 			Order("created_at DESC").
 			First(ctx)
@@ -95,6 +112,7 @@ func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessi
 			slog.ErrorContext(ctx, "failed to find any model for new session", "error", err)
 			return nil, err
 		}
+		defaultModel = m
 	}
 
 	defaultModelProvider, err := gorm.G[models.ModelProvider](s.db).

@@ -45,7 +45,7 @@ func startDaemon() error {
 	defer cancel()
 
 	slog.InfoContext(baseCtx, "initializing database connection...")
-	if err := conn.InitDB(baseCtx, cfg.DB); err != nil {
+	if err := conn.InitDB(baseCtx, cfg.DB, cfg.Debug); err != nil {
 		return fmt.Errorf("failed to initialize database connection: %w", err)
 	}
 

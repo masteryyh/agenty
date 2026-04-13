@@ -40,6 +40,7 @@ var (
 	ErrProviderAlreadyExists      = NewBusinessError(http.StatusConflict, "provider already exists")
 	ErrProviderInUse              = NewBusinessError(http.StatusBadRequest, "provider is in use and cannot be deleted")
 	ErrProviderNotConfigured      = NewBusinessError(http.StatusBadRequest, "provider is not configured")
+	ErrPresetCannotBeDeleted      = NewBusinessError(http.StatusForbidden, "preset provider or model cannot be deleted")
 
 	ErrMCPServerNotFound         = NewBusinessError(http.StatusNotFound, "mcp server not found")
 	ErrMCPServerAlreadyExists    = NewBusinessError(http.StatusConflict, "mcp server already exists")

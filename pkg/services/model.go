@@ -119,6 +119,8 @@ func (s *ModelService) CreateModel(ctx context.Context, dto *models.CreateModelD
 			Code:                    dto.Code,
 			EmbeddingModel:          dto.EmbeddingModel,
 			ContextCompressionModel: dto.ContextCompressionModel,
+			MultiModal:              dto.MultiModal,
+			Light:                   dto.Light,
 			Thinking:                dto.Thinking,
 		}
 
@@ -258,6 +260,14 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 				}
 			}
 			updates["context_compression_model"] = *dto.ContextCompressionModel
+		}
+
+		if dto.MultiModal != nil {
+			updates["multi_modal"] = *dto.MultiModal
+		}
+
+		if dto.Light != nil {
+			updates["light"] = *dto.Light
 		}
 
 		if model.EmbeddingModel && model.ContextCompressionModel {
@@ -479,6 +489,10 @@ func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error
 
 		if model.DefaultModel {
 			return customerrors.ErrDeletingDefaultModel
+		}
+
+		if model.IsPreset {
+			return customerrors.ErrPresetCannotBeDeleted
 		}
 
 		if model.EmbeddingModel {

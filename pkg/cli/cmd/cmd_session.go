@@ -22,10 +22,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/pterm/pterm"
 )
 
-func handleNewCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleNewCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	currentSession, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get current session: %w", err)
@@ -36,15 +35,14 @@ func handleNewCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID
 		return CommandResult{Handled: true}, fmt.Errorf("failed to create new session: %w", err)
 	}
 
-	clearScreen()
-	fmt.Printf("  %s  %s\n\n", pterm.FgGray.Sprint("Session"), pterm.FgGray.Sprint(session.ID.String()[:8]+"…  (new)"))
-	fmt.Printf("  %s\n\n", pterm.FgGray.Sprintf("Type %s for commands  ·  %s to quit",
-		pterm.FgWhite.Sprint("/help"), pterm.FgWhite.Sprint("/exit")))
+	bridge.Printf("  %s  %s\n", styleGray.Render("Session"), styleGray.Render(session.ID.String()[:8]+"…  (new)"))
+	bridge.Printf("  %s\n", styleGray.Render(fmt.Sprintf("Type %s for commands  ·  %s to quit",
+		styleWhite.Render("/help"), styleWhite.Render("/exit"))))
 
 	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }
 
-func handleStatusCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleStatusCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
@@ -67,48 +65,43 @@ func handleStatusCmd(b backend.Backend, args []string, sessionID uuid.UUID, mode
 		currentModelInfo = modelID.String()
 	}
 
-	thinkStatus := pterm.FgGray.Sprint("off")
+	thinkStatus := styleGray.Render("off")
 	if state.Thinking {
 		if state.ThinkingLevel != "" {
-			thinkStatus = pterm.FgGreen.Sprint("on") + pterm.FgGray.Sprintf("  (%s)", state.ThinkingLevel)
+			thinkStatus = styleGreen.Render("on") + styleGray.Render(fmt.Sprintf("  (%s)", state.ThinkingLevel))
 		} else {
-			thinkStatus = pterm.FgGreen.Sprint("on")
+			thinkStatus = styleGreen.Render("on")
 		}
 	}
 
-	fmt.Println()
-	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Session Status"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Session"), pterm.FgCyan.Sprint(session.ID))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Model"), pterm.FgMagenta.Sprint(currentModelInfo))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Thinking"), thinkStatus)
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Tokens used"), pterm.FgYellow.Sprint(session.TokenConsumed))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Messages"), pterm.FgGreen.Sprint(len(session.Messages)))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Created"), pterm.FgGray.Sprint(session.CreatedAt.Format("2006-01-02 15:04:05")))
-	fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Updated"), pterm.FgGray.Sprint(session.UpdatedAt.Format("2006-01-02 15:04:05")))
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(renderSectionHeader("Session Status"))
+	sb.WriteString(renderKV("Session", styleCyan.Render(session.ID.String()), 16))
+	sb.WriteString(renderKV("Model", styleMagenta.Render(currentModelInfo), 16))
+	sb.WriteString(renderKV("Thinking", thinkStatus, 16))
+	sb.WriteString(renderKV("Tokens used", styleYellow.Render(fmt.Sprint(session.TokenConsumed)), 16))
+	sb.WriteString(renderKV("Messages", styleGreen.Render(fmt.Sprint(len(session.Messages))), 16))
+	sb.WriteString(renderKV("Created", styleGray.Render(session.CreatedAt.Format("2006-01-02 15:04:05")), 16))
+	sb.WriteString(renderKV("Updated", styleGray.Render(session.UpdatedAt.Format("2006-01-02 15:04:05")), 16))
 
-	fmt.Println()
+	bridge.Print(sb.String())
 
 	return CommandResult{Handled: true}, nil
 }
 
-func handleHistoryCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleHistoryCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	session, err := b.GetSession(sessionID)
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	if len(session.Messages) == 0 {
-		pterm.Info.Println("No message history available")
+		bridge.Info("No message history available")
 		return CommandResult{Handled: true}, nil
 	}
 
-	if err := openHistoryViewer(session.Messages); err != nil {
-		pterm.Warning.Printf("Failed to open interactive viewer: %v\n", err)
-		pterm.Info.Println("Showing history in console instead...")
-		fmt.Println()
-		printMessageHistory(session.Messages)
-		fmt.Println()
-	}
+	bridge.Print(renderMessageHistoryToString(session.Messages, false))
 
 	return CommandResult{Handled: true}, nil
 }

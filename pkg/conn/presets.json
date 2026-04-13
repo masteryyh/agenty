@@ -1,0 +1,387 @@
+{
+    "providers": [
+        {
+            "id": "019d81b2-434f-7743-8ef7-62c102851871",
+            "name": "OpenAI",
+            "type": "openai",
+            "baseUrl": "https://api.openai.com/v1",
+            "models": [
+                {
+                    "id": "019d81b2-434f-7835-b472-cd0ef3b909a8",
+                    "name": "GPT-5.4-Pro",
+                    "code": "gpt-5.4-pro-2026-03-05",
+                    "contextWindow": 1050000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                },
+                {
+                    "id": "019d81b2-434f-783d-9c7f-89d8ace57bf8",
+                    "name": "GPT-5.4",
+                    "code": "gpt-5.4-2026-03-05",
+                    "contextWindow": 1050000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high", "xhigh"],
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-7845-8e95-319faec30aaf",
+                    "name": "GPT-5.4-mini",
+                    "code": "gpt-5.4-mini-2026-03-17",
+                    "contextWindow": 400000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true,
+                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                },
+                {
+                    "id": "019d81b2-434f-784d-9ed7-43a217990e58",
+                    "name": "GPT-5.4-nano",
+                    "code": "gpt-5.4-nano-2026-03-17",
+                    "contextWindow": 400000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true,
+                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                },
+                {
+                    "id": "019d81b2-434f-785c-8ce2-1b32505f2aa9",
+                    "name": "GPT-5.3 Codex",
+                    "code": "gpt-5.3-codex",
+                    "contextWindow": 400000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                },
+                {
+                    "id": "019d81b2-434f-7864-bb63-1f556270e350",
+                    "name": "GPT-4.1",
+                    "code": "gpt-4.1-2025-04-14",
+                    "contextWindow": 1047576,
+                    "thinking": false,
+                    "multiModal": true,
+                    "light": false
+                },
+                {
+                    "id": "019d81b2-434f-786c-b23d-20e295c747fa",
+                    "name": "GPT-4o",
+                    "code": "gpt-4o-2024-11-20",
+                    "contextWindow": 128000,
+                    "thinking": false,
+                    "multiModal": true,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-7874-8625-3495bc9408f4",
+                    "name": "text-embedding-3-large",
+                    "code": "text-embedding-3-large",
+                    "multiModal": false,
+                    "light": false,
+                    "embeddingModel": true
+                },
+                {
+                    "id": "019d81b2-434f-787b-be83-f61ec8f69651",
+                    "name": "text-embedding-3-small",
+                    "code": "text-embedding-3-small",
+                    "multiModal": false,
+                    "light": true,
+                    "embeddingModel": true
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-77f3-af29-f409e79f29cb",
+            "name": "Google",
+            "type": "gemini",
+            "baseUrl": "https://generativelanguage.googleapis.com",
+            "models": [
+                {
+                    "id": "019d81b2-434f-7883-8853-7f0b83147ead",
+                    "name": "Gemini 3.1 Pro",
+                    "code": "gemini-3.1-pro-preview-customtools",
+                    "contextWindow": 1048576,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high"],
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-788f-acef-0352df728823",
+                    "name": "Gemini 3.1 Flash Lite",
+                    "code": "gemini-3.1-flash-lite-preview",
+                    "contextWindow": 1048576,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true,
+                    "thinkingLevels": ["minimal", "low", "medium", "high"]
+                },
+                {
+                    "id": "019d81b2-434f-7897-a867-114a03c14eb4",
+                    "name": "Gemini 3 Flash Preview",
+                    "code": "gemini-3-flash-preview",
+                    "contextWindow": 1048576,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true,
+                    "thinkingLevels": ["minimal", "low", "medium", "high"]
+                },
+                {
+                    "id": "019d81b2-434f-789f-850d-9730d40dc187",
+                    "name": "Gemini Embedding 2 Preview",
+                    "code": "gemini-embedding-2-preview",
+                    "multiModal": true,
+                    "light": false,
+                    "embeddingModel": true
+                },
+                {
+                    "id": "019d81b2-434f-78a6-9a1c-5e6ba74795af",
+                    "name": "Gemini Embedding 001",
+                    "code": "gemini-embedding-001",
+                    "multiModal": false,
+                    "light": false,
+                    "embeddingModel": true
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-7806-b092-86f7e970f7d9",
+            "name": "Anthropic",
+            "type": "anthropic",
+            "baseUrl": "https://api.anthropic.com",
+            "models": [
+                {
+                    "id": "019d81b2-434f-78ae-83ec-3c5bd07990e2",
+                    "name": "Claude Opus 4.6",
+                    "code": "claude-opus-4-6",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high", "max"],
+                    "anthropicAdaptiveThinking": true
+                },
+                {
+                    "id": "019d81b2-434f-78b6-9d0a-d26377456aaa",
+                    "name": "Claude Sonnet 4.6",
+                    "code": "claude-sonnet-4-6",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": ["low", "medium", "high", "max"],
+                    "anthropicAdaptiveThinking": true,
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-78be-90d6-eab4d46d992a",
+                    "name": "Claude Haiku 4.5",
+                    "code": "claude-haiku-4-5-20251001",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true,
+                    "anthropicAdaptiveThinking": false
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-780e-92b7-ba90efb71cbc",
+            "name": "Kimi",
+            "type": "kimi",
+            "baseUrl": "https://api.moonshot.cn/v1",
+            "models": [
+                {
+                    "id": "019d81b2-434f-78ca-af6b-9a125c63c192",
+                    "name": "Kimi k2.5",
+                    "code": "kimi-k2.5",
+                    "contextWindow": 262144,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "defaultModel": true
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-781a-bb9f-ab387aa68020",
+            "name": "Minimax",
+            "type": "anthropic",
+            "baseUrl": "https://api.minimaxi.com/anthropic",
+            "models": [
+                {
+                    "id": "019d81b2-434f-78d1-8723-658a43c683d0",
+                    "name": "Minimax M2.7",
+                    "code": "MiniMax-M2.7",
+                    "contextWindow": 204800,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false,
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-78d9-8958-431f52c42a46",
+                    "name": "Minimax M2.7 High Speed",
+                    "code": "MiniMax-M2.7-highspeed",
+                    "contextWindow": 204800,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-78e1-af15-7af0f27b1a4e",
+                    "name": "Minimax M2.5",
+                    "code": "MiniMax-M2.5",
+                    "contextWindow": 204800,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false
+                },
+                {
+                    "id": "019d81b2-434f-78ed-8e48-1c416ba3a601",
+                    "name": "Minimax M2.5 High Speed",
+                    "code": "MiniMax-M2.5-highspeed",
+                    "contextWindow": 204800,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": true
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-7822-b16b-7013255b4d4c",
+            "name": "BigModel (Zhipu AI)",
+            "type": "bigmodel",
+            "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+            "models": [
+                {
+                    "id": "019d81b2-434f-7c77-a252-d2e4c9fb8667",
+                    "name": "GLM-5.1",
+                    "code": "glm-5.1",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false,
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-7c92-9b93-1e7eeea222f5",
+                    "name": "GLM-5V-Turbo",
+                    "code": "glm-5v-turbo",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-7c9e-afad-677d92566544",
+                    "name": "GLM-4.7",
+                    "code": "glm-4.7",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false
+                },
+                {
+                    "id": "019d81b2-434f-7caa-b4bb-faa1782e84bf",
+                    "name": "GLM-4.7-FlashX",
+                    "code": "glm-4.7-flashx",
+                    "contextWindow": 200000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-7cb2-bf4e-a75d42ce3a2d",
+                    "name": "Embedding-3",
+                    "code": "embedding-3",
+                    "contextWindow": 8192,
+                    "multiModal": false,
+                    "light": false,
+                    "embeddingModel": true
+                },
+                {
+                    "id": "019d81b2-434f-7cb5-9797-4634bc836d88",
+                    "name": "Embedding-2",
+                    "code": "embedding-2",
+                    "contextWindow": 8192,
+                    "multiModal": false,
+                    "light": false,
+                    "embeddingModel": true
+                }
+            ]
+        },
+        {
+            "id": "019d81b2-434f-782d-8abd-e341e00c04fa",
+            "name": "Qwen",
+            "type": "qwen",
+            "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "models": [
+                {
+                    "id": "019d81b2-434f-7cc9-b2ef-976ac31293a3",
+                    "name": "Qwen3.6 Plus",
+                    "code": "qwen3.6-plus",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "defaultModel": true
+                },
+                {
+                    "id": "019d81b2-434f-7cd1-9112-91222d331196",
+                    "name": "Qwen3.5 Flash",
+                    "code": "qwen3.5-flash",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-7cd9-91ff-486d798944e3",
+                    "name": "Qwen3.5 Omni Plus",
+                    "code": "qwen3.5-omni-plus",
+                    "contextWindow": 256000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false
+                },
+                {
+                    "id": "019d81b2-434f-7ce0-b93d-de027adb1c82",
+                    "name": "Qwen3.5 Omni Flash",
+                    "code": "qwen3.5-omni-flash",
+                    "contextWindow": 256000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": true
+                },
+                {
+                    "id": "019d81b2-434f-7ce8-8686-6c209be98f83",
+                    "name": "Qwen3 Max",
+                    "code": "qwen3-max",
+                    "contextWindow": 256000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false
+                },
+                {
+                    "id": "019d81c4-ef67-7df7-8788-90ae8b0d04e7",
+                    "name": "Tongyi Embedding Vision Plus",
+                    "code": "tongyi-embedding-vision-plus",
+                    "embeddingModel": true,
+                    "multiModal": true
+                },
+                {
+                    "id": "019d81c6-fb26-7d9a-9ad0-17d46eb3752c",
+                    "name": "Tongyi Embedding Vision Flash",
+                    "code": "tongyi-embedding-vision-flash",
+                    "embeddingModel": true,
+                    "multiModal": true
+                }
+            ]
+        }
+    ]
+}

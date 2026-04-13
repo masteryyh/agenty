@@ -21,26 +21,25 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/pterm/pterm"
 )
 
-func handleExitCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	pterm.Info.Println("Goodbye!")
+func handleExitCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	bridge.Info("Goodbye!")
 	return CommandResult{Handled: true, ShouldExit: true}, nil
 }
 
-func handleThinkCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleThinkCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if len(args) == 0 {
 		if state.Thinking {
 			if state.ThinkingLevel != "" {
-				pterm.Info.Printf("Thinking is %s (level: %s)\n", pterm.FgGreen.Sprint("on"), pterm.FgYellow.Sprint(state.ThinkingLevel))
+				bridge.Info("Thinking is %s (level: %s)", styleGreen.Render("on"), styleYellow.Render(state.ThinkingLevel))
 			} else {
-				pterm.Info.Printf("Thinking is %s\n", pterm.FgGreen.Sprint("on"))
+				bridge.Info("Thinking is %s", styleGreen.Render("on"))
 			}
 		} else {
-			pterm.Info.Printf("Thinking is %s\n", pterm.FgRed.Sprint("off"))
+			bridge.Info("Thinking is %s", styleRed.Render("off"))
 		}
-		pterm.Info.Println("Usage: /think [off|<level>]")
+		bridge.Info("Usage: /think [off|<level>]")
 		return CommandResult{Handled: true}, nil
 	}
 
@@ -48,7 +47,7 @@ func handleThinkCmd(b backend.Backend, args []string, sessionID uuid.UUID, model
 	if arg == "off" {
 		state.Thinking = false
 		state.ThinkingLevel = ""
-		pterm.Success.Println("Thinking disabled")
+		bridge.Success("Thinking disabled")
 		return CommandResult{Handled: true}, nil
 	}
 
@@ -66,20 +65,20 @@ func handleThinkCmd(b backend.Backend, args []string, sessionID uuid.UUID, model
 	}
 	if !valid {
 		if len(supportedLevels) == 0 {
-			pterm.Error.Printf("Model does not support thinking\n")
+			bridge.Error("Model does not support thinking")
 		} else {
-			pterm.Error.Printf("Unknown level: %s. Supported: %s\n", arg, strings.Join(supportedLevels, ", "))
+			bridge.Error("Unknown level: %s. Supported: %s", arg, strings.Join(supportedLevels, ", "))
 		}
 		return CommandResult{Handled: true}, nil
 	}
 
 	state.Thinking = true
 	state.ThinkingLevel = arg
-	pterm.Success.Printf("Thinking enabled (level: %s)\n", pterm.FgYellow.Sprint(arg))
+	bridge.Success("Thinking enabled (level: %s)", styleYellow.Render(arg))
 	return CommandResult{Handled: true}, nil
 }
 
-func handleHelpCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	PrintCommandHints()
+func handleHelpCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	bridge.Print(renderCommandHintsToString())
 	return CommandResult{Handled: true}, nil
 }

@@ -33,98 +33,201 @@ import (
 )
 
 const (
-	kimiDefaultBaseURL = "https://api.moonshot.ai/v1"
-	kimiToolTypeFunc   = "function"
-	kimiThinkingOff    = "disabled"
+	bigModelDefaultBaseURL = "https://open.bigmodel.cn/api/paas/v4"
+	bigModelToolTypeFunc   = "function"
 )
 
-type KimiProvider struct {
+type BigModelProvider struct {
 	httpClient *http.Client
 }
 
-func NewKimiProvider() *KimiProvider {
-	return &KimiProvider{
+func NewBigModelProvider() *BigModelProvider {
+	return &BigModelProvider{
 		httpClient: &http.Client{},
 	}
 }
 
-func (p *KimiProvider) Name() string {
-	return "kimi"
+func (p *BigModelProvider) Name() string {
+	return "bigmodel"
 }
 
-type kimiRequest struct {
-	Model          string              `json:"model"`
-	Messages       []kimiMessage       `json:"messages"`
-	Tools          []kimiTool          `json:"tools,omitempty"`
-	Thinking       *kimiThinking       `json:"thinking,omitempty"`
-	ResponseFormat *kimiResponseFormat `json:"response_format,omitempty"`
-	Stream         bool                `json:"stream,omitempty"`
+type bigModelRequest struct {
+	Model    string            `json:"model"`
+	Messages []bigModelMessage `json:"messages"`
+	Tools    []bigModelTool    `json:"tools,omitempty"`
+	Thinking *bigModelThinking `json:"thinking,omitempty"`
+	Stream   bool              `json:"stream,omitempty"`
 }
 
-type kimiResponseFormat struct {
-	Type string `json:"type"`
-}
-
-type kimiMessage struct {
+type bigModelMessage struct {
 	Role             models.MessageRole `json:"role"`
 	Content          string             `json:"content"`
-	ToolCalls        []kimiToolCall     `json:"tool_calls,omitempty"`
+	ToolCalls        []bigModelToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string             `json:"tool_call_id,omitempty"`
 	ReasoningContent string             `json:"reasoning_content,omitempty"`
 }
 
-type kimiToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function kimiToolFunction `json:"function"`
+type bigModelToolCall struct {
+	ID       string               `json:"id"`
+	Type     string               `json:"type"`
+	Function bigModelToolCallFunc `json:"function"`
 }
 
-type kimiToolFunction struct {
+type bigModelToolCallFunc struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
-type kimiTool struct {
+type bigModelTool struct {
 	Type     string              `json:"type"`
-	Function kimiToolFunctionDef `json:"function"`
+	Function bigModelToolFuncDef `json:"function"`
 }
 
-type kimiToolFunctionDef struct {
+type bigModelToolFuncDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
 }
 
-type kimiThinking struct {
-	Type string `json:"type"`
+type bigModelThinking struct {
+	Type          string `json:"type"`
+	ClearThinking bool   `json:"clear_thinking"`
 }
 
-type kimiResponse struct {
-	Choices []kimiChoice `json:"choices"`
-	Usage   kimiUsage    `json:"usage"`
-	Error   *kimiError   `json:"error,omitempty"`
+type bigModelResponse struct {
+	Choices []bigModelChoice `json:"choices"`
+	Usage   bigModelUsage    `json:"usage"`
+	Error   *bigModelError   `json:"error,omitempty"`
 }
 
-type kimiChoice struct {
-	Message kimiMessage `json:"message"`
+type bigModelChoice struct {
+	Message bigModelMessage `json:"message"`
 }
 
-type kimiUsage struct {
+type bigModelUsage struct {
 	TotalTokens int64 `json:"total_tokens"`
 }
 
-type kimiError struct {
+type bigModelError struct {
 	Message string `json:"message"`
-	Type    string `json:"type"`
+	Code    string `json:"code"`
 }
 
-func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	baseURL := req.BaseURL
-	if baseURL == "" {
-		baseURL = kimiDefaultBaseURL
+type bigModelStreamChunk struct {
+	Choices []bigModelStreamChoice `json:"choices"`
+	Usage   *bigModelUsage         `json:"usage,omitempty"`
+}
+
+type bigModelStreamChoice struct {
+	Delta bigModelStreamDelta `json:"delta"`
+}
+
+type bigModelStreamDelta struct {
+	Content          string             `json:"content,omitempty"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	ToolCalls        []bigModelToolCall `json:"tool_calls,omitempty"`
+	Role             string             `json:"role,omitempty"`
+}
+
+func buildBigModelMessages(messages []Message) []bigModelMessage {
+	return lo.FilterMap(messages, func(msg Message, _ int) (bigModelMessage, bool) {
+		switch msg.Role {
+		case models.RoleUser:
+			return bigModelMessage{
+				Role:    models.RoleUser,
+				Content: msg.Content,
+			}, true
+		case models.RoleAssistant:
+			bm := bigModelMessage{
+				Role:             models.RoleAssistant,
+				Content:          msg.Content,
+				ReasoningContent: msg.ReasoningContent,
+			}
+			if len(msg.ToolCalls) > 0 {
+				bm.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) bigModelToolCall {
+					return bigModelToolCall{
+						ID:   tc.ID,
+						Type: bigModelToolTypeFunc,
+						Function: bigModelToolCallFunc{
+							Name:      tc.Name,
+							Arguments: string(tc.Arguments),
+						},
+					}
+				})
+			}
+			return bm, true
+		case models.RoleTool:
+			if msg.ToolResult != nil {
+				return bigModelMessage{
+					Role:       models.RoleTool,
+					Content:    msg.ToolResult.Content,
+					ToolCallID: msg.ToolResult.CallID,
+				}, true
+			}
+			return bigModelMessage{}, false
+		case models.RoleSystem:
+			return bigModelMessage{
+				Role:    models.RoleSystem,
+				Content: msg.Content,
+			}, true
+		default:
+			return bigModelMessage{}, false
+		}
+	})
+}
+
+func buildBigModelTools(defs []tools.ToolDefinition) []bigModelTool {
+	return lo.Map(defs, func(def tools.ToolDefinition, _ int) bigModelTool {
+		properties := make(map[string]any)
+		for name, prop := range def.Parameters.Properties {
+			properties[name] = prop.ToMap()
+		}
+		return bigModelTool{
+			Type: bigModelToolTypeFunc,
+			Function: bigModelToolFuncDef{
+				Name:        def.Name,
+				Description: def.Description,
+				Parameters: map[string]any{
+					"type":       def.Parameters.Type,
+					"properties": properties,
+					"required":   def.Parameters.Required,
+				},
+			},
+		}
+	})
+}
+
+func (p *BigModelProvider) buildRequest(req *ChatRequest, stream bool) bigModelRequest {
+	messages := buildBigModelMessages(req.Messages)
+	apiReq := bigModelRequest{
+		Model:    req.Model,
+		Messages: messages,
+		Stream:   stream,
 	}
 
-	apiReq := p.buildKimiRequest(req, false)
+	thinkingType := "enabled"
+	if !req.Thinking {
+		thinkingType = "disabled"
+	}
+	apiReq.Thinking = &bigModelThinking{
+		Type:          thinkingType,
+		ClearThinking: req.BigModelClearThinking,
+	}
+
+	if len(req.Tools) > 0 {
+		apiReq.Tools = buildBigModelTools(req.Tools)
+	}
+
+	return apiReq
+}
+
+func (p *BigModelProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = bigModelDefaultBaseURL
+	}
+
+	apiReq := p.buildRequest(req, false)
 
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -153,7 +256,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
 	}
 
-	var apiResp kimiResponse
+	var apiResp bigModelResponse
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -172,7 +275,7 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 		result.ReasoningContent = choice.Message.ReasoningContent
 
 		if len(choice.Message.ToolCalls) > 0 {
-			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc kimiToolCall, _ int) models.ToolCall {
+			result.ToolCalls = lo.Map(choice.Message.ToolCalls, func(tc bigModelToolCall, _ int) models.ToolCall {
 				return models.ToolCall{
 					ID:        tc.ID,
 					Name:      tc.Function.Name,
@@ -185,124 +288,13 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	return result, nil
 }
 
-func buildKimiMessages(messages []Message) []kimiMessage {
-	return lo.FilterMap(messages, func(msg Message, _ int) (kimiMessage, bool) {
-		switch msg.Role {
-		case models.RoleUser:
-			return kimiMessage{
-				Role:             models.RoleUser,
-				Content:          msg.Content,
-				ReasoningContent: msg.ReasoningContent,
-			}, true
-		case models.RoleAssistant:
-			km := kimiMessage{
-				Role:             models.RoleAssistant,
-				Content:          msg.Content,
-				ReasoningContent: msg.ReasoningContent,
-			}
-			if len(msg.ToolCalls) > 0 {
-				km.ToolCalls = lo.Map(msg.ToolCalls, func(tc models.ToolCall, _ int) kimiToolCall {
-					return kimiToolCall{
-						ID:   tc.ID,
-						Type: kimiToolTypeFunc,
-						Function: kimiToolFunction{
-							Name:      tc.Name,
-							Arguments: string(tc.Arguments),
-						},
-					}
-				})
-			}
-			return km, true
-		case models.RoleTool:
-			if msg.ToolResult != nil {
-				return kimiMessage{
-					Role:             models.RoleTool,
-					Content:          msg.ToolResult.Content,
-					ToolCallID:       msg.ToolResult.CallID,
-					ReasoningContent: msg.ReasoningContent,
-				}, true
-			}
-			return kimiMessage{}, false
-		case models.RoleSystem:
-			return kimiMessage{
-				Role:    models.RoleSystem,
-				Content: msg.Content,
-			}, true
-		default:
-			return kimiMessage{}, false
-		}
-	})
-}
-
-func buildKimiTools(defs []tools.ToolDefinition) []kimiTool {
-	return lo.Map(defs, func(def tools.ToolDefinition, _ int) kimiTool {
-		properties := make(map[string]any)
-		for name, prop := range def.Parameters.Properties {
-			properties[name] = prop.ToMap()
-		}
-		return kimiTool{
-			Type: kimiToolTypeFunc,
-			Function: kimiToolFunctionDef{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters: map[string]any{
-					"type":       def.Parameters.Type,
-					"properties": properties,
-					"required":   def.Parameters.Required,
-				},
-			},
-		}
-	})
-}
-
-type kimiStreamChunk struct {
-	Choices []kimiStreamChoice `json:"choices"`
-	Usage   *kimiUsage         `json:"usage,omitempty"`
-}
-
-type kimiStreamChoice struct {
-	Delta kimiStreamDelta `json:"delta"`
-}
-
-type kimiStreamDelta struct {
-	Content          string         `json:"content,omitempty"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
-	ToolCalls        []kimiToolCall `json:"tool_calls,omitempty"`
-	Role             string         `json:"role,omitempty"`
-}
-
-func (p *KimiProvider) buildKimiRequest(req *ChatRequest, stream bool) kimiRequest {
-	messages := buildKimiMessages(req.Messages)
-	apiReq := kimiRequest{
-		Model:    req.Model,
-		Messages: messages,
-		Stream:   stream,
-	}
-
-	isThinkingModel := req.Model == "kimi-k2-thinking" || req.Model == "kimi-k2.5" ||
-		strings.HasPrefix(req.Model, "kimi-k2")
-	if !isThinkingModel {
-		apiReq.Thinking = &kimiThinking{Type: kimiThinkingOff}
-	}
-
-	if len(req.Tools) > 0 {
-		apiReq.Tools = buildKimiTools(req.Tools)
-	}
-
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_object" {
-		apiReq.ResponseFormat = &kimiResponseFormat{Type: "json_object"}
-	}
-
-	return apiReq
-}
-
-func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	baseURL := req.BaseURL
 	if baseURL == "" {
-		baseURL = kimiDefaultBaseURL
+		baseURL = bigModelDefaultBaseURL
 	}
 
-	apiReq := p.buildKimiRequest(req, true)
+	apiReq := p.buildRequest(req, true)
 
 	body, err := json.Marshal(apiReq)
 	if err != nil {
@@ -330,7 +322,7 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 
 	ch := make(chan StreamEvent, 64)
 
-	safe.GoOnce("kimi-stream", func() {
+	safe.GoOnce("bigmodel-stream", func() {
 		defer close(ch)
 		defer httpResp.Body.Close()
 
@@ -359,7 +351,7 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 				break
 			}
 
-			var chunk kimiStreamChunk
+			var chunk bigModelStreamChunk
 			if err := json.UnmarshalString(data, &chunk); err != nil {
 				continue
 			}

@@ -22,22 +22,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/models"
 )
 
 type ChatState struct {
-	Thinking      bool
-	ThinkingLevel string
+	Thinking        bool
+	ThinkingLevel   string
+	HistoryOffset   int
 }
 
 type CommandResult struct {
-	Handled      bool
-	NewSessionID uuid.UUID
-	NewModelID   uuid.UUID
-	NewAgentID   uuid.UUID
-	ShouldExit   bool
+	Handled         bool
+	NewSessionID    uuid.UUID
+	NewModelID      uuid.UUID
+	NewAgentID      uuid.UUID
+	NewModelName    string
+	NewAgentName    string
+	SessionMessages []models.ChatMessageDto
+	TokenConsumed   int64
+	ShouldExit      bool
 }
 
-type CommandHandler func(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
+type CommandHandler func(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
 	"/new":        handleNewCmd,
@@ -80,22 +86,6 @@ func parseSlashInput(input string) []string {
 	return parts
 }
 
-func handleSlashCommand(b backend.Backend, input string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	parts := parseSlashInput(input)
-	if len(parts) == 0 {
-		return CommandResult{}, nil
-	}
-
-	command := strings.ToLower(parts[0])
-
-	handler, ok := commandRegistry[command]
-	if !ok {
-		return CommandResult{}, nil
-	}
-
-	return handler(b, parts[1:], sessionID, modelID, agentID, state)
-}
-
 func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error) {
 	parts := strings.Split(modelSpec, "/")
 	if len(parts) != 2 {
@@ -133,10 +123,6 @@ func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 	}
 
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
-}
-
-func clearScreen() {
-	fmt.Print("\033[2J\033[H")
 }
 
 var listHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  Ctrl+D delete  ·  Esc back"

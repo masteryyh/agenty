@@ -21,86 +21,87 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/cli/ui"
 	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/pterm/pterm"
 )
 
 var webSearchProviderOptions = []string{"disabled", "tavily", "brave", "firecrawl"}
 
-func handleSettingsCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleSettingsCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	settings, err := b.GetSystemSettings()
 	if err != nil {
 		return CommandResult{Handled: true}, fmt.Errorf("failed to get settings: %w", err)
 	}
 
 	if len(args) == 0 {
-		if err := doEditSettings(b, settings); err != nil && !errors.Is(err, ui.ErrCancelled) {
-			pterm.Error.Printf("Failed to update settings: %v\n", err)
+		if err := doEditSettings(b, bridge, settings); err != nil && !errors.Is(err, ErrCancelled) {
+			bridge.Error("Failed to update settings: %v", err)
 		}
 		return CommandResult{Handled: true}, nil
 	}
 
 	switch args[0] {
 	case "show":
-		printSettings(settings)
+		printSettings(bridge, settings)
 	case "edit":
-		if err := doEditSettings(b, settings); err != nil && !errors.Is(err, ui.ErrCancelled) {
-			pterm.Error.Printf("Failed to update settings: %v\n", err)
+		if err := doEditSettings(b, bridge, settings); err != nil && !errors.Is(err, ErrCancelled) {
+			bridge.Error("Failed to update settings: %v", err)
 		}
 	default:
-		pterm.Warning.Printf("Unknown subcommand: %s\n", args[0])
-		pterm.Info.Println("Usage: /settings [show|edit]")
+		bridge.Warning("Unknown subcommand: %s", args[0])
+		bridge.Info("Usage: /settings [show|edit]")
 	}
 
 	return CommandResult{Handled: true}, nil
 }
 
-func printSettings(settings *models.SystemSettingsDto) {
-	fmt.Println()
-	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("System Settings"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+func printSettings(bridge *UIBridge, settings *models.SystemSettingsDto) {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(renderSectionHeader("System Settings"))
 
-	embeddingModel := pterm.FgGray.Sprint("not set")
+	embeddingModel := styleGray.Render("not set")
 	if settings.EmbeddingModelID != nil {
-		embeddingModel = pterm.FgCyan.Sprint(settings.EmbeddingModelID.String())
+		embeddingModel = styleCyan.Render(settings.EmbeddingModelID.String())
 	}
-	compressionModel := pterm.FgGray.Sprint("not set")
+	compressionModel := styleGray.Render("not set")
 	if settings.ContextCompressionModelID != nil {
-		compressionModel = pterm.FgCyan.Sprint(settings.ContextCompressionModelID.String())
+		compressionModel = styleCyan.Render(settings.ContextCompressionModelID.String())
 	}
 
-	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Embedding Model"), embeddingModel)
-	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Compression Model"), compressionModel)
+	sb.WriteString(renderKV("Embedding Model", embeddingModel, 24))
+	sb.WriteString(renderKV("Compression Model", compressionModel, 24))
 
-	fmt.Println()
-	fmt.Printf("  %s\n  %s\n\n", pterm.Bold.Sprint("Web Search"), pterm.FgGray.Sprint(strings.Repeat("─", 56)))
+	sb.WriteString("\n")
+	sb.WriteString(renderSectionHeader("Web Search"))
 
-	providerStr := pterm.FgGray.Sprint("disabled")
+	providerStr := styleGray.Render("disabled")
 	if settings.WebSearchProvider != "" && settings.WebSearchProvider != models.WebSearchProviderDisabled {
-		providerStr = pterm.FgGreen.Sprint(string(settings.WebSearchProvider))
+		providerStr = styleGreen.Render(string(settings.WebSearchProvider))
 	}
-	fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Provider"), providerStr)
+	sb.WriteString(renderKV("Provider", providerStr, 24))
 
-	printAPIKeyField := func(label, val string) {
-		display := pterm.FgGray.Sprint("not set")
+	writeAPIKeyField := func(label, val string) {
+		display := styleGray.Render("not set")
 		if val != "" {
-			display = pterm.FgYellow.Sprint(val)
+			display = styleYellow.Render(val)
 		}
-		fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint(label), display)
+		sb.WriteString(renderKV(label, display, 24))
 	}
 
-	printAPIKeyField("Brave API Key", settings.BraveAPIKey)
-	printAPIKeyField("Tavily API Key", settings.TavilyAPIKey)
-	printAPIKeyField("Firecrawl API Key", settings.FirecrawlAPIKey)
+	writeAPIKeyField("Brave API Key", settings.BraveAPIKey)
+	writeAPIKeyField("Tavily API Key", settings.TavilyAPIKey)
+	writeAPIKeyField("Firecrawl API Key", settings.FirecrawlAPIKey)
 	if settings.FirecrawlBaseURL != "" {
-		fmt.Printf("  %-24s %s\n", pterm.FgGray.Sprint("Firecrawl Base URL"), pterm.FgGray.Sprint(settings.FirecrawlBaseURL))
+		sb.WriteString(renderKV("Firecrawl Base URL", styleGray.Render(settings.FirecrawlBaseURL), 24))
 	}
-	fmt.Println()
+
+	bridge.Print(sb.String())
 }
 
-func doEditSettings(b backend.Backend, settings *models.SystemSettingsDto) error {
+func doEditSettings(b backend.Backend, bridge *UIBridge, settings *models.SystemSettingsDto) error {
 	defaultProviderIdx := 0
 	for i, opt := range webSearchProviderOptions {
 		if opt == string(settings.WebSearchProvider) {
@@ -109,48 +110,51 @@ func doEditSettings(b backend.Backend, settings *models.SystemSettingsDto) error
 		}
 	}
 
-	fields := []*ui.FormField{
-		ui.SelectField("Web Search Provider", webSearchProviderOptions, defaultProviderIdx),
-		ui.TextField("Brave API Key", "", false),
-		ui.TextField("Tavily API Key", "", false),
-		ui.TextField("Firecrawl API Key", "", false),
-		ui.TextField("Firecrawl Base URL", settings.FirecrawlBaseURL, false),
+	providerOpts := make([]huh.Option[string], len(webSearchProviderOptions))
+	for i, p := range webSearchProviderOptions {
+		providerOpts[i] = huh.NewOption(p, p)
 	}
 
-	fields[1].Placeholder = "leave blank to keep"
-	fields[2].Placeholder = "leave blank to keep"
-	fields[3].Placeholder = "leave blank to keep"
-	fields[4].Placeholder = "leave blank for default (https://api.firecrawl.dev)"
+	selectedProvider := webSearchProviderOptions[defaultProviderIdx]
+	var braveKey, tavilyKey, firecrawlKey, firecrawlBaseURL string
 
-	submitted, err := ui.ShowForm("System Settings", fields)
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Web Search Provider").Options(providerOpts...).Value(&selectedProvider),
+		huh.NewInput().Title("Brave API Key").Placeholder("leave blank to keep").Value(&braveKey),
+		huh.NewInput().Title("Tavily API Key").Placeholder("leave blank to keep").Value(&tavilyKey),
+		huh.NewInput().Title("Firecrawl API Key").Placeholder("leave blank to keep").Value(&firecrawlKey),
+		huh.NewInput().Title("Firecrawl Base URL").Placeholder("leave blank for default (https://api.firecrawl.dev)").Value(&firecrawlBaseURL),
+	))
+
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	provider := models.WebSearchProvider(webSearchProviderOptions[fields[0].SelIdx])
+	provider := models.WebSearchProvider(selectedProvider)
 	dto := &models.UpdateSystemSettingsDto{
 		WebSearchProvider: &provider,
 	}
 
-	if v := fields[1].Value; v != "" {
-		dto.BraveAPIKey = &v
+	if strings.TrimSpace(braveKey) != "" {
+		dto.BraveAPIKey = &braveKey
 	}
-	if v := fields[2].Value; v != "" {
-		dto.TavilyAPIKey = &v
+	if strings.TrimSpace(tavilyKey) != "" {
+		dto.TavilyAPIKey = &tavilyKey
 	}
-	if v := fields[3].Value; v != "" {
-		dto.FirecrawlAPIKey = &v
+	if strings.TrimSpace(firecrawlKey) != "" {
+		dto.FirecrawlAPIKey = &firecrawlKey
 	}
-	if v := fields[4].Value; v != "" {
-		dto.FirecrawlBaseURL = &v
+	if strings.TrimSpace(firecrawlBaseURL) != "" {
+		dto.FirecrawlBaseURL = &firecrawlBaseURL
 	}
 
 	if _, err := b.UpdateSystemSettings(dto); err != nil {
 		return err
 	}
-	pterm.Success.Println("Settings updated successfully")
+	bridge.Success("Settings updated successfully")
 	return nil
 }

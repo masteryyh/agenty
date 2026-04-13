@@ -19,21 +19,17 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"os"
-	"strings"
 
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/chat/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
-	"github.com/masteryyh/agenty/pkg/consts"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
-	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -82,9 +78,6 @@ agentic looping and skills usage capabilities.`,
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./agenty.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
-
-	pterm.DefaultInteractiveSelect.Selector = "❯"
-	pterm.DefaultInteractiveSelect.MaxHeight = 8
 }
 
 func startLocalMode() error {
@@ -94,7 +87,7 @@ func startLocalMode() error {
 	defer cancel()
 
 	slog.InfoContext(baseCtx, "initializing database connection...")
-	if err := conn.InitDB(baseCtx, cfg.DB); err != nil {
+	if err := conn.InitDB(baseCtx, cfg.DB, cfg.Debug); err != nil {
 		return fmt.Errorf("failed to initialize database connection: %w", err)
 	}
 
@@ -113,14 +106,6 @@ func startLocalMode() error {
 
 func Execute() error {
 	return rootCmd.Execute()
-}
-
-func showBanner() {
-	index := rand.IntN(len(consts.ASCIIArts))
-	banner := strings.Trim(consts.ASCIIArts[index], "\n")
-	fmt.Println(pterm.FgLightCyan.Sprint(banner))
-	fmt.Println(pterm.FgGray.Sprint("  AI Agent Platform"))
-	fmt.Println()
 }
 
 func modelDisplayName(m models.ModelDto) string {

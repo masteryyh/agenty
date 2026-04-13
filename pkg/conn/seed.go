@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,166 +18,194 @@ package conn
 
 import (
 	"context"
+	_ "embed"
 	"log/slog"
 
 	json "github.com/bytedance/sonic"
+	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/models"
 	"gorm.io/gorm"
 )
 
-type presetProvider struct {
-	Name    string
-	Type    models.APIType
-	BaseURL string
-	Models  []presetModel
+//go:embed presets.json
+var presetsJSON []byte
+
+type presetModelJSON struct {
+	ID                        string   `json:"id"`
+	Name                      string   `json:"name"`
+	Code                      string   `json:"code"`
+	ContextWindow             int      `json:"contextWindow"`
+	EmbeddingModel            bool     `json:"embeddingModel"`
+	MultiModal                bool     `json:"multiModal"`
+	Light                     bool     `json:"light"`
+	Thinking                  bool     `json:"thinking"`
+	ThinkingLevels            []string `json:"thinkingLevels"`
+	AnthropicAdaptiveThinking bool     `json:"anthropicAdaptiveThinking"`
+	DefaultModel              bool     `json:"defaultModel"`
 }
 
-type presetModel struct {
-	Name                      string
-	Code                      string
-	DefaultModel              bool
-	Thinking                  bool
-	ThinkingLevels            []string
-	AnthropicAdaptiveThinking bool
+type presetProviderJSON struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Type    models.APIType    `json:"type"`
+	BaseURL string            `json:"baseUrl"`
+	Models  []presetModelJSON `json:"models"`
 }
 
-var presetProviders = []presetProvider{
-	{
-		Name:    "OpenAI",
-		Type:    models.APITypeOpenAI,
-		BaseURL: "https://api.openai.com/v1",
-		Models: []presetModel{
-			{
-				Name:           "GPT-5.3 Codex",
-				Code:           "gpt-5.3-codex",
-				Thinking:       true,
-				ThinkingLevels: []string{"low", "medium", "high"},
-			},
-			{
-				Name:           "GPT-5.2",
-				Code:           "gpt-5.2",
-				Thinking:       true,
-				ThinkingLevels: []string{"low", "medium", "high"},
-			},
-			{
-				Name:           "GPT-4o",
-				Code:           "gpt-4o-2024-11-20",
-				Thinking:       true,
-				ThinkingLevels: []string{"low", "medium", "high"},
-			},
-		},
-	},
-	{
-		Name:    "Google",
-		Type:    models.APITypeGemini,
-		BaseURL: "https://generativelanguage.googleapis.com",
-		Models: []presetModel{
-			{
-				Name:           "Gemini 3.1 Pro Preview",
-				Code:           "gemini-3.1-pro-preview",
-				Thinking:       true,
-				ThinkingLevels: []string{"low", "medium", "high"},
-			},
-			{
-				Name:           "Gemini 3 Pro Preview",
-				Code:           "gemini-3-pro-preview",
-				Thinking:       true,
-				ThinkingLevels: []string{"low", "high"},
-			},
-			{
-				Name:           "Gemini 3 Flash Preview",
-				Code:           "gemini-3-flash-preview",
-				Thinking:       true,
-				ThinkingLevels: []string{"minimal", "low", "medium", "high"},
-			},
-		},
-	},
-	{
-		Name:    "Anthropic",
-		Type:    models.APITypeAnthropic,
-		BaseURL: "https://api.anthropic.com",
-		Models: []presetModel{
-			{
-				Name:                      "Claude Opus 4.6",
-				Code:                      "claude-opus-4-6",
-				Thinking:                  true,
-				ThinkingLevels:            []string{"low", "medium", "high", "max"},
-				AnthropicAdaptiveThinking: true,
-			},
-			{
-				Name:                      "Claude Sonnet 4.6",
-				Code:                      "claude-sonnet-4-6",
-				Thinking:                  true,
-				ThinkingLevels:            []string{"low", "medium", "high", "max"},
-				AnthropicAdaptiveThinking: true,
-			},
-			{
-				Name:                      "Claude Haiku 4.5",
-				Code:                      "claude-haiku-4-5-20251001",
-				Thinking:                  true,
-				AnthropicAdaptiveThinking: true,
-			},
-		},
-	},
-	{
-		Name:    "Kimi",
-		Type:    models.APITypeKimi,
-		BaseURL: "https://api.moonshot.cn/v1",
-		Models: []presetModel{
-			{
-				Name:         "Kimi k2.5",
-				Code:         "kimi-k2.5",
-				DefaultModel: true,
-				Thinking:     true,
-			},
-		},
-	},
+type presetsFile struct {
+	Providers []presetProviderJSON `json:"providers"`
 }
 
 func seedPresets(ctx context.Context, db *gorm.DB) error {
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, pp := range presetProviders {
-			var count int64
-			if err := tx.Model(&models.ModelProvider{}).
-				Where("name = ? AND type = ? AND deleted_at IS NULL", pp.Name, pp.Type).
-				Count(&count).Error; err != nil {
+	var file presetsFile
+	if err := json.Unmarshal(presetsJSON, &file); err != nil {
+		return err
+	}
+
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		jsonProviderIDs := make([]uuid.UUID, 0, len(file.Providers))
+		jsonModelIDs := make([]uuid.UUID, 0)
+
+		for _, pp := range file.Providers {
+			providerID, err := uuid.Parse(pp.ID)
+			if err != nil {
 				return err
 			}
-			if count > 0 {
-				continue
+			jsonProviderIDs = append(jsonProviderIDs, providerID)
+
+			var existing models.ModelProvider
+			err = tx.Where("id = ?", providerID).First(&existing).Error
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return err
 			}
 
-			provider := &models.ModelProvider{
-				Name:    pp.Name,
-				Type:    pp.Type,
-				BaseURL: pp.BaseURL,
-				APIKey:  "",
+			if err == gorm.ErrRecordNotFound {
+				provider := &models.ModelProvider{
+					ID:       providerID,
+					Name:     pp.Name,
+					Type:     pp.Type,
+					BaseURL:  pp.BaseURL,
+					APIKey:   "",
+					IsPreset: true,
+				}
+				if createErr := tx.Create(provider).Error; createErr != nil {
+					return createErr
+				}
+				slog.InfoContext(ctx, "created preset provider", "name", pp.Name)
+			} else {
+				if updateErr := tx.Model(&existing).Updates(map[string]any{
+					"name":       pp.Name,
+					"type":       pp.Type,
+					"base_url":   pp.BaseURL,
+					"is_preset":  true,
+					"deleted_at": nil,
+				}).Error; updateErr != nil {
+					return updateErr
+				}
 			}
-			if err := tx.Create(provider).Error; err != nil {
-				return err
-			}
-			slog.InfoContext(ctx, "created preset provider", "name", pp.Name)
 
 			for _, pm := range pp.Models {
+				modelID, err := uuid.Parse(pm.ID)
+				if err != nil {
+					return err
+				}
+				jsonModelIDs = append(jsonModelIDs, modelID)
+
 				thinkingLevels := []byte("[]")
 				if len(pm.ThinkingLevels) > 0 {
 					thinkingLevels, _ = json.Marshal(pm.ThinkingLevels)
 				}
-				model := &models.Model{
-					ProviderID:                provider.ID,
-					Name:                      pm.Name,
-					Code:                      pm.Code,
-					DefaultModel:              pm.DefaultModel,
-					Thinking:                  pm.Thinking,
-					ThinkingLevels:            thinkingLevels,
-					AnthropicAdaptiveThinking: pm.AnthropicAdaptiveThinking,
-				}
-				if err := tx.Create(model).Error; err != nil {
+
+				var existingModel models.Model
+				err = tx.Where("id = ?", modelID).First(&existingModel).Error
+				if err != nil && err != gorm.ErrRecordNotFound {
 					return err
 				}
-				slog.InfoContext(ctx, "created preset model", "provider", pp.Name, "model", pm.Name, "code", pm.Code)
+
+				if err == gorm.ErrRecordNotFound {
+					model := &models.Model{
+						ID:                        modelID,
+						ProviderID:                providerID,
+						Name:                      pm.Name,
+						Code:                      pm.Code,
+						IsPreset:                  true,
+						ContextWindow:             pm.ContextWindow,
+						EmbeddingModel:            pm.EmbeddingModel,
+						MultiModal:                pm.MultiModal,
+						Light:                     pm.Light,
+						Thinking:                  pm.Thinking,
+						ThinkingLevels:            thinkingLevels,
+						AnthropicAdaptiveThinking: pm.AnthropicAdaptiveThinking,
+					}
+					if createErr := tx.Create(model).Error; createErr != nil {
+						return createErr
+					}
+					slog.InfoContext(ctx, "created preset model", "provider", pp.Name, "model", pm.Name, "code", pm.Code)
+				} else {
+					if updateErr := tx.Model(&existingModel).Updates(map[string]any{
+						"provider_id":                 providerID,
+						"name":                        pm.Name,
+						"code":                        pm.Code,
+						"is_preset":                   true,
+						"context_window":              pm.ContextWindow,
+						"embedding_model":             pm.EmbeddingModel,
+						"multi_modal":                 pm.MultiModal,
+						"light":                       pm.Light,
+						"thinking":                    pm.Thinking,
+						"thinking_levels":             thinkingLevels,
+						"anthropic_adaptive_thinking": pm.AnthropicAdaptiveThinking,
+						"deleted_at":                  nil,
+					}).Error; updateErr != nil {
+						return updateErr
+					}
+				}
+			}
+		}
+
+		if len(jsonProviderIDs) > 0 {
+			if err := tx.Model(&models.ModelProvider{}).
+				Where("is_preset = TRUE AND id NOT IN ? AND deleted_at IS NULL", jsonProviderIDs).
+				Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+				return err
+			}
+		}
+
+		if len(jsonModelIDs) > 0 {
+			if err := tx.Model(&models.Model{}).
+				Where("is_preset = TRUE AND id NOT IN ? AND deleted_at IS NULL", jsonModelIDs).
+				Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+				return err
+			}
+		}
+
+		var defaultCount int64
+		if err := tx.Model(&models.Model{}).
+			Where("default_model = TRUE AND deleted_at IS NULL").
+			Count(&defaultCount).Error; err != nil {
+			return err
+		}
+
+		if defaultCount == 0 {
+			for _, pp := range file.Providers {
+				found := false
+				for _, pm := range pp.Models {
+					if pm.DefaultModel {
+						modelID, _ := uuid.Parse(pm.ID)
+						if err := tx.Model(&models.Model{}).
+							Where("id = ?", modelID).
+							Update("default_model", true).Error; err != nil {
+							return err
+						}
+						slog.InfoContext(ctx, "set default model", "model", pm.Name, "code", pm.Code)
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
 			}
 		}
 
@@ -196,10 +224,7 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 			}
 			slog.InfoContext(ctx, "created default agent", "name", agent.Name)
 		}
+
 		return nil
-	}); err != nil {
-		slog.ErrorContext(ctx, "failed to seed preset providers and models", "error", err)
-		return err
-	}
-	return nil
+	})
 }

@@ -21,14 +21,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/cli/ui"
 	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/pterm/pterm"
 )
 
-var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi"}
+var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi", "bigmodel"}
 
 var providerDefaultBaseURLs = map[string]string{
 	"openai":        "https://api.openai.com/v1",
@@ -36,13 +35,18 @@ var providerDefaultBaseURLs = map[string]string{
 	"anthropic":     "https://api.anthropic.com",
 	"gemini":        "https://generativelanguage.googleapis.com/v1beta",
 	"kimi":          "https://api.moonshot.cn/v1",
+	"bigmodel":      "https://open.bigmodel.cn/api/paas/v4",
 }
 
 func providerLabel(p models.ModelProviderDto) string {
-	return fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
+	label := fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
+	if p.IsPreset {
+		label += " " + styleMagenta.Render("[P]")
+	}
+	return label
 }
 
-func handleProviderCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleProviderCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	for {
 		result, err := b.ListProviders(1, 100)
 		if err != nil {
@@ -50,14 +54,14 @@ func handleProviderCmd(b backend.Backend, args []string, sessionID uuid.UUID, mo
 		}
 
 		if len(result.Data) == 0 {
-			pterm.Warning.Println("No providers found")
-			res, err := ui.ShowList("Providers", []string{"(no providers)"}, "a add  ·  Esc back")
+			bridge.Warning("No providers found")
+			res, err := bridge.ShowList("Providers", []string{"(no providers)"}, "a add  ·  Esc back")
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
-			if res.Action == ui.ListActionAdd {
-				if err := doCreateProvider(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-					pterm.Error.Printf("Failed to create provider: %v\n", err)
+			if res.Action == ListActionAdd {
+				if err := doCreateProvider(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+					bridge.Error("Failed to create provider: %v", err)
 				}
 				continue
 			}
@@ -66,112 +70,107 @@ func handleProviderCmd(b backend.Backend, args []string, sessionID uuid.UUID, mo
 
 		items := make([]string, len(result.Data))
 		for i, p := range result.Data {
-			items[i] = fmt.Sprintf("%s  %s  %s", providerLabel(p), pterm.FgGray.Sprint(p.BaseURL), pterm.FgGray.Sprint(p.APIKeyCensored))
+			items[i] = fmt.Sprintf("%s  %s  %s", providerLabel(p), styleGray.Render(p.BaseURL), styleGray.Render(p.APIKeyCensored))
 		}
 
-		res, err := ui.ShowList("Providers", items, listHints)
+		res, err := bridge.ShowList("Providers", items, listHints)
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
 
 		switch res.Action {
-		case ui.ListActionSelect:
-			target := result.Data[res.Index]
-			fmt.Println()
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Name"), target.Name)
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Type"), string(target.Type))
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Base URL"), target.BaseURL)
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("API Key"), target.APIKeyCensored)
-			fmt.Println()
-			continue
-
-		case ui.ListActionAdd:
-			if err := doCreateProvider(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to create provider: %v\n", err)
+		case ListActionSelect:
+			if err := doUpdateProvider(b, bridge, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update provider: %v", err)
 			}
 			continue
 
-		case ui.ListActionEdit:
-			if err := doUpdateProvider(b, result.Data[res.Index]); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to update provider: %v\n", err)
+		case ListActionAdd:
+			if err := doCreateProvider(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to create provider: %v", err)
 			}
 			continue
 
-		case ui.ListActionDelete:
+		case ListActionEdit:
+			if err := doUpdateProvider(b, bridge, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update provider: %v", err)
+			}
+			continue
+
+		case ListActionDelete:
 			target := result.Data[res.Index]
-			confirmed, err := ui.ShowConfirm(fmt.Sprintf("Delete provider '%s' and all its models?", target.Name))
+			if target.IsPreset {
+				bridge.Warning("'%s' is a preset provider and cannot be deleted.", target.Name)
+				continue
+			}
+			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete provider '%s' and all its models?", target.Name))
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
 				if err := b.DeleteProvider(target.ID, true); err != nil {
-					pterm.Error.Printf("Failed to delete provider: %v\n", err)
+					bridge.Error("Failed to delete provider: %v", err)
 				} else {
-					pterm.Success.Printf("Provider deleted: %s\n", target.Name)
+					bridge.Success("Provider deleted: %s", target.Name)
 				}
 			}
 			continue
 
-		case ui.ListActionCancel:
+		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
 		}
 	}
 }
 
-func doCreateProvider(b backend.Backend) error {
-	typeField := ui.SelectField("Type", providerTypeOptions, 0)
-	urlField := ui.TextField("Base URL", providerDefaultBaseURLs[providerTypeOptions[0]], true)
-	const urlFieldIdx = 2
+func doCreateProvider(b backend.Backend, bridge *UIBridge) error {
+	typeOpts := make([]huh.Option[string], len(providerTypeOptions))
+	for i, t := range providerTypeOptions {
+		typeOpts[i] = huh.NewOption(t, t)
+	}
 
-	typeField.OnChange = func(selIdx int, inputs [][]rune, update func(int, string)) {
-		typeName := providerTypeOptions[selIdx]
-		newDefault, hasDefault := providerDefaultBaseURLs[typeName]
-		if !hasDefault {
-			return
-		}
-		currentURL := strings.TrimSpace(string(inputs[urlFieldIdx]))
-		for _, u := range providerDefaultBaseURLs {
-			if currentURL == u || currentURL == "" {
-				update(urlFieldIdx, newDefault)
-				return
+	var name, selectedType, baseURL, apiKey string
+	selectedType = providerTypeOptions[0]
+	baseURL = providerDefaultBaseURLs[selectedType]
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
 			}
-		}
-	}
+			return nil
+		}),
+		huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType),
+		huh.NewInput().Title("Base URL").Value(&baseURL).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewInput().Title("API key").Value(&apiKey),
+	))
 
-	fields := []*ui.FormField{
-		ui.TextField("Name", "", true),
-		typeField,
-		urlField,
-		ui.TextField("API key", "", false),
-	}
-
-	submitted, err := ui.ShowForm("Create Provider", fields)
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	name := fields[0].Value
-	selectedType := providerTypeOptions[fields[1].SelIdx]
-	baseURL := fields[2].Value
-	apiKey := fields[3].Value
-
 	provider, err := b.CreateProvider(&models.CreateModelProviderDto{
-		Name:    name,
+		Name:    strings.TrimSpace(name),
 		Type:    models.APIType(selectedType),
-		BaseURL: baseURL,
+		BaseURL: strings.TrimSpace(baseURL),
 		APIKey:  apiKey,
 	})
 	if err != nil {
 		return err
 	}
-	pterm.Success.Printf("Provider created: %s\n", provider.Name)
+	bridge.Success("Provider created: %s", provider.Name)
 	return nil
 }
 
-func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
+func doUpdateProvider(b backend.Backend, bridge *UIBridge, target models.ModelProviderDto) error {
 	defaultTypeIdx := 0
 	for i, opt := range providerTypeOptions {
 		if opt == string(target.Type) {
@@ -180,43 +179,58 @@ func doUpdateProvider(b backend.Backend, target models.ModelProviderDto) error {
 		}
 	}
 
-	apiKeyField := ui.TextField("API key", "", false)
-	apiKeyField.Placeholder = "leave blank to keep"
-
-	fields := []*ui.FormField{
-		ui.TextField("Name", target.Name, true),
-		ui.SelectField("Type", providerTypeOptions, defaultTypeIdx),
-		ui.TextField("Base URL", target.BaseURL, true),
-		apiKeyField,
+	typeOpts := make([]huh.Option[string], len(providerTypeOptions))
+	for i, t := range providerTypeOptions {
+		typeOpts[i] = huh.NewOption(t, t)
 	}
 
-	submitted, err := ui.ShowForm("Update Provider", fields)
+	newName := target.Name
+	selectedType := providerTypeOptions[defaultTypeIdx]
+	newBaseURL := target.BaseURL
+	var newAPIKey string
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&newName).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType),
+		huh.NewInput().Title("Base URL").Value(&newBaseURL).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewInput().Title("API key").Placeholder("leave blank to keep").Value(&newAPIKey),
+	))
+
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	newName := fields[0].Value
-	newType := providerTypeOptions[fields[1].SelIdx]
-	newBaseURL := fields[2].Value
-	newAPIKey := fields[3].Value
+	newName = strings.TrimSpace(newName)
+	newBaseURL = strings.TrimSpace(newBaseURL)
 
-	if target.Name == newName && string(target.Type) == newType && target.BaseURL == newBaseURL && newAPIKey == "" {
-		pterm.Info.Println("No changes detected, skipping update")
+	if target.Name == newName && string(target.Type) == selectedType && target.BaseURL == newBaseURL && newAPIKey == "" {
+		bridge.Info("No changes detected, skipping update")
 		return nil
 	}
 
 	updated, err := b.UpdateProvider(target.ID, &models.UpdateModelProviderDto{
 		Name:    newName,
-		Type:    models.APIType(newType),
+		Type:    models.APIType(selectedType),
 		BaseURL: newBaseURL,
 		APIKey:  newAPIKey,
 	})
 	if err != nil {
 		return err
 	}
-	pterm.Success.Printf("Provider updated: %s\n", updated.Name)
+	bridge.Success("Provider updated: %s", updated.Name)
 	return nil
 }

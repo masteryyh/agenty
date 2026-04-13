@@ -32,9 +32,13 @@ type Model struct {
 	DefaultModel              bool           `gorm:"default:false"`
 	EmbeddingModel            bool           `gorm:"default:false"`
 	ContextCompressionModel   bool           `gorm:"default:false"`
+	MultiModal                bool           `gorm:"default:false"`
+	Light                     bool           `gorm:"default:false"`
 	Thinking                  bool           `gorm:"default:false"`
 	ThinkingLevels            datatypes.JSON `gorm:"type:jsonb;default:'[]'::jsonb"`
 	AnthropicAdaptiveThinking bool           `gorm:"default:false"`
+	IsPreset                  bool           `gorm:"default:false"`
+	ContextWindow             int            `gorm:"default:0"`
 	CreatedAt                 time.Time      `gorm:"autoCreateTime"`
 	UpdatedAt                 time.Time      `gorm:"autoUpdateTime"`
 	DeletedAt                 *time.Time
@@ -57,9 +61,13 @@ func (m *Model) ToDto(provider *ModelProviderDto) *ModelDto {
 		DefaultModel:              m.DefaultModel,
 		EmbeddingModel:            m.EmbeddingModel,
 		ContextCompressionModel:   m.ContextCompressionModel,
+		MultiModal:                m.MultiModal,
+		Light:                     m.Light,
 		Thinking:                  m.Thinking,
 		ThinkingLevels:            thinkingLevels,
 		AnthropicAdaptiveThinking: m.AnthropicAdaptiveThinking,
+		IsPreset:                  m.IsPreset,
+		ContextWindow:             m.ContextWindow,
 		CreatedAt:                 m.CreatedAt,
 		UpdatedAt:                 m.UpdatedAt,
 	}
@@ -78,9 +86,13 @@ type ModelDto struct {
 	DefaultModel              bool              `json:"defaultModel"`
 	EmbeddingModel            bool              `json:"embeddingModel"`
 	ContextCompressionModel   bool              `json:"contextCompressionModel"`
+	MultiModal                bool              `json:"multiModal"`
+	Light                     bool              `json:"light"`
 	Thinking                  bool              `json:"thinking"`
 	ThinkingLevels            []string          `json:"thinkingLevels"`
 	AnthropicAdaptiveThinking bool              `json:"anthropicAdaptiveThinking"`
+	IsPreset                  bool              `json:"isPreset"`
+	ContextWindow             int               `json:"contextWindow"`
 	CreatedAt                 time.Time         `json:"createdAt"`
 	UpdatedAt                 time.Time         `json:"updatedAt"`
 }
@@ -91,6 +103,8 @@ type CreateModelDto struct {
 	Code                      string    `json:"code" binding:"required,code"`
 	EmbeddingModel            bool      `json:"embeddingModel" binding:"omitempty"`
 	ContextCompressionModel   bool      `json:"contextCompressionModel" binding:"omitempty"`
+	MultiModal                bool      `json:"multiModal" binding:"omitempty"`
+	Light                     bool      `json:"light" binding:"omitempty"`
 	Thinking                  bool      `json:"thinking" binding:"omitempty"`
 	ThinkingLevels            []string  `json:"thinkingLevels" binding:"omitempty"`
 	AnthropicAdaptiveThinking bool      `json:"anthropicAdaptiveThinking" binding:"omitempty"`
@@ -101,6 +115,8 @@ type UpdateModelDto struct {
 	DefaultModel              *bool    `json:"defaultModel" binding:"omitempty"`
 	EmbeddingModel            *bool    `json:"embeddingModel" binding:"omitempty"`
 	ContextCompressionModel   *bool    `json:"contextCompressionModel" binding:"omitempty"`
+	MultiModal                *bool    `json:"multiModal" binding:"omitempty"`
+	Light                     *bool    `json:"light" binding:"omitempty"`
 	Thinking                  *bool    `json:"thinking" binding:"omitempty"`
 	ThinkingLevels            []string `json:"thinkingLevels" binding:"omitempty"`
 	AnthropicAdaptiveThinking *bool    `json:"anthropicAdaptiveThinking" binding:"omitempty"`

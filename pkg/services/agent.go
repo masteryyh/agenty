@@ -81,12 +81,24 @@ func (s *AgentService) CreateAgent(ctx context.Context, dto *models.CreateAgentD
 				return err
 			}
 		}
-		return gorm.G[models.Agent](tx).Create(ctx, agent)
+		if err := gorm.G[models.Agent](tx).Create(ctx, agent); err != nil {
+			return err
+		}
+		if len(dto.ModelIDs) > 0 {
+			entries := make([]models.AgentModel, len(dto.ModelIDs))
+			for i, modelID := range dto.ModelIDs {
+				entries[i] = models.AgentModel{AgentID: agent.ID, ModelID: modelID, SortOrder: i}
+			}
+			if err := tx.WithContext(ctx).Create(&entries).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		slog.ErrorContext(ctx, "failed to create agent", "error", err)
 		return nil, err
 	}
-	return agent.ToDto(), nil
+	return s.loadAgentModels(ctx, agent.ToDto())
 }
 
 func (s *AgentService) GetAgent(ctx context.Context, agentID uuid.UUID) (*models.AgentDto, error) {
@@ -100,7 +112,51 @@ func (s *AgentService) GetAgent(ctx context.Context, agentID uuid.UUID) (*models
 		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", agentID)
 		return nil, err
 	}
-	return agent.ToDto(), nil
+	return s.loadAgentModels(ctx, agent.ToDto())
+}
+
+func (s *AgentService) loadAgentModels(ctx context.Context, dto *models.AgentDto) (*models.AgentDto, error) {
+	agentModelEntries, err := gorm.G[models.AgentModel](s.db).
+		Where("agent_id = ?", dto.ID).
+		Order("sort_order ASC").
+		Find(ctx)
+	if err != nil || len(agentModelEntries) == 0 {
+		return dto, nil
+	}
+
+	modelIDs := make([]uuid.UUID, len(agentModelEntries))
+	for i, entry := range agentModelEntries {
+		modelIDs[i] = entry.ModelID
+	}
+
+	mdls, err := gorm.G[models.Model](s.db).
+		Where("id IN ? AND deleted_at IS NULL", modelIDs).
+		Find(ctx)
+	if err != nil {
+		return dto, nil
+	}
+
+	providerIDs := lo.Uniq(lo.Map(mdls, func(m models.Model, _ int) uuid.UUID { return m.ProviderID }))
+	providers, _ := gorm.G[models.ModelProvider](s.db).
+		Where("id IN ? AND deleted_at IS NULL", providerIDs).
+		Find(ctx)
+
+	providerMap := lo.KeyBy(providers, func(p models.ModelProvider) uuid.UUID { return p.ID })
+	modelMap := lo.KeyBy(mdls, func(m models.Model) uuid.UUID { return m.ID })
+
+	dto.Models = make([]models.ModelDto, 0, len(agentModelEntries))
+	for _, entry := range agentModelEntries {
+		mdl, ok := modelMap[entry.ModelID]
+		if !ok {
+			continue
+		}
+		var provDto *models.ModelProviderDto
+		if p, ok := providerMap[mdl.ProviderID]; ok {
+			provDto = p.ToDto()
+		}
+		dto.Models = append(dto.Models, *mdl.ToDto(provDto))
+	}
+	return dto, nil
 }
 
 func (s *AgentService) ListAgents(ctx context.Context, request *pagination.PageRequest) (*pagination.PagedResponse[models.AgentDto], error) {
@@ -127,6 +183,47 @@ func (s *AgentService) ListAgents(ctx context.Context, request *pagination.PageR
 		return *a.ToDto()
 	})
 
+	if len(dtos) > 0 {
+		agentIDs := lo.Map(agentsResult, func(a models.Agent, _ int) uuid.UUID { return a.ID })
+		agentModelEntries, err := gorm.G[models.AgentModel](s.db).
+			Where("agent_id IN ?", agentIDs).
+			Order("sort_order ASC").
+			Find(ctx)
+		if err == nil && len(agentModelEntries) > 0 {
+			modelIDs := lo.Uniq(lo.Map(agentModelEntries, func(am models.AgentModel, _ int) uuid.UUID { return am.ModelID }))
+			mdls, err := gorm.G[models.Model](s.db).
+				Where("id IN ? AND deleted_at IS NULL", modelIDs).
+				Find(ctx)
+			if err == nil {
+				providerIDs := lo.Uniq(lo.Map(mdls, func(m models.Model, _ int) uuid.UUID { return m.ProviderID }))
+				providers, _ := gorm.G[models.ModelProvider](s.db).
+					Where("id IN ? AND deleted_at IS NULL", providerIDs).
+					Find(ctx)
+				providerMap := lo.KeyBy(providers, func(p models.ModelProvider) uuid.UUID { return p.ID })
+				modelMap := lo.KeyBy(mdls, func(m models.Model) uuid.UUID { return m.ID })
+				dtoMap := make(map[uuid.UUID]*models.AgentDto, len(dtos))
+				for i := range dtos {
+					dtoMap[dtos[i].ID] = &dtos[i]
+				}
+				for _, entry := range agentModelEntries {
+					agentDto, ok := dtoMap[entry.AgentID]
+					if !ok {
+						continue
+					}
+					mdl, ok := modelMap[entry.ModelID]
+					if !ok {
+						continue
+					}
+					var provDto *models.ModelProviderDto
+					if p, ok := providerMap[mdl.ProviderID]; ok {
+						provDto = p.ToDto()
+					}
+					agentDto.Models = append(agentDto.Models, *mdl.ToDto(provDto))
+				}
+			}
+		}
+	}
+
 	return &pagination.PagedResponse[models.AgentDto]{
 		Total:    countResult,
 		PageSize: request.PageSize,
@@ -147,8 +244,6 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 		return err
 	}
 
-	updates := make(map[string]any)
-
 	if dto.Name != nil && *dto.Name != agent.Name {
 		nameExists, err := gorm.G[models.Agent](s.db).
 			Where("name = ? AND id != ? AND deleted_at IS NULL", *dto.Name, agentID).
@@ -160,24 +255,26 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 		if nameExists > 0 {
 			return customerrors.ErrAgentAlreadyExists
 		}
-		updates["name"] = *dto.Name
 	}
 
-	if dto.Soul != nil {
-		updates["soul"] = *dto.Soul
-	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := make(map[string]any)
+		if dto.Name != nil && *dto.Name != agent.Name {
+			updates["name"] = *dto.Name
+		}
+		if dto.Soul != nil {
+			updates["soul"] = *dto.Soul
+		}
+		if len(updates) > 0 {
+			if err := tx.Model(&models.Agent{}).
+				Where("id = ? AND deleted_at IS NULL", agentID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
 
-	if err := s.db.WithContext(ctx).
-		Model(&models.Agent{}).
-		Where("id = ? AND deleted_at IS NULL", agentID).
-		Updates(updates).Error; err != nil {
-		slog.ErrorContext(ctx, "failed to update agent", "error", err, "agentId", agentID)
-		return err
-	}
-
-	if dto.IsDefault != nil {
-		if *dto.IsDefault {
-			if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if dto.IsDefault != nil {
+			if *dto.IsDefault {
 				if _, err := gorm.G[models.Agent](tx).
 					Where("id != ? AND deleted_at IS NULL", agentID).
 					Update(ctx, "is_default", false); err != nil {
@@ -188,19 +285,32 @@ func (s *AgentService) UpdateAgent(ctx context.Context, agentID uuid.UUID, dto *
 					Update(ctx, "is_default", true); err != nil {
 					return err
 				}
-				return nil
-			}); err != nil {
-				slog.ErrorContext(ctx, "failed to update agent default flag", "error", err, "agentId", agentID)
-				return err
-			}
-		} else {
-			if _, err := gorm.G[models.Agent](s.db).
-				Where("id = ? AND deleted_at IS NULL", agentID).
-				Update(ctx, "is_default", false); err != nil {
-				slog.ErrorContext(ctx, "failed to clear agent default flag", "error", err, "agentId", agentID)
-				return err
+			} else {
+				if _, err := gorm.G[models.Agent](tx).
+					Where("id = ? AND deleted_at IS NULL", agentID).
+					Update(ctx, "is_default", false); err != nil {
+					return err
+				}
 			}
 		}
+
+		if dto.ModelIDs != nil {
+			if err := tx.Where("agent_id = ?", agentID).Delete(&models.AgentModel{}).Error; err != nil {
+				return err
+			}
+			if len(*dto.ModelIDs) > 0 {
+				entries := make([]models.AgentModel, len(*dto.ModelIDs))
+				for i, modelID := range *dto.ModelIDs {
+					entries[i] = models.AgentModel{AgentID: agentID, ModelID: modelID, SortOrder: i}
+				}
+				return tx.Create(&entries).Error
+			}
+		}
+
+		return nil
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to update agent", "error", err, "agentId", agentID)
+		return err
 	}
 
 	return nil
@@ -238,6 +348,10 @@ func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 		if _, err := gorm.G[models.KnowledgeItem](tx).
 			Where("agent_id = ? AND deleted_at IS NULL", agentID).
 			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			return err
+		}
+
+		if err := tx.Where("agent_id = ?", agentID).Delete(&models.AgentModel{}).Error; err != nil {
 			return err
 		}
 

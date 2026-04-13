@@ -181,7 +181,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 
 func (s *ProviderService) DeleteProvider(ctx context.Context, providerID uuid.UUID, force bool) error {
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		_, err := gorm.G[models.ModelProvider](tx).
+		provider, err := gorm.G[models.ModelProvider](tx).
 			Where("id = ? AND deleted_at IS NULL", providerID).
 			First(ctx)
 		if err != nil {
@@ -189,6 +189,10 @@ func (s *ProviderService) DeleteProvider(ctx context.Context, providerID uuid.UU
 				return customerrors.ErrProviderNotFound
 			}
 			return fmt.Errorf("failed to find provider: %w", err)
+		}
+
+		if provider.IsPreset {
+			return customerrors.ErrPresetCannotBeDeleted
 		}
 
 		chatModels, err := gorm.G[models.Model](tx).
