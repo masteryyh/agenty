@@ -24,6 +24,7 @@ import (
 
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -33,7 +34,7 @@ var (
 	dbOnce sync.Once
 )
 
-func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
+func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 	var err error
 	dbOnce.Do(func() {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -43,14 +44,15 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 			cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
 		dbConn, connErr := gorm.Open(postgres.Open(dsn), &gorm.Config{
 			TranslateError: true,
+			Logger:         logger.NewGormLogger(debug),
 		})
 		if connErr != nil {
-			err = connErr
+			err = fmt.Errorf("failed to connect to database: %w", connErr)
 			return
 		}
 
 		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; extErr != nil {
-			err = extErr
+			err = fmt.Errorf("pgvector extension is required but could not be created: %w", extErr)
 			return
 		}
 
@@ -67,24 +69,24 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig) error {
 				&models.ModelProvider{},
 				&models.Model{},
 				&models.Agent{},
+				&models.AgentModel{},
 				&models.MCPServer{},
 				&models.KnowledgeItem{},
 				&models.KnowledgeBaseData{},
 			); migrateErr != nil {
-			err = migrateErr
+			err = fmt.Errorf("failed to migrate database: %w", migrateErr)
 			return
 		}
 
 		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_text_embedding_hnsw ON kb_data USING hnsw (text_embedding vector_ip_ops)`).Error; idxErr != nil {
-			err = idxErr
+			err = fmt.Errorf("failed to create index: %w", idxErr)
 			return
 		}
 
 		if seedErr := seedPresets(timeoutCtx, dbConn); seedErr != nil {
-			err = seedErr
+			err = fmt.Errorf("failed to seed presets: %w", seedErr)
 			return
 		}
-
 		db = dbConn
 	})
 	return err

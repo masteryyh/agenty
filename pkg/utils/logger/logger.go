@@ -96,6 +96,8 @@ func Init(isDaemon bool, debug bool, logFilePath string) error {
 	}
 	if isDaemon {
 		handlers = append(handlers, slog.NewTextHandler(os.Stdout, opts))
+	} else {
+		handlers = append(handlers, newTUIHandler(level))
 	}
 
 	slog.SetDefault(slog.New(&multiHandler{handlers: handlers}))

@@ -30,6 +30,7 @@ const (
 	APITypeAnthropic    APIType = "anthropic"
 	APITypeKimi         APIType = "kimi"
 	APITypeGemini       APIType = "gemini"
+	APITypeBigModel     APIType = "bigmodel"
 )
 
 type ModelProvider struct {
@@ -38,6 +39,7 @@ type ModelProvider struct {
 	Type      APIType   `gorm:"type:varchar(50);not null"`
 	BaseURL   string    `gorm:"type:varchar(255);not null"`
 	APIKey    string    `gorm:"type:varchar(255);not null;default:''" json:"-"`
+	IsPreset  bool      `gorm:"default:false"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 	DeletedAt *time.Time
@@ -61,6 +63,7 @@ func (p *ModelProvider) ToDto() *ModelProviderDto {
 		Type:           p.Type,
 		BaseURL:        p.BaseURL,
 		APIKeyCensored: censored,
+		IsPreset:       p.IsPreset,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
 	}
@@ -72,20 +75,21 @@ type ModelProviderDto struct {
 	Type           APIType   `json:"type"`
 	BaseURL        string    `json:"baseUrl"`
 	APIKeyCensored string    `json:"apiKeyCensored"`
+	IsPreset       bool      `json:"isPreset"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type CreateModelProviderDto struct {
 	Name    string  `json:"name" binding:"required"`
-	Type    APIType `json:"type" binding:"required,oneof=openai openai-legacy anthropic kimi gemini"`
+	Type    APIType `json:"type" binding:"required,oneof=openai openai-legacy anthropic kimi gemini bigmodel"`
 	BaseURL string  `json:"baseUrl" binding:"required,url"`
 	APIKey  string  `json:"apiKey" binding:"required"`
 }
 
 type UpdateModelProviderDto struct {
 	Name    string  `json:"name" binding:"omitempty"`
-	Type    APIType `json:"type" binding:"omitempty,oneof=openai openai-legacy anthropic kimi gemini"`
+	Type    APIType `json:"type" binding:"omitempty,oneof=openai openai-legacy anthropic kimi gemini bigmodel"`
 	BaseURL string  `json:"baseUrl" binding:"omitempty,url"`
 	APIKey  string  `json:"apiKey" binding:"omitempty"`
 }

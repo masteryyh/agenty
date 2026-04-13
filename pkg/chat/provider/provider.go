@@ -57,6 +57,7 @@ type ChatRequest struct {
 	Thinking                  bool
 	ThinkingLevel             string
 	AnthropicAdaptiveThinking bool
+	BigModelClearThinking     bool
 	BaseURL                   string
 	APIType                   models.APIType
 	APIKey                    string

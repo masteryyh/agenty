@@ -49,6 +49,7 @@ func NewChatExecutor(registry *tools.Registry) *ChatExecutor {
 		models.APITypeAnthropic:    provider.NewAnthropicProvider(),
 		models.APITypeKimi:         provider.NewKimiProvider(),
 		models.APITypeGemini:       provider.NewGeminiProvider(),
+		models.APITypeBigModel:     provider.NewBigModelProvider(),
 	}
 
 	return &ChatExecutor{
@@ -101,6 +102,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			Thinking:                  params.Thinking,
 			ThinkingLevel:             params.ThinkingLevel,
 			AnthropicAdaptiveThinking: params.AnthropicAdaptiveThinking,
+			BigModelClearThinking:     i == 0,
 			Messages:                  messages,
 			Tools:                     toolDefs,
 			BaseURL:                   params.BaseURL,
@@ -199,6 +201,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				Thinking:                  params.Thinking,
 				ThinkingLevel:             params.ThinkingLevel,
 				AnthropicAdaptiveThinking: params.AnthropicAdaptiveThinking,
+				BigModelClearThinking:     i == 0,
 				Messages:                  messages,
 				Tools:                     toolDefs,
 				BaseURL:                   params.BaseURL,

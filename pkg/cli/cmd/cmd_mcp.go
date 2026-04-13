@@ -21,11 +21,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/cli/ui"
 	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/pterm/pterm"
 )
 
 var mcpTransportOptions = []string{"stdio", "sse", "streamable-http"}
@@ -38,7 +37,7 @@ func mcpServerLabel(s models.MCPServerDto) string {
 	return fmt.Sprintf("%s (%s → %s)", s.Name, s.Transport, target)
 }
 
-func handleMCPCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+func handleMCPCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	for {
 		result, err := b.ListMCPServers(1, 100)
 		if err != nil {
@@ -46,14 +45,14 @@ func handleMCPCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID
 		}
 
 		if len(result.Data) == 0 {
-			pterm.Warning.Println("No MCP servers found")
-			res, err := ui.ShowList("MCP Servers", []string{"(no servers)"}, "a add  ·  Esc back")
+			bridge.Warning("No MCP servers found")
+			res, err := bridge.ShowList("MCP Servers", []string{"(no servers)"}, "a add  ·  Esc back")
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
-			if res.Action == ui.ListActionAdd {
-				if err := doCreateMCPServer(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-					pterm.Error.Printf("Failed to register MCP server: %v\n", err)
+			if res.Action == ListActionAdd {
+				if err := doCreateMCPServer(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+					bridge.Error("Failed to register MCP server: %v", err)
 				}
 				continue
 			}
@@ -77,167 +76,186 @@ func handleMCPCmd(b backend.Backend, args []string, sessionID uuid.UUID, modelID
 			if !s.Enabled {
 				enabled = "✗"
 			}
-			items[i] = fmt.Sprintf("%s %s  %s  enabled:%s", statusIcon, mcpServerLabel(s), pterm.FgGray.Sprint(s.Status), enabled)
+			items[i] = fmt.Sprintf("%s %s  %s  enabled:%s", statusIcon, mcpServerLabel(s), styleGray.Render(s.Status), enabled)
 		}
 
-		res, err := ui.ShowList("MCP Servers", items, listHints)
+		res, err := bridge.ShowList("MCP Servers", items, listHints)
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
 
 		switch res.Action {
-		case ui.ListActionSelect:
+		case ListActionSelect:
+			if err := doUpdateMCPServer(b, bridge, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update MCP server: %v", err)
+			}
+			continue
+
+		case ListActionAdd:
+			if err := doCreateMCPServer(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to register MCP server: %v", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateMCPServer(b, bridge, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update MCP server: %v", err)
+			}
+			continue
+
+		case ListActionDelete:
 			target := result.Data[res.Index]
-			fmt.Println()
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Name"), target.Name)
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Transport"), string(target.Transport))
-			fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Status"), target.Status)
-			if target.Transport == models.MCPTransportStdio {
-				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Command"), target.Command)
-			} else {
-				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("URL"), target.URL)
-			}
-			if len(target.Tools) > 0 {
-				fmt.Printf("  %-16s %s\n", pterm.FgGray.Sprint("Tools"), strings.Join(target.Tools, "  ·  "))
-			}
-			if target.Error != "" {
-				fmt.Printf("  %-16s %s\n", pterm.FgRed.Sprint("Error"), target.Error)
-			}
-			fmt.Println()
-			continue
-
-		case ui.ListActionAdd:
-			if err := doCreateMCPServer(b); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to register MCP server: %v\n", err)
-			}
-			continue
-
-		case ui.ListActionEdit:
-			if err := doUpdateMCPServer(b, result.Data[res.Index]); err != nil && !errors.Is(err, ui.ErrCancelled) {
-				pterm.Error.Printf("Failed to update MCP server: %v\n", err)
-			}
-			continue
-
-		case ui.ListActionDelete:
-			target := result.Data[res.Index]
-			confirmed, err := ui.ShowConfirm(fmt.Sprintf("Delete MCP server '%s'?", target.Name))
+			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete MCP server '%s'?", target.Name))
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
 			if confirmed {
 				if err := b.DeleteMCPServer(target.ID); err != nil {
-					pterm.Error.Printf("Failed to delete MCP server: %v\n", err)
+					bridge.Error("Failed to delete MCP server: %v", err)
 				} else {
-					pterm.Success.Printf("MCP server deleted: %s\n", target.Name)
+					bridge.Success("MCP server deleted: %s", target.Name)
 				}
 			}
 			continue
 
-		case ui.ListActionCancel:
+		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
 		}
 	}
 }
 
-func doCreateMCPServer(b backend.Backend) error {
-	commandField := ui.TextField("Command", "", true)
-	argsField := &ui.FormField{
-		Label:       "Arguments",
-		Type:        ui.FormFieldText,
-		Placeholder: "space-separated, leave blank for none",
-	}
-	urlField := ui.TextField("Server URL", "", true)
+func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
+	var name, selectedTransport string
+	selectedTransport = mcpTransportOptions[0]
 
-	isStdio := func(fields []*ui.FormField) bool {
-		return models.MCPTransportType(fields[1].Options[fields[1].SelIdx]) == models.MCPTransportStdio
-	}
-	isURLBased := func(fields []*ui.FormField) bool {
-		t := models.MCPTransportType(fields[1].Options[fields[1].SelIdx])
-		return t == models.MCPTransportSSE || t == models.MCPTransportStreamableHTTP
-	}
-	commandField.VisibleWhen = isStdio
-	argsField.VisibleWhen = isStdio
-	urlField.VisibleWhen = isURLBased
-
-	fields := []*ui.FormField{
-		ui.TextField("Name", "", true),
-		ui.SelectField("Transport", mcpTransportOptions, 0),
-		commandField,
-		argsField,
-		urlField,
+	transportOpts := make([]huh.Option[string], len(mcpTransportOptions))
+	for i, t := range mcpTransportOptions {
+		transportOpts[i] = huh.NewOption(t, t)
 	}
 
-	submitted, err := ui.ShowForm("Register MCP Server", fields)
+	step1 := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("required")
+			}
+			return nil
+		}),
+		huh.NewSelect[string]().Title("Transport").Options(transportOpts...).Value(&selectedTransport),
+	))
+
+	submitted, err := bridge.ShowHuhForm(step1)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	selectedTransport := models.MCPTransportType(mcpTransportOptions[fields[1].SelIdx])
+	transport := models.MCPTransportType(selectedTransport)
 	dto := &models.CreateMCPServerDto{
-		Name:      fields[0].Value,
-		Transport: selectedTransport,
+		Name:      strings.TrimSpace(name),
+		Transport: transport,
 	}
-	switch selectedTransport {
+
+	switch transport {
 	case models.MCPTransportStdio:
-		dto.Command = commandField.Value
-		if argsStr := argsField.Value; argsStr != "" {
-			dto.Args = strings.Fields(argsStr)
+		var command, args string
+		step2 := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Command").Value(&command).Validate(func(s string) error {
+				if strings.TrimSpace(s) == "" {
+					return fmt.Errorf("required")
+				}
+				return nil
+			}),
+			huh.NewInput().Title("Arguments").Placeholder("space-separated, leave blank for none").Value(&args),
+		))
+		submitted, err = bridge.ShowHuhForm(step2)
+		if err != nil {
+			return err
 		}
+		if !submitted {
+			return ErrCancelled
+		}
+		dto.Command = strings.TrimSpace(command)
+		if args = strings.TrimSpace(args); args != "" {
+			dto.Args = strings.Fields(args)
+		}
+
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		dto.URL = urlField.Value
+		var serverURL string
+		step2 := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Server URL").Value(&serverURL).Validate(func(s string) error {
+				if strings.TrimSpace(s) == "" {
+					return fmt.Errorf("required")
+				}
+				return nil
+			}),
+		))
+		submitted, err = bridge.ShowHuhForm(step2)
+		if err != nil {
+			return err
+		}
+		if !submitted {
+			return ErrCancelled
+		}
+		dto.URL = strings.TrimSpace(serverURL)
 	}
 
 	server, err := b.CreateMCPServer(dto)
 	if err != nil {
 		return err
 	}
-	pterm.Success.Printf("MCP server registered: %s\n", server.Name)
+	bridge.Success("MCP server registered: %s", server.Name)
 
-	autoConnect, err := ui.ShowConfirm("Connect now?")
+	autoConnect, err := bridge.ShowConfirm("Connect now?")
 	if err != nil {
 		return err
 	}
 	if autoConnect {
 		if err := b.ConnectMCPServer(server.ID); err != nil {
-			pterm.Warning.Printf("Connection failed: %s\n", err)
+			bridge.Warning("Connection failed: %s", err)
 		} else {
-			pterm.Success.Println("Connected")
+			bridge.Success("Connected")
 		}
 	}
 
 	return nil
 }
 
-func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
-	fields := []*ui.FormField{
-		ui.TextField("Name", target.Name, false),
-		ui.ToggleField("Enabled", target.Enabled),
-	}
+func doUpdateMCPServer(b backend.Backend, bridge *UIBridge, target models.MCPServerDto) error {
+	newName := target.Name
+	enabled := target.Enabled
 
+	var fields []huh.Field
+	fields = append(fields,
+		huh.NewInput().Title("Name").Value(&newName),
+		huh.NewSelect[bool]().Title("Enabled").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&enabled),
+	)
+
+	var newCommand, newURL string
 	switch target.Transport {
 	case models.MCPTransportStdio:
-		fields = append(fields, ui.TextField("Command", target.Command, false))
+		newCommand = target.Command
+		fields = append(fields, huh.NewInput().Title("Command").Value(&newCommand))
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		fields = append(fields, ui.TextField("URL", target.URL, false))
+		newURL = target.URL
+		fields = append(fields, huh.NewInput().Title("URL").Value(&newURL))
 	}
 
-	submitted, err := ui.ShowForm("Update MCP Server", fields)
+	form := huh.NewForm(huh.NewGroup(fields...))
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
 	if !submitted {
-		return ui.ErrCancelled
+		return ErrCancelled
 	}
 
-	newName := fields[0].Value
 	if newName == "" {
 		newName = target.Name
 	}
-	enabled := fields[1].BoolValue()
-
 	dto := &models.UpdateMCPServerDto{
 		Name:    newName,
 		Enabled: &enabled,
@@ -245,13 +263,11 @@ func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
 
 	switch target.Transport {
 	case models.MCPTransportStdio:
-		newCmd := fields[2].Value
-		if newCmd == "" {
-			newCmd = target.Command
+		if newCommand == "" {
+			newCommand = target.Command
 		}
-		dto.Command = newCmd
+		dto.Command = newCommand
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		newURL := fields[2].Value
 		if newURL == "" {
 			newURL = target.URL
 		}
@@ -262,6 +278,6 @@ func doUpdateMCPServer(b backend.Backend, target models.MCPServerDto) error {
 	if err != nil {
 		return err
 	}
-	pterm.Success.Printf("MCP server updated: %s\n", updated.Name)
+	bridge.Success("MCP server updated: %s", updated.Name)
 	return nil
 }
