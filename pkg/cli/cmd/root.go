@@ -67,7 +67,7 @@ agentic looping and skills usage capabilities.`,
 
 			if cfg.IsRemoteMode() {
 				b := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
-				return startChat(b)
+				return startChat(b, false)
 			}
 
 			return startLocalMode()
@@ -101,7 +101,7 @@ func startLocalMode() error {
 	defer mcpManager.Close()
 
 	b := backend.NewLocalBackend()
-	return startChat(b)
+	return startChat(b, true)
 }
 
 func Execute() error {

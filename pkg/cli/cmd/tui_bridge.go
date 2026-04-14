@@ -48,11 +48,13 @@ const (
 	overlayKindList overlayKind = iota
 	overlayKindMultiSelect
 	overlayKindHuhForm
+	overlayKindLogViewer
 )
 
 type overlayRequest struct {
 	kind           overlayKind
 	title          string
+	subtitle       string
 	items          []string
 	hints          string
 	options        []string
@@ -95,12 +97,17 @@ func (b *UIBridge) Close() {
 	b.closeOnce.Do(func() { close(b.done) })
 }
 
-func (b *UIBridge) ShowList(title string, items []string, hints string) (*ListResult, error) {
+func (b *UIBridge) ShowList(title string, items []string, hints string, subtitle ...string) (*ListResult, error) {
+	sub := ""
+	if len(subtitle) > 0 {
+		sub = subtitle[0]
+	}
 	respCh := make(chan overlayResponse, 1)
 	b.program.Send(overlayRequestMsg{
 		request: overlayRequest{
 			kind:       overlayKindList,
 			title:      title,
+			subtitle:   sub,
 			items:      items,
 			hints:      hints,
 			responseCh: respCh,
@@ -171,6 +178,20 @@ func (b *UIBridge) ShowMultiSelect(title string, options []string, defaultIndice
 		return resp.selectedIndices, resp.err
 	case <-b.done:
 		return nil, nil
+	}
+}
+
+func (b *UIBridge) ShowLogViewer() {
+	respCh := make(chan overlayResponse, 1)
+	b.program.Send(overlayRequestMsg{
+		request: overlayRequest{
+			kind:       overlayKindLogViewer,
+			responseCh: respCh,
+		},
+	})
+	select {
+	case <-respCh:
+	case <-b.done:
 	}
 }
 

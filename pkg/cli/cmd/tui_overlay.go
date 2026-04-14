@@ -27,6 +27,7 @@ const listMaxVisible = 12
 
 type listOverlay struct {
 	title      string
+	subtitle   string
 	items      []string
 	hints      string
 	cursor     int
@@ -80,7 +81,11 @@ func (l *listOverlay) render(width, _ int) string {
 	var buf strings.Builder
 	sep := max(min(56, width-4), 10)
 	fmt.Fprintf(&buf, "\n  %s\n", styleBold.Render(l.title))
-	fmt.Fprintf(&buf, "  %s\n\n", styleGray.Render(strings.Repeat("─", sep)))
+	fmt.Fprintf(&buf, "  %s\n", styleGray.Render(strings.Repeat("─", sep)))
+	if l.subtitle != "" {
+		fmt.Fprintf(&buf, "  %s\n", l.subtitle)
+	}
+	buf.WriteString("\n")
 
 	end := min(l.offset + listMaxVisible, len(l.items))
 	for i := l.offset; i < end; i++ {

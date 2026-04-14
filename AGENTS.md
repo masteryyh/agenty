@@ -25,7 +25,21 @@ The backend service can also act as a MCP client to communicate with other MCP s
   - `routes/`: API routes
   - `services/`: Business logic and services
   - `utils/`: Utility functions and helpers
-  - `chat/`: core ReAct pattern implementation for agentic looping and tool calling
+  - `chat/`: Model provider API callers and ReAct pattern implementations
+
+## Core working procedure
+
+1. **Understand Requirement Thoroughly**: Always make sure you understand the requirements of user. Read codes, documents and ask user for more information if you are not sure about anything. Use `askQuestions` tool to ask user for more details.
+
+2. **Collect Enough Information**: Collect enough information about the project, requirements, third-party libraries and frameworks that about to be used, and any other relevant information. Use tools from tavily and context7 to retrieve latest documents and information.
+
+3. **Make Full Plan**: Make a full plan about how to organize codes and packages, what libraries and frameworks to use, how to implement features, and how to make sure the code is effective, efficient, maintainable and fits well into the overall project. Use `todo` tool to track your todo list.
+
+4. **Implement Features Carefully**: Implement features carefully according to your plan. Make sure you follow coding standards, conventions and best practices from the project and Go community. Make sure you use components, functions and packages that already exists in the project and libraries whenever possible, do not reinvent the wheel.
+
+5. **Review and Optimize**: Always review your code for potential issues, bugs, or improvements before finalizing it. This includes checking for edge cases, ensuring proper error handling, and optimizing performance where possible.
+
+6. **Run Builds and Tests**: Always run builds and tests to make sure your code works as expected and does not break anything. Write new tests if necessary to cover new features or edge cases.
 
 ## Agent guidelines
 
@@ -47,7 +61,7 @@ When coding agents for this project, please adhere to the following guidelines:
 
 4. **Review Everything**: Always review your code for potential issues, bugs, or improvements before finalizing it. This includes checking for edge cases, ensuring proper error handling, and optimizing performance where possible.
 
-5. **Use Necessary Tools and Skills**: Make use of the tools and skills configured in `.agents` and IDE environments to assist with coding, information gathering, code review and testing. Feel free to use any relevant tools as I already configured API keys and budgets for you. Search internet by using `fetch` `web` `web_search` or anything you like to retrive accurate information. Use `context7` to retrive latest documents for libraries and frameworks.
+5. **Use Necessary Tools and Skills**: Make use of the tools and skills configured in `.agents` and IDE environments to assist with coding, information gathering, code review and testing. Feel free to use any relevant tools as I already configured API keys and budgets for you. Search internet by using `fetch` `web` `web_search` or anything you like to retrieve accurate information. Use `context7` to retrieve latest documents for libraries and frameworks.
 
 6. **Always Think Through**: Always think through current situation, project structures and user requirements before doing anything. **MAKE A FULL PLAN** before trying to do any changes. Your plan should always fits into the overall project.
 
@@ -57,7 +71,9 @@ When coding agents for this project, please adhere to the following guidelines:
 
 9. **Read and Update HANDOFF.md**: Read `HANDOFF.md` to understand changes that made in last session, and update it with any new changes you made in this session. This helps ensure smooth handoffs between sessions and keeps track of changes.
 
-10. **Use sub agents**: Do not hesitate to use sub agents or `/fleet` command to create sub agents to assist you in complex tasks, search for information in parallel, or review a large code base.
+10. **Use Sub Agents**: Do not hesitate to use sub agents or `/fleet` command to create sub agents to assist you in complex tasks, search for information in parallel, or review a large code base.
+
+11. **Daemon Mode and Local Mode**: When working on core logics, make sure they can work in both daemon mode and local mode.
 
 ## Other requirements
 

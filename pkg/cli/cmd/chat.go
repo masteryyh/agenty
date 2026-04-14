@@ -28,7 +28,14 @@ import (
 	"golang.org/x/term"
 )
 
-func startChat(b backend.Backend) error {
+func startChat(b backend.Backend, isLocal bool) error {
+	if isLocal {
+		registerCommand(
+			Command{Name: "/logs", Description: "View debug logs", Usage: "/logs"},
+			handleLogsCmd,
+		)
+	}
+
 	initialized, err := b.IsInitialized()
 	if err != nil {
 		return fmt.Errorf("failed to check initialization status: %w", err)
@@ -98,7 +105,30 @@ func startChat(b backend.Backend) error {
 
 	var modelID uuid.UUID
 	var modelInfo string
-	if session.LastUsedModel == uuid.Nil {
+
+	agent, agentErr := b.GetAgent(agentID)
+	if agentErr == nil && agent != nil && len(agent.Models) > 0 {
+		if session.LastUsedModel != uuid.Nil {
+			for _, m := range agent.Models {
+				if m.ID == session.LastUsedModel && m.Provider != nil && m.Provider.APIKeyCensored != "<not set>" {
+					modelID = m.ID
+					modelInfo = modelDisplayName(m)
+					break
+				}
+			}
+		}
+		if modelID == uuid.Nil {
+			for _, m := range agent.Models {
+				if m.Provider != nil && m.Provider.APIKeyCensored != "<not set>" {
+					modelID = m.ID
+					modelInfo = modelDisplayName(m)
+					break
+				}
+			}
+		}
+	}
+
+	if modelID == uuid.Nil {
 		defaultModel, err := b.GetDefaultModel()
 		if err == nil && defaultModel != nil {
 			modelID = defaultModel.ID
@@ -114,19 +144,6 @@ func startChat(b backend.Backend) error {
 			} else {
 				return fmt.Errorf("no models available, use /model to create one")
 			}
-		}
-	} else {
-		modelID = session.LastUsedModel
-		if allModels, err := b.ListModels(1, 100); err == nil {
-			for _, m := range allModels.Data {
-				if m.ID == modelID {
-					modelInfo = modelDisplayName(m)
-					break
-				}
-			}
-		}
-		if modelInfo == "" {
-			modelInfo = modelID.String()[:8] + "…"
 		}
 	}
 

@@ -24,6 +24,7 @@ import (
 
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -48,11 +49,8 @@ func GetEmbeddingService() *EmbeddingService {
 }
 
 func (s *EmbeddingService) IsEnabled(ctx context.Context) bool {
-	settings, err := GetSystemService().getOrCreate(ctx)
-	if err != nil {
-		return false
-	}
-	return settings.EmbeddingModelID != nil
+	_, _, err := s.getEmbeddingConfig(ctx)
+	return err == nil
 }
 
 func (s *EmbeddingService) getEmbeddingConfig(ctx context.Context) (*models.Model, *models.ModelProvider, error) {
@@ -78,6 +76,9 @@ func (s *EmbeddingService) getEmbeddingConfig(ctx context.Context) (*models.Mode
 		return nil, nil, fmt.Errorf("failed to find embedding model provider: %w", err)
 	}
 
+	if provider.APIKey == "" {
+		return nil, nil, customerrors.ErrProviderNotConfigured
+	}
 	return &model, &provider, nil
 }
 

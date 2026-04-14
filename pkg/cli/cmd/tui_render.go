@@ -458,3 +458,24 @@ func renderErrorMessage(text string) string {
 	return fmt.Sprintf("  %s  %s\n\n", styleSysErr.Render("✗"), styleSysErr.Render(text))
 }
 
+func WrapForDisplay(s string) string {
+	w := max(renderWidth-4, 20)
+	var buf strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == "" {
+			buf.WriteString("\n")
+			continue
+		}
+		for _, wl := range strings.Split(wordwrap.String(line, w), "\n") {
+			if ansi.PrintableRuneWidth(wl) > w {
+				for _, hw := range strings.Split(wrap.String(wl, w), "\n") {
+					buf.WriteString(hw + "\n")
+				}
+			} else {
+				buf.WriteString(wl + "\n")
+			}
+		}
+	}
+	return buf.String()
+}
+

@@ -31,6 +31,7 @@ const (
 	EventUsage          StreamEventType = "usage"
 	EventError          StreamEventType = "error"
 	EventDone           StreamEventType = "done"
+	EventModelSwitch    StreamEventType = "model_switch"
 )
 
 type StreamEvent struct {
@@ -42,6 +43,10 @@ type StreamEvent struct {
 	Usage      *StreamUsage       `json:"usage,omitempty"`
 	Error      string             `json:"error,omitempty"`
 	Message    *Message           `json:"message,omitempty"`
+	ModelID              string   `json:"modelId,omitempty"`
+	ModelName            string   `json:"modelName,omitempty"`
+	ModelThinking        bool     `json:"modelThinking,omitempty"`
+	ModelThinkingLevels  []string `json:"modelThinkingLevels,omitempty"`
 }
 
 type StreamUsage struct {

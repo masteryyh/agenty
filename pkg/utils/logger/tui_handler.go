@@ -21,21 +21,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/masteryyh/agenty/pkg/cli/theme"
 )
-
-var logCallback atomic.Pointer[func(string)]
-
-func SetLogCallback(cb func(string)) {
-	logCallback.Store(&cb)
-}
-
-func ClearLogCallback() {
-	logCallback.Store(nil)
-}
 
 type tuiHandler struct {
 	level slog.Level
@@ -48,15 +37,11 @@ func newTUIHandler(level slog.Level) *tuiHandler {
 }
 
 func (h *tuiHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level && logCallback.Load() != nil
+	return level >= h.level
 }
 
 func (h *tuiHandler) Handle(_ context.Context, r slog.Record) error {
-	cbPtr := logCallback.Load()
-	if cbPtr == nil {
-		return nil
-	}
-	(*cbPtr)(formatRecordForTUI(r, h.attrs))
+	entryStore.add(formatRecordForTUI(r, h.attrs))
 	return nil
 }
 
@@ -92,10 +77,9 @@ func formatRecordForTUI(r slog.Record, extraAttrs []slog.Attr) string {
 	msg := theme.White.Render(r.Message)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("  %s  %s%s%s%s%s",
+	fmt.Fprintf(&sb, "  %s  %s%s%s%s%s",
 		iconStyle.Render(icon),
-		levelStr, sep, ts, sep, msg,
-	))
+		levelStr, sep, ts, sep, msg)
 
 	var attrParts []string
 	for _, a := range extraAttrs {

@@ -282,14 +282,14 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		return nil, err
 	}
 
-	messages, err := s.loadHistoryMessages(ctx, res.session.ID, data.ModelID, data.Thinking)
+	messages, err := s.loadHistoryMessages(ctx, res.session.ID, res.model.ID, data.Thinking && res.model.Thinking)
 	if err != nil {
 		return nil, err
 	}
 	messages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
 	messages = append(messages, provider.Message{Role: models.RoleUser, Content: data.Message})
 
-	if err := s.saveUserMessage(ctx, &res.session, res.model.ID, data.Message); err != nil {
+	if err := s.saveUserMessage(ctx, &res.session, data.Message); err != nil {
 		return nil, err
 	}
 
@@ -317,31 +317,49 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 }
 
 func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (<-chan provider.StreamEvent, error) {
-	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrSessionNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
 
-	systemPrompt, err := buildSystemPrompt(&res.agent)
+	candidates, err := s.resolveModelList(ctx, session.AgentID, data.ModelID)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to resolve models", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	agent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", session.AgentID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrAgentNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", session.AgentID)
+		return nil, err
+	}
+
+	systemPrompt, err := buildSystemPrompt(&agent)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
 	}
 
-	messages, err := s.loadHistoryMessages(ctx, res.session.ID, data.ModelID, data.Thinking)
+	primary := candidates[0]
+	baseMessages, err := s.loadHistoryMessages(ctx, session.ID, primary.model.ID, data.Thinking && primary.model.Thinking)
 	if err != nil {
 		return nil, err
 	}
-	messages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
-	messages = append(messages, provider.Message{Role: models.RoleUser, Content: data.Message})
+	baseMessages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, baseMessages...)
+	baseMessages = append(baseMessages, provider.Message{Role: models.RoleUser, Content: data.Message})
 
-	if err := s.saveUserMessage(ctx, &res.session, res.model.ID, data.Message); err != nil {
-		return nil, err
-	}
-
-	executorCh, err := s.chatExecutor.StreamChat(ctx, buildChatParams(res, messages, data))
-	if err != nil {
-		slog.ErrorContext(ctx, "stream chat failed", "error", err, "sessionId", sessionID)
+	if err := s.saveUserMessage(ctx, &session, data.Message); err != nil {
 		return nil, err
 	}
 
@@ -353,37 +371,102 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 		var collectedMessages []provider.Message
 		var totalTokens int64
 
-		for evt := range executorCh {
-			if evt.Type == provider.EventMessageDone && evt.Message != nil {
-				collectedMessages = append(collectedMessages, *evt.Message)
-			}
-			if evt.Type == provider.EventToolResult && evt.ToolResult != nil {
-				collectedMessages = append(collectedMessages, provider.Message{
-					Role:       models.RoleTool,
-					Content:    evt.ToolResult.Content,
-					ToolResult: evt.ToolResult,
-				})
-			}
-			if evt.Type == provider.EventUsage && evt.Usage != nil {
-				totalTokens = evt.Usage.TotalTokens
+		for candidateIdx, candidate := range candidates {
+			isFallback := candidateIdx > 0 || (data.ModelID != uuid.Nil && candidate.model.ID != data.ModelID)
+
+			if isFallback {
+				var thinkingLevels []string
+				if len(candidate.model.ThinkingLevels) > 0 {
+					_ = json.Unmarshal(candidate.model.ThinkingLevels, &thinkingLevels)
+				}
+				select {
+				case out <- provider.StreamEvent{
+					Type:                provider.EventModelSwitch,
+					ModelID:             candidate.model.ID.String(),
+					ModelName:           candidate.chatProvider.Name + "/" + candidate.model.Name,
+					ModelThinking:       candidate.model.Thinking,
+					ModelThinkingLevels: thinkingLevels,
+				}:
+				case <-ctx.Done():
+					return
+				}
 			}
 
-			if evt.Type == provider.EventDone {
-				s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+			msgs := baseMessages
+			if !candidate.model.Thinking {
+				msgs = stripThinkingData(baseMessages)
+			}
+
+			res := &chatResources{
+				session:      session,
+				model:        candidate.model,
+				chatProvider: candidate.chatProvider,
+				agent:        agent,
+			}
+
+			executorCh, err := s.chatExecutor.StreamChat(ctx, buildChatParams(res, msgs, data))
+			if err != nil {
+				slog.WarnContext(ctx, "model unavailable, trying next", "model", candidate.model.Name, "error", err)
+				continue
+			}
+
+			var apiErr string
+			for evt := range executorCh {
+				if evt.Type == provider.EventError {
+					apiErr = evt.Error
+					slog.WarnContext(ctx, "model returned error, trying next", "model", candidate.model.Name, "error", evt.Error)
+					go func() {
+						for range executorCh {
+						}
+					}()
+					break
+				}
+
+				if evt.Type == provider.EventMessageDone && evt.Message != nil {
+					collectedMessages = append(collectedMessages, *evt.Message)
+				}
+				if evt.Type == provider.EventToolResult && evt.ToolResult != nil {
+					collectedMessages = append(collectedMessages, provider.Message{
+						Role:       models.RoleTool,
+						Content:    evt.ToolResult.Content,
+						ToolResult: evt.ToolResult,
+					})
+				}
+				if evt.Type == provider.EventUsage && evt.Usage != nil {
+					totalTokens = evt.Usage.TotalTokens
+				}
+
+				if evt.Type == provider.EventDone {
+					s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+					select {
+					case out <- evt:
+					case <-ctx.Done():
+					}
+					return
+				}
 
 				select {
 				case out <- evt:
 				case <-ctx.Done():
+					s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+					return
 				}
+			}
+
+			if apiErr == "" {
 				return
 			}
 
-			select {
-			case out <- evt:
-			case <-ctx.Done():
-				s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
-				return
-			}
+			collectedMessages = nil
+			totalTokens = 0
+		}
+
+		select {
+		case out <- provider.StreamEvent{
+			Type:  provider.EventError,
+			Error: "all configured models are unavailable, please check your model configuration",
+		}:
+		case <-ctx.Done():
 		}
 	})
 
@@ -407,10 +490,126 @@ func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResour
 }
 
 type chatResources struct {
-	session      models.ChatSession
+	session           models.ChatSession
+	model             models.Model
+	chatProvider      models.ModelProvider
+	agent             models.Agent
+	fallbackModelName string
+}
+
+type modelCandidate struct {
 	model        models.Model
 	chatProvider models.ModelProvider
-	agent        models.Agent
+}
+
+func (s *ChatService) resolveModelList(ctx context.Context, agentID, preferredModelID uuid.UUID) ([]modelCandidate, error) {
+	tryModel := func(mid uuid.UUID) (modelCandidate, bool, error) {
+		mdl, err := gorm.G[models.Model](s.db).
+			Where("id = ? AND deleted_at IS NULL", mid).
+			First(ctx)
+		if err != nil {
+			return modelCandidate{}, false, err
+		}
+		prov, err := gorm.G[models.ModelProvider](s.db).
+			Where("id = ? AND deleted_at IS NULL", mdl.ProviderID).
+			First(ctx)
+		if err != nil {
+			return modelCandidate{}, false, err
+		}
+		if prov.APIKey == "" {
+			return modelCandidate{}, false, customerrors.ErrProviderNotConfigured
+		}
+		return modelCandidate{model: mdl, chatProvider: prov}, true, nil
+	}
+
+	var result []modelCandidate
+	seen := map[uuid.UUID]bool{}
+
+	if preferredModelID != uuid.Nil {
+		if c, ok, err := tryModel(preferredModelID); ok {
+			result = append(result, c)
+			seen[preferredModelID] = true
+		} else if err != nil {
+			return nil, err
+		}
+	}
+
+	agentModels, err := gorm.G[models.AgentModel](s.db).
+		Where("agent_id = ?", agentID).
+		Order("sort_order ASC").
+		Find(ctx)
+	if err == nil {
+		for _, am := range agentModels {
+			if seen[am.ModelID] {
+				continue
+			}
+			if c, ok, err := tryModel(am.ModelID); ok {
+				result = append(result, c)
+				seen[am.ModelID] = true
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil, customerrors.ErrModelNotFound
+	}
+	return result, nil
+}
+
+func stripThinkingData(messages []provider.Message) []provider.Message {
+	result := make([]provider.Message, len(messages))
+	for i, m := range messages {
+		m.ReasoningContent = ""
+		m.ReasoningBlocks = nil
+		result[i] = m
+	}
+	return result
+}
+
+func (s *ChatService) resolveModel(ctx context.Context, agentID, preferredModelID uuid.UUID) (models.Model, models.ModelProvider, error) {
+	tryModel := func(mid uuid.UUID) (models.Model, models.ModelProvider, bool) {
+		mdl, err := gorm.G[models.Model](s.db).
+			Where("id = ? AND deleted_at IS NULL", mid).
+			First(ctx)
+		if err != nil {
+			return models.Model{}, models.ModelProvider{}, false
+		}
+		prov, err := gorm.G[models.ModelProvider](s.db).
+			Where("id = ? AND deleted_at IS NULL", mdl.ProviderID).
+			First(ctx)
+		if err != nil || prov.APIKey == "" {
+			return models.Model{}, models.ModelProvider{}, false
+		}
+		return mdl, prov, true
+	}
+
+	if preferredModelID != uuid.Nil {
+		if mdl, prov, ok := tryModel(preferredModelID); ok {
+			return mdl, prov, nil
+		}
+		slog.WarnContext(ctx, "preferred model unavailable, falling back to agent model list", "modelId", preferredModelID)
+	}
+
+	agentModels, err := gorm.G[models.AgentModel](s.db).
+		Where("agent_id = ?", agentID).
+		Order("sort_order ASC").
+		Find(ctx)
+	if err != nil || len(agentModels) == 0 {
+		return models.Model{}, models.ModelProvider{}, customerrors.ErrModelNotFound
+	}
+
+	for _, am := range agentModels {
+		if am.ModelID == preferredModelID {
+			continue
+		}
+		if mdl, prov, ok := tryModel(am.ModelID); ok {
+			return mdl, prov, nil
+		}
+	}
+
+	return models.Model{}, models.ModelProvider{}, customerrors.ErrProviderNotConfigured
 }
 
 func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID uuid.UUID) (*chatResources, error) {
@@ -425,30 +624,13 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 		return nil, err
 	}
 
-	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL", modelID).
-		First(ctx)
+	model, chatProvider, err := s.resolveModel(ctx, session.AgentID, modelID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, customerrors.ErrModelNotFound
+		if customerrors.GetBusinessError(err) == nil {
+			slog.ErrorContext(ctx, "failed to resolve model", "error", err, "sessionId", sessionID, "preferredModelId", modelID)
+			return nil, fmt.Errorf("failed to resolve model: %w", err)
 		}
-		slog.ErrorContext(ctx, "failed to find model", "error", err, "modelId", modelID)
 		return nil, err
-	}
-
-	chatProvider, err := gorm.G[models.ModelProvider](s.db).
-		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
-		First(ctx)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, customerrors.ErrProviderNotFound
-		}
-		slog.ErrorContext(ctx, "failed to find provider", "error", err, "providerId", model.ProviderID)
-		return nil, err
-	}
-
-	if chatProvider.APIKey == "" {
-		return nil, customerrors.ErrProviderNotConfigured
 	}
 
 	agent, err := gorm.G[models.Agent](s.db).
@@ -462,12 +644,18 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 		return nil, err
 	}
 
-	return &chatResources{
+	res := &chatResources{
 		session:      session,
 		model:        model,
 		chatProvider: chatProvider,
 		agent:        agent,
-	}, nil
+	}
+
+	if model.ID != modelID {
+		res.fallbackModelName = chatProvider.Name + "/" + model.Name
+	}
+
+	return res, nil
 }
 
 func buildSystemPrompt(agent *models.Agent) (string, error) {
@@ -548,13 +736,12 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 	return messages, nil
 }
 
-func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatSession, modelID uuid.UUID, content string) error {
+func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatSession, content string) error {
 	msg := models.ChatMessage{
 		SessionID: session.ID,
 		AgentID:   session.AgentID,
 		Role:      models.RoleUser,
 		Content:   content,
-		ModelID:   modelID,
 	}
 	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &msg); err != nil {
 		slog.ErrorContext(ctx, "failed to save user message", "error", err, "sessionId", session.ID)
