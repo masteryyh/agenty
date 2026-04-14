@@ -126,3 +126,8 @@ func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 }
 
 var listHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  Ctrl+D delete  ·  Esc back"
+
+func registerCommand(cmd Command, handler CommandHandler) {
+	commandRegistry[cmd.Name] = handler
+	commands = append(commands, cmd)
+}

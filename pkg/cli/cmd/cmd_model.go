@@ -45,7 +45,7 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 
 		var filtered []models.ModelDto
 		for _, mdl := range result.Data {
-			if mdl.Provider != nil && mdl.Provider.APIKeyCensored != "<not set>" {
+			if mdl.Provider != nil && mdl.Provider.APIKeyCensored != "<not set>" && !mdl.EmbeddingModel {
 				filtered = append(filtered, mdl)
 			}
 		}
@@ -71,7 +71,10 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 			items[i] = modelLabel(m)
 		}
 
-		res, err := bridge.ShowList("Models  "+styleGray.Render("(select to switch)"), items, listHints)
+		legend := styleGreen.Render("●") + styleGray.Render(" default  ") +
+			styleMagenta.Render("●") + styleGray.Render(" preset  ") +
+			styleCyan.Render("●") + styleGray.Render(" light")
+		res, err := bridge.ShowList("Models  "+styleGray.Render("(select to switch)"), items, listHints, legend)
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -79,10 +82,6 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 		switch res.Action {
 		case ListActionSelect:
 			target := result.Data[res.Index]
-			if target.EmbeddingModel {
-				bridge.Warning("Embedding models cannot be used as chat models.")
-				continue
-			}
 			displayName := modelDisplayName(target)
 			bridge.Success("Switched to model: %s", displayName)
 			return CommandResult{Handled: true, NewModelID: target.ID, NewModelName: displayName}, nil
@@ -129,24 +128,21 @@ func modelLabel(m models.ModelDto) string {
 	if m.Provider != nil {
 		providerName = m.Provider.Name
 	}
-	var tags []string
+	var dots []string
 	if m.DefaultModel {
-		tags = append(tags, styleGreen.Render("[D]"))
+		dots = append(dots, styleGreen.Render("●"))
 	}
 	if m.IsPreset {
-		tags = append(tags, styleMagenta.Render("[P]"))
+		dots = append(dots, styleMagenta.Render("●"))
 	}
-	if m.EmbeddingModel {
-		tags = append(tags, styleCyan.Render("[E]"))
+	if m.Light {
+		dots = append(dots, styleCyan.Render("●"))
 	}
-	if m.ContextCompressionModel {
-		tags = append(tags, styleYellow.Render("[CC]"))
+	dotStr := ""
+	if len(dots) > 0 {
+		dotStr = " " + strings.Join(dots, "")
 	}
-	tagStr := ""
-	if len(tags) > 0 {
-		tagStr = " " + strings.Join(tags, "")
-	}
-	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, tagStr)
+	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, dotStr)
 }
 
 func doCreateModel(b backend.Backend, bridge *UIBridge) error {
@@ -167,6 +163,7 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 	selectedProvider := providerOptions[0]
 	var name, code string
 	modelType := "Chat"
+	lightModel := false
 
 	providerOpts := make([]huh.Option[string], len(providerOptions))
 	for i, p := range providerOptions {
@@ -190,9 +187,11 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 		huh.NewSelect[string]().Title("Type").
 			Options(
 				huh.NewOption("Chat", "Chat"),
-				huh.NewOption("Chat + Context compression", "Chat + Context compression"),
 				huh.NewOption("Embedding", "Embedding"),
 			).Value(&modelType),
+		huh.NewSelect[bool]().Title("Lightweight model").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&lightModel),
 	))
 
 	submitted, err := bridge.ShowHuhForm(form)
@@ -212,14 +211,13 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 	}
 
 	embeddingModel := modelType == "Embedding"
-	contextCompressionModel := modelType == "Chat + Context compression"
 
 	model, err := b.CreateModel(&models.CreateModelDto{
-		Name:                    name,
-		Code:                    code,
-		ProviderID:              targetProvider.ID,
-		EmbeddingModel:          embeddingModel,
-		ContextCompressionModel: contextCompressionModel,
+		Name:           name,
+		Code:           code,
+		ProviderID:     targetProvider.ID,
+		EmbeddingModel: embeddingModel,
+		Light:          lightModel,
 	})
 	if err != nil {
 		return err
@@ -232,34 +230,19 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 		}
 	}
 
-	if contextCompressionModel {
-		setActive, err := bridge.ShowConfirm("Set as active context compression model in system settings?")
-		if err != nil {
-			return err
-		}
-		if setActive {
-			if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{ContextCompressionModelID: &model.ID}); err != nil {
-				bridge.Warning("Failed to set active context compression model: %v", err)
-			} else {
-				bridge.Success("Active context compression model updated.")
-			}
-		}
-	}
-
 	return nil
 }
 
 func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) error {
 	currentTypeIdx := 0
-	if target.ContextCompressionModel {
+	if target.EmbeddingModel {
 		currentTypeIdx = 1
-	} else if target.EmbeddingModel {
-		currentTypeIdx = 2
 	}
 
-	typeOptions := []string{"Chat", "Chat + Context compression", "Embedding"}
+	typeOptions := []string{"Chat", "Embedding"}
 	newName := target.Name
 	setDefault := target.DefaultModel
+	lightModel := target.Light
 	modelType := typeOptions[currentTypeIdx]
 
 	form := huh.NewForm(huh.NewGroup(
@@ -275,9 +258,11 @@ func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) 
 		huh.NewSelect[string]().Title("Type").
 			Options(
 				huh.NewOption("Chat", "Chat"),
-				huh.NewOption("Chat + Context compression", "Chat + Context compression"),
 				huh.NewOption("Embedding", "Embedding"),
 			).Value(&modelType),
+		huh.NewSelect[bool]().Title("Lightweight model").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&lightModel),
 	))
 
 	submitted, err := bridge.ShowHuhForm(form)
@@ -290,19 +275,18 @@ func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) 
 
 	newName = strings.TrimSpace(newName)
 	embeddingModel := modelType == "Embedding"
-	contextCompressionModel := modelType == "Chat + Context compression"
 
 	if newName == target.Name && setDefault == target.DefaultModel &&
-		embeddingModel == target.EmbeddingModel && contextCompressionModel == target.ContextCompressionModel {
+		embeddingModel == target.EmbeddingModel && lightModel == target.Light {
 		bridge.Info("No changes detected, skipping update")
 		return nil
 	}
 
 	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{
-		Name:                    &newName,
-		DefaultModel:            &setDefault,
-		EmbeddingModel:          &embeddingModel,
-		ContextCompressionModel: &contextCompressionModel,
+		Name:           &newName,
+		DefaultModel:   &setDefault,
+		EmbeddingModel: &embeddingModel,
+		Light:          &lightModel,
 	}); err != nil {
 		return err
 	}
@@ -311,20 +295,6 @@ func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) 
 	if embeddingModel && !target.EmbeddingModel {
 		if err := offerSetActiveEmbeddingModel(b, bridge, target.ID); err != nil {
 			return err
-		}
-	}
-
-	if contextCompressionModel && !target.ContextCompressionModel {
-		setActive, err := bridge.ShowConfirm("Set as active context compression model in system settings?")
-		if err != nil {
-			return err
-		}
-		if setActive {
-			if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{ContextCompressionModelID: &target.ID}); err != nil {
-				bridge.Warning("Failed to set active context compression model: %v", err)
-			} else {
-				bridge.Success("Active context compression model updated.")
-			}
 		}
 	}
 

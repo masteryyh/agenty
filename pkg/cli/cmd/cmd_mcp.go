@@ -125,7 +125,7 @@ func handleMCPCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 }
 
 func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
-	var name, selectedTransport string
+	var name, selectedTransport, command, argsStr, serverURL string
 	selectedTransport = mcpTransportOptions[0]
 
 	transportOpts := make([]huh.Option[string], len(mcpTransportOptions))
@@ -133,7 +133,7 @@ func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
 		transportOpts[i] = huh.NewOption(t, t)
 	}
 
-	step1 := huh.NewForm(huh.NewGroup(
+	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
 			if strings.TrimSpace(s) == "" {
 				return fmt.Errorf("required")
@@ -141,9 +141,12 @@ func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
 			return nil
 		}),
 		huh.NewSelect[string]().Title("Transport").Options(transportOpts...).Value(&selectedTransport),
+		huh.NewInput().Title("Command").Placeholder("stdio only — executable path or name").Value(&command),
+		huh.NewInput().Title("Arguments").Placeholder("stdio only — space-separated args, leave blank for none").Value(&argsStr),
+		huh.NewInput().Title("Server URL").Placeholder("sse/streamable-http only — e.g. http://localhost:3000/sse").Value(&serverURL),
 	))
 
-	submitted, err := bridge.ShowHuhForm(step1)
+	submitted, err := bridge.ShowHuhForm(form)
 	if err != nil {
 		return err
 	}
@@ -159,44 +162,16 @@ func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
 
 	switch transport {
 	case models.MCPTransportStdio:
-		var command, args string
-		step2 := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Command").Value(&command).Validate(func(s string) error {
-				if strings.TrimSpace(s) == "" {
-					return fmt.Errorf("required")
-				}
-				return nil
-			}),
-			huh.NewInput().Title("Arguments").Placeholder("space-separated, leave blank for none").Value(&args),
-		))
-		submitted, err = bridge.ShowHuhForm(step2)
-		if err != nil {
-			return err
-		}
-		if !submitted {
-			return ErrCancelled
+		if strings.TrimSpace(command) == "" {
+			return fmt.Errorf("command is required for stdio transport")
 		}
 		dto.Command = strings.TrimSpace(command)
-		if args = strings.TrimSpace(args); args != "" {
-			dto.Args = strings.Fields(args)
+		if a := strings.TrimSpace(argsStr); a != "" {
+			dto.Args = strings.Fields(a)
 		}
-
 	case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
-		var serverURL string
-		step2 := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Server URL").Value(&serverURL).Validate(func(s string) error {
-				if strings.TrimSpace(s) == "" {
-					return fmt.Errorf("required")
-				}
-				return nil
-			}),
-		))
-		submitted, err = bridge.ShowHuhForm(step2)
-		if err != nil {
-			return err
-		}
-		if !submitted {
-			return ErrCancelled
+		if strings.TrimSpace(serverURL) == "" {
+			return fmt.Errorf("server URL is required for %s transport", transport)
 		}
 		dto.URL = strings.TrimSpace(serverURL)
 	}

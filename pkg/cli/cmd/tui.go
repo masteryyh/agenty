@@ -106,6 +106,7 @@ type chatModel struct {
 
 	bannerContent string
 	chatLog       *strings.Builder
+	outputLog     *strings.Builder
 
 	tokenConsumed int
 
@@ -116,6 +117,8 @@ type chatModel struct {
 	completion completionModel
 
 	pendingHistory bool
+
+	huhFormWidth int
 
 	width  int
 	height int
@@ -160,6 +163,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		input:        ta,
 		mode:         modeChat,
 		chatLog:      new(strings.Builder),
+		outputLog:    new(strings.Builder),
 		lastMessages: messages,
 		stream:       newStreamModel(),
 	}
@@ -261,24 +265,32 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req := msg.request
 		switch req.kind {
 		case overlayKindList:
-			m.overlay = newListOverlay(req.title, req.items, req.hints, req.responseCh)
+			o := newListOverlay(req.title, req.items, req.hints, req.responseCh)
+			o.subtitle = req.subtitle
+			m.overlay = o
 		case overlayKindMultiSelect:
 			m.overlay = newMultiSelectOverlay(req.title, req.options, req.defaultIndices, req.responseCh)
 		case overlayKindHuhForm:
-			width := m.width
-			if width <= 0 {
-				width = 80
+			formWidth := m.width - 8
+			if formWidth > 80 {
+				formWidth = 80
 			}
-			form := req.huhForm.WithWidth(width - 4).WithTheme(theme.NewHuhTheme())
+			if formWidth < 20 {
+				formWidth = 20
+			}
+			m.huhFormWidth = formWidth
+			form := req.huhForm.WithWidth(formWidth).WithTheme(theme.NewHuhTheme())
 			m.overlay = form
 			m.overlayRespCh = req.responseCh
 			return m, form.Init()
+		case overlayKindLogViewer:
+			m.overlay = newLogViewerOverlay(m.width, m.height, req.responseCh)
 		}
 		return m, nil
 
 	case appendOutputMsg:
-		m.appendToChatLog(msg.text)
-		m.refreshViewport()
+		m.outputLog.WriteString(msg.text)
+		m.updateViewportContent()
 		return m, nil
 
 	case clearChatMsg:
@@ -296,7 +308,13 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyMsg(msg)
 
 	case tea.MouseMsg:
-		if m.mode == modeChat {
+		if m.mode == modeOverlay {
+			if lv, ok := m.overlay.(*logViewerOverlay); ok {
+				if cmd := lv.handleMouse(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		} else if m.mode == modeChat {
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			if vpCmd != nil {
@@ -306,6 +324,16 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case streamEventMsg:
+		if msg.event.Type == provider.EventModelSwitch {
+			if id, err := uuid.Parse(msg.event.ModelID); err == nil {
+				m.modelID = id
+			}
+			m.modelName = msg.event.ModelName
+			m.adjustThinkingForModel(msg.event.ModelThinking, msg.event.ModelThinkingLevels)
+			m.appendToChatLog(renderStatusMessage("⚠", "模型已自动切换至 "+msg.event.ModelName))
+			m.refreshViewport()
+			return m, m.stream.waitForEvent()
+		}
 		m.stream.handleEvent(msg.event, m.modelName)
 		m.refreshViewport()
 		return m, m.stream.waitForEvent()
@@ -395,12 +423,26 @@ func (m chatModel) renderOverlay() string {
 		return o.render(m.width, m.height)
 	case *multiSelectOverlay:
 		return o.render(m.width, m.height)
+	case *logViewerOverlay:
+		return o.render(m.width, m.height)
 	case *huh.Form:
 		view := o.View()
 		lines := strings.Split(view, "\n")
 		topPad := (m.height - len(lines)) / 3
 		if topPad < 2 {
 			topPad = 2
+		}
+		leftPad := (m.width - m.huhFormWidth) / 2
+		if leftPad < 0 {
+			leftPad = 0
+		}
+		if leftPad > 0 {
+			pad := strings.Repeat(" ", leftPad)
+			paddedLines := make([]string, len(lines))
+			for i, l := range lines {
+				paddedLines[i] = pad + l
+			}
+			return strings.Repeat("\n", topPad) + strings.Join(paddedLines, "\n")
 		}
 		return strings.Repeat("\n", topPad) + view
 	}
@@ -409,17 +451,20 @@ func (m chatModel) renderOverlay() string {
 
 func (m *chatModel) handleOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var done bool
+	var cmd tea.Cmd
 	switch o := m.overlay.(type) {
 	case *listOverlay:
 		done = o.handleKey(msg)
 	case *multiSelectOverlay:
 		done = o.handleKey(msg)
+	case *logViewerOverlay:
+		done, cmd = o.handleKey(msg)
 	}
 	if done {
 		m.mode = modeChat
 		m.overlay = nil
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m chatModel) renderTopSeparator() string {
@@ -727,10 +772,14 @@ func (m *chatModel) handleCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.chatState.HistoryOffset = 0
 		m.tokenConsumed = int(msg.result.TokenConsumed)
 
+		m.outputLog.Reset()
 		m.chatLog.Reset()
+		m.chatLog.WriteString(m.bannerContent)
 		if len(msg.result.SessionMessages) > 0 {
 			m.lastMessages = msg.result.SessionMessages
 			m.chatLog.WriteString(renderMessageHistoryToString(msg.result.SessionMessages, m.showReasoning))
+		} else {
+			m.lastMessages = nil
 		}
 		m.refreshViewport()
 	}
@@ -743,6 +792,7 @@ func (m *chatModel) handleCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *chatModel) handleChatInput(input string) (tea.Model, tea.Cmd) {
+	m.outputLog.Reset()
 	m.appendToChatLog(renderUserHeader(time.Now()) + "\n")
 	m.appendToChatLog(renderUserPlainBlock(input) + "\n")
 	m.refreshViewport()
@@ -781,16 +831,50 @@ func (m *chatModel) toggleReasoning() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *chatModel) adjustThinkingForModel(modelThinking bool, thinkingLevels []string) {
+	if !m.chatState.Thinking {
+		return
+	}
+	if !modelThinking {
+		m.chatState.Thinking = false
+		m.chatState.ThinkingLevel = ""
+		return
+	}
+	if len(thinkingLevels) == 0 {
+		m.chatState.ThinkingLevel = ""
+		return
+	}
+	for _, l := range thinkingLevels {
+		if l == m.chatState.ThinkingLevel {
+			return
+		}
+	}
+	m.chatState.Thinking = false
+	m.chatState.ThinkingLevel = ""
+}
+
 func (m *chatModel) appendToChatLog(s string) {
 	m.chatLog.WriteString(s)
 }
 
-func (m *chatModel) refreshViewport() {
-	m.updateLayout()
+func (m *chatModel) viewportContent() string {
 	content := m.chatLog.String()
+	if m.outputLog.Len() > 0 {
+		content += m.outputLog.String()
+	}
 	if m.stream.active {
 		content += m.stream.liveContent(m.showReasoning)
 	}
-	m.viewport.SetContent(content)
+	return content
+}
+
+func (m *chatModel) updateViewportContent() {
+	m.updateLayout()
+	m.viewport.SetContent(m.viewportContent())
+}
+
+func (m *chatModel) refreshViewport() {
+	m.updateLayout()
+	m.viewport.SetContent(m.viewportContent())
 	m.viewport.GotoBottom()
 }

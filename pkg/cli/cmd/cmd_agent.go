@@ -271,12 +271,12 @@ func selectAgentModels(b backend.Backend, bridge *UIBridge, currentIDs []uuid.UU
 
 	var chatModels []models.ModelDto
 	for _, m := range allModels.Data {
-		if !m.EmbeddingModel && !m.ContextCompressionModel {
+		if !m.EmbeddingModel && m.Provider != nil && m.Provider.APIKeyCensored != "<not set>" {
 			chatModels = append(chatModels, m)
 		}
 	}
 	if len(chatModels) == 0 {
-		bridge.Warning("No chat models configured yet")
+		bridge.Warning("No chat models from configured providers found")
 		return nil, ErrCancelled
 	}
 

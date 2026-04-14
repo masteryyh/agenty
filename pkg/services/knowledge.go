@@ -122,9 +122,8 @@ func (s *KnowledgeService) CreateItemSync(ctx context.Context, agentID uuid.UUID
 	}
 
 	if err := s.chunkAndEmbed(ctx, item); err != nil {
-		return nil, fmt.Errorf("failed to chunk and embed knowledge item: %w", err)
+		slog.WarnContext(ctx, "failed to chunk and embed knowledge item; item saved without vector index", "itemId", item.ID, "error", err)
 	}
-
 	return item.ToDto(), nil
 }
 

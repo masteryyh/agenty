@@ -43,7 +43,7 @@ type ChatMessage struct {
 	Content           string         `gorm:"type:text"`
 	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
 	ToolResults       datatypes.JSON `gorm:"type:jsonb"`
-	ModelID           uuid.UUID      `gorm:"type:uuid;not null"`
+	ModelID           uuid.UUID      `gorm:"type:uuid"`
 	ReasoningContent  string         `gorm:"type:text"`
 	ProviderSpecifics datatypes.JSON `gorm:"type:jsonb"`
 	CreatedAt         time.Time      `gorm:"autoCreateTime:milli"`
