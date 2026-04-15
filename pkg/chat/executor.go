@@ -23,9 +23,9 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
 )
@@ -33,8 +33,8 @@ import (
 const maxToolCallIterations = 20
 
 type ChatExecutor struct {
-	registry  *tools.Registry
-	providers map[models.APIType]provider.ChatProvider
+	registry         *tools.Registry
+	providerRegistry map[models.APIType]providers.Provider
 }
 
 var (
@@ -43,18 +43,19 @@ var (
 )
 
 func NewChatExecutor(registry *tools.Registry) *ChatExecutor {
-	providers := map[models.APIType]provider.ChatProvider{
-		models.APITypeOpenAI:       provider.NewOpenAIProvider(),
-		models.APITypeOpenAILegacy: provider.NewOpenAILegacyProvider(),
-		models.APITypeAnthropic:    provider.NewAnthropicProvider(),
-		models.APITypeKimi:         provider.NewKimiProvider(),
-		models.APITypeGemini:       provider.NewGeminiProvider(),
-		models.APITypeBigModel:     provider.NewBigModelProvider(),
+	providerMap := map[models.APIType]providers.Provider{
+		models.APITypeOpenAI:       providers.NewOpenAIProvider(),
+		models.APITypeOpenAILegacy: providers.NewOpenAILegacyProvider(),
+		models.APITypeAnthropic:    providers.NewAnthropicProvider(),
+		models.APITypeKimi:         providers.NewKimiProvider(),
+		models.APITypeGemini:       providers.NewGeminiProvider(),
+		models.APITypeBigModel:     providers.NewBigModelProvider(),
+		models.APITypeQwen:         providers.NewQwenProvider(),
 	}
 
 	return &ChatExecutor{
-		registry:  registry,
-		providers: providers,
+		registry:         registry,
+		providerRegistry: providerMap,
 	}
 }
 
@@ -66,7 +67,7 @@ func GetChatExecutor() *ChatExecutor {
 }
 
 type ChatParams struct {
-	Messages                  []provider.Message
+	Messages                  []providers.Message
 	Model                     string
 	AgentID                   uuid.UUID
 	SessionID                 uuid.UUID
@@ -77,27 +78,27 @@ type ChatParams struct {
 	BaseURL                   string
 	APIKey                    string
 	APIType                   models.APIType
-	ResponseFormat            *provider.ResponseFormat
+	ResponseFormat            *providers.ResponseFormat
 }
 
 type ChatResult struct {
 	TotalToken int64
-	Messages   []provider.Message
+	Messages   []providers.Message
 }
 
 func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResult, error) {
-	p, ok := ce.providers[params.APIType]
+	p, ok := ce.providerRegistry[params.APIType]
 	if !ok {
-		p = ce.providers[models.APITypeOpenAI]
+		p = ce.providerRegistry[models.APITypeOpenAI]
 	}
 
 	toolDefs := ce.registry.Definitions()
-	messages := make([]provider.Message, len(params.Messages))
+	messages := make([]providers.Message, len(params.Messages))
 	copy(messages, params.Messages)
 
 	var totalTokens int64
 	for i := range maxToolCallIterations {
-		req := &provider.ChatRequest{
+		req := &providers.ChatRequest{
 			Model:                     params.Model,
 			Thinking:                  params.Thinking,
 			ThinkingLevel:             params.ThinkingLevel,
@@ -117,7 +118,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		}
 		totalTokens += resp.TotalToken
 
-		assistantMsg := provider.Message{
+		assistantMsg := providers.Message{
 			Role:             models.RoleAssistant,
 			Content:          resp.Content,
 			ToolCalls:        resp.ToolCalls,
@@ -144,7 +145,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
 			result := ce.registry.Execute(ctx, tcc, tc)
 
-			toolMsg := provider.Message{
+			toolMsg := providers.Message{
 				Role:       models.RoleTool,
 				Content:    result.Content,
 				ToolResult: &result,
@@ -153,7 +154,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		}
 	}
 
-	finalMessages := lo.Map(messages[len(params.Messages):], func(msg provider.Message, _ int) provider.Message {
+	finalMessages := lo.Map(messages[len(params.Messages):], func(msg providers.Message, _ int) providers.Message {
 		if msg.Role == models.RoleAssistant {
 			if msg.ReasoningContent == "" && len(msg.ReasoningBlocks) > 0 {
 				var summaryBuilder strings.Builder
@@ -178,17 +179,17 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 	}, nil
 }
 
-func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-chan provider.StreamEvent, error) {
-	p, ok := ce.providers[params.APIType]
+func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-chan providers.StreamEvent, error) {
+	p, ok := ce.providerRegistry[params.APIType]
 	if !ok {
-		p = ce.providers[models.APITypeOpenAI]
+		p = ce.providerRegistry[models.APITypeOpenAI]
 	}
 
 	toolDefs := ce.registry.Definitions()
-	messages := make([]provider.Message, len(params.Messages))
+	messages := make([]providers.Message, len(params.Messages))
 	copy(messages, params.Messages)
 
-	out := make(chan provider.StreamEvent, 64)
+	out := make(chan providers.StreamEvent, 64)
 
 	safe.GoOnce("chat-executor-stream", func() {
 		defer close(out)
@@ -196,7 +197,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 		var totalTokens int64
 
 		for i := range maxToolCallIterations {
-			req := &provider.ChatRequest{
+			req := &providers.ChatRequest{
 				Model:                     params.Model,
 				Thinking:                  params.Thinking,
 				ThinkingLevel:             params.ThinkingLevel,
@@ -212,16 +213,16 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 
 			providerCh, err := p.StreamChat(ctx, req)
 			if err != nil {
-				out <- provider.StreamEvent{Type: provider.EventError, Error: err.Error()}
+				out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
 				return
 			}
 
-			var assistantMsg *provider.Message
+			var assistantMsg *providers.Message
 			for evt := range providerCh {
 				switch evt.Type {
-				case provider.EventMessageDone:
+				case providers.EventMessageDone:
 					assistantMsg = evt.Message
-				case provider.EventUsage:
+				case providers.EventUsage:
 					if evt.Usage != nil {
 						totalTokens += evt.Usage.TotalTokens
 					}
@@ -235,7 +236,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 			}
 
 			if assistantMsg == nil {
-				out <- provider.StreamEvent{Type: provider.EventError, Error: "no message received from provider"}
+				out <- providers.StreamEvent{Type: providers.EventError, Error: "no message received from provider"}
 				return
 			}
 
@@ -270,15 +271,15 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				result := ce.registry.Execute(ctx, tcc, tc)
 
 				select {
-				case out <- provider.StreamEvent{
-					Type:       provider.EventToolResult,
+				case out <- providers.StreamEvent{
+					Type:       providers.EventToolResult,
 					ToolResult: &result,
 				}:
 				case <-ctx.Done():
 					return
 				}
 
-				toolMsg := provider.Message{
+				toolMsg := providers.Message{
 					Role:       models.RoleTool,
 					Content:    result.Content,
 					ToolResult: &result,
@@ -287,12 +288,12 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 			}
 		}
 
-		out <- provider.StreamEvent{
-			Type:  provider.EventUsage,
-			Usage: &provider.StreamUsage{TotalTokens: totalTokens},
+		out <- providers.StreamEvent{
+			Type:  providers.EventUsage,
+			Usage: &providers.StreamUsage{TotalTokens: totalTokens},
 		}
 
-		out <- provider.StreamEvent{Type: provider.EventDone}
+		out <- providers.StreamEvent{Type: providers.EventDone}
 	})
 
 	return out, nil

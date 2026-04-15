@@ -30,10 +30,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/cli/theme"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
@@ -45,7 +45,7 @@ const (
 )
 
 type streamEventMsg struct {
-	event provider.StreamEvent
+	event providers.StreamEvent
 }
 
 type streamDoneMsg struct {
@@ -97,8 +97,8 @@ type chatModel struct {
 	agentName string
 	chatState *ChatState
 
-	mode    appMode
-	overlay any
+	mode          appMode
+	overlay       any
 	overlayRespCh chan overlayResponse
 
 	viewport viewport.Model
@@ -190,19 +190,29 @@ func (m chatModel) updateHuhOverlay(msg tea.Msg) (chatModel, tea.Cmd, bool) {
 	if !ok {
 		return m, nil, false
 	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		if m.overlayRespCh != nil {
+			m.overlayRespCh <- overlayResponse{formSubmitted: false}
+			m.overlayRespCh = nil
+		}
+		m.mode = modeChat
+		m.overlay = nil
+		return m, nil, true
+	}
 	newModel, cmd := form.Update(msg)
 	if f, ok := newModel.(*huh.Form); ok {
 		m.overlay = f
 		form = f
 	}
-	if form.State == huh.StateCompleted {
+	switch form.State {
+	case huh.StateCompleted:
 		if m.overlayRespCh != nil {
 			m.overlayRespCh <- overlayResponse{formSubmitted: true}
 			m.overlayRespCh = nil
 		}
 		m.mode = modeChat
 		m.overlay = nil
-	} else if form.State == huh.StateAborted {
+	case huh.StateAborted:
 		if m.overlayRespCh != nil {
 			m.overlayRespCh <- overlayResponse{formSubmitted: false}
 			m.overlayRespCh = nil
@@ -308,13 +318,14 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyMsg(msg)
 
 	case tea.MouseMsg:
-		if m.mode == modeOverlay {
+		switch m.mode {
+		case modeOverlay:
 			if lv, ok := m.overlay.(*logViewerOverlay); ok {
 				if cmd := lv.handleMouse(msg); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			}
-		} else if m.mode == modeChat {
+		case modeChat:
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			if vpCmd != nil {
@@ -324,7 +335,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case streamEventMsg:
-		if msg.event.Type == provider.EventModelSwitch {
+		if msg.event.Type == providers.EventModelSwitch {
 			if id, err := uuid.Parse(msg.event.ModelID); err == nil {
 				m.modelID = id
 			}
@@ -805,7 +816,7 @@ func (m *chatModel) handleChatInput(input string) (tea.Model, tea.Cmd) {
 			Message:       input,
 			Thinking:      m.chatState.Thinking,
 			ThinkingLevel: m.chatState.ThinkingLevel,
-		}, func(evt provider.StreamEvent) error {
+		}, func(evt providers.StreamEvent) error {
 			m.stream.ch <- evt
 			return nil
 		})

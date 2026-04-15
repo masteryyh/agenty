@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
+	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -361,4 +362,38 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 	})
 
 	return ch, nil
+}
+
+func (p *OpenAIProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	client := conn.GetOpenAIClient(req.BaseURL, req.APIKey)
+
+	params := openai.EmbeddingNewParams{
+		Model: req.Model,
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: req.Texts,
+		},
+	}
+	if req.Dimensions > 0 {
+		params.Dimensions = param.NewOpt(req.Dimensions)
+	}
+
+	resp, err := client.Embeddings.New(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embeddings: %w", err)
+	}
+
+	result := make([][]float32, len(req.Texts))
+	for _, item := range resp.Data {
+		if int(item.Index) >= len(result) {
+			continue
+		}
+		result[item.Index] = lo.Map(item.Embedding, func(v float64, _ int) float32 {
+			return float32(v)
+		})
+	}
+	return &EmbeddingResponse{Embeddings: result}, nil
+}
+
+func (p *OpenAIProvider) VectorNormalized() bool {
+	return true
 }

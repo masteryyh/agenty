@@ -28,8 +28,8 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/response"
 )
@@ -173,7 +173,7 @@ func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.Chat
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
 }
 
-func (c *Client) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event provider.StreamEvent) error) error {
+func (c *Client) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error {
 	jsonData, err := json.Marshal(dto)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request body: %w", err)
@@ -216,7 +216,7 @@ func (c *Client) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *model
 		}
 
 		if line == "" && currentData != "" {
-			var evt provider.StreamEvent
+			var evt providers.StreamEvent
 			if err := json.UnmarshalString(currentData, &evt); err != nil {
 				currentData = ""
 				continue
@@ -227,7 +227,7 @@ func (c *Client) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *model
 				return err
 			}
 
-			if evt.Type == provider.EventDone {
+			if evt.Type == providers.EventDone {
 				return nil
 			}
 		}

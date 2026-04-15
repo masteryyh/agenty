@@ -27,21 +27,12 @@ import (
 const maxCompletionVisible = 8
 
 type completionModel struct {
-	items     []string
-	visible   bool
-	idx       int
-	mode      completionMode
-	argCmd    *Command
-	allArgs   []string
-}
-
-func (c *completionModel) reset() {
-	c.items = nil
-	c.visible = false
-	c.idx = 0
-	c.mode = completeCmdMode
-	c.argCmd = nil
-	c.allArgs = nil
+	items   []string
+	visible bool
+	idx     int
+	mode    completionMode
+	argCmd  *Command
+	allArgs []string
 }
 
 func (c *completionModel) dismiss() {
@@ -55,10 +46,7 @@ func (c *completionModel) height() int {
 	if !c.visible || len(c.items) == 0 {
 		return 0
 	}
-	n := len(c.items)
-	if n > maxCompletionVisible {
-		n = maxCompletionVisible
-	}
+	n := min(len(c.items), maxCompletionVisible)
 	return n
 }
 

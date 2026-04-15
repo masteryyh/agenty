@@ -26,9 +26,9 @@ import (
 )
 
 type ChatState struct {
-	Thinking        bool
-	ThinkingLevel   string
-	HistoryOffset   int
+	Thinking      bool
+	ThinkingLevel string
+	HistoryOffset int
 }
 
 type CommandResult struct {
@@ -46,18 +46,18 @@ type CommandResult struct {
 type CommandHandler func(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
 
 var commandRegistry = map[string]CommandHandler{
-	"/new":        handleNewCmd,
-	"/status":     handleStatusCmd,
-	"/history":    handleHistoryCmd,
-	"/model":      handleModelCmd,
-	"/think":      handleThinkCmd,
-	"/help":       handleHelpCmd,
-	"/exit":       handleExitCmd,
-	"/agent":      handleAgentCmd,
-	"/provider":   handleProviderCmd,
-	"/mcp":        handleMCPCmd,
-	"/settings":   handleSettingsCmd,
-	"/memory":     handleMemoryCmd,
+	"/new":      handleNewCmd,
+	"/status":   handleStatusCmd,
+	"/history":  handleHistoryCmd,
+	"/model":    handleModelCmd,
+	"/think":    handleThinkCmd,
+	"/help":     handleHelpCmd,
+	"/exit":     handleExitCmd,
+	"/agent":    handleAgentCmd,
+	"/provider": handleProviderCmd,
+	"/mcp":      handleMCPCmd,
+	"/settings": handleSettingsCmd,
+	"/memory":   handleMemoryCmd,
 }
 
 func parseSlashInput(input string) []string {

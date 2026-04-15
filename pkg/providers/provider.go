@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
 	"context"
@@ -22,6 +22,41 @@ import (
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
 )
+
+type StreamEventType string
+
+const (
+	EventReasoningDelta StreamEventType = "reasoning_delta"
+	EventContentDelta   StreamEventType = "content_delta"
+	EventToolCallStart  StreamEventType = "tool_call_start"
+	EventToolCallDelta  StreamEventType = "tool_call_delta"
+	EventToolCallDone   StreamEventType = "tool_call_done"
+	EventToolResult     StreamEventType = "tool_result"
+	EventMessageDone    StreamEventType = "message_done"
+	EventUsage          StreamEventType = "usage"
+	EventError          StreamEventType = "error"
+	EventDone           StreamEventType = "done"
+	EventModelSwitch    StreamEventType = "model_switch"
+)
+
+type StreamEvent struct {
+	Type                StreamEventType    `json:"type"`
+	Content             string             `json:"content,omitempty"`
+	Reasoning           string             `json:"reasoning,omitempty"`
+	ToolCall            *models.ToolCall   `json:"toolCall,omitempty"`
+	ToolResult          *models.ToolResult `json:"toolResult,omitempty"`
+	Usage               *StreamUsage       `json:"usage,omitempty"`
+	Error               string             `json:"error,omitempty"`
+	Message             *Message           `json:"message,omitempty"`
+	ModelID             string             `json:"modelId,omitempty"`
+	ModelName           string             `json:"modelName,omitempty"`
+	ModelThinking       bool               `json:"modelThinking,omitempty"`
+	ModelThinkingLevels []string           `json:"modelThinkingLevels,omitempty"`
+}
+
+type StreamUsage struct {
+	TotalTokens int64 `json:"totalTokens"`
+}
 
 type ReasoningBlock struct {
 	Summary   string `json:"summary"`
@@ -39,8 +74,8 @@ type Message struct {
 }
 
 type ResponseFormat struct {
-	Type       string            `json:"type"`                 // "json_object", "json_schema" or "text"
-	JSONSchema *JSONSchemaFormat `json:"jsonSchema,omitempty"` // Required when Type is "json_schema"
+	Type       string            `json:"type"`
+	JSONSchema *JSONSchemaFormat `json:"jsonSchema,omitempty"`
 }
 
 type JSONSchemaFormat struct {
@@ -73,8 +108,22 @@ type ChatResponse struct {
 	TotalToken       int64
 }
 
-type ChatProvider interface {
+type EmbeddingRequest struct {
+	Model      string
+	Texts      []string
+	BaseURL    string
+	APIKey     string
+	Dimensions int64
+}
+
+type EmbeddingResponse struct {
+	Embeddings [][]float32
+}
+
+type Provider interface {
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
 	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
+	Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error)
 	Name() string
+	VectorNormalized() bool
 }

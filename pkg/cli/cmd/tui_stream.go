@@ -23,35 +23,35 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/muesli/reflow/ansi"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/muesli/reflow/wrap"
 )
 
 type streamModel struct {
-	active          bool
-	headerPrinted   bool
-	hasReasoning    bool
-	hasToolSection  bool
-	hadToolCalls    bool
-	hasContent      bool
-	atLineStart     bool
+	active         bool
+	headerPrinted  bool
+	hasReasoning   bool
+	hasToolSection bool
+	hadToolCalls   bool
+	hasContent     bool
+	atLineStart    bool
 
-	buf             *strings.Builder
-	reasoningBuf    *strings.Builder
-	reasoningStart  time.Time
-	inReasoning     bool
-	sectionPrefix   string
-	inContent       bool
-	contentBuf      *strings.Builder
+	buf            *strings.Builder
+	reasoningBuf   *strings.Builder
+	reasoningStart time.Time
+	inReasoning    bool
+	sectionPrefix  string
+	inContent      bool
+	contentBuf     *strings.Builder
 
-	ch              chan provider.StreamEvent
-	doneCh          chan error
+	ch     chan providers.StreamEvent
+	doneCh chan error
 
-	spinIdx         int
-	tickCount       int
-	phrase          string
+	spinIdx   int
+	tickCount int
+	phrase    string
 
 	currentToolName string
 	toolArgsBuf     *strings.Builder
@@ -87,7 +87,7 @@ func (s *streamModel) start() {
 	s.inContent = false
 	s.sectionPrefix = ""
 	s.reasoningStart = time.Time{}
-	s.ch = make(chan provider.StreamEvent, 32)
+	s.ch = make(chan providers.StreamEvent, 32)
 	s.doneCh = make(chan error, 1)
 }
 
@@ -104,9 +104,9 @@ func (s *streamModel) waitForEvent() tea.Cmd {
 	}
 }
 
-func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
+func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 	switch evt.Type {
-	case provider.EventReasoningDelta:
+	case providers.EventReasoningDelta:
 		if !s.headerPrinted {
 			s.buf.WriteString(renderAssistantHeader(modelName, time.Now()))
 			s.buf.WriteString("\n")
@@ -120,7 +120,7 @@ func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
 		}
 		s.reasoningBuf.WriteString(evt.Reasoning)
 
-	case provider.EventContentDelta:
+	case providers.EventContentDelta:
 		if s.inReasoning {
 			s.finalizeReasoning(true)
 		}
@@ -139,7 +139,7 @@ func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
 		}
 		s.contentBuf.WriteString(evt.Content)
 
-	case provider.EventToolCallStart:
+	case providers.EventToolCallStart:
 		s.finalizeReasoning(true)
 		s.finalizeContent()
 		if !s.headerPrinted {
@@ -162,18 +162,18 @@ func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
 		}
 		s.atLineStart = true
 
-	case provider.EventToolCallDelta:
+	case providers.EventToolCallDelta:
 		if evt.ToolCall != nil {
 			s.toolArgsBuf.WriteString(evt.ToolCall.Arguments)
 		}
 
-	case provider.EventToolCallDone:
+	case providers.EventToolCallDone:
 		argsJSON := s.toolArgsBuf.String()
 		s.buf.WriteString(streamRenderBuiltinToolCallLine(s.currentToolName, argsJSON))
 		s.buf.WriteString("\n")
 		s.atLineStart = true
 
-	case provider.EventToolResult:
+	case providers.EventToolResult:
 		if evt.ToolResult != nil {
 			if evt.ToolResult.IsError {
 				s.buf.WriteString(streamRenderToolError())
@@ -202,7 +202,7 @@ func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
 			s.atLineStart = true
 		}
 
-	case provider.EventMessageDone:
+	case providers.EventMessageDone:
 		s.finalizeReasoning(true)
 		s.finalizeContent()
 		if !s.atLineStart {
@@ -213,7 +213,7 @@ func (s *streamModel) handleEvent(evt provider.StreamEvent, modelName string) {
 		s.hasContent = false
 		s.atLineStart = true
 
-	case provider.EventError:
+	case providers.EventError:
 		if !s.atLineStart {
 			s.buf.WriteString("\n")
 		}
@@ -285,33 +285,33 @@ func (s *streamModel) liveContent(showReasoning bool) string {
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 var streamingPhrases = []string{
-"Brainstorming...",
-"Thundering...",
-"Processing...",
-"Connecting dots...",
-"Exploring ideas...",
-"Crafting a response...",
-"Pondering...",
-"Working on it...",
-"Consulting the oracle...",
-"Firing synapses...",
-"Chewing on that...",
-"Hmm...",
-"Reticulating splines...",
+	"Brainstorming...",
+	"Thundering...",
+	"Processing...",
+	"Connecting dots...",
+	"Exploring ideas...",
+	"Crafting a response...",
+	"Pondering...",
+	"Working on it...",
+	"Consulting the oracle...",
+	"Firing synapses...",
+	"Chewing on that...",
+	"Hmm...",
+	"Reticulating splines...",
 }
 
 func streamRenderToolLabel() string {
-return contentIndent + styleToolLabel.Render("🔧 tool execution:") + "\n"
+	return contentIndent + styleToolLabel.Render("🔧 tool execution:") + "\n"
 }
 
 func streamRenderToolSuccess() string {
-return contentIndent + "  " + styleToolSuccess.Render("✓ ok") + "\n"
+	return contentIndent + "  " + styleToolSuccess.Render("✓ ok") + "\n"
 }
 
 func streamRenderToolError() string {
-return contentIndent + "  " + styleToolError.Render("✗ error") + "\n"
+	return contentIndent + "  " + styleToolError.Render("✗ error") + "\n"
 }
 
 func streamRenderFinalLabel() string {
-return "\n" + contentIndent + styleFinalLabel.Render("📝 final response:") + "\n"
+	return "\n" + contentIndent + styleFinalLabel.Render("📝 final response:") + "\n"
 }

@@ -39,7 +39,7 @@ The backend service can also act as a MCP client to communicate with other MCP s
 
 5. **Review and Optimize**: Always review your code for potential issues, bugs, or improvements before finalizing it. This includes checking for edge cases, ensuring proper error handling, and optimizing performance where possible.
 
-6. **Run Builds and Tests**: Always run builds and tests to make sure your code works as expected and does not break anything. Write new tests if necessary to cover new features or edge cases.
+6. **Run Fmts, Builds and Tests**: Always run `gofmt`, `go build`, `go vet` and tests to make sure your code works as expected and does not break anything. Write new tests if necessary to cover new features or edge cases.
 
 ## Agent guidelines
 

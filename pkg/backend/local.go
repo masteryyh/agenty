@@ -21,9 +21,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
@@ -123,7 +123,7 @@ func (l *LocalBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*model
 	return &result, nil
 }
 
-func (l *LocalBackend) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event provider.StreamEvent) error) error {
+func (l *LocalBackend) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error {
 	ch, err := l.chatSvc.StreamChat(ctx, sessionID, dto)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func (l *LocalBackend) StreamChat(ctx context.Context, sessionID uuid.UUID, dto 
 		if err := handler(evt); err != nil {
 			return err
 		}
-		if evt.Type == provider.EventDone {
+		if evt.Type == providers.EventDone {
 			return nil
 		}
 	}

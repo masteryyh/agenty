@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
 	"context"
@@ -213,7 +213,7 @@ func buildGeminiThoughtChain(blocks []ReasoningBlock) []*genai.Part {
 	})
 }
 
-func validateThinkingLevel(level string) genai.ThinkingLevel {
+func validateGeminiThinkingLevel(level string) genai.ThinkingLevel {
 	switch level {
 	case "low":
 		return genai.ThinkingLevelLow
@@ -239,7 +239,7 @@ func (p *GeminiProvider) buildContentConfig(req *ChatRequest) *genai.GenerateCon
 	if req.Thinking {
 		config.ThinkingConfig = &genai.ThinkingConfig{
 			IncludeThoughts: true,
-			ThinkingLevel:   validateThinkingLevel(req.ThinkingLevel),
+			ThinkingLevel:   validateGeminiThinkingLevel(req.ThinkingLevel),
 		}
 	}
 
@@ -356,4 +356,34 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 	})
 
 	return ch, nil
+}
+
+func (p *GeminiProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	client, err := conn.GetGeminiClient(ctx, req.BaseURL, req.APIKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Model == "" {
+		return nil, fmt.Errorf("model is required for embedding")
+	}
+
+	contents := lo.Map(req.Texts, func(text string, _ int) *genai.Content {
+		return genai.NewContentFromText(text, genai.RoleUser)
+	})
+
+	result, err := client.Models.EmbedContent(ctx, req.Model, contents, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gemini embedding failed: %w", err)
+	}
+
+	embeddings := lo.Map(result.Embeddings, func(emb *genai.ContentEmbedding, _ int) []float32 {
+		return emb.Values
+	})
+
+	return &EmbeddingResponse{Embeddings: embeddings}, nil
+}
+
+func (p *GeminiProvider) VectorNormalized() bool {
+	return false
 }

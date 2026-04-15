@@ -20,9 +20,9 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 )
 
@@ -104,7 +104,7 @@ func (r *RemoteBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*mode
 	return r.client.Chat(sessionID, dto)
 }
 
-func (r *RemoteBackend) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event provider.StreamEvent) error) error {
+func (r *RemoteBackend) StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error {
 	return r.client.StreamChat(ctx, sessionID, dto, handler)
 }
 

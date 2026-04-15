@@ -23,10 +23,10 @@ import (
 	"sync"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"gorm.io/gorm"
 )
 
@@ -48,8 +48,8 @@ type SearchEvaluation struct {
 }
 
 type SearchEvaluator struct {
-	db        *gorm.DB
-	providers map[models.APIType]provider.ChatProvider
+	db               *gorm.DB
+	providerRegistry map[models.APIType]providers.Provider
 }
 
 var (
@@ -61,12 +61,13 @@ func GetSearchEvaluator() *SearchEvaluator {
 	evaluatorOnce.Do(func() {
 		searchEvaluator = &SearchEvaluator{
 			db: conn.GetDB(),
-			providers: map[models.APIType]provider.ChatProvider{
-				models.APITypeOpenAI:       provider.NewOpenAIProvider(),
-				models.APITypeOpenAILegacy: provider.NewOpenAILegacyProvider(),
-				models.APITypeAnthropic:    provider.NewAnthropicProvider(),
-				models.APITypeKimi:         provider.NewKimiProvider(),
-				models.APITypeGemini:       provider.NewGeminiProvider(),
+			providerRegistry: map[models.APIType]providers.Provider{
+				models.APITypeOpenAI:       providers.NewOpenAIProvider(),
+				models.APITypeOpenAILegacy: providers.NewOpenAILegacyProvider(),
+				models.APITypeAnthropic:    providers.NewAnthropicProvider(),
+				models.APITypeKimi:         providers.NewKimiProvider(),
+				models.APITypeGemini:       providers.NewGeminiProvider(),
+				models.APITypeBigModel:     providers.NewBigModelProvider(),
 			},
 		}
 	})
@@ -83,22 +84,22 @@ func (e *SearchEvaluator) Evaluate(ctx context.Context, modelID, query, searchRe
 	}
 
 	prompt := fmt.Sprintf(consts.SearchEvaluationPrompt, query, searchResults)
-	messages := []provider.Message{
+	messages := []providers.Message{
 		{Role: models.RoleUser, Content: prompt},
 	}
 
-	p, ok := e.providers[apiProvider.Type]
+	p, ok := e.providerRegistry[apiProvider.Type]
 	if !ok {
-		p = e.providers[models.APITypeOpenAI]
+		p = e.providerRegistry[models.APITypeOpenAI]
 	}
 
-	resp, err := p.Chat(ctx, &provider.ChatRequest{
+	resp, err := p.Chat(ctx, &providers.ChatRequest{
 		Model:    model.Code,
 		Messages: messages,
 		BaseURL:  apiProvider.BaseURL,
 		APIKey:   apiProvider.APIKey,
 		APIType:  apiProvider.Type,
-		ResponseFormat: &provider.ResponseFormat{
+		ResponseFormat: &providers.ResponseFormat{
 			Type: "json_object",
 		},
 	})

@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	maxToolArgPreview     = 40
-	maxToolResultPreview  = 60
-	maxToolResultLines    = 5
+	maxToolArgPreview    = 40
+	maxToolResultPreview = 60
+	maxToolResultLines   = 5
 )
 
 // renderBuiltinToolCallSummary returns a human-readable summary of a tool call's arguments.

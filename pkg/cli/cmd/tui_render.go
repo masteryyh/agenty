@@ -478,4 +478,3 @@ func WrapForDisplay(s string) string {
 	}
 	return buf.String()
 }
-
