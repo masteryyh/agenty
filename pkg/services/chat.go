@@ -28,12 +28,12 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/chat"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
@@ -286,8 +286,8 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	if err != nil {
 		return nil, err
 	}
-	messages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
-	messages = append(messages, provider.Message{Role: models.RoleUser, Content: data.Message})
+	messages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
+	messages = append(messages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
 	if err := s.saveUserMessage(ctx, &res.session, data.Message); err != nil {
 		return nil, err
@@ -316,7 +316,7 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	return messageDtos, nil
 }
 
-func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (<-chan provider.StreamEvent, error) {
+func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (<-chan providers.StreamEvent, error) {
 	session, err := gorm.G[models.ChatSession](s.db).
 		Where("id = ? AND deleted_at IS NULL", sessionID).
 		First(ctx)
@@ -356,19 +356,19 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 	if err != nil {
 		return nil, err
 	}
-	baseMessages = append([]provider.Message{{Role: models.RoleSystem, Content: systemPrompt}}, baseMessages...)
-	baseMessages = append(baseMessages, provider.Message{Role: models.RoleUser, Content: data.Message})
+	baseMessages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, baseMessages...)
+	baseMessages = append(baseMessages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
 	if err := s.saveUserMessage(ctx, &session, data.Message); err != nil {
 		return nil, err
 	}
 
-	out := make(chan provider.StreamEvent, 64)
+	out := make(chan providers.StreamEvent, 64)
 
 	safe.GoOnce("chat-service-stream", func() {
 		defer close(out)
 
-		var collectedMessages []provider.Message
+		var collectedMessages []providers.Message
 		var totalTokens int64
 
 		for candidateIdx, candidate := range candidates {
@@ -380,8 +380,8 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 					_ = json.Unmarshal(candidate.model.ThinkingLevels, &thinkingLevels)
 				}
 				select {
-				case out <- provider.StreamEvent{
-					Type:                provider.EventModelSwitch,
+				case out <- providers.StreamEvent{
+					Type:                providers.EventModelSwitch,
 					ModelID:             candidate.model.ID.String(),
 					ModelName:           candidate.chatProvider.Name + "/" + candidate.model.Name,
 					ModelThinking:       candidate.model.Thinking,
@@ -412,7 +412,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 
 			var apiErr string
 			for evt := range executorCh {
-				if evt.Type == provider.EventError {
+				if evt.Type == providers.EventError {
 					apiErr = evt.Error
 					slog.WarnContext(ctx, "model returned error, trying next", "model", candidate.model.Name, "error", evt.Error)
 					go func() {
@@ -422,21 +422,21 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 					break
 				}
 
-				if evt.Type == provider.EventMessageDone && evt.Message != nil {
+				if evt.Type == providers.EventMessageDone && evt.Message != nil {
 					collectedMessages = append(collectedMessages, *evt.Message)
 				}
-				if evt.Type == provider.EventToolResult && evt.ToolResult != nil {
-					collectedMessages = append(collectedMessages, provider.Message{
+				if evt.Type == providers.EventToolResult && evt.ToolResult != nil {
+					collectedMessages = append(collectedMessages, providers.Message{
 						Role:       models.RoleTool,
 						Content:    evt.ToolResult.Content,
 						ToolResult: evt.ToolResult,
 					})
 				}
-				if evt.Type == provider.EventUsage && evt.Usage != nil {
+				if evt.Type == providers.EventUsage && evt.Usage != nil {
 					totalTokens = evt.Usage.TotalTokens
 				}
 
-				if evt.Type == provider.EventDone {
+				if evt.Type == providers.EventDone {
 					s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
 					select {
 					case out <- evt:
@@ -462,8 +462,8 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 		}
 
 		select {
-		case out <- provider.StreamEvent{
-			Type:  provider.EventError,
+		case out <- providers.StreamEvent{
+			Type:  providers.EventError,
 			Error: "all configured models are unavailable, please check your model configuration",
 		}:
 		case <-ctx.Done():
@@ -473,7 +473,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 	return out, nil
 }
 
-func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResources, collectedMessages []provider.Message, totalTokens int64, thinkingLevel string) {
+func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResources, collectedMessages []providers.Message, totalTokens int64, thinkingLevel string) {
 	baseTime := time.Now()
 	newMessages := make([]models.ChatMessage, 0, len(collectedMessages))
 	for i, m := range collectedMessages {
@@ -558,8 +558,8 @@ func (s *ChatService) resolveModelList(ctx context.Context, agentID, preferredMo
 	return result, nil
 }
 
-func stripThinkingData(messages []provider.Message) []provider.Message {
-	result := make([]provider.Message, len(messages))
+func stripThinkingData(messages []providers.Message) []providers.Message {
+	result := make([]providers.Message, len(messages))
 	for i, m := range messages {
 		m.ReasoningContent = ""
 		m.ReasoningBlocks = nil
@@ -671,7 +671,7 @@ func buildSystemPrompt(agent *models.Agent) (string, error) {
 	return sb.String(), nil
 }
 
-func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelID uuid.UUID, thinking bool) ([]provider.Message, error) {
+func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelID uuid.UUID, thinking bool) ([]providers.Message, error) {
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
 		Where("session_id = ? AND deleted_at IS NULL", sessionID).
 		Order("created_at ASC").
@@ -681,7 +681,7 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 		return nil, err
 	}
 
-	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) provider.Message {
+	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) providers.Message {
 		var toolCalls []models.ToolCall
 		if len(cm.ToolCalls) > 0 {
 			if err := json.Unmarshal(cm.ToolCalls, &toolCalls); err != nil {
@@ -699,7 +699,7 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 			}
 		}
 
-		msg := provider.Message{
+		msg := providers.Message{
 			Role:       cm.Role,
 			Content:    cm.Content,
 			ToolCalls:  toolCalls,
@@ -712,19 +712,19 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 				var ps models.ProviderSpecificData
 				if err := json.Unmarshal(cm.ProviderSpecifics, &ps); err == nil {
 					if len(ps.AnthropicThinkingBlocks) > 0 {
-						msg.ReasoningBlocks = lo.Map(ps.AnthropicThinkingBlocks, func(b models.AnthropicThinkingBlock, _ int) provider.ReasoningBlock {
+						msg.ReasoningBlocks = lo.Map(ps.AnthropicThinkingBlocks, func(b models.AnthropicThinkingBlock, _ int) providers.ReasoningBlock {
 							if b.Type == "redacted_thinking" {
-								return provider.ReasoningBlock{Signature: b.Data, Redacted: true}
+								return providers.ReasoningBlock{Signature: b.Data, Redacted: true}
 							}
-							return provider.ReasoningBlock{Summary: b.Thinking, Signature: b.Signature}
+							return providers.ReasoningBlock{Summary: b.Thinking, Signature: b.Signature}
 						})
 					} else if len(ps.GeminiThinkingBlocks) > 0 {
-						msg.ReasoningBlocks = lo.Map(ps.GeminiThinkingBlocks, func(b models.GeminiThinkingData, _ int) provider.ReasoningBlock {
-							return provider.ReasoningBlock{Summary: b.Summary, Signature: b.ThoughtSignature}
+						msg.ReasoningBlocks = lo.Map(ps.GeminiThinkingBlocks, func(b models.GeminiThinkingData, _ int) providers.ReasoningBlock {
+							return providers.ReasoningBlock{Summary: b.Summary, Signature: b.ThoughtSignature}
 						})
 					} else if len(ps.OpenAIReasoningBlocks) > 0 {
-						msg.ReasoningBlocks = lo.Map(ps.OpenAIReasoningBlocks, func(b models.OpenAIReasoningBlock, _ int) provider.ReasoningBlock {
-							return provider.ReasoningBlock{Summary: b.Summary, Signature: b.EncryptedContent}
+						msg.ReasoningBlocks = lo.Map(ps.OpenAIReasoningBlocks, func(b models.OpenAIReasoningBlock, _ int) providers.ReasoningBlock {
+							return providers.ReasoningBlock{Summary: b.Summary, Signature: b.EncryptedContent}
 						})
 					}
 				}
@@ -750,7 +750,7 @@ func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatS
 	return nil
 }
 
-func buildChatParams(res *chatResources, messages []provider.Message, data *models.ChatDto) *chat.ChatParams {
+func buildChatParams(res *chatResources, messages []providers.Message, data *models.ChatDto) *chat.ChatParams {
 	return &chat.ChatParams{
 		BaseURL:                   res.chatProvider.BaseURL,
 		APIKey:                    res.chatProvider.APIKey,
@@ -766,7 +766,7 @@ func buildChatParams(res *chatResources, messages []provider.Message, data *mode
 	}
 }
 
-func buildChatMessage(m provider.Message, sessionID, agentID, modelID uuid.UUID, providerType models.APIType, timestamp time.Time, thinkingLevel string) models.ChatMessage {
+func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID, providerType models.APIType, timestamp time.Time, thinkingLevel string) models.ChatMessage {
 	var rawCalls []byte
 	if len(m.ToolCalls) > 0 {
 		if d, err := json.Marshal(m.ToolCalls); err != nil {
@@ -801,18 +801,18 @@ func buildChatMessage(m provider.Message, sessionID, agentID, modelID uuid.UUID,
 		var specificData models.ProviderSpecificData
 		switch providerType {
 		case models.APITypeAnthropic:
-			specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
+			specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b providers.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
 				if b.Redacted {
 					return models.AnthropicThinkingBlock{Type: "redacted_thinking", Data: b.Signature}
 				}
 				return models.AnthropicThinkingBlock{Type: "thinking", Thinking: b.Summary, Signature: b.Signature}
 			})
 		case models.APITypeGemini:
-			specificData.GeminiThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.GeminiThinkingData {
+			specificData.GeminiThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b providers.ReasoningBlock, _ int) models.GeminiThinkingData {
 				return models.GeminiThinkingData{ThoughtSignature: b.Signature, ThinkingLevel: thinkingLevel, Summary: b.Summary}
 			})
 		case models.APITypeOpenAI:
-			specificData.OpenAIReasoningBlocks = lo.Map(m.ReasoningBlocks, func(b provider.ReasoningBlock, _ int) models.OpenAIReasoningBlock {
+			specificData.OpenAIReasoningBlocks = lo.Map(m.ReasoningBlocks, func(b providers.ReasoningBlock, _ int) models.OpenAIReasoningBlock {
 				return models.OpenAIReasoningBlock{Summary: b.Summary, EncryptedContent: b.Signature}
 			})
 		}

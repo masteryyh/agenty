@@ -14,19 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
@@ -37,14 +34,10 @@ const (
 	bigModelToolTypeFunc   = "function"
 )
 
-type BigModelProvider struct {
-	httpClient *http.Client
-}
+type BigModelProvider struct{}
 
 func NewBigModelProvider() *BigModelProvider {
-	return &BigModelProvider{
-		httpClient: &http.Client{},
-	}
+	return &BigModelProvider{}
 }
 
 func (p *BigModelProvider) Name() string {
@@ -229,36 +222,13 @@ func (p *BigModelProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRes
 
 	apiReq := p.buildRequest(req, false)
 
-	body, err := json.Marshal(apiReq)
+	apiResp, err := conn.Post[bigModelResponse](ctx, conn.HTTPRequest{
+		URL:     baseURL + "/chat/completions",
+		Headers: map[string]string{"Authorization": "Bearer " + req.APIKey},
+		Body:    apiReq,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-
-	httpResp, err := p.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
-	}
-
-	var apiResp bigModelResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, err
 	}
 
 	if apiResp.Error != nil {
@@ -296,35 +266,19 @@ func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-
 
 	apiReq := p.buildRequest(req, true)
 
-	body, err := json.Marshal(apiReq)
+	lines, err := conn.PostSSE(ctx, conn.HTTPRequest{
+		URL:     baseURL + "/chat/completions",
+		Headers: map[string]string{"Authorization": "Bearer " + req.APIKey},
+		Body:    apiReq,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
-
-	httpResp, err := p.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		defer httpResp.Body.Close()
-		respBody, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	ch := make(chan StreamEvent, 64)
 
 	safe.GoOnce("bigmodel-stream", func() {
 		defer close(ch)
-		defer httpResp.Body.Close()
 
 		type toolCallAccum struct {
 			id          string
@@ -338,21 +292,17 @@ func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-
 		tcKeys := make([]int, 0)
 		var totalTokens int64
 
-		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(make([]byte, 512*1024), 512*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
+		for evt := range lines {
+			if evt.Err != nil {
+				ch <- StreamEvent{
+					Type:  EventError,
+					Error: fmt.Sprintf("stream read error: %v", evt.Err),
+				}
+				return
 			}
 
 			var chunk bigModelStreamChunk
-			if err := json.UnmarshalString(data, &chunk); err != nil {
+			if err := json.UnmarshalString(evt.Data, &chunk); err != nil {
 				continue
 			}
 
@@ -414,14 +364,6 @@ func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			ch <- StreamEvent{
-				Type:  EventError,
-				Error: fmt.Sprintf("stream read error: %v", err),
-			}
-			return
-		}
-
 		if totalTokens > 0 {
 			ch <- StreamEvent{
 				Type:  EventUsage,
@@ -457,4 +399,70 @@ func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-
 	})
 
 	return ch, nil
+}
+
+func (p *BigModelProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = bigModelDefaultBaseURL
+	}
+
+	if req.Model == "" {
+		return nil, fmt.Errorf("model is required for embedding")
+	}
+
+	type bigModelEmbedRequest struct {
+		Model      string `json:"model"`
+		Input      any    `json:"input"`
+		Dimensions *int64 `json:"dimensions,omitempty"`
+	}
+
+	type bigModelEmbedData struct {
+		Index     int       `json:"index"`
+		Object    string    `json:"object"`
+		Embedding []float32 `json:"embedding"`
+	}
+
+	type bigModelEmbedResponse struct {
+		Model  string              `json:"model"`
+		Object string              `json:"object"`
+		Data   []bigModelEmbedData `json:"data"`
+	}
+
+	var input any
+	if len(req.Texts) == 1 {
+		input = req.Texts[0]
+	} else {
+		input = req.Texts
+	}
+
+	embedReq := bigModelEmbedRequest{
+		Model: req.Model,
+		Input: input,
+	}
+	if req.Dimensions > 0 {
+		embedReq.Dimensions = &req.Dimensions
+	}
+
+	embedResp, err := conn.Post[bigModelEmbedResponse](ctx, conn.HTTPRequest{
+		URL:     baseURL + "/embeddings",
+		Headers: map[string]string{"Authorization": "Bearer " + req.APIKey},
+		Body:    embedReq,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	embeddings := make([][]float32, len(embedResp.Data))
+	for _, data := range embedResp.Data {
+		if data.Index >= 0 && data.Index < len(embeddings) {
+			embeddings[data.Index] = data.Embedding
+		}
+	}
+
+	return &EmbeddingResponse{Embeddings: embeddings}, nil
+}
+
+func (p *BigModelProvider) VectorNormalized() bool {
+	return false
 }

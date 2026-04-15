@@ -14,7 +14,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-783d-9c7f-89d8ace57bf8",
@@ -24,7 +29,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high", "xhigh"],
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ],
                     "defaultModel": true
                 },
                 {
@@ -35,7 +45,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": true,
-                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-784d-9ed7-43a217990e58",
@@ -45,7 +60,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": true,
-                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-785c-8ce2-1b32505f2aa9",
@@ -55,7 +75,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high", "xhigh"]
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-7864-bb63-1f556270e350",
@@ -107,7 +132,11 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high"],
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high"
+                    ],
                     "defaultModel": true
                 },
                 {
@@ -118,7 +147,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": true,
-                    "thinkingLevels": ["minimal", "low", "medium", "high"]
+                    "thinkingLevels": [
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-7897-a867-114a03c14eb4",
@@ -128,7 +162,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": true,
-                    "thinkingLevels": ["minimal", "low", "medium", "high"]
+                    "thinkingLevels": [
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high"
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-789f-850d-9730d40dc187",
@@ -162,7 +201,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high", "max"],
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
                     "anthropicAdaptiveThinking": true
                 },
                 {
@@ -173,7 +217,12 @@
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
-                    "thinkingLevels": ["low", "medium", "high", "max"],
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
                     "anthropicAdaptiveThinking": true,
                     "defaultModel": true
                 },
@@ -320,6 +369,7 @@
             "name": "Qwen",
             "type": "qwen",
             "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "bailianMultiModalEmbeddingBaseUrl": "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
             "models": [
                 {
                     "id": "019d81b2-434f-7cc9-b2ef-976ac31293a3",
@@ -368,16 +418,10 @@
                     "light": false
                 },
                 {
-                    "id": "019d81c4-ef67-7df7-8788-90ae8b0d04e7",
-                    "name": "Tongyi Embedding Vision Plus",
-                    "code": "tongyi-embedding-vision-plus",
-                    "embeddingModel": true,
-                    "multiModal": true
-                },
-                {
-                    "id": "019d81c6-fb26-7d9a-9ad0-17d46eb3752c",
-                    "name": "Tongyi Embedding Vision Flash",
-                    "code": "tongyi-embedding-vision-flash",
+                    "id": "019d9012-81fd-7a76-b02f-fd8b71831b2c",
+                    "name": "Qwen3 VL Embedding",
+                    "code": "qwen3-vl-embedding",
+                    "contextWindow": 32000,
                     "embeddingModel": true,
                     "multiModal": true
                 }

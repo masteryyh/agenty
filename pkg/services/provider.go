@@ -63,10 +63,11 @@ func (s *ProviderService) CreateProvider(ctx context.Context, dto *models.Create
 	}
 
 	provider := &models.ModelProvider{
-		Name:    dto.Name,
-		Type:    dto.Type,
-		BaseURL: dto.BaseURL,
-		APIKey:  dto.APIKey,
+		Name:                              dto.Name,
+		Type:                              dto.Type,
+		BaseURL:                           dto.BaseURL,
+		BailianMultiModalEmbeddingBaseURL: dto.BailianMultiModalEmbeddingBaseURL,
+		APIKey:                            dto.APIKey,
 	}
 
 	if err := gorm.G[models.ModelProvider](s.db).Create(ctx, provider); err != nil {
@@ -162,6 +163,10 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 
 	if dto.BaseURL != "" {
 		updates["base_url"] = dto.BaseURL
+	}
+
+	if dto.BailianMultiModalEmbeddingBaseURL != nil {
+		updates["bailian_multi_modal_embedding_base_url"] = dto.BailianMultiModalEmbeddingBaseURL
 	}
 
 	if dto.APIKey != "" {

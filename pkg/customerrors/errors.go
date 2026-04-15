@@ -49,6 +49,8 @@ var (
 
 	ErrKnowledgeItemNotFound = NewBusinessError(http.StatusNotFound, "knowledge item not found")
 	ErrKnowledgeContentEmpty = NewBusinessError(http.StatusBadRequest, "knowledge item content is required")
+
+	ErrEmbeddingNotSupported = errors.New("embedding is not supported by this provider")
 )
 
 func GetBusinessError(err error) *BusinessError {

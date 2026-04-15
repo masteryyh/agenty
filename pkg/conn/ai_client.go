@@ -31,12 +31,16 @@ func GetOpenAIClient(baseUrl, apiKey string) *openai.Client {
 	client := openai.NewClient(
 		openaiOption.WithBaseURL(baseUrl),
 		openaiOption.WithAPIKey(apiKey),
+		openaiOption.WithHTTPClient(GetHTTPClient()),
 	)
 	return &client
 }
 
 func GetAnthropicClient(baseURL, apiKey string) anthropic.Client {
-	opts := []anthropicOption.RequestOption{anthropicOption.WithAPIKey(apiKey)}
+	opts := []anthropicOption.RequestOption{
+		anthropicOption.WithAPIKey(apiKey),
+		anthropicOption.WithHTTPClient(GetHTTPClient()),
+	}
 	if baseURL != "" {
 		opts = append(opts, anthropicOption.WithBaseURL(baseURL))
 	}
@@ -45,8 +49,9 @@ func GetAnthropicClient(baseURL, apiKey string) anthropic.Client {
 
 func GetGeminiClient(ctx context.Context, baseURL, apiKey string) (*genai.Client, error) {
 	cc := &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
+		APIKey:     apiKey,
+		Backend:    genai.BackendGeminiAPI,
+		HTTPClient: GetHTTPClient(),
 	}
 	if baseURL != "" {
 		cc.HTTPOptions = genai.HTTPOptions{BaseURL: baseURL}

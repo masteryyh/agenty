@@ -47,11 +47,12 @@ type presetModelJSON struct {
 }
 
 type presetProviderJSON struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Type    models.APIType    `json:"type"`
-	BaseURL string            `json:"baseUrl"`
-	Models  []presetModelJSON `json:"models"`
+	ID                                string            `json:"id"`
+	Name                              string            `json:"name"`
+	Type                              models.APIType    `json:"type"`
+	BaseURL                           string            `json:"baseUrl"`
+	BailianMultiModalEmbeddingBaseURL *string           `json:"bailianMultiModalEmbeddingBaseUrl,omitempty"`
+	Models                            []presetModelJSON `json:"models"`
 }
 
 type presetsFile struct {
@@ -83,12 +84,13 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 
 			if err == gorm.ErrRecordNotFound {
 				provider := &models.ModelProvider{
-					ID:       providerID,
-					Name:     pp.Name,
-					Type:     pp.Type,
-					BaseURL:  pp.BaseURL,
-					APIKey:   "",
-					IsPreset: true,
+					ID:                                providerID,
+					Name:                              pp.Name,
+					Type:                              pp.Type,
+					BaseURL:                           pp.BaseURL,
+					BailianMultiModalEmbeddingBaseURL: pp.BailianMultiModalEmbeddingBaseURL,
+					APIKey:                            "",
+					IsPreset:                          true,
 				}
 				if createErr := tx.Create(provider).Error; createErr != nil {
 					return createErr

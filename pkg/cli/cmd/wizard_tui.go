@@ -17,41 +17,41 @@ limitations under the License.
 package cmd
 
 import (
-"fmt"
-"strings"
+	"fmt"
+	"strings"
 
-tea "github.com/charmbracelet/bubbletea"
-"github.com/masteryyh/agenty/pkg/backend"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/masteryyh/agenty/pkg/backend"
 )
 
 // maskWizKey returns a partially-masked display string for an API key.
 func maskWizKey(key string) string {
-r := []rune(key)
-if len(r) <= 4 {
-return strings.Repeat("*", len(r))
-}
-return string(r[:2]) + "****" + string(r[len(r)-2:])
+	r := []rune(key)
+	if len(r) <= 4 {
+		return strings.Repeat("*", len(r))
+	}
+	return string(r[:2]) + "****" + string(r[len(r)-2:])
 }
 
 // RunWizardTUI runs the first-time setup wizard as a full-screen TUI.
 func RunWizardTUI(b backend.Backend) error {
-providers, err := b.ListProviders(1, 100)
-if err != nil {
-return fmt.Errorf("failed to list providers: %w", err)
-}
+	providers, err := b.ListProviders(1, 100)
+	if err != nil {
+		return fmt.Errorf("failed to list providers: %w", err)
+	}
 
-settings, _ := b.GetSystemSettings()
+	settings, _ := b.GetSystemSettings()
 
-m := newWizardModel(b, providers.Data, settings)
-p := tea.NewProgram(m, tea.WithAltScreen())
-finalModel, err := p.Run()
-if err != nil {
-return err
-}
+	m := newWizardModel(b, providers.Data, settings)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
 
-if wm, ok := finalModel.(wizardModel); ok && wm.aborted {
-return nil
-}
+	if wm, ok := finalModel.(wizardModel); ok && wm.aborted {
+		return nil
+	}
 
-return nil
+	return nil
 }

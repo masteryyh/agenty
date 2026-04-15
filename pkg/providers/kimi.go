@@ -14,19 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
@@ -38,14 +36,10 @@ const (
 	kimiThinkingOff    = "disabled"
 )
 
-type KimiProvider struct {
-	httpClient *http.Client
-}
+type KimiProvider struct{}
 
 func NewKimiProvider() *KimiProvider {
-	return &KimiProvider{
-		httpClient: &http.Client{},
-	}
+	return &KimiProvider{}
 }
 
 func (p *KimiProvider) Name() string {
@@ -126,36 +120,13 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 
 	apiReq := p.buildKimiRequest(req, false)
 
-	body, err := json.Marshal(apiReq)
+	apiResp, err := conn.Post[kimiResponse](ctx, conn.HTTPRequest{
+		URL:     baseURL + "/chat/completions",
+		Headers: map[string]string{"Authorization": "Bearer " + req.APIKey},
+		Body:    apiReq,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-
-	httpResp, err := p.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
-	}
-
-	var apiResp kimiResponse
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, err
 	}
 
 	if apiResp.Error != nil {
@@ -304,35 +275,19 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 
 	apiReq := p.buildKimiRequest(req, true)
 
-	body, err := json.Marshal(apiReq)
+	lines, err := conn.PostSSE(ctx, conn.HTTPRequest{
+		URL:     baseURL + "/chat/completions",
+		Headers: map[string]string{"Authorization": "Bearer " + req.APIKey},
+		Body:    apiReq,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
-	httpReq.Header.Set("Accept", "text/event-stream")
-
-	httpResp, err := p.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		defer httpResp.Body.Close()
-		respBody, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", httpResp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	ch := make(chan StreamEvent, 64)
 
 	safe.GoOnce("kimi-stream", func() {
 		defer close(ch)
-		defer httpResp.Body.Close()
 
 		type toolCallAccum struct {
 			id          string
@@ -346,21 +301,17 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 		tcKeys := make([]int, 0)
 		var totalTokens int64
 
-		scanner := bufio.NewScanner(httpResp.Body)
-		scanner.Buffer(make([]byte, 512*1024), 512*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
+		for evt := range lines {
+			if evt.Err != nil {
+				ch <- StreamEvent{
+					Type:  EventError,
+					Error: fmt.Sprintf("stream read error: %v", evt.Err),
+				}
+				return
 			}
 
 			var chunk kimiStreamChunk
-			if err := json.UnmarshalString(data, &chunk); err != nil {
+			if err := json.UnmarshalString(evt.Data, &chunk); err != nil {
 				continue
 			}
 
@@ -422,14 +373,6 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			ch <- StreamEvent{
-				Type:  EventError,
-				Error: fmt.Sprintf("stream read error: %v", err),
-			}
-			return
-		}
-
 		if totalTokens > 0 {
 			ch <- StreamEvent{
 				Type:  EventUsage,
@@ -465,4 +408,12 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 	})
 
 	return ch, nil
+}
+
+func (p *KimiProvider) Embed(_ context.Context, _ *EmbeddingRequest) (*EmbeddingResponse, error) {
+	return nil, customerrors.ErrEmbeddingNotSupported
+}
+
+func (p *KimiProvider) VectorNormalized() bool {
+	return false
 }

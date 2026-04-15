@@ -19,14 +19,10 @@ package services
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"sync"
-	"time"
 
-	json "github.com/bytedance/sonic"
+	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
@@ -36,9 +32,7 @@ type WebSearchResult struct {
 	Snippet string `json:"snippet"`
 }
 
-type WebSearchService struct {
-	client *http.Client
-}
+type WebSearchService struct{}
 
 var (
 	webSearchService *WebSearchService
@@ -47,9 +41,7 @@ var (
 
 func GetWebSearchService() *WebSearchService {
 	webSearchOnce.Do(func() {
-		webSearchService = &WebSearchService{
-			client: &http.Client{Timeout: 30 * time.Second},
-		}
+		webSearchService = &WebSearchService{}
 	})
 	return webSearchService
 }
@@ -82,6 +74,16 @@ func (s *WebSearchService) IsEnabled(ctx context.Context) bool {
 	return settings.WebSearchProvider != models.WebSearchProviderDisabled && settings.WebSearchProvider != ""
 }
 
+type tavilyResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Content string `json:"content"`
+}
+
+type tavilyResponse struct {
+	Results []tavilyResult `json:"results"`
+}
+
 func (s *WebSearchService) searchTavily(ctx context.Context, apiKey, query string, limit int) ([]WebSearchResult, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("Tavily API key is not configured")
@@ -94,42 +96,14 @@ func (s *WebSearchService) searchTavily(ctx context.Context, apiKey, query strin
 		"query":       query,
 		"max_results": limit,
 	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.tavily.com/search", strings.NewReader(string(bodyBytes)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := s.client.Do(req)
+	tavilyResp, err := conn.Post[tavilyResponse](ctx, conn.HTTPRequest{
+		URL:     "https://api.tavily.com/search",
+		Headers: map[string]string{"Authorization": "Bearer " + apiKey},
+		Body:    reqBody,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("Tavily API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Tavily response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Tavily API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var tavilyResp struct {
-		Results []struct {
-			Title   string `json:"title"`
-			URL     string `json:"url"`
-			Content string `json:"content"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(respBody, &tavilyResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Tavily response: %w", err)
 	}
 
 	results := make([]WebSearchResult, 0, len(tavilyResp.Results))
@@ -143,6 +117,20 @@ func (s *WebSearchService) searchTavily(ctx context.Context, apiKey, query strin
 	return results, nil
 }
 
+type braveResult struct {
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+}
+
+type braveWeb struct {
+	Results []braveResult `json:"results"`
+}
+
+type braveResponse struct {
+	Web braveWeb `json:"web"`
+}
+
 func (s *WebSearchService) searchBrave(ctx context.Context, apiKey, query string, limit int) ([]WebSearchResult, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("Brave API key is not configured")
@@ -151,40 +139,16 @@ func (s *WebSearchService) searchBrave(ctx context.Context, apiKey, query string
 		limit = 5
 	}
 
-	u := fmt.Sprintf("https://api.search.brave.com/res/v1/web/search?q=%s&count=%d", url.QueryEscape(query), limit)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Subscription-Token", apiKey)
-
-	resp, err := s.client.Do(req)
+	braveResp, err := conn.Get[braveResponse](ctx, conn.HTTPRequest{
+		URL:    "https://api.search.brave.com/res/v1/web/search",
+		Params: map[string]string{"q": query, "count": fmt.Sprintf("%d", limit)},
+		Headers: map[string]string{
+			"Accept":               "application/json",
+			"X-Subscription-Token": apiKey,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("Brave API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Brave response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Brave API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var braveResp struct {
-		Web struct {
-			Results []struct {
-				Title       string `json:"title"`
-				URL         string `json:"url"`
-				Description string `json:"description"`
-			} `json:"results"`
-		} `json:"web"`
-	}
-	if err := json.Unmarshal(respBody, &braveResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Brave response: %w", err)
 	}
 
 	results := make([]WebSearchResult, 0, len(braveResp.Web.Results))
@@ -198,6 +162,17 @@ func (s *WebSearchService) searchBrave(ctx context.Context, apiKey, query string
 	return results, nil
 }
 
+type firecrawlItem struct {
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+	Markdown    string `json:"markdown"`
+}
+
+type firecrawlResponse struct {
+	Data []firecrawlItem `json:"data"`
+}
+
 func (s *WebSearchService) searchFirecrawl(ctx context.Context, apiKey, baseURL, query string, limit int) ([]WebSearchResult, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("Firecrawl API key is not configured")
@@ -209,48 +184,19 @@ func (s *WebSearchService) searchFirecrawl(ctx context.Context, apiKey, baseURL,
 		limit = 5
 	}
 
+	endpoint := strings.TrimRight(baseURL, "/") + "/v1/search"
 	reqBody := map[string]any{
 		"query": query,
 		"limit": limit,
 	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
 
-	endpoint := strings.TrimRight(baseURL, "/") + "/v1/search"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := s.client.Do(req)
+	fcResp, err := conn.Post[firecrawlResponse](ctx, conn.HTTPRequest{
+		URL:     endpoint,
+		Headers: map[string]string{"Authorization": "Bearer " + apiKey},
+		Body:    reqBody,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("Firecrawl API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Firecrawl response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Firecrawl API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var fcResp struct {
-		Data []struct {
-			Title       string `json:"title"`
-			URL         string `json:"url"`
-			Description string `json:"description"`
-			Markdown    string `json:"markdown"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &fcResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Firecrawl response: %w", err)
 	}
 
 	results := make([]WebSearchResult, 0, len(fcResp.Data))

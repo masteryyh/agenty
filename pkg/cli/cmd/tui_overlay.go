@@ -87,7 +87,7 @@ func (l *listOverlay) render(width, _ int) string {
 	}
 	buf.WriteString("\n")
 
-	end := min(l.offset + listMaxVisible, len(l.items))
+	end := min(l.offset+listMaxVisible, len(l.items))
 	for i := l.offset; i < end; i++ {
 		if i == l.cursor {
 			fmt.Fprintf(&buf, "  %s %s\n", styleCyan.Render("❯"), l.items[i])

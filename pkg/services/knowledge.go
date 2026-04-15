@@ -31,7 +31,6 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/chunk"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
-	"github.com/openai/openai-go/v3"
 	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -258,11 +257,10 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 	embeddingSvc := GetEmbeddingService()
 	embeddingEnabled := embeddingSvc.IsEnabled(ctx)
 
-	var client *openai.Client
-	var modelCode string
+	var embedBatch BatchEmbedFunc
 	if embeddingEnabled {
 		var err error
-		client, modelCode, err = embeddingSvc.GetClient(ctx)
+		embedBatch, err = embeddingSvc.NewBatchEmbedder(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get embedding client: %w", err)
 		}
@@ -276,7 +274,7 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 		var embeddings [][]float32
 		if embeddingEnabled {
 			var err error
-			embeddings, err = embeddingSvc.embedBatchWithClient(ctx, client, modelCode, batch)
+			embeddings, err = embedBatch(ctx, batch)
 			if err != nil {
 				return fmt.Errorf("failed to embed chunk batch: %w", err)
 			}

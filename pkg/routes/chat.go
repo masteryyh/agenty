@@ -23,9 +23,9 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 	"github.com/masteryyh/agenty/pkg/utils/response"
@@ -209,7 +209,7 @@ func (r *ChatRoutes) StreamChat(c *gin.Context) {
 			}
 			data, _ := json.Marshal(evt)
 			c.SSEvent(string(evt.Type), string(data))
-			return evt.Type != provider.EventDone
+			return evt.Type != providers.EventDone
 		case <-c.Request.Context().Done():
 			return false
 		}

@@ -35,7 +35,7 @@ type wizInput struct {
 	label string
 }
 
-func newWizTextInput(label string, masked bool) textinput.Model {
+func newWizTextInput(masked bool) textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.TextStyle = theme.White
@@ -49,7 +49,7 @@ func newWizTextInput(label string, masked bool) textinput.Model {
 }
 
 func (i wizInput) Reset(label string, masked bool) (wizInput, tea.Cmd) {
-	ti := newWizTextInput(label, masked)
+	ti := newWizTextInput(masked)
 	cmd := ti.Focus()
 	return wizInput{model: ti, label: label}, cmd
 }

@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/provider"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
 )
 
@@ -45,7 +45,7 @@ type Backend interface {
 	GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDto, error)
 
 	Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error)
-	StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event provider.StreamEvent) error) error
+	StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error
 
 	ListAgents(page, pageSize int) (*pagination.PagedResponse[models.AgentDto], error)
 	GetAgent(agentID uuid.UUID) (*models.AgentDto, error)

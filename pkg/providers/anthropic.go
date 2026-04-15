@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provider
+package providers
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/samber/lo"
@@ -352,4 +353,12 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest) (<
 	})
 
 	return ch, nil
+}
+
+func (p *AnthropicProvider) Embed(_ context.Context, _ *EmbeddingRequest) (*EmbeddingResponse, error) {
+	return nil, customerrors.ErrEmbeddingNotSupported
+}
+
+func (p *AnthropicProvider) VectorNormalized() bool {
+	return false
 }
