@@ -57,6 +57,7 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		chatGroup.GET("/session/last", r.GetLastSession)
 		chatGroup.GET("/session/last/:agentId", r.GetLastSessionByAgent)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
+		chatGroup.PATCH("/session/:sessionId/cwd", r.SetSessionCwd)
 		chatGroup.POST("/chat", r.Chat)
 		chatGroup.POST("/stream", r.StreamChat)
 	}
@@ -142,6 +143,32 @@ func (r *ChatRoutes) GetLastSessionByAgent(c *gin.Context) {
 		return
 	}
 	response.OK(c, session)
+}
+
+func (r *ChatRoutes) SetSessionCwd(c *gin.Context) {
+	sessionIDRaw := c.Param("sessionId")
+	if sessionIDRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	sessionID, err := uuid.Parse(sessionIDRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	var dto models.SetSessionCwdDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	if err := r.service.SetSessionCwd(c, sessionID, dto.Cwd, dto.AgentsMD); err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK[any](c, nil)
 }
 
 func (r *ChatRoutes) Chat(c *gin.Context) {

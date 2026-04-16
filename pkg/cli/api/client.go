@@ -169,6 +169,11 @@ func (c *Client) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDt
 	return doRequest[models.ChatSessionDto](c, "GET", fmt.Sprintf("/api/v1/chats/session/last/%s", agentID), nil)
 }
 
+func (c *Client) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	_, err := doRequest[any](c, "PATCH", fmt.Sprintf("/api/v1/chats/session/%s/cwd", sessionID), &models.SetSessionCwdDto{Cwd: cwd, AgentsMD: agentsMD})
+	return err
+}
+
 func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
 }

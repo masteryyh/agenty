@@ -72,6 +72,7 @@ type ToolCallContext struct {
 	SessionID uuid.UUID
 	ModelID   uuid.UUID
 	ModelCode string
+	Cwd       string
 }
 
 type Tool interface {

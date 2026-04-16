@@ -27,6 +27,8 @@ type ChatSession struct {
 	AgentID       uuid.UUID `gorm:"type:uuid;not null"`
 	TokenConsumed int64     `gorm:"not null;default:0"`
 	LastUsedModel uuid.UUID `gorm:"type:uuid"`
+	Cwd           *string   `gorm:"type:text"`
+	AgentsMD      *string   `gorm:"type:text"`
 	CreatedAt     time.Time `gorm:"autoCreateTime:milli"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime:milli"`
 	DeletedAt     *time.Time
@@ -42,6 +44,7 @@ func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 		AgentID:       m.AgentID,
 		TokenConsumed: m.TokenConsumed,
 		LastUsedModel: m.LastUsedModel,
+		Cwd:           m.Cwd,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
 	}
@@ -65,10 +68,16 @@ type ChatSessionDto struct {
 	Messages      []ChatMessageDto `json:"messages"`
 	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
 	Todos         []TodoItemDto    `json:"todos,omitempty"`
+	Cwd           *string          `json:"cwd,omitempty"`
 	CreatedAt     time.Time        `json:"createdAt"`
 	UpdatedAt     time.Time        `json:"updatedAt"`
 }
 
 type CreateSessionDto struct {
 	AgentID uuid.UUID `json:"agentId" binding:"required"`
+}
+
+type SetSessionCwdDto struct {
+	Cwd      *string `json:"cwd"`
+	AgentsMD *string `json:"agentsMD"`
 }

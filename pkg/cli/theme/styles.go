@@ -56,10 +56,10 @@ var (
 	SysOK           = lipgloss.NewStyle().Foreground(Colors.Success)
 	SysErr          = lipgloss.NewStyle().Foreground(Colors.Error)
 
-	InputPromptFocused  = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	InputPromptBlurred  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	InputText           = lipgloss.NewStyle().Foreground(Colors.Text)
-	InputPlaceholder    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	InputPromptFocused = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	InputPromptBlurred = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	InputText          = lipgloss.NewStyle().Foreground(Colors.Text)
+	InputPlaceholder   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	Spinner    = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
 	SpinnerTxt = lipgloss.NewStyle().Foreground(lipgloss.Color("219"))

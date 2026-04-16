@@ -34,7 +34,7 @@ type MCPServerRoutes struct {
 }
 
 var (
-	mcpServerRoutes    *MCPServerRoutes
+	mcpServerRoutes     *MCPServerRoutes
 	mcpServerRoutesOnce sync.Once
 )
 

@@ -115,6 +115,10 @@ func (l *LocalBackend) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSes
 	return l.chatSvc.GetLastSessionByAgent(signal.GetBaseContext(), agentID)
 }
 
+func (l *LocalBackend) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	return l.chatSvc.SetSessionCwd(signal.GetBaseContext(), sessionID, cwd, agentsMD)
+}
+
 func (l *LocalBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	result, err := l.chatSvc.Chat(signal.GetBaseContext(), sessionID, dto)
 	if err != nil {

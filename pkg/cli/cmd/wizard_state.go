@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/cli/theme"
@@ -83,10 +83,12 @@ type wizFeedback struct {
 	kind feedbackKind
 }
 
-func (f wizFeedback) setOK(msg string) wizFeedback   { return wizFeedback{msg: msg, kind: feedbackOK} }
-func (f wizFeedback) setWarn(msg string) wizFeedback { return wizFeedback{msg: msg, kind: feedbackWarn} }
-func (f wizFeedback) setErr(msg string) wizFeedback  { return wizFeedback{msg: msg, kind: feedbackErr} }
-func (wizFeedback) clear() wizFeedback               { return wizFeedback{} }
+func (f wizFeedback) setOK(msg string) wizFeedback { return wizFeedback{msg: msg, kind: feedbackOK} }
+func (f wizFeedback) setWarn(msg string) wizFeedback {
+	return wizFeedback{msg: msg, kind: feedbackWarn}
+}
+func (f wizFeedback) setErr(msg string) wizFeedback { return wizFeedback{msg: msg, kind: feedbackErr} }
+func (wizFeedback) clear() wizFeedback              { return wizFeedback{} }
 
 func (f wizFeedback) render() string {
 	if f.msg == "" {

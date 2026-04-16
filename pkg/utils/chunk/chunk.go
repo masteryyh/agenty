@@ -172,7 +172,7 @@ func splitLargeSegment(seg string, chunkSize, overlap int) []string {
 				step = 1
 			}
 			for j := 0; j < len(words); j += step {
-				end := min(j + chunkSize, len(words))
+				end := min(j+chunkSize, len(words))
 				chunks = append(chunks, strings.Join(words[j:end], " "))
 				if end == len(words) {
 					break

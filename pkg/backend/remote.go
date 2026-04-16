@@ -100,6 +100,10 @@ func (r *RemoteBackend) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSe
 	return r.client.GetLastSessionByAgent(agentID)
 }
 
+func (r *RemoteBackend) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	return r.client.SetSessionCwd(sessionID, cwd, agentsMD)
+}
+
 func (r *RemoteBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return r.client.Chat(sessionID, dto)
 }

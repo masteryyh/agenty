@@ -270,13 +270,36 @@ func (s *ChatService) ListSessions(ctx context.Context, request *pagination.Page
 	}, nil
 }
 
+func (s *ChatService) SetSessionCwd(ctx context.Context, sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return customerrors.ErrSessionNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
+		return err
+	}
+
+	updates := map[string]any{"cwd": cwd, "agents_md": agentsMD}
+	if err := s.db.WithContext(ctx).
+		Model(&models.ChatSession{}).
+		Where("id = ?", session.ID).
+		Updates(updates).Error; err != nil {
+		slog.ErrorContext(ctx, "failed to update session cwd", "error", err, "sessionId", sessionID)
+		return err
+	}
+	return nil
+}
+
 func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) ([]*models.ChatMessageDto, error) {
 	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
 	if err != nil {
 		return nil, err
 	}
 
-	systemPrompt, err := buildSystemPrompt(&res.agent)
+	systemPrompt, err := buildSystemPrompt(&res.agent, &res.session)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
@@ -345,7 +368,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 		return nil, err
 	}
 
-	systemPrompt, err := buildSystemPrompt(&agent)
+	systemPrompt, err := buildSystemPrompt(&agent, &session)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
@@ -658,14 +681,18 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 	return res, nil
 }
 
-func buildSystemPrompt(agent *models.Agent) (string, error) {
+func buildSystemPrompt(agent *models.Agent, session *models.ChatSession) (string, error) {
 	var sb strings.Builder
-	if err := consts.AgentBasePrompt.Execute(&sb, map[string]any{
+	data := map[string]any{
 		"DateTime":  time.Now().Format(time.RFC3339),
 		"AgentName": agent.Name,
 		"AgentID":   agent.ID,
 		"Soul":      agent.Soul,
-	}); err != nil {
+	}
+	if session != nil && session.AgentsMD != nil {
+		data["AgentsMD"] = *session.AgentsMD
+	}
+	if err := consts.AgentBasePrompt.Execute(&sb, data); err != nil {
 		return "", err
 	}
 	return sb.String(), nil
@@ -751,6 +778,10 @@ func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatS
 }
 
 func buildChatParams(res *chatResources, messages []providers.Message, data *models.ChatDto) *chat.ChatParams {
+	var cwd string
+	if res.session.Cwd != nil {
+		cwd = *res.session.Cwd
+	}
 	return &chat.ChatParams{
 		BaseURL:                   res.chatProvider.BaseURL,
 		APIKey:                    res.chatProvider.APIKey,
@@ -759,6 +790,7 @@ func buildChatParams(res *chatResources, messages []providers.Message, data *mod
 		AgentID:                   res.session.AgentID,
 		SessionID:                 res.session.ID,
 		ModelID:                   res.model.ID,
+		Cwd:                       cwd,
 		APIType:                   res.chatProvider.Type,
 		Thinking:                  data.Thinking && res.model.Thinking,
 		ThinkingLevel:             data.ThinkingLevel,

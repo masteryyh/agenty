@@ -93,6 +93,11 @@ var commands = []Command{
 	},
 	{Name: "/memory", Description: "View agent long-term memories", Usage: "/memory"},
 	{
+		Name:        "/cwd",
+		Description: "Set or show current working directory (reads AGENTS.md)",
+		Usage:       "/cwd [<path>|clear]",
+	},
+	{
 		Name:        "/think",
 		Description: "Set thinking mode",
 		Usage:       "/think [off|<level>]",
