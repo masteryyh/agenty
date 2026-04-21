@@ -22,6 +22,13 @@ import (
 	"path/filepath"
 )
 
+func GetCleanPathWithBase(path, base string, followSymlink bool) (string, error) {
+	if base != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
+	}
+	return GetCleanPath(path, followSymlink)
+}
+
 func GetCleanPath(path string, followSymlink bool) (string, error) {
 	if path == "" {
 		return "", errors.New("path cannot be empty")

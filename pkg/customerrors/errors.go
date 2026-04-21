@@ -50,6 +50,8 @@ var (
 	ErrKnowledgeItemNotFound = NewBusinessError(http.StatusNotFound, "knowledge item not found")
 	ErrKnowledgeContentEmpty = NewBusinessError(http.StatusBadRequest, "knowledge item content is required")
 
+	ErrSkillNotFound = NewBusinessError(http.StatusNotFound, "skill not found")
+
 	ErrEmbeddingNotSupported = errors.New("embedding is not supported by this provider")
 )
 

@@ -169,6 +169,11 @@ func (c *Client) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDt
 	return doRequest[models.ChatSessionDto](c, "GET", fmt.Sprintf("/api/v1/chats/session/last/%s", agentID), nil)
 }
 
+func (c *Client) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	_, err := doRequest[any](c, "PATCH", fmt.Sprintf("/api/v1/chats/session/%s/cwd", sessionID), &models.SetSessionCwdDto{Cwd: cwd, AgentsMD: agentsMD})
+	return err
+}
+
 func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
 }
@@ -305,4 +310,41 @@ func (c *Client) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*mod
 
 func (c *Client) ListMemories(agentID uuid.UUID) (*[]models.KnowledgeItemSummaryDto, error) {
 	return doRequest[[]models.KnowledgeItemSummaryDto](c, "GET", fmt.Sprintf("/api/v1/agents/%s/memories", agentID), nil)
+}
+
+func (c *Client) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error) {
+	result, err := doRequest[[]models.SkillDto](c, "GET", fmt.Sprintf("/api/v1/skills?sessionId=%s", sessionID), nil)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return *result, nil
+}
+
+func (c *Client) SearchSkills(sessionID uuid.UUID, query string, limit int) ([]models.SkillSearchResult, error) {
+	result, err := doRequest[[]models.SkillSearchResult](c, "GET", fmt.Sprintf("/api/v1/skills/search?sessionId=%s&query=%s&limit=%d", sessionID, query, limit), nil)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return *result, nil
+}
+
+func (c *Client) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
+	body := map[string]any{"name": name}
+	if sessionID != nil {
+		body["sessionId"] = sessionID.String()
+	}
+	result, err := doRequest[models.SkillContentResult](c, "POST", "/api/v1/skills/content", body)
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", nil
+	}
+	return result.Content, nil
 }

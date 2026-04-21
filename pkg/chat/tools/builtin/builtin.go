@@ -41,4 +41,8 @@ func RegisterAll(registry *tools.Registry) {
 		webSearchService: webSearchSvc,
 		evaluator:        services.GetSearchEvaluator(),
 	})
+
+	registry.Register(&FindSkillTool{
+		skillService: services.GetSkillService(),
+	})
 }

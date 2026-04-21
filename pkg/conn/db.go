@@ -73,6 +73,7 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 				&models.MCPServer{},
 				&models.KnowledgeItem{},
 				&models.KnowledgeBaseData{},
+				&models.Skill{},
 			); migrateErr != nil {
 			err = fmt.Errorf("failed to migrate database: %w", migrateErr)
 			return
@@ -80,6 +81,11 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 
 		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_text_embedding_hnsw ON kb_data USING hnsw (text_embedding vector_ip_ops)`).Error; idxErr != nil {
 			err = fmt.Errorf("failed to create index: %w", idxErr)
+			return
+		}
+
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_skills_bm25 ON skills USING bm25 (id, name, description) WITH (key_field = 'id')`).Error; idxErr != nil {
+			err = fmt.Errorf("failed to create skills BM25 index: %w", idxErr)
 			return
 		}
 

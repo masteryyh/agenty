@@ -10,7 +10,7 @@ import (
 type GenericResponse[T any] struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    *T      `json:"data,omitempty"`
+	Data    *T     `json:"data,omitempty"`
 }
 
 func NewGenericResponse[T any](code int, message string, data T) *GenericResponse[T] {

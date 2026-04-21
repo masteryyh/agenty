@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -43,10 +42,6 @@ func (t *RunShellCommandTool) Definition() tools.ToolDefinition {
 					Type:        "string",
 					Description: "The shell command to execute. On Windows this runs via PowerShell -Command, on Linux/macOS via sh -c.",
 				},
-				"workdir": {
-					Type:        "string",
-					Description: "Optional working directory for the command. Defaults to the current working directory if not specified.",
-				},
 				"timeout": {
 					Type:        "integer",
 					Description: "Optional timeout in seconds. Defaults to 30. The command will be killed if it exceeds this duration.",
@@ -57,10 +52,9 @@ func (t *RunShellCommandTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *RunShellCommandTool) Execute(ctx context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
+func (t *RunShellCommandTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Command string `json:"command"`
-		Workdir string `json:"workdir,omitempty"`
 		Timeout int    `json:"timeout,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -86,18 +80,8 @@ func (t *RunShellCommandTool) Execute(ctx context.Context, _ tools.ToolCallConte
 		cmd = exec.CommandContext(execCtx, "sh", "-c", args.Command)
 	}
 
-	if args.Workdir != "" {
-		dirInfo, err := os.Stat(args.Workdir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", fmt.Errorf("working directory does not exist: %s", args.Workdir)
-			}
-			return "", fmt.Errorf("failed to access working directory: %w", err)
-		}
-		if !dirInfo.IsDir() {
-			return "", fmt.Errorf("working directory path is not a directory: %s", args.Workdir)
-		}
-		cmd.Dir = args.Workdir
+	if tcc.Cwd != "" {
+		cmd.Dir = tcc.Cwd
 	}
 
 	var stdout, stderr bytes.Buffer

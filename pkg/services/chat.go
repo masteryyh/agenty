@@ -270,15 +270,51 @@ func (s *ChatService) ListSessions(ctx context.Context, request *pagination.Page
 	}, nil
 }
 
+func (s *ChatService) SetSessionCwd(ctx context.Context, sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return customerrors.ErrSessionNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
+		return err
+	}
+
+	skillSvc := GetSkillService()
+
+	if session.Cwd != nil {
+		if err := skillSvc.DropSessionTable(ctx, sessionID); err != nil {
+			slog.WarnContext(ctx, "failed to drop old session skills table", "sessionId", sessionID, "error", err)
+		}
+	}
+
+	updates := map[string]any{"cwd": cwd, "agents_md": agentsMD}
+	if err := s.db.WithContext(ctx).
+		Model(&models.ChatSession{}).
+		Where("id = ?", session.ID).
+		Updates(updates).Error; err != nil {
+		slog.ErrorContext(ctx, "failed to update session cwd", "error", err, "sessionId", sessionID)
+		return err
+	}
+
+	if cwd != nil {
+		if err := skillSvc.CreateSessionTable(ctx, sessionID); err != nil {
+			slog.WarnContext(ctx, "failed to create session skills table", "sessionId", sessionID, "error", err)
+		} else {
+			if err := skillSvc.PopulateSessionSkills(ctx, sessionID, *cwd); err != nil {
+				slog.WarnContext(ctx, "failed to populate session skills", "sessionId", sessionID, "error", err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) ([]*models.ChatMessageDto, error) {
 	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
 	if err != nil {
-		return nil, err
-	}
-
-	systemPrompt, err := buildSystemPrompt(&res.agent)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
 	}
 
@@ -286,6 +322,15 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	if err != nil {
 		return nil, err
 	}
+
+	skillsXML := s.resolveSkillsXML(ctx, &res.session, data.Message, messages)
+
+	systemPrompt, err := buildSystemPrompt(&res.agent, &res.session, skillsXML)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
+		return nil, err
+	}
+
 	messages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
 	messages = append(messages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
@@ -345,17 +390,20 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 		return nil, err
 	}
 
-	systemPrompt, err := buildSystemPrompt(&agent)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
-		return nil, err
-	}
-
 	primary := candidates[0]
 	baseMessages, err := s.loadHistoryMessages(ctx, session.ID, primary.model.ID, data.Thinking && primary.model.Thinking)
 	if err != nil {
 		return nil, err
 	}
+
+	skillsXML := s.resolveSkillsXML(ctx, &session, data.Message, baseMessages)
+
+	systemPrompt, err := buildSystemPrompt(&agent, &session, skillsXML)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
+		return nil, err
+	}
+
 	baseMessages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, baseMessages...)
 	baseMessages = append(baseMessages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
@@ -487,6 +535,187 @@ func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResour
 	if err := s.saveMessagesAndUpdateSession(ctx, &res.session, res.model.ID, newMessages, totalTokens); err != nil {
 		slog.ErrorContext(ctx, "failed to persist stream messages", "error", err, "sessionId", res.session.ID)
 	}
+}
+
+const skillCountThreshold = 30
+
+func formatSkillsXML(skills []models.SkillDto) string {
+	if len(skills) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, skill := range skills {
+		fmt.Fprintf(&sb, "<skill>\n    <name>%s</name>\n    <description>%s</description>\n    <path>%s</path>\n</skill>\n", skill.Name, skill.Description, skill.SkillMDPath)
+	}
+	return sb.String()
+}
+
+func formatSearchResultsXML(skills []models.SkillSearchResult) string {
+	if len(skills) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, skill := range skills {
+		fmt.Fprintf(&sb, "<skill>\n    <name>%s</name>\n    <description>%s</description>\n    <path>%s</path>\n</skill>\n", skill.Name, skill.Description, skill.SkillMDPath)
+	}
+	return sb.String()
+}
+
+func (s *ChatService) resolveSkillsXML(ctx context.Context, session *models.ChatSession, userMessage string, historyMessages []providers.Message) string {
+	skillSvc := GetSkillService()
+
+	count, err := skillSvc.CountSessionSkills(ctx, session.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to count session skills", "error", err, "sessionId", session.ID)
+		return ""
+	}
+
+	if count == 0 {
+		return ""
+	}
+
+	if count <= skillCountThreshold {
+		skills, err := skillSvc.ListSessionSkillSummaries(ctx, session.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to list session skill summaries", "error", err, "sessionId", session.ID)
+			return ""
+		}
+		return formatSkillsXML(skills)
+	}
+
+	results := s.preSelectSkills(ctx, session, userMessage, historyMessages)
+	return formatSearchResultsXML(results)
+}
+
+func (s *ChatService) preSelectSkills(ctx context.Context, session *models.ChatSession, userMessage string, historyMessages []providers.Message) []models.SkillSearchResult {
+	lightModel, lightProvider, err := s.resolveLightModel(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "no light model available for skill pre-selection, falling back to find_skill", "error", err)
+		return nil
+	}
+
+	promptContext := buildSkillSelectionContext(session, userMessage, historyMessages)
+	selectionPrompt := fmt.Sprintf(consts.SkillSelectionPrompt, promptContext)
+
+	result, err := s.chatExecutor.Chat(ctx, &chat.ChatParams{
+		Messages: []providers.Message{
+			{Role: models.RoleSystem, Content: selectionPrompt},
+			{Role: models.RoleUser, Content: "Generate search keywords for finding relevant skills."},
+		},
+		Model:     lightModel.Code,
+		AgentID:   session.AgentID,
+		SessionID: session.ID,
+		ModelID:   lightModel.ID,
+		BaseURL:   lightProvider.BaseURL,
+		APIKey:    lightProvider.APIKey,
+		APIType:   lightProvider.Type,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "skill pre-selection LLM call failed", "error", err)
+		return nil
+	}
+
+	if len(result.Messages) == 0 {
+		return nil
+	}
+
+	lastContent := result.Messages[len(result.Messages)-1].Content
+	keywords := parseKeywordLines(lastContent)
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	skillSvc := GetSkillService()
+	seen := make(map[string]bool)
+	var allResults []models.SkillSearchResult
+
+	for _, kw := range keywords {
+		results, err := skillSvc.SearchSkills(ctx, &session.ID, kw, 15)
+		if err != nil {
+			slog.WarnContext(ctx, "skill search failed for keyword", "keyword", kw, "error", err)
+			continue
+		}
+		for _, r := range results {
+			if !seen[r.SkillMDPath] {
+				seen[r.SkillMDPath] = true
+				allResults = append(allResults, r)
+			}
+		}
+	}
+
+	if len(allResults) > skillCountThreshold {
+		allResults = allResults[:skillCountThreshold]
+	}
+	return allResults
+}
+
+func (s *ChatService) resolveLightModel(ctx context.Context) (*models.Model, *models.ModelProvider, error) {
+	mdl, err := gorm.G[models.Model](s.db).
+		Where("light = true AND deleted_at IS NULL").
+		Order("created_at ASC").
+		First(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("no light model found: %w", err)
+	}
+
+	prov, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", mdl.ProviderID).
+		First(ctx)
+	if err != nil || prov.APIKey == "" {
+		return nil, nil, fmt.Errorf("light model provider not configured: %w", err)
+	}
+	return &mdl, &prov, nil
+}
+
+func buildSkillSelectionContext(session *models.ChatSession, userMessage string, historyMessages []providers.Message) string {
+	var sb strings.Builder
+
+	if session.Cwd != nil {
+		fmt.Fprintf(&sb, "Project directory: %s\n", *session.Cwd)
+	}
+	if session.AgentsMD != nil {
+		content := *session.AgentsMD
+		fmt.Fprintf(&sb, "Project instructions:\n%s\n\n", content)
+	}
+
+	if len(historyMessages) > 0 {
+		sb.WriteString("Recent conversation:\n")
+		start := 0
+		if len(historyMessages) > 6 {
+			start = len(historyMessages) - 6
+		}
+		for _, msg := range historyMessages[start:] {
+			if msg.Role == models.RoleUser || msg.Role == models.RoleAssistant {
+				fmt.Fprintf(&sb, "[%s]: %s\n", msg.Role, msg.Content)
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	fmt.Fprintf(&sb, "Current user message: %s\n", userMessage)
+	return sb.String()
+}
+
+func parseKeywordLines(content string) []string {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	var keywords []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimLeft(line, "0123456789.-)#<> ")
+		line = strings.TrimSpace(line)
+		if line != "" {
+			keywords = append(keywords, line)
+		}
+	}
+	if len(keywords) > 5 {
+		keywords = keywords[:5]
+	}
+	return keywords
 }
 
 type chatResources struct {
@@ -658,14 +887,21 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 	return res, nil
 }
 
-func buildSystemPrompt(agent *models.Agent) (string, error) {
+func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsXML string) (string, error) {
 	var sb strings.Builder
-	if err := consts.AgentBasePrompt.Execute(&sb, map[string]any{
+	data := map[string]any{
 		"DateTime":  time.Now().Format(time.RFC3339),
 		"AgentName": agent.Name,
 		"AgentID":   agent.ID,
 		"Soul":      agent.Soul,
-	}); err != nil {
+	}
+	if session != nil && session.AgentsMD != nil {
+		data["AgentsMD"] = *session.AgentsMD
+	}
+	if skillsXML != "" {
+		data["SkillsXML"] = skillsXML
+	}
+	if err := consts.AgentBasePrompt.Execute(&sb, data); err != nil {
 		return "", err
 	}
 	return sb.String(), nil
@@ -751,6 +987,10 @@ func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatS
 }
 
 func buildChatParams(res *chatResources, messages []providers.Message, data *models.ChatDto) *chat.ChatParams {
+	var cwd string
+	if res.session.Cwd != nil {
+		cwd = *res.session.Cwd
+	}
 	return &chat.ChatParams{
 		BaseURL:                   res.chatProvider.BaseURL,
 		APIKey:                    res.chatProvider.APIKey,
@@ -759,6 +999,7 @@ func buildChatParams(res *chatResources, messages []providers.Message, data *mod
 		AgentID:                   res.session.AgentID,
 		SessionID:                 res.session.ID,
 		ModelID:                   res.model.ID,
+		Cwd:                       cwd,
 		APIType:                   res.chatProvider.Type,
 		Thinking:                  data.Thinking && res.model.Thinking,
 		ThinkingLevel:             data.ThinkingLevel,

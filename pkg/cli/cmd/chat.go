@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -34,6 +35,24 @@ func startChat(b backend.Backend, isLocal bool) error {
 			Command{Name: "/logs", Description: "View debug logs", Usage: "/logs"},
 			handleLogsCmd,
 		)
+		commandRegistry["/new"] = func(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+			result, err := handleNewCmd(b, bridge, args, sessionID, modelID, agentID, state)
+			if err == nil && result.NewSessionID != uuid.Nil {
+				if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+					var agentsMD *string
+					for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+						candidate := filepath.Join(cwd, name)
+						if data, readErr := os.ReadFile(candidate); readErr == nil {
+							content := string(data)
+							agentsMD = &content
+							break
+						}
+					}
+					_ = b.SetSessionCwd(result.NewSessionID, &cwd, agentsMD)
+				}
+			}
+			return result, err
+		}
 	}
 
 	initialized, err := b.IsInitialized()
@@ -101,6 +120,23 @@ func startChat(b backend.Backend, isLocal bool) error {
 			return fmt.Errorf("failed to create session: %w", err)
 		}
 		sessionID = session.ID
+	}
+
+	if isLocal {
+		if cwd, err := os.Getwd(); err == nil {
+			var agentsMD *string
+			for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+				candidate := filepath.Join(cwd, name)
+				if data, readErr := os.ReadFile(candidate); readErr == nil {
+					content := string(data)
+					agentsMD = &content
+					break
+				}
+			}
+			if setErr := b.SetSessionCwd(sessionID, &cwd, agentsMD); setErr == nil {
+				session.Cwd = &cwd
+			}
+		}
 	}
 
 	var modelID uuid.UUID

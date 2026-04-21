@@ -72,6 +72,7 @@ type ChatParams struct {
 	AgentID                   uuid.UUID
 	SessionID                 uuid.UUID
 	ModelID                   uuid.UUID
+	Cwd                       string
 	Thinking                  bool
 	ThinkingLevel             string
 	AnthropicAdaptiveThinking bool
@@ -139,6 +140,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			SessionID: params.SessionID,
 			ModelID:   params.ModelID,
 			ModelCode: params.Model,
+			Cwd:       params.Cwd,
 		}
 
 		for _, tc := range resp.ToolCalls {
@@ -264,6 +266,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				SessionID: params.SessionID,
 				ModelID:   params.ModelID,
 				ModelCode: params.Model,
+				Cwd:       params.Cwd,
 			}
 
 			for _, tc := range assistantMsg.ToolCalls {

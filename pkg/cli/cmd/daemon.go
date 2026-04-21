@@ -32,6 +32,7 @@ import (
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/middleware"
 	"github.com/masteryyh/agenty/pkg/routes"
+	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
@@ -58,6 +59,12 @@ func startDaemon() error {
 	mcpManager := mcppkg.InitManager(baseCtx, registry)
 	mcpManager.Start()
 	slog.InfoContext(baseCtx, "MCP manager initialized")
+
+	slog.InfoContext(baseCtx, "initializing skill service...")
+	skillSvc := services.GetSkillService()
+	if err := skillSvc.Initialize(baseCtx); err != nil {
+		slog.WarnContext(baseCtx, "skill service initialization failed", "error", err)
+	}
 
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)
@@ -88,6 +95,7 @@ func startDaemon() error {
 
 	<-baseCtx.Done()
 	slog.InfoContext(baseCtx, "shutting down server")
+	skillSvc.Shutdown()
 	mcpManager.Close()
 	return nil
 }

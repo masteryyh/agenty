@@ -56,7 +56,7 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReadFileTool) Execute(_ context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
+func (t *ReadFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path      string `json:"path"`
 		StartLine int    `json:"startLine,omitempty"`
@@ -66,7 +66,7 @@ func (t *ReadFileTool) Execute(_ context.Context, _ tools.ToolCallContext, argum
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	abs, err := utils.GetCleanPath(args.Path, true)
+	abs, err := utils.GetCleanPathWithBase(args.Path, tcc.Cwd, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -151,7 +151,7 @@ func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *WriteFileTool) Execute(_ context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
+func (t *WriteFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -160,7 +160,7 @@ func (t *WriteFileTool) Execute(_ context.Context, _ tools.ToolCallContext, argu
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath, err := utils.GetCleanPath(args.Path, false)
+	cleanPath, err := utils.GetCleanPathWithBase(args.Path, tcc.Cwd, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
@@ -207,7 +207,7 @@ func (t *ReplaceInFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReplaceInFileTool) Execute(_ context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
+func (t *ReplaceInFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path       string `json:"path"`
 		StartLine  int    `json:"startLine"`
@@ -218,7 +218,7 @@ func (t *ReplaceInFileTool) Execute(_ context.Context, _ tools.ToolCallContext, 
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath, err := utils.GetCleanPath(args.Path, true)
+	cleanPath, err := utils.GetCleanPathWithBase(args.Path, tcc.Cwd, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to replace in file: %w", err)
 	}
@@ -283,7 +283,7 @@ func (t *ListDirectoryTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ListDirectoryTool) Execute(_ context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
+func (t *ListDirectoryTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path string `json:"path"`
 	}
@@ -291,7 +291,7 @@ func (t *ListDirectoryTool) Execute(_ context.Context, _ tools.ToolCallContext, 
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	cleanPath, err := utils.GetCleanPath(args.Path, true)
+	cleanPath, err := utils.GetCleanPathWithBase(args.Path, tcc.Cwd, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to list directory: %w", err)
 	}

@@ -53,4 +53,3 @@ func TestSaveMemoryToolInvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
-

@@ -115,6 +115,10 @@ func (l *LocalBackend) GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSes
 	return l.chatSvc.GetLastSessionByAgent(signal.GetBaseContext(), agentID)
 }
 
+func (l *LocalBackend) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error {
+	return l.chatSvc.SetSessionCwd(signal.GetBaseContext(), sessionID, cwd, agentsMD)
+}
+
 func (l *LocalBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	result, err := l.chatSvc.Chat(signal.GetBaseContext(), sessionID, dto)
 	if err != nil {
@@ -210,4 +214,12 @@ func (l *LocalBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto)
 func (l *LocalBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error) {
 	category := models.KnowledgeCategoryLLMMemory
 	return services.GetKnowledgeService().ListItems(signal.GetBaseContext(), agentID, &category)
+}
+
+func (l *LocalBackend) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error) {
+	return services.GetSkillService().ListSkills(signal.GetBaseContext(), &sessionID)
+}
+
+func (l *LocalBackend) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
+	return services.GetSkillService().GetSkillContent(signal.GetBaseContext(), name, sessionID)
 }

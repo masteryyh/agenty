@@ -43,6 +43,7 @@ type Backend interface {
 	GetSession(sessionID uuid.UUID) (*models.ChatSessionDto, error)
 	GetLastSession() (*models.ChatSessionDto, error)
 	GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDto, error)
+	SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error
 
 	Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error)
 	StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error
@@ -64,6 +65,9 @@ type Backend interface {
 	UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error)
 
 	ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error)
+
+	ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error)
+	GetSkillContent(name string, sessionID *uuid.UUID) (string, error)
 
 	IsInitialized() (bool, error)
 	SetInitialized() error

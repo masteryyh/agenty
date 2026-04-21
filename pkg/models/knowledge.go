@@ -122,14 +122,14 @@ type CreateKnowledgeItemDto struct {
 }
 
 type KnowledgeBaseData struct {
-	ID             uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	ItemID         uuid.UUID       `gorm:"type:uuid;not null;index"`
-	AgentID        uuid.UUID       `gorm:"type:uuid;not null;index"`
-	ChunkIndex     int             `gorm:"not null;default:0"`
-	ChunkContent   string          `gorm:"type:text;not null"`
-	TextEmbedding  pgvector.Vector `gorm:"type:vector(1536)"`
-	CreatedAt      time.Time       `gorm:"autoCreateTime:milli"`
-	UpdatedAt      time.Time       `gorm:"autoUpdateTime:milli"`
+	ID            uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
+	ItemID        uuid.UUID       `gorm:"type:uuid;not null;index"`
+	AgentID       uuid.UUID       `gorm:"type:uuid;not null;index"`
+	ChunkIndex    int             `gorm:"not null;default:0"`
+	ChunkContent  string          `gorm:"type:text;not null"`
+	TextEmbedding pgvector.Vector `gorm:"type:vector(1024)"`
+	CreatedAt     time.Time       `gorm:"autoCreateTime:milli"`
+	UpdatedAt     time.Time       `gorm:"autoUpdateTime:milli"`
 }
 
 func (KnowledgeBaseData) TableName() string {
