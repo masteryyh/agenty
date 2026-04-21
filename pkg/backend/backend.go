@@ -66,6 +66,9 @@ type Backend interface {
 
 	ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error)
 
+	ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error)
+	GetSkillContent(name string, sessionID *uuid.UUID) (string, error)
+
 	IsInitialized() (bool, error)
 	SetInitialized() error
 }

@@ -23,6 +23,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/services"
 )
 
@@ -34,26 +35,8 @@ type SearchTool struct {
 
 func (t *SearchTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
-		Name: "search",
-		Description: `Unified multi-channel, multi-strategy search tool. Submit an array of search specs; each spec has a unique id, a channel, a query, and an optional per-spec limit. The same channel may appear multiple times with different queries to implement multi-strategy retrieval (e.g., keyword + semantic + HyDE in one call).
-
-Available channels:
-- "knowledge_base": Searches all knowledge base categories (llm_memory, session_memory, user_document) using hybrid vector + BM25 + keyword retrieval.
-- "web_search": Searches the internet via the configured provider (Brave / Tavily / Firecrawl). Only available when a web search API key is configured in system settings.
-
-Query format guidance per channel and strategy:
-- knowledge_base + semantic (vector): Natural language question, e.g., "How did Google perform in Q3 2025?"
-- knowledge_base + keyword (BM25): Refined keywords, e.g., "Google Q3 2025 revenue earnings net profit"
-- knowledge_base + HyDE: After reviewing initial results, write a hypothetical passage that would answer the question (based on actual results, not imagined). Add this as a new entry with a distinct id on a second call.
-- web_search: Search-engine-style query, e.g., "Google Q3 2025 annual report revenue"
-
-Recommended workflow:
-1. First call: Submit keyword and semantic queries to knowledge_base (different ids).
-2. Review the returned quality and message per channel.
-3. If quality is "medium" or "low", add a HyDE query in a second call.
-4. Only fall back to web_search when knowledge_base quality is "low" or "no_results".
-
-Results are returned as a JSON object grouped by channel. Each channel section includes results, the queries used, a quality rating (high/medium/low/no_results/error), and an improvement suggestion message.`,
+		Name:        "search",
+		Description: consts.SearchToolDescription,
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{

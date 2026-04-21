@@ -28,6 +28,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/conn"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 	"github.com/spf13/cobra"
@@ -99,6 +100,13 @@ func startLocalMode() error {
 	mcpManager := mcppkg.InitManager(baseCtx, registry)
 	mcpManager.Start()
 	defer mcpManager.Close()
+
+	slog.InfoContext(baseCtx, "initializing skill service...")
+	skillSvc := services.GetSkillService()
+	if err := skillSvc.Initialize(baseCtx); err != nil {
+		slog.WarnContext(baseCtx, "skill service initialization failed", "error", err)
+	}
+	defer skillSvc.Shutdown()
 
 	b := backend.NewLocalBackend()
 	return startChat(b, true)

@@ -186,3 +186,11 @@ func (r *RemoteBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemS
 	}
 	return *result, nil
 }
+
+func (r *RemoteBackend) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error) {
+	return r.client.ListSkills(sessionID)
+}
+
+func (r *RemoteBackend) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
+	return r.client.GetSkillContent(name, sessionID)
+}

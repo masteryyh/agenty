@@ -98,6 +98,11 @@ var commands = []Command{
 		Usage:       "/cwd [<path>|clear]",
 	},
 	{
+		Name:        "/skill",
+		Description: "View available skills",
+		Usage:       "/skill",
+	},
+	{
 		Name:        "/think",
 		Description: "Set thinking mode",
 		Usage:       "/think [off|<level>]",

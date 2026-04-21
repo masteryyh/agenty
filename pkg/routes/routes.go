@@ -33,6 +33,7 @@ type V1Routes struct {
 	memoryRoutes    *MemoryRoutes
 	mcpServerRoutes *MCPServerRoutes
 	systemRoutes    *SystemRoutes
+	skillRoutes     *SkillRoutes
 }
 
 var (
@@ -50,6 +51,7 @@ func GetV1Routes() *V1Routes {
 			memoryRoutes:    GetMemoryRoutes(),
 			mcpServerRoutes: GetMCPServerRoutes(),
 			systemRoutes:    GetSystemRoutes(),
+			skillRoutes:     GetSkillRoutes(),
 		}
 	})
 	return v1Routes
@@ -72,5 +74,6 @@ func (r *V1Routes) RegisterRoutes(routerGroup *gin.RouterGroup) error {
 	r.memoryRoutes.RegisterRoutes(routerGroup)
 	r.mcpServerRoutes.RegisterRoutes(routerGroup)
 	r.systemRoutes.RegisterRoutes(routerGroup)
+	r.skillRoutes.RegisterRoutes(routerGroup)
 	return nil
 }

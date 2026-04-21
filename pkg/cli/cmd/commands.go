@@ -59,6 +59,7 @@ var commandRegistry = map[string]CommandHandler{
 	"/settings": handleSettingsCmd,
 	"/memory":   handleMemoryCmd,
 	"/cwd":      handleCwdCmd,
+	"/skill":    handleSkillCmd,
 }
 
 func parseSlashInput(input string) []string {

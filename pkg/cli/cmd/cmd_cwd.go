@@ -49,6 +49,20 @@ func handleCwdCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 	}
 
 	input := args[0]
+
+	if !filepath.IsAbs(input) && input != "~" && !strings.HasPrefix(input, "~/") {
+		for part := range strings.SplitSeq(filepath.ToSlash(input), "/") {
+			if part == ".." {
+				bridge.Error("Path traversal with '..' is not allowed. Use a subdirectory path or an absolute path.")
+				return CommandResult{Handled: true}, nil
+			}
+			if part == "." {
+				bridge.Error("Explicit '.' reference is not allowed. Use a subdirectory path directly (e.g. '.agents/skills') or an absolute path.")
+				return CommandResult{Handled: true}, nil
+			}
+		}
+	}
+
 	var dirPath string
 	if input == "~" || strings.HasPrefix(input, "~/") {
 		homeDir, err := os.UserHomeDir()
