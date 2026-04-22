@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"time"
 
@@ -168,9 +169,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		stream:       newStreamModel(),
 	}
 
-	banner := strings.Trim(consts.ASCIIArts[rand.IntN(len(consts.ASCIIArts))], "\n")
-	bannerLine := styleUserHeader.Render(banner) + "\n" +
-		styleBarSep.Render("  ai agent platform") + "\n\n"
+	bannerLine := renderBannerCard()
 	m.bannerContent = bannerLine
 	m.chatLog.WriteString(bannerLine)
 	m.chatLog.WriteString(historyContent)
@@ -888,4 +887,128 @@ func (m *chatModel) refreshViewport() {
 	m.updateLayout()
 	m.viewport.SetContent(m.viewportContent())
 	m.viewport.GotoBottom()
+}
+
+func abbreviateCwd(path string, maxLen int) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path == home {
+			path = "~"
+		} else if strings.HasPrefix(path, home+"/") {
+			path = "~" + path[len(home):]
+		}
+	}
+
+	if len(path) <= maxLen {
+		return path
+	}
+
+	isAbs := strings.HasPrefix(path, "/")
+	rawParts := strings.Split(path, "/")
+	var parts []string
+	for _, p := range rawParts {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+
+	if len(parts) <= 1 {
+		if len(path) > maxLen {
+			return path[:maxLen-3] + "..."
+		}
+		return path
+	}
+
+	last := parts[len(parts)-1]
+	const ellipsis = "/.../"
+
+	accumulated := ""
+	if isAbs {
+		accumulated = "/"
+	}
+
+	for _, part := range parts[:len(parts)-1] {
+		var candidate string
+		switch accumulated {
+		case "/":
+			candidate = "/" + part
+		case "":
+			candidate = part
+		default:
+			candidate = accumulated + "/" + part
+		}
+
+		if len(candidate+ellipsis+last) <= maxLen {
+			accumulated = candidate
+		} else {
+			break
+		}
+	}
+
+	if accumulated == "" {
+		accumulated = "/"
+	}
+	return accumulated + ellipsis + last
+}
+
+func renderBannerCard() string {
+	art := strings.Trim(consts.ASCIIArts[rand.IntN(len(consts.ASCIIArts))], "\n")
+
+	cwd := "~"
+	if wd, err := os.Getwd(); err == nil {
+		cwd = abbreviateCwd(wd, 36)
+	}
+
+	artLines := strings.Split(art, "\n")
+	infoLines := []string{
+		styleAssistantHeader.Render("yet another ai agent"),
+		styleGray.Render("v0.0.1"),
+		styleGray.Render(cwd),
+	}
+
+	numArt := len(artLines)
+	numInfo := len(infoLines)
+	totalHeight := max(numArt, numInfo)
+
+	artPadTop := (totalHeight - numArt + 1) / 2
+	infoPadTop := (totalHeight - numInfo) / 2
+
+	maxArtWidth := 0
+	for _, l := range artLines {
+		if w := lipgloss.Width(l); w > maxArtWidth {
+			maxArtWidth = w
+		}
+	}
+
+	const gap = "   "
+
+	rows := make([]string, totalHeight)
+	for i := range rows {
+		var left string
+		artIdx := i - artPadTop
+		if artIdx >= 0 && artIdx < numArt {
+			line := artLines[artIdx]
+			if pad := maxArtWidth - lipgloss.Width(line); pad > 0 {
+				line += strings.Repeat(" ", pad)
+			}
+			left = styleUserHeader.Render(line)
+		} else {
+			left = strings.Repeat(" ", maxArtWidth)
+		}
+
+		var right string
+		infoIdx := i - infoPadTop
+		if infoIdx >= 0 && infoIdx < numInfo {
+			right = infoLines[infoIdx]
+		}
+
+		rows[i] = left + gap + right
+	}
+
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.Colors.Primary).
+		Padding(0, 1).
+		Render(strings.Join(rows, "\n"))
+
+	return card + "\n\n"
 }

@@ -19,6 +19,10 @@ package theme
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -29,4 +33,30 @@ const (
 func RestoreTerminal() {
 	fmt.Fprint(os.Stdout, seqDisableMouseAll+seqShowCursor)
 	os.Stdout.Sync()
+}
+
+func DetectDarkBackground() bool {
+	if v := os.Getenv("VSCODE_TERMINAL_THEME_KIND"); v != "" {
+		return strings.EqualFold(v, "dark")
+	}
+
+	if v := os.Getenv("COLORFGBG"); v != "" {
+		parts := strings.Split(v, ";")
+		if len(parts) >= 2 {
+			bg, err := strconv.Atoi(parts[len(parts)-1])
+			if err == nil {
+				return bg < 8
+			}
+		}
+	}
+
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("defaults", "read", "-g", "AppleInterfaceStyle").Output()
+		if err == nil {
+			return strings.TrimSpace(string(out)) == "Dark"
+		}
+		return false
+	}
+
+	return true
 }
