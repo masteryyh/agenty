@@ -225,6 +225,14 @@ func streamRenderBuiltinToolCallLine(name, argsJSON string) string {
 	return truncate.StringWithTail(line, uint(maxW), "…")
 }
 
+func isLineBasedTool(name string) bool {
+	switch name {
+	case "read_file", "run_shell_command", "list_directory", "write_file", "replace_in_file":
+		return true
+	}
+	return false
+}
+
 // renderBuiltinToolResultLines parses tool result content and returns display lines + more count.
 // maxLines controls how many lines are returned; returns (lines, moreCount).
 func renderBuiltinToolResultLines(name, content string, maxLines int) ([]string, int) {
@@ -315,37 +323,62 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 }
 
 func renderShellResultLines(content string, maxLines int) ([]string, int) {
-	rawLines := strings.Split(content, "\n")
-	var lines []string
-	inStdout := false
-	stdoutLines := 0
-	totalStdoutLines := 0
+	const (
+		sectionNone = iota
+		sectionStdout
+		sectionStderr
+	)
 
-	for _, l := range rawLines {
+	exitCode := 0
+	var stdoutLines []string
+	var stderrLines []string
+	section := sectionNone
+
+	for _, l := range strings.Split(content, "\n") {
+		if strings.HasPrefix(l, "Exit Code:") {
+			fmt.Sscanf(l, "Exit Code: %d", &exitCode)
+			continue
+		}
 		if l == "Stdout:" {
-			inStdout = true
-			lines = append(lines, styleGray.Render(l))
+			section = sectionStdout
 			continue
 		}
 		if l == "Stderr:" {
-			inStdout = false
+			section = sectionStderr
+			continue
 		}
-		if inStdout {
-			totalStdoutLines++
-		}
-		if len(lines) < maxLines {
-			lines = append(lines, l)
-			if inStdout {
-				stdoutLines++
-			}
+		switch section {
+		case sectionStdout:
+			stdoutLines = append(stdoutLines, l)
+		case sectionStderr:
+			stderrLines = append(stderrLines, l)
 		}
 	}
 
-	more := totalStdoutLines - stdoutLines
-	if more < 0 {
-		more = 0
+	trimTrailing := func(ls []string) []string {
+		for len(ls) > 0 && strings.TrimSpace(ls[len(ls)-1]) == "" {
+			ls = ls[:len(ls)-1]
+		}
+		return ls
 	}
-	return lines, more
+	stdoutLines = trimTrailing(stdoutLines)
+	stderrLines = trimTrailing(stderrLines)
+
+	var displayLines []string
+	if exitCode == 0 && len(stdoutLines) > 0 {
+		displayLines = stdoutLines
+	} else if exitCode != 0 && len(stderrLines) > 0 {
+		displayLines = stderrLines
+	} else if exitCode != 0 && len(stdoutLines) > 0 {
+		displayLines = stdoutLines
+	} else {
+		return []string{styleGray.Render(fmt.Sprintf("command exited with code %d", exitCode))}, 0
+	}
+
+	if len(displayLines) <= maxLines {
+		return displayLines, 0
+	}
+	return displayLines[:maxLines], len(displayLines) - maxLines
 }
 
 func renderGenericResultLines(content string, maxLines int) ([]string, int) {

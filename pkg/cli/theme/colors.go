@@ -34,7 +34,7 @@ type Palette struct {
 	TextFaint  lipgloss.Color
 }
 
-var Colors = Palette{
+var darkPalette = Palette{
 	Primary:    lipgloss.Color("43"),
 	Secondary:  lipgloss.Color("39"),
 	Accent:     lipgloss.Color("214"),
@@ -48,4 +48,33 @@ var Colors = Palette{
 	TextMuted:  lipgloss.Color("242"),
 	TextSubtle: lipgloss.Color("238"),
 	TextFaint:  lipgloss.Color("244"),
+}
+
+var lightPalette = Palette{
+	Primary:    lipgloss.Color("30"),
+	Secondary:  lipgloss.Color("25"),
+	Accent:     lipgloss.Color("166"),
+	Highlight:  lipgloss.Color("36"),
+	Special:    lipgloss.Color("54"),
+	Magenta:    lipgloss.Color("125"),
+	Success:    lipgloss.Color("28"),
+	Error:      lipgloss.Color("160"),
+	Warning:    lipgloss.Color("130"),
+	Text:       lipgloss.Color("235"),
+	TextMuted:  lipgloss.Color("238"),
+	TextSubtle: lipgloss.Color("244"),
+	TextFaint:  lipgloss.Color("242"),
+}
+
+var Colors = darkPalette
+var IsDark = true
+
+func InitTheme(isDark bool) {
+	IsDark = isDark
+	if isDark {
+		Colors = darkPalette
+	} else {
+		Colors = lightPalette
+	}
+	initStyles()
 }

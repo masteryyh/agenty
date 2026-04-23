@@ -187,6 +187,9 @@ func startChat(b backend.Backend, isLocal bool) error {
 		SetRenderWidth(w)
 	}
 
+	theme.InitTheme(theme.DetectDarkBackground())
+	refreshRenderStyles()
+
 	bridge := newUIBridge()
 	model := newChatModel(b, bridge, sessionID, modelID, agentID, modelInfo, agentName, session.Messages)
 

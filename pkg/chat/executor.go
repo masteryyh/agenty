@@ -18,6 +18,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -87,6 +88,45 @@ type ChatResult struct {
 	Messages   []providers.Message
 }
 
+func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.ToolCallContext, toolCalls []models.ToolCall, onResult func(models.ToolResult)) []models.ToolResult {
+	results := make([]models.ToolResult, len(toolCalls))
+	var wg sync.WaitGroup
+
+	for i, tc := range toolCalls {
+		wg.Add(1)
+		idx, call := i, tc
+		safe.GoOnce(fmt.Sprintf("tool-%s-%s", call.Name, call.ID), func() {
+			defer wg.Done()
+
+			var result models.ToolResult
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.ErrorContext(ctx, "panic in tool execution", "tool", call.Name, "id", call.ID, "error", r)
+						result = models.ToolResult{
+							CallID:  call.ID,
+							Name:    call.Name,
+							Content: fmt.Sprintf("tool panicked: %v", r),
+							IsError: true,
+						}
+					}
+				}()
+				slog.InfoContext(ctx, "executing tool", "name", call.Name, "id", call.ID)
+				result = ce.registry.Execute(ctx, tcc, call)
+				slog.InfoContext(ctx, "tool execution done", "name", call.Name, "id", call.ID, "isError", result.IsError)
+			}()
+
+			results[idx] = result
+			if onResult != nil {
+				onResult(result)
+			}
+		})
+	}
+
+	wg.Wait()
+	return results
+}
+
 func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResult, error) {
 	p, ok := ce.providerRegistry[params.APIType]
 	if !ok {
@@ -143,14 +183,12 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			Cwd:       params.Cwd,
 		}
 
-		for _, tc := range resp.ToolCalls {
-			slog.InfoContext(ctx, "executing tool", "name", tc.Name, "id", tc.ID)
-			result := ce.registry.Execute(ctx, tcc, tc)
-
+		results := ce.executeToolCallsParallel(ctx, tcc, resp.ToolCalls, nil)
+		for i := range results {
 			toolMsg := providers.Message{
 				Role:       models.RoleTool,
-				Content:    result.Content,
-				ToolResult: &result,
+				Content:    results[i].Content,
+				ToolResult: &results[i],
 			}
 			messages = append(messages, toolMsg)
 		}
@@ -269,23 +307,23 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				Cwd:       params.Cwd,
 			}
 
-			for _, tc := range assistantMsg.ToolCalls {
-				slog.InfoContext(ctx, "stream: executing tool", "name", tc.Name, "id", tc.ID)
-				result := ce.registry.Execute(ctx, tcc, tc)
-
+			onResult := func(result models.ToolResult) {
+				r := result
 				select {
 				case out <- providers.StreamEvent{
 					Type:       providers.EventToolResult,
-					ToolResult: &result,
+					ToolResult: &r,
 				}:
 				case <-ctx.Done():
-					return
 				}
+			}
 
+			results := ce.executeToolCallsParallel(ctx, tcc, assistantMsg.ToolCalls, onResult)
+			for i := range results {
 				toolMsg := providers.Message{
 					Role:       models.RoleTool,
-					Content:    result.Content,
-					ToolResult: &result,
+					Content:    results[i].Content,
+					ToolResult: &results[i],
 				}
 				messages = append(messages, toolMsg)
 			}

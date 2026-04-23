@@ -1,10 +1,15 @@
-.PHONY: all build clean test vet fmt
+.PHONY: all build clean test vet fmt install
 
 all: build
 
 build:
 	@echo "Building agenty..."
 	go build -o bin/agenty cmd/main.go
+
+install: build
+	@echo "Installing agenty to /usr/local/bin..."
+	sudo install -m 755 bin/agenty /usr/local/bin/agenty
+	sudo chmod +x /usr/local/bin/agenty
 
 clean:
 	@echo "Cleaning..."

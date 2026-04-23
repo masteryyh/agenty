@@ -24,6 +24,13 @@ import (
 func NewHuhTheme() *huh.Theme {
 	t := huh.ThemeBase()
 
+	buttonFg := lipgloss.Color("0")
+	blurredBtnBg := lipgloss.Color("236")
+	if !IsDark {
+		buttonFg = lipgloss.Color("255")
+		blurredBtnBg = lipgloss.Color("250")
+	}
+
 	t.Focused.Base = lipgloss.NewStyle().
 		PaddingLeft(1).
 		BorderStyle(lipgloss.ThickBorder()).
@@ -44,10 +51,10 @@ func NewHuhTheme() *huh.Theme {
 	t.Focused.MultiSelectSelector = lipgloss.NewStyle().Foreground(Colors.Primary).SetString("❯ ")
 	t.Focused.FocusedButton = lipgloss.NewStyle().
 		Padding(0, 2).MarginRight(1).
-		Foreground(lipgloss.Color("0")).Background(Colors.Primary)
+		Foreground(buttonFg).Background(Colors.Primary)
 	t.Focused.BlurredButton = lipgloss.NewStyle().
 		Padding(0, 2).MarginRight(1).
-		Foreground(Colors.TextMuted).Background(lipgloss.Color("236"))
+		Foreground(Colors.TextMuted).Background(blurredBtnBg)
 	t.Focused.TextInput.Cursor = lipgloss.NewStyle().Foreground(Colors.Primary)
 	t.Focused.TextInput.CursorText = lipgloss.NewStyle().Foreground(Colors.Text).Background(Colors.Primary)
 	t.Focused.TextInput.Text = lipgloss.NewStyle().Foreground(Colors.Text)
@@ -69,7 +76,7 @@ func NewHuhTheme() *huh.Theme {
 	t.Blurred.TextInput.Prompt = lipgloss.NewStyle().Foreground(Colors.TextSubtle).SetString("  ")
 	t.Blurred.FocusedButton = lipgloss.NewStyle().
 		Padding(0, 2).MarginRight(1).
-		Foreground(Colors.TextSubtle).Background(lipgloss.Color("236"))
+		Foreground(Colors.TextSubtle).Background(blurredBtnBg)
 
 	t.Group.Title = lipgloss.NewStyle().Foreground(Colors.Accent).Bold(true).MarginBottom(1)
 	t.Group.Description = lipgloss.NewStyle().Foreground(Colors.TextMuted).MarginBottom(1)

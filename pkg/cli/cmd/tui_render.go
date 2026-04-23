@@ -94,8 +94,12 @@ func renderMarkdown(text string) string {
 
 	markdownRendererMu.Lock()
 	if markdownRendererInst == nil || markdownRendererWidth != w {
+		glamourStyle := "dark"
+		if !theme.IsDark {
+			glamourStyle = "light"
+		}
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStandardStyle("dark"),
+			glamour.WithStandardStyle(glamourStyle),
 			glamour.WithWordWrap(w),
 		)
 		markdownRendererWidth = w
@@ -309,7 +313,11 @@ func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[strin
 				}
 			}
 			if moreCount > 0 {
-				buf.WriteString(contPrefix + styleGray.Render(fmt.Sprintf("...(%d more results)", moreCount)) + "\n")
+				moreLabel := "more results"
+				if isLineBasedTool(tc.Name) {
+					moreLabel = "more lines"
+				}
+				buf.WriteString(contPrefix + styleGray.Render(fmt.Sprintf("...(%d %s)", moreCount, moreLabel)) + "\n")
 			}
 		}
 	}
@@ -477,4 +485,48 @@ func WrapForDisplay(s string) string {
 		}
 	}
 	return buf.String()
+}
+
+func refreshRenderStyles() {
+	styleSep = theme.Sep
+	styleAssistantHeader = theme.AssistantHeader
+	styleUserHeader = theme.UserHeader
+	styleTimestamp = theme.Timestamp
+	styleModelInfo = theme.ModelInfo
+	styleContent = theme.Content
+	styleReasoning = theme.Reasoning
+	styleReasoningLabel = theme.ReasoningLabel
+	styleToolLabel = theme.ToolLabel
+	styleToolName = theme.ToolName
+	styleToolArgs = theme.ToolArgs
+	styleToolSuccess = theme.ToolSuccess
+	styleToolError = theme.ToolError
+	styleToolResult = theme.ToolResult
+	styleFinalLabel = theme.FinalLabel
+	styleSysMsg = theme.SysMsg
+	styleSysOk = theme.SysOK
+	styleSysErr = theme.SysErr
+
+	styleBold = theme.Bold
+	styleGray = theme.Muted
+	styleCyan = theme.Cyan
+	styleGreen = theme.Green
+	styleRed = theme.Red
+	styleYellow = theme.Yellow
+	styleMagenta = theme.MagentaS
+	styleWhite = theme.White
+	styleReverse = theme.Reverse
+
+	styleBarSep = theme.BarSep
+	styleBarModel = theme.BarModel
+	styleBarThink = theme.BarThink
+	styleHintMuted = theme.HintMuted
+	styleStreaming = theme.Streaming
+
+	styleSpinner = theme.Spinner
+	styleSpinTxt = theme.SpinnerTxt
+
+	markdownRendererMu.Lock()
+	markdownRendererInst = nil
+	markdownRendererMu.Unlock()
 }
