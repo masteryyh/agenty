@@ -52,9 +52,6 @@ type streamModel struct {
 	spinIdx   int
 	tickCount int
 	phrase    string
-
-	currentToolName string
-	toolArgsBuf     *strings.Builder
 }
 
 func newStreamModel() streamModel {
@@ -62,7 +59,6 @@ func newStreamModel() streamModel {
 		buf:          new(strings.Builder),
 		reasoningBuf: new(strings.Builder),
 		contentBuf:   new(strings.Builder),
-		toolArgsBuf:  new(strings.Builder),
 		atLineStart:  true,
 	}
 }
@@ -79,8 +75,6 @@ func (s *streamModel) start() {
 	s.hadToolCalls = false
 	s.hasContent = false
 	s.atLineStart = true
-	s.currentToolName = ""
-	s.toolArgsBuf.Reset()
 	s.reasoningBuf.Reset()
 	s.contentBuf.Reset()
 	s.inReasoning = false
@@ -155,23 +149,16 @@ func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 			s.hasToolSection = true
 			s.hadToolCalls = true
 		}
-		s.currentToolName = ""
-		s.toolArgsBuf.Reset()
-		if evt.ToolCall != nil {
-			s.currentToolName = evt.ToolCall.Name
-		}
 		s.atLineStart = true
 
 	case providers.EventToolCallDelta:
-		if evt.ToolCall != nil {
-			s.toolArgsBuf.WriteString(evt.ToolCall.Arguments)
-		}
 
 	case providers.EventToolCallDone:
-		argsJSON := s.toolArgsBuf.String()
-		s.buf.WriteString(streamRenderBuiltinToolCallLine(s.currentToolName, argsJSON))
-		s.buf.WriteString("\n")
-		s.atLineStart = true
+		if evt.ToolCall != nil {
+			s.buf.WriteString(streamRenderBuiltinToolCallLine(evt.ToolCall.Name, evt.ToolCall.Arguments))
+			s.buf.WriteString("\n")
+			s.atLineStart = true
+		}
 
 	case providers.EventToolResult:
 		if evt.ToolResult != nil {

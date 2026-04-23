@@ -28,8 +28,18 @@ const (
 
 	LightBoxStyle = `
 ┌─┐┌─┐┌─┐┌┐┌┌┬┐┬ ┬
-├─┤│ ┬├─┤│││ │ └┬┘
-┴ ┴└─┘┴ ┴┘└┘ ┴  ┴ `
+├─┤│ ┬│┤ │││ │ └┬┘
+┴ ┴└─┘└─┘┘└┘ ┴  ┴ `
+
+	BoldStyle = `
+┏━┓┏━┓┏━┓┏┓┏┏┳┓┳ ┳
+┣━┫┃ ┳┃┫ ┃┃┃ ┃ ┗┳┛
+┻ ┻┗━┛┗━┛┛┗┛ ┻  ┻ `
+
+	RoundStyle = `
+╭─╮╭─╮╭─╮╭╮╭╭┬╮╮ ╭
+├─┤│ ┬│┤ │││ │ ╰┬╯
+┴ ┴╰─╯╰─╯╯╰╯ ┴  ┴ `
 )
 
-var ASCIIArts = []string{BoxStyle, PixelStyle, LightBoxStyle}
+var ASCIIArts = []string{BoxStyle, PixelStyle, LightBoxStyle, BoldStyle, RoundStyle}
