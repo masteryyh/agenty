@@ -26,6 +26,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
 
@@ -56,7 +57,7 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReadFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
+func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path      string `json:"path"`
 		StartLine int    `json:"startLine,omitempty"`
@@ -71,14 +72,39 @@ func (t *ReadFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arg
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
-	if _, err := os.Stat(abs); err != nil {
+	if err := validatePath(abs); err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	stat, err := os.Stat(abs)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file does not exist: %s", args.Path)
 		}
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
+	if stat.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file: %s", args.Path)
+	}
+	if !stat.Mode().IsRegular() {
+		return "", fmt.Errorf("path is not a regular file: %s", args.Path)
+	}
+
+	fileLock, err := acquireFileLock(ctx, abs, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to lock file for reading: %w", err)
+	}
+	defer func() { _ = releaseFileLock(fileLock) }()
 
 	if args.StartLine <= 0 && args.EndLine <= 0 {
+		stat, err = os.Stat(abs)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file: %w", err)
+		}
+		if stat.Size() > consts.FileReadMaxSize {
+			return "", fmt.Errorf("file size %d exceeds %d bytes, consider limit lines to read", stat.Size(), consts.FileReadMaxSize)
+		}
+
 		data, err := os.ReadFile(abs)
 		if err != nil {
 			return "", fmt.Errorf("failed to read file: %w", err)
@@ -151,7 +177,7 @@ func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *WriteFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
+func (t *WriteFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -164,10 +190,44 @@ func (t *WriteFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, ar
 	if err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
+	if err := validatePath(cleanPath); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	if err := validateExistingFile(cleanPath); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
 
 	dir := filepath.Dir(cleanPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	if stat, err := os.Stat(cleanPath); err == nil {
+		if stat.IsDir() {
+			return "", fmt.Errorf("path is a directory, not a file: %s", args.Path)
+		}
+		if !stat.Mode().IsRegular() {
+			return "", fmt.Errorf("path is not a regular file: %s", args.Path)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	fileLock, err := acquireFileLock(ctx, cleanPath, true)
+	if err != nil {
+		return "", fmt.Errorf("failed to lock file for writing: %w", err)
+	}
+	defer func() { _ = releaseFileLock(fileLock) }()
+
+	if stat, err := os.Stat(cleanPath); err == nil {
+		if stat.IsDir() {
+			return "", fmt.Errorf("path is a directory, not a file: %s", args.Path)
+		}
+		if !stat.Mode().IsRegular() {
+			return "", fmt.Errorf("path is not a regular file: %s", args.Path)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
 	if err := os.WriteFile(cleanPath, []byte(args.Content), 0o644); err != nil {
@@ -207,7 +267,7 @@ func (t *ReplaceInFileTool) Definition() tools.ToolDefinition {
 	}
 }
 
-func (t *ReplaceInFileTool) Execute(_ context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
+func (t *ReplaceInFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
 		Path       string `json:"path"`
 		StartLine  int    `json:"startLine"`
@@ -222,6 +282,9 @@ func (t *ReplaceInFileTool) Execute(_ context.Context, tcc tools.ToolCallContext
 	if err != nil {
 		return "", fmt.Errorf("failed to replace in file: %w", err)
 	}
+	if err := validatePath(cleanPath); err != nil {
+		return "", fmt.Errorf("failed to replace in file: %w", err)
+	}
 
 	fileInfo, err := os.Stat(cleanPath)
 	if err != nil {
@@ -232,6 +295,29 @@ func (t *ReplaceInFileTool) Execute(_ context.Context, tcc tools.ToolCallContext
 	}
 	if fileInfo.IsDir() {
 		return "", fmt.Errorf("path is a directory, not a file: %s", args.Path)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("path is not a regular file: %s", args.Path)
+	}
+
+	fileLock, err := acquireFileLock(ctx, cleanPath, true)
+	if err != nil {
+		return "", fmt.Errorf("failed to lock file for writing: %w", err)
+	}
+	defer func() { _ = releaseFileLock(fileLock) }()
+
+	fileInfo, err = os.Stat(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("file does not exist: %s", args.Path)
+		}
+		return "", fmt.Errorf("failed to replace in file: %w", err)
+	}
+	if fileInfo.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file: %s", args.Path)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("path is not a regular file: %s", args.Path)
 	}
 
 	data, err := os.ReadFile(cleanPath)
@@ -293,6 +379,9 @@ func (t *ListDirectoryTool) Execute(_ context.Context, tcc tools.ToolCallContext
 
 	cleanPath, err := utils.GetCleanPathWithBase(args.Path, tcc.Cwd, true)
 	if err != nil {
+		return "", fmt.Errorf("failed to list directory: %w", err)
+	}
+	if err := validatePath(cleanPath); err != nil {
 		return "", fmt.Errorf("failed to list directory: %w", err)
 	}
 
