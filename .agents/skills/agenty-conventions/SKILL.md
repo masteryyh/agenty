@@ -25,6 +25,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 5. Use `any` instead of `interface{}`
 6. Use `fmt.Fprintf` instead of `strings.Builder.WriteString()`
 7. GORM `Raw().Rows()` must use `?` placeholders — **never use `$1`/`$2` directly**
+8. JSON field names and JSON tags must use lowerCamelCase for API/tool request and response payloads
 
 ## Package Structure Quick Reference
 
@@ -59,6 +60,7 @@ Verify each item when adding new functionality:
 
 - [ ] New Go files have the Apache 2.0 license header
 - [ ] `any` is used instead of `interface{}`
+- [ ] JSON tags use lowerCamelCase for API/tool payload fields
 - [ ] `strings.Builder` uses `fmt.Fprintf`, not `sb.WriteString`
 - [ ] GORM `Raw().Rows()` uses `?` placeholders
 - [ ] New services are singletons initialized with `sync.Once`, exposing a `GetXxxService()` function

@@ -22,8 +22,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	json "github.com/bytedance/sonic"
+	"github.com/gofrs/flock"
 	"github.com/masteryyh/agenty/pkg/chat/tools"
 )
 
@@ -80,6 +82,72 @@ func TestWriteFileTool(t *testing.T) {
 	}
 }
 
+func TestWriteFileToolWaitsForFileLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "locked.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	existingLock := flock.New(fileLockPath(path))
+	if err := existingLock.Lock(); err != nil {
+		t.Fatalf("failed to lock test file: %v", err)
+	}
+	defer func() { _ = existingLock.Unlock() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	tool := &WriteFileTool{}
+	args, _ := json.MarshalString(map[string]string{"path": path, "content": "new"})
+	_, err := tool.Execute(ctx, tools.ToolCallContext{}, args)
+	if err == nil {
+		t.Fatal("expected error while file lock is held")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("expected context deadline error, got %v", err)
+	}
+}
+
+func TestValidateFileToolPathRejectsRestrictedPaths(t *testing.T) {
+	cases := []string{
+		"/dev/zero",
+		"/etc/passwd",
+		`C:\Windows\System32\drivers\etc\hosts`,
+	}
+	for _, path := range cases {
+		if err := validatePath(path); err == nil {
+			t.Fatalf("expected restricted path error for %s", path)
+		}
+	}
+
+	if err := validatePath("/etc2/passwd"); err != nil {
+		t.Fatalf("unexpected error for non-sensitive prefix: %v", err)
+	}
+}
+
+func TestWriteFileToolRejectsSensitiveSymlinkParent(t *testing.T) {
+	if _, err := os.Stat("/etc"); err != nil {
+		t.Skip("/etc is not available on this platform")
+	}
+
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, "system")
+	if err := os.Symlink("/etc", linkPath); err != nil {
+		t.Skipf("failed to create symlink: %v", err)
+	}
+
+	tool := &WriteFileTool{}
+	args, _ := json.MarshalString(map[string]string{"path": filepath.Join(linkPath, "agenty-test-file"), "content": "x"})
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, args)
+	if err == nil {
+		t.Fatal("expected error for sensitive symlink target")
+	}
+	if !strings.Contains(err.Error(), "run_shell_command") {
+		t.Fatalf("expected command guidance, got %v", err)
+	}
+}
+
 func TestListDirectoryTool(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("a"), 0o644); err != nil {
@@ -100,6 +168,22 @@ func TestListDirectoryTool(t *testing.T) {
 	}
 	if !strings.Contains(result, "[dir] subdir") {
 		t.Fatalf("expected dir entry, got '%s'", result)
+	}
+}
+
+func TestListDirectoryToolRejectsSensitivePath(t *testing.T) {
+	if _, err := os.Stat("/etc"); err != nil {
+		t.Skip("/etc is not available on this platform")
+	}
+
+	tool := &ListDirectoryTool{}
+	args, _ := json.MarshalString(map[string]string{"path": "/etc"})
+	_, err := tool.Execute(context.Background(), tools.ToolCallContext{}, args)
+	if err == nil {
+		t.Fatal("expected error for sensitive system path")
+	}
+	if !strings.Contains(err.Error(), "run_shell_command") {
+		t.Fatalf("expected command guidance, got %v", err)
 	}
 }
 

@@ -251,13 +251,13 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 	var resp struct {
 		KnowledgeBase *struct {
 			Results []struct {
-				ItemTitle string  `json:"item_title,omitempty"`
+				ItemTitle string  `json:"itemTitle,omitempty"`
 				Category  string  `json:"category"`
 				Content   string  `json:"content"`
 				Score     float64 `json:"score"`
 			} `json:"results"`
 			Quality string `json:"quality"`
-		} `json:"knowledge_base,omitempty"`
+		} `json:"knowledgeBase,omitempty"`
 		WebSearch *struct {
 			Results []struct {
 				Title   string `json:"title"`
@@ -265,8 +265,16 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 				Content string `json:"content"`
 			} `json:"results"`
 			Quality string `json:"quality"`
-		} `json:"web_search,omitempty"`
-		OverallQuality string `json:"overall_quality"`
+		} `json:"webSearch,omitempty"`
+		WorkspaceFiles *struct {
+			Results []struct {
+				RelativePath string `json:"relativePath"`
+				Path         string `json:"path"`
+				StartLine    int    `json:"startLine"`
+			} `json:"results"`
+			Quality string `json:"quality"`
+		} `json:"workspaceFiles,omitempty"`
+		OverallQuality string `json:"overallQuality"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &resp); err != nil {
@@ -311,6 +319,26 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 				label = label[:47] + "..."
 			}
 			lines = append(lines, styleGray.Render("[kb] ")+label)
+		}
+	}
+
+	if resp.WorkspaceFiles != nil {
+		totalResults += len(resp.WorkspaceFiles.Results)
+		for _, r := range resp.WorkspaceFiles.Results {
+			if len(lines) >= maxLines {
+				break
+			}
+			label := r.RelativePath
+			if label == "" {
+				label = r.Path
+			}
+			if r.StartLine > 0 {
+				label = fmt.Sprintf("%s:%d", label, r.StartLine)
+			}
+			if len(label) > 55 {
+				label = label[:52] + "..."
+			}
+			lines = append(lines, styleGray.Render("[file] ")+label)
 		}
 	}
 

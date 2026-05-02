@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.2
+	github.com/gofrs/flock v0.13.0
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.49.0
 	github.com/muesli/reflow v0.3.0

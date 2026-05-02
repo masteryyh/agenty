@@ -74,51 +74,52 @@ You should treat yourself as a smart, resourceful and proactive **person**, spea
 **Casually, friendly and concise**: Communicate with user in a casual, friendly and concise way, just like a real human being. Avoid being too formal or verbose. DO NOT USE MARKDOWN OR OTHER FORMATTED TEXT UNLESS BEING TOLD TO DO SO.
 `
 
-	SearchEvaluationPrompt = `You are a search result evaluator. Analyze the search results below and determine their relevance and quality relative to the user's original query.
+	SearchFusionRerankPrompt = `You are a search result fusion ranker. Re-rank heterogeneous search candidates from knowledge base, workspace files, and web search for the user's query.
 
-User's Query: %s
-
-Search Results:
+User query:
 %s
 
-Evaluate the results and respond with a JSON object (no markdown, no code fence):
+Candidates:
+%s
+
+Respond with a JSON object only:
 {
-  "quality": "<high|medium|low|no_results>",
-  "relevance": <0.0-1.0>,
-  "summary": "<brief summary of the most relevant findings>",
-  "reasoning": "<why you rated the results this way>"
+  "rankedIds": ["candidate id in best-to-worst order"],
+  "scores": {"candidate id": 0.0},
+  "summary": "brief reason for the ranking"
 }
 
-Guidelines:
-- "high": Results directly answer the query with specific, accurate information
-- "medium": Results are related but don't fully address the query
-- "low": Results are tangentially related or mostly irrelevant
-- "no_results": No useful results found
-- relevance is a float from 0.0 (irrelevant) to 1.0 (perfect match)
-- summary should be concise (1-3 sentences) highlighting the most relevant information found`
+Rules:
+- Prefer candidates that directly answer the user query with concrete evidence.
+- Prefer workspace file results for project/code questions when they contain relevant symbols, paths, or implementation details.
+- Prefer knowledge base results for user memory, session memory, and stored documents.
+- Prefer web results for current external facts.
+- Do not invent candidate ids.
+- scores must be floats from 0.0 to 1.0.`
 )
 
 const (
-	SearchToolDescription = `Unified multi-channel, multi-strategy search tool. Submit an array of search specs; each spec has a unique id, a channel, a query, and an optional per-spec limit. The same channel may appear multiple times with different queries to implement multi-strategy retrieval (e.g., keyword + semantic + HyDE in one call).
+	SearchToolDescription = `Unified multi-channel, multi-strategy search tool. Submit an array of search specs; each spec has a unique id, a channel, a query, and an optional per-spec limit. The same channel may appear multiple times with different queries to implement multi-strategy retrieval.
 
 Available channels:
 - "knowledge_base": Searches all knowledge base categories (llm_memory, session_memory, user_document) using hybrid vector + BM25 + keyword retrieval.
+- "workspace_files": Searches file names and file contents under the current session cwd. This channel is only available when cwd is set; paths are constrained to cwd.
 - "web_search": Searches the internet via the configured provider (Brave / Tavily / Firecrawl). Only available when a web search API key is configured in system settings.
 
 Query format guidance per channel and strategy:
 - knowledge_base + semantic (vector): Natural language question, e.g., "How did Google perform in Q3 2025?"
 - knowledge_base + keyword (BM25): Refined keywords, e.g., "Google Q3 2025 revenue earnings net profit"
-- knowledge_base + HyDE: After reviewing initial results, write a hypothetical passage that would answer the question (based on actual results, not imagined). Add this as a new entry with a distinct id on a second call.
+- workspace_files: Code symbols, file names, package names, or exact phrases, e.g., "SearchTool HybridSearch workspace_files"
 - web_search: Search-engine-style query, e.g., "Google Q3 2025 annual report revenue"
 
 Recommended workflow:
-1. First call: Submit keyword and semantic queries to knowledge_base (different ids).
-2. Review the returned quality and message per channel.
-3. If quality is "medium" or "low", add a HyDE query in a second call.
-4. Only fall back to web_search when knowledge_base quality is "low" or "no_results".
+1. For project/code questions, include workspace_files alongside knowledge_base when cwd is available.
+2. For memory/document questions, start with knowledge_base.
+3. For current external facts, include web_search.
+4. If quality is "medium" or "low", refine using concrete terms from returned results rather than inventing hypothetical facts.
 
-Results are returned as a JSON object grouped by channel. Each channel section includes results, the queries used, a quality rating (high/medium/low/no_results/error), and an improvement suggestion message.`
-	
+Results are returned as a JSON object grouped by channel plus rankedResults. rankedResults contains globally fused and optionally light-model-reranked candidates across all channels. Each channel section includes results, the queries used, a quality rating (high/medium/low/no_results/error), and an improvement suggestion message.`
+
 	FindSkillToolDescription = `Search for available skills based on user message, conversation context and project background using a piece of search query. This tool will return a list of relevant skills with their names, descriptions and paths. You need to pick the most relevant skill and use read_file tool to read the SKILL.md file to actually load the skill.
 
 Write queries just like using search engines: combine the core action, domain, and technology keywords from the user message and project context. Separate keywords with spaces.
