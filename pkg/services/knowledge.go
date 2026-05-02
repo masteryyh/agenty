@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -200,13 +201,13 @@ func (s *KnowledgeService) HybridSearch(ctx context.Context, agentID uuid.UUID, 
 	candidateLimit := limit * 3
 
 	var (
-		vectorResults   []kbRankedItem
-		fullTextResults []kbRankedItem
-		keywordResults  []kbRankedItem
-		vectorErr       error
-		fullTextErr     error
-		keywordErr      error
-		wg              sync.WaitGroup
+		vectorResults  []kbRankedItem
+		bm25Results    []kbRankedItem
+		keywordResults []kbRankedItem
+		vectorErr      error
+		bm25Err        error
+		keywordErr     error
+		wg             sync.WaitGroup
 	)
 
 	agentIDStr := agentID.String()
@@ -224,9 +225,9 @@ func (s *KnowledgeService) HybridSearch(ctx context.Context, agentID uuid.UUID, 
 			vectorResults, vectorErr = s.vectorSearch(ctx, agentID, query, candidateLimit)
 		})
 	}
-	safe.GoOnce("full-text-search-"+agentIDStr, func() {
+	safe.GoOnce("bm25-search-"+agentIDStr, func() {
 		defer wg.Done()
-		fullTextResults, fullTextErr = s.fullTextSearch(ctx, agentID, query, candidateLimit)
+		bm25Results, bm25Err = s.bm25Search(ctx, agentID, query, candidateLimit)
 	})
 	safe.GoOnce("keyword-search-"+agentIDStr, func() {
 		defer wg.Done()
@@ -237,15 +238,25 @@ func (s *KnowledgeService) HybridSearch(ctx context.Context, agentID uuid.UUID, 
 	if vectorErr != nil {
 		slog.ErrorContext(ctx, "kb vector search failed", "error", vectorErr)
 	}
-	if fullTextErr != nil {
-		slog.ErrorContext(ctx, "kb full text search failed", "error", fullTextErr)
+	if bm25Err != nil {
+		slog.ErrorContext(ctx, "kb bm25 search failed", "error", bm25Err)
 	}
 	if keywordErr != nil {
 		slog.ErrorContext(ctx, "kb keyword search failed", "error", keywordErr)
 	}
 
-	merged := kbRRFMerge(limit, vectorResults, fullTextResults, keywordResults)
-	return merged, nil
+	merged := kbRRFMerge(limit, vectorResults, bm25Results, keywordResults)
+	var subErrs []error
+	if vectorErr != nil {
+		subErrs = append(subErrs, fmt.Errorf("vector search: %w", vectorErr))
+	}
+	if bm25Err != nil {
+		subErrs = append(subErrs, fmt.Errorf("bm25 search: %w", bm25Err))
+	}
+	if keywordErr != nil {
+		subErrs = append(subErrs, fmt.Errorf("keyword search: %w", keywordErr))
+	}
+	return merged, errors.Join(subErrs...)
 }
 
 func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.KnowledgeItem) error {
@@ -326,7 +337,7 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 	}
 
 	var results []chunkWithItem
-	err = s.db.WithContext(ctx).
+	if err = s.db.WithContext(ctx).
 		Table("kb_data").
 		Select("kb_data.*, knowledge_items.title AS item_title, knowledge_items.category AS category").
 		Joins("JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL").
@@ -335,8 +346,7 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 			Expression: clause.Expr{SQL: "kb_data.text_embedding <#> ?", Vars: []any{pgvector.NewVector(embedding)}},
 		}).
 		Limit(limit).
-		Find(&results).Error
-	if err != nil {
+		Find(&results).Error; err != nil {
 		return nil, fmt.Errorf("kb vector search failed: %w", err)
 	}
 
@@ -353,31 +363,34 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 	}), nil
 }
 
-func (s *KnowledgeService) fullTextSearch(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]kbRankedItem, error) {
-	tsQuery := strings.Join(strings.Fields(query), " | ")
-
+func (s *KnowledgeService) bm25Search(ctx context.Context, agentID uuid.UUID, query string, limit int) ([]kbRankedItem, error) {
 	type chunkWithItem struct {
-		models.KnowledgeBaseData
-		ItemTitle string                   `gorm:"column:item_title"`
-		Category  models.KnowledgeCategory `gorm:"column:category"`
+		ID           uuid.UUID                `gorm:"column:id"`
+		ItemID       uuid.UUID                `gorm:"column:item_id"`
+		ItemTitle    string                   `gorm:"column:item_title"`
+		Category     models.KnowledgeCategory `gorm:"column:category"`
+		ChunkIndex   int                      `gorm:"column:chunk_index"`
+		ChunkContent string                   `gorm:"column:chunk_content"`
+		Score        float64                  `gorm:"column:score"`
 	}
 
 	var results []chunkWithItem
-	err := s.db.WithContext(ctx).
-		Table("kb_data").
-		Select("kb_data.*, knowledge_items.title AS item_title, knowledge_items.category AS category").
-		Joins("JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL").
-		Where("kb_data.agent_id = ? AND to_tsvector('simple', kb_data.chunk_content) @@ plainto_tsquery('simple', ?)", agentID, tsQuery).
-		Clauses(clause.OrderBy{
-			Expression: clause.Expr{
-				SQL:  "ts_rank(to_tsvector('simple', kb_data.chunk_content), plainto_tsquery('simple', ?)) DESC",
-				Vars: []any{tsQuery},
-			},
-		}).
-		Limit(limit).
-		Find(&results).Error
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT kb_data.id,
+		       kb_data.item_id,
+		       knowledge_items.title AS item_title,
+		       knowledge_items.category AS category,
+		       kb_data.chunk_index,
+		       kb_data.chunk_content,
+		       pdb.score(kb_data.id) AS score
+		FROM kb_data
+		JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL
+		WHERE kb_data.agent_id = ? AND kb_data.chunk_content ||| ?
+		ORDER BY score DESC
+		LIMIT ?
+	`, agentID, query, limit).Scan(&results).Error
 	if err != nil {
-		return nil, fmt.Errorf("kb full text search failed: %w", err)
+		return nil, fmt.Errorf("kb bm25 search failed: %w", err)
 	}
 
 	return lo.Map(results, func(r chunkWithItem, i int) kbRankedItem {

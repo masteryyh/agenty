@@ -84,6 +84,11 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 			return
 		}
 
+		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_bm25 ON kb_data USING bm25 (id, agent_id, item_id, chunk_content, created_at) WITH (key_field = 'id')`).Error; idxErr != nil {
+			err = fmt.Errorf("failed to create knowledge base BM25 index: %w", idxErr)
+			return
+		}
+
 		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_skills_bm25 ON skills USING bm25 (id, name, description) WITH (key_field = 'id')`).Error; idxErr != nil {
 			err = fmt.Errorf("failed to create skills BM25 index: %w", idxErr)
 			return

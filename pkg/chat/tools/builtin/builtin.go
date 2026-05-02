@@ -30,16 +30,12 @@ func RegisterAll(registry *tools.Registry) {
 	registry.Register(&UpdateSoulTool{agentService: services.GetAgentService()})
 	registry.Register(&TodoTool{})
 
-	knowledgeSvc := services.GetKnowledgeService()
 	registry.Register(&SaveMemoryTool{
-		knowledgeService: knowledgeSvc,
+		knowledgeService: services.GetKnowledgeService(),
 	})
 
-	webSearchSvc := services.GetWebSearchService()
 	registry.Register(&SearchTool{
-		knowledgeService: knowledgeSvc,
-		webSearchService: webSearchSvc,
-		evaluator:        services.GetSearchEvaluator(),
+		searchService: services.GetSearchService(),
 	})
 
 	registry.Register(&FindSkillTool{

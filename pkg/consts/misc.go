@@ -12,6 +12,8 @@ const (
 	KnowledgeChunkOverlap  = 64
 
 	FileReadMaxSize = 512 * 1024
+
+	WorkspaceSearchMaxFileSize = 512 * 1024
 )
 
 var (

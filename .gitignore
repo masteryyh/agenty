@@ -44,3 +44,5 @@ HANDOFF.md
 
 # Logs
 *.log
+
+.codex/

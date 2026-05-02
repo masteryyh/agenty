@@ -77,6 +77,16 @@ data, err := json.Marshal(v)
 err = json.Unmarshal(b, &v)
 ```
 
+JSON field names and JSON tags for API/tool request and response payloads must use lowerCamelCase:
+
+```go
+type SearchResultDto struct {
+    SearchID     string `json:"searchId"`
+    RelativePath string `json:"relativePath,omitempty"`
+    StartLine    int    `json:"startLine,omitempty"`
+}
+```
+
 ## Error Handling
 
 ```go
