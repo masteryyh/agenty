@@ -218,10 +218,7 @@ func streamRenderBuiltinToolCallLine(name, argsJSON string) string {
 	if summary != "" {
 		line += "  " + summary
 	}
-	maxW := renderWidth
-	if maxW < 20 {
-		maxW = 20
-	}
+	maxW := max(renderWidth, 20)
 	return truncate.StringWithTail(line, uint(maxW), "…")
 }
 
@@ -343,10 +340,7 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 	}
 
 	shown := len(lines)
-	more := totalResults - shown
-	if more < 0 {
-		more = 0
-	}
+	more := max(totalResults-shown, 0)
 	return lines, more
 }
 

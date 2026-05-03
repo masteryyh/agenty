@@ -21,10 +21,10 @@ import (
 	"fmt"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type SearchTool struct {

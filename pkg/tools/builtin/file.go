@@ -25,8 +25,8 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/tools"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
 
@@ -35,7 +35,7 @@ type ReadFileTool struct{}
 func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "read_file",
-		Description: "Read the contents of a file at the given path. Returns the file content as text.",
+		Description: "Read the contents of a file at the given path. For code tasks, prefer reading targeted ranges with withLineNumbers=true so later edits can reference exact lines.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -51,6 +51,10 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 					Type:        "integer",
 					Description: "The line number to stop reading at (1-based index). Optional, defaults to the end of the file.",
 				},
+				"withLineNumbers": {
+					Type:        "boolean",
+					Description: "Optional. When true, prefixes each returned line with its 1-based line number. Useful before replace_in_file.",
+				},
 			},
 			Required: []string{"path"},
 		},
@@ -59,9 +63,10 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 
 func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
-		Path      string `json:"path"`
-		StartLine int    `json:"startLine,omitempty"`
-		EndLine   int    `json:"endLine,omitempty"`
+		Path            string `json:"path"`
+		StartLine       int    `json:"startLine,omitempty"`
+		EndLine         int    `json:"endLine,omitempty"`
+		WithLineNumbers bool   `json:"withLineNumbers,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -109,6 +114,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 		if err != nil {
 			return "", fmt.Errorf("failed to read file: %w", err)
 		}
+		if args.WithLineNumbers {
+			return addLineNum(string(data), 1), nil
+		}
 		return string(data), nil
 	}
 
@@ -141,7 +149,11 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
-		sb.WriteString(scanner.Text())
+		if args.WithLineNumbers {
+			fmt.Fprintf(&sb, "%d: %s", lineNum, scanner.Text())
+		} else {
+			sb.WriteString(scanner.Text())
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
@@ -152,6 +164,18 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 	}
 
 	return sb.String(), nil
+}
+
+func addLineNum(content string, startLine int) string {
+	lines := strings.Split(content, "\n")
+	var sb strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		fmt.Fprintf(&sb, "%d: %s", startLine+i, line)
+	}
+	return sb.String()
 }
 
 type WriteFileTool struct{}

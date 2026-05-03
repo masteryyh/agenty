@@ -26,7 +26,7 @@ import (
 	"time"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type RunShellCommandTool struct{}
@@ -34,17 +34,17 @@ type RunShellCommandTool struct{}
 func (t *RunShellCommandTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "run_shell_command",
-		Description: "Execute a shell command on the local machine and return its output. Supports Windows (PowerShell), Linux, and macOS (sh). Returns stdout, stderr, and exit code.",
+		Description: "Execute a shell command on the local machine and return stdout, stderr, and exit code. Commands run in the current session cwd when set. For code tasks, prefer fast inspection and verification commands such as rg, git diff/status, gofmt, go test, go vet, go build, npm test, cargo test, or language-specific linters. Increase timeout for builds or test suites.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
 				"command": {
 					Type:        "string",
-					Description: "The shell command to execute. On Windows this runs via PowerShell -Command, on Linux/macOS via sh -c.",
+					Description: "The shell command to execute. On Windows this runs via PowerShell -Command, on Linux/macOS via sh -c. Keep commands targeted and quote paths safely.",
 				},
 				"timeout": {
 					Type:        "integer",
-					Description: "Optional timeout in seconds. Defaults to 30. The command will be killed if it exceeds this duration.",
+					Description: "Optional timeout in seconds. Defaults to 30. Use a larger value for builds, dependency checks, and test suites.",
 				},
 			},
 			Required: []string{"command"},

@@ -240,7 +240,8 @@ func (c *completionModel) render() string {
 			if i == c.idx {
 				cursor := styleCyan.Render("❯ ")
 				val := styleWhite.Bold(true).Render(item)
-				buf.WriteString(cursor + val)
+				buf.WriteString(cursor)
+				buf.WriteString(val)
 			} else {
 				buf.WriteString(styleModelInfo.Render("  " + item))
 			}
@@ -258,9 +259,14 @@ func (c *completionModel) render() string {
 			if i == c.idx {
 				cursor := styleCyan.Render("❯ ")
 				name := styleWhite.Bold(true).Render(item)
-				buf.WriteString(cursor + name + argsRef + desc)
+				buf.WriteString(cursor)
+				buf.WriteString(name)
+				buf.WriteString(argsRef)
+				buf.WriteString(desc)
 			} else {
-				buf.WriteString(styleModelInfo.Render("  "+item) + argsRef + desc)
+				buf.WriteString(styleModelInfo.Render("  " + item))
+				buf.WriteString(argsRef)
+				buf.WriteString(desc)
 			}
 		}
 		if i < n-1 {

@@ -126,9 +126,12 @@ func (l *logViewerOverlay) render(width, height int) string {
 	hints := "  " + styleGray.Render("q/Esc close  ·  ↑/↓ scroll  ·  PgUp/PgDn half page  ·  Home/End top/bottom")
 
 	var buf strings.Builder
-	buf.WriteString(headerLine + "\n")
-	buf.WriteString(l.viewport.View() + "\n")
-	buf.WriteString(footerSep + "\n")
+	buf.WriteString(headerLine)
+	buf.WriteString("\n")
+	buf.WriteString(l.viewport.View())
+	buf.WriteString("\n")
+	buf.WriteString(footerSep)
+	buf.WriteString("\n")
 	buf.WriteString(hints)
 	return buf.String()
 }

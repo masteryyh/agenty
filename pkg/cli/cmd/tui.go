@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -152,6 +153,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 
 	historyContent := renderMessageHistoryToString(messages, false)
 
+	defaultState := defaultChatState(b, modelID)
 	m := chatModel{
 		backend:      b,
 		bridge:       bridge,
@@ -160,7 +162,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		agentID:      agentID,
 		modelName:    modelName,
 		agentName:    agentName,
-		chatState:    &ChatState{},
+		chatState:    &defaultState,
 		input:        ta,
 		mode:         modeChat,
 		chatLog:      new(strings.Builder),
@@ -175,6 +177,22 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 	m.chatLog.WriteString(historyContent)
 
 	return m
+}
+
+func defaultChatState(b backend.Backend, modelID uuid.UUID) ChatState {
+	levelsPtr, err := b.GetModelThinkingLevels(modelID)
+	if err != nil || levelsPtr == nil || len(*levelsPtr) == 0 {
+		return ChatState{}
+	}
+
+	level := (*levelsPtr)[0]
+	for _, candidate := range []string{"medium", "high", "adaptive", "on"} {
+		if slices.Contains(*levelsPtr, candidate) {
+			level = candidate
+			return ChatState{Thinking: true, ThinkingLevel: level}
+		}
+	}
+	return ChatState{Thinking: true, ThinkingLevel: level}
 }
 
 func (m chatModel) Init() tea.Cmd {
@@ -765,6 +783,9 @@ func (m *chatModel) handleCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 
 	if msg.result.NewModelID != uuid.Nil {
 		m.modelID = msg.result.NewModelID
+		defaultState := defaultChatState(m.backend, m.modelID)
+		m.chatState.Thinking = defaultState.Thinking
+		m.chatState.ThinkingLevel = defaultState.ThinkingLevel
 		if msg.result.NewModelName != "" {
 			m.modelName = msg.result.NewModelName
 		}

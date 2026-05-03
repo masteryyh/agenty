@@ -27,6 +27,12 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 7. GORM `Raw().Rows()` must use `?` placeholders — **never use `$1`/`$2` directly**
 8. JSON field names and JSON tags must use lowerCamelCase for API/tool request and response payloads
 
+## Detailed Coding Patterns
+
+1. **Avoid String Concatenation in `WriteString`**: When using `strings.Builder`, do not use string concatenation (`+`) inside `WriteString`. Instead, split them into multiple sequential `WriteString` calls (e.g., `buf.WriteString(A); buf.WriteString(B)` instead of `buf.WriteString(A + B)`).
+2. **Use Built-in `min`/`max`**: Use Go's built-in `min()` and `max()` functions instead of manual `if` statements for clamping or comparing values.
+3. **Use `strings.SplitSeq`**: When iterating over split strings, use `strings.SplitSeq` instead of `strings.Split` to prevent unnecessary slice allocations.
+
 ## Package Structure Quick Reference
 
 | Package Path | Responsibility |

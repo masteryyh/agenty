@@ -17,8 +17,8 @@ limitations under the License.
 package builtin
 
 import (
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 func RegisterAll(registry *tools.Registry) {

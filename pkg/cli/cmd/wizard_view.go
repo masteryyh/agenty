@@ -149,19 +149,43 @@ func (m wizardModel) viewModelSelect() string {
 				displayLabel = styleGray.Render(label)
 			}
 		}
-		buf.WriteString("  " + cursor + badge + " " + displayLabel + "\n")
+		buf.WriteString("  ")
+		buf.WriteString(cursor)
+		buf.WriteString(badge)
+		buf.WriteString(" ")
+		buf.WriteString(displayLabel)
+		buf.WriteString("\n")
 	}
-	buf.WriteString("\n  " + styleGray.Render("↑/↓ navigate  ·  Space select  ·  Enter confirm") + "\n")
-	switch n := len(m.selectedOrder); {
-	case n == 0:
-		buf.WriteString("  " + styleYellow.Render("⚠") + "  " + styleGray.Render("Select at least one model") + "\n")
-	case n == 1:
-		buf.WriteString("  " + styleGreen.Render("✓") + "  " + styleYellow.Render("★ ") +
-			styleWhite.Render(m.chatLabels[m.selectedOrder[0]]) + "  " + styleGray.Render("(primary)") + "\n")
+
+	buf.WriteString("\n  ")
+	buf.WriteString(styleGray.Render("↑/↓ navigate  ·  Space select  ·  Enter confirm"))
+	buf.WriteString("\n")
+
+	switch n := len(m.selectedOrder); n {
+	case 0:
+		buf.WriteString("  ")
+		buf.WriteString(styleYellow.Render("⚠"))
+		buf.WriteString("  ")
+		buf.WriteString(styleGray.Render("Select at least one model"))
+		buf.WriteString("\n")
+	case 1:
+		buf.WriteString("  ")
+		buf.WriteString(styleGreen.Render("✓"))
+		buf.WriteString("  ")
+		buf.WriteString(styleYellow.Render("★ "))
+		buf.WriteString(styleWhite.Render(m.chatLabels[m.selectedOrder[0]]))
+		buf.WriteString("  ")
+		buf.WriteString(styleGray.Render("(primary)"))
+		buf.WriteString("\n")
 	default:
-		buf.WriteString("  " + styleGreen.Render("✓") + "  " + styleYellow.Render("★ ") +
-			styleWhite.Render(m.chatLabels[m.selectedOrder[0]]) +
-			"  " + styleGray.Render(fmt.Sprintf("+ %d fallback(s)", n-1)) + "\n")
+		buf.WriteString("  ")
+		buf.WriteString(styleGreen.Render("✓"))
+		buf.WriteString("  ")
+		buf.WriteString(styleYellow.Render("★ "))
+		buf.WriteString(styleWhite.Render(m.chatLabels[m.selectedOrder[0]]))
+		buf.WriteString("  ")
+		buf.WriteString(styleGray.Render(fmt.Sprintf("+ %d fallback(s)", n-1)))
+		buf.WriteString("\n")
 	}
 	buf.WriteString(m.feedback.render())
 	return buf.String()
@@ -184,12 +208,25 @@ func (m wizardModel) viewEmbedSelect() string {
 		if i == m.embedNav.pos {
 			displayLabel = styleWhite.Render(label)
 		}
-		buf.WriteString("  " + cursor + statusIcon + "  " + displayLabel + "\n")
+		buf.WriteString("  ")
+		buf.WriteString(cursor)
+		buf.WriteString(statusIcon)
+		buf.WriteString("  ")
+		buf.WriteString(displayLabel)
+		buf.WriteString("\n")
 	}
 	buf.WriteString("\n")
-	buf.WriteString("  " + styleYellow.Render("⚠") + "  " + styleYellow.Render("Changing the embedding model later requires") + "\n")
-	buf.WriteString("     " + styleYellow.Render("complete re-vectorization of all knowledge base data.") + "\n")
-	buf.WriteString("\n  " + styleGray.Render("↑/↓ navigate  ·  Enter select  ·  Esc skip") + "\n")
+	buf.WriteString("  ")
+	buf.WriteString(styleYellow.Render("⚠"))
+	buf.WriteString("  ")
+	buf.WriteString(styleYellow.Render("Changing the embedding model later requires"))
+	buf.WriteString("\n")
+	buf.WriteString("     ")
+	buf.WriteString(styleYellow.Render("complete re-vectorization of all knowledge base data."))
+	buf.WriteString("\n")
+	buf.WriteString("\n  ")
+	buf.WriteString(styleGray.Render("↑/↓ navigate  ·  Enter select  ·  Esc skip"))
+	buf.WriteString("\n")
 	buf.WriteString(m.feedback.render())
 	return buf.String()
 }
@@ -241,7 +278,13 @@ func (m wizardModel) renderSelectableList(title, hints string, items []wizListIt
 		} else {
 			name = styleGray.Render(name)
 		}
-		buf.WriteString(cursor + statusIcon + "  " + name + "  " + it.detail + "\n")
+		buf.WriteString(cursor)
+		buf.WriteString(statusIcon)
+		buf.WriteString("  ")
+		buf.WriteString(name)
+		buf.WriteString("  ")
+		buf.WriteString(it.detail)
+		buf.WriteString("\n")
 	}
 
 	if withContinue {
@@ -249,7 +292,9 @@ func (m wizardModel) renderSelectableList(title, hints string, items []wizListIt
 		if w < 20 {
 			w = 60
 		}
-		buf.WriteString("  " + styleGray.Render(strings.Repeat("─", min(54, w))) + "\n")
+		buf.WriteString("  ")
+		buf.WriteString(styleGray.Render(strings.Repeat("─", min(54, w))))
+		buf.WriteString("\n")
 		continuePrefix := "    "
 		continueLabel := "Continue →"
 		if nav.pos == len(items) {
@@ -258,10 +303,16 @@ func (m wizardModel) renderSelectableList(title, hints string, items []wizListIt
 		} else {
 			continueLabel = styleGray.Render(continueLabel)
 		}
-		buf.WriteString(continuePrefix + styleGreen.Render("▶") + "  " + continueLabel + "\n")
+		buf.WriteString(continuePrefix)
+		buf.WriteString(styleGreen.Render("▶"))
+		buf.WriteString("  ")
+		buf.WriteString(continueLabel)
+		buf.WriteString("\n")
 	}
 
-	buf.WriteString("\n  " + styleGray.Render(hints) + "\n")
+	buf.WriteString("\n  ")
+	buf.WriteString(styleGray.Render(hints))
+	buf.WriteString("\n")
 	buf.WriteString(m.feedback.render())
 	return buf.String()
 }

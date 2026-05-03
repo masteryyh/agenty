@@ -25,14 +25,14 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
-	"github.com/masteryyh/agenty/pkg/chat/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/middleware"
 	"github.com/masteryyh/agenty/pkg/routes"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/tools"
+	"github.com/masteryyh/agenty/pkg/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )

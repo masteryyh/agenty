@@ -18,7 +18,6 @@ package services
 
 import (
 	"context"
-	json "github.com/bytedance/sonic"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,11 +27,13 @@ import (
 	"sync"
 	"time"
 
+	json "github.com/bytedance/sonic"
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	builtinskill "github.com/masteryyh/agenty/pkg/skill"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"go.yaml.in/yaml/v3"
 	"gorm.io/datatypes"
@@ -46,12 +47,13 @@ const (
 )
 
 type SkillService struct {
-	db               *gorm.DB
-	globalWatcher    *fsnotify.Watcher
-	projectWatchers  map[uuid.UUID]*projectWatcherState
-	sessionTables    map[uuid.UUID]bool
-	mu               sync.RWMutex
-	globalSkillsPath string
+	db                *gorm.DB
+	globalWatcher     *fsnotify.Watcher
+	projectWatchers   map[uuid.UUID]*projectWatcherState
+	sessionTables     map[uuid.UUID]bool
+	mu                sync.RWMutex
+	globalSkillsPath  string
+	builtinSkillsPath string
 }
 
 type projectWatcherState struct {
@@ -72,17 +74,26 @@ func GetSkillService() *SkillService {
 			slog.Error("failed to get user home directory", "error", err)
 			homeDir = ""
 		}
+		builtinSkillsPath, err := builtinskill.BuiltinDir()
+		if err != nil {
+			slog.Error("failed to resolve builtin skills directory", "error", err)
+		}
 		skillService = &SkillService{
-			db:               conn.GetDB(),
-			projectWatchers:  make(map[uuid.UUID]*projectWatcherState),
-			sessionTables:    make(map[uuid.UUID]bool),
-			globalSkillsPath: filepath.Join(homeDir, agentsSkillsDir),
+			db:                conn.GetDB(),
+			projectWatchers:   make(map[uuid.UUID]*projectWatcherState),
+			sessionTables:     make(map[uuid.UUID]bool),
+			globalSkillsPath:  filepath.Join(homeDir, agentsSkillsDir),
+			builtinSkillsPath: builtinSkillsPath,
 		}
 	})
 	return skillService
 }
 
 func (s *SkillService) Initialize(ctx context.Context) error {
+	if err := s.ensureBuiltinSkills(ctx); err != nil {
+		return fmt.Errorf("failed to ensure builtin skills: %w", err)
+	}
+
 	if err := s.scanGlobalSkills(ctx); err != nil {
 		return fmt.Errorf("failed to scan global skills: %w", err)
 	}
@@ -114,11 +125,48 @@ func (s *SkillService) Shutdown() {
 }
 
 type parsedSkill struct {
+	ID          *uuid.UUID
 	Name        string
 	Description string
 	Path        string
-	SourceDir   string
 	Metadata    []byte
+}
+
+func (s *SkillService) ensureBuiltinSkills(ctx context.Context) error {
+	if s.builtinSkillsPath == "" {
+		return nil
+	}
+
+	skills, err := builtinskill.ListBuiltinSkills()
+	if err != nil {
+		return err
+	}
+
+	written := 0
+	for _, skill := range skills {
+		skillDir := filepath.Join(s.builtinSkillsPath, skill.Name)
+		skillMDPath := filepath.Join(skillDir, skillMDFileName)
+
+		if _, err := os.Stat(skillMDPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to stat builtin skill %s: %w", skill.Name, err)
+		}
+
+		if err := os.MkdirAll(skillDir, 0755); err != nil {
+			return fmt.Errorf("failed to create builtin skill directory %s: %w", skillDir, err)
+		}
+
+		if err := os.WriteFile(skillMDPath, skill.Content, 0644); err != nil {
+			return fmt.Errorf("failed to write builtin skill %s: %w", skill.Name, err)
+		}
+		written++
+	}
+
+	if written > 0 {
+		slog.InfoContext(ctx, "installed builtin skills", "count", written, "path", s.builtinSkillsPath)
+	}
+	return nil
 }
 
 type skillFrontmatter struct {
@@ -164,11 +212,20 @@ func (s *SkillService) parseSkillMD(skillMDPath string) (*parsedSkill, error) {
 		return nil, fmt.Errorf("failed to marshal skill metadata to JSON: %w", err)
 	}
 
+	var id *uuid.UUID
+	if rawID := strings.TrimSpace(fm.Metadata["id"]); rawID != "" {
+		parsedID, err := uuid.Parse(rawID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse skill metadata id: %w", err)
+		}
+		id = &parsedID
+	}
+
 	return &parsedSkill{
+		ID:          id,
 		Name:        fm.Name,
 		Description: fm.Description,
 		Path:        skillMDPath,
-		SourceDir:   filepath.Dir(skillMDPath),
 		Metadata:    metadataJSON,
 	}, nil
 }
@@ -206,23 +263,33 @@ func (s *SkillService) scanDirectory(dirPath string) ([]*parsedSkill, error) {
 }
 
 func (s *SkillService) scanGlobalSkills(ctx context.Context) error {
-	stat, err := os.Stat(s.globalSkillsPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.InfoContext(ctx, "global skills directory does not exist, skipping scan", "path", s.globalSkillsPath)
-			return nil
+	sources := []string{s.globalSkillsPath, s.builtinSkillsPath}
+
+	var discovered []*parsedSkill
+	for _, source := range sources {
+		if source == "" {
+			continue
 		}
-		return fmt.Errorf("failed to stat global skills path: %w", err)
-	}
 
-	if !stat.IsDir() {
-		slog.WarnContext(ctx, "global skills path is not a directory, skipping scan", "path", s.globalSkillsPath)
-		return nil
-	}
+		stat, err := os.Stat(source)
+		if err != nil {
+			if os.IsNotExist(err) {
+				slog.InfoContext(ctx, "skills directory does not exist, skipping scan", "path", source)
+				continue
+			}
+			return fmt.Errorf("failed to stat skills path %s: %w", source, err)
+		}
 
-	skills, err := s.scanDirectory(s.globalSkillsPath)
-	if err != nil {
-		return err
+		if !stat.IsDir() {
+			slog.WarnContext(ctx, "skills path is not a directory, skipping scan", "path", source)
+			continue
+		}
+
+		skills, err := s.scanDirectory(source)
+		if err != nil {
+			return err
+		}
+		discovered = append(discovered, skills...)
 	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -230,24 +297,42 @@ func (s *SkillService) scanGlobalSkills(ctx context.Context) error {
 			return fmt.Errorf("failed to clear existing skills: %w", err)
 		}
 
-		for _, parsed := range skills {
+		for _, parsed := range discovered {
 			skill := &models.Skill{
 				Name:        parsed.Name,
 				Description: parsed.Description,
 				SkillMDPath: parsed.Path,
 				Metadata:    datatypes.JSON(parsed.Metadata),
 			}
+			if parsed.ID != nil {
+				skill.ID = *parsed.ID
+			}
 			if err := tx.Create(skill).Error; err != nil {
 				return fmt.Errorf("failed to insert skill %s: %w", parsed.Name, err)
 			}
 		}
 
-		slog.InfoContext(ctx, "scanned global skills", "count", len(skills))
+		slog.InfoContext(ctx, "scanned global skills", "count", len(discovered))
 		return nil
 	})
 }
 
 func (s *SkillService) startGlobalWatcher(ctx context.Context) error {
+	if s.globalSkillsPath == "" {
+		return nil
+	}
+
+	stat, err := os.Stat(s.globalSkillsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat global skills path: %w", err)
+	}
+	if !stat.IsDir() {
+		return nil
+	}
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("failed to create fsnotify watcher: %w", err)
@@ -336,12 +421,16 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 		var existing models.Skill
 		err := tx.Where("skill_md_path = ?", parsed.Path).First(&existing).Error
 		if err == nil {
-			return tx.Model(&existing).Updates(map[string]any{
+			updates := map[string]any{
 				"name":        parsed.Name,
 				"description": parsed.Description,
 				"metadata":    datatypes.JSON(parsed.Metadata),
 				"updated_at":  time.Now(),
-			}).Error
+			}
+			if parsed.ID != nil {
+				updates["id"] = *parsed.ID
+			}
+			return tx.Model(&existing).Updates(updates).Error
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -352,6 +441,9 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 			Description: parsed.Description,
 			SkillMDPath: parsed.Path,
 			Metadata:    datatypes.JSON(parsed.Metadata),
+		}
+		if parsed.ID != nil {
+			skill.ID = *parsed.ID
 		}
 		return tx.Create(skill).Error
 	}); err != nil {
@@ -368,6 +460,30 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 
 	for _, sessionID := range sessionIDs {
 		tableName := s.sessionTableName(sessionID)
+
+		var metadataArg any
+		if len(parsed.Metadata) > 0 {
+			metadataArg = string(parsed.Metadata)
+		}
+
+		if parsed.ID != nil {
+			query := fmt.Sprintf(`
+				INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, 'global', $5, $6, NOW(), NOW())
+				ON CONFLICT (skill_md_path) DO UPDATE SET
+					id = EXCLUDED.id,
+					name = EXCLUDED.name,
+					description = EXCLUDED.description,
+					metadata = EXCLUDED.metadata,
+					updated_at = NOW()
+			`, tableName)
+
+			if err := s.db.WithContext(ctx).Exec(query, *parsed.ID, parsed.Name, parsed.Description, parsed.Path, parsed.Path, metadataArg).Error; err != nil {
+				slog.WarnContext(ctx, "failed to propagate skill to session", "sessionId", sessionID, "error", err)
+			}
+			continue
+		}
+
 		query := fmt.Sprintf(`
 			INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
 			VALUES (uuidv7(), $1, $2, $3, 'global', $4, $5, NOW(), NOW())
@@ -378,12 +494,7 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 				updated_at = NOW()
 		`, tableName)
 
-		var metadataArg any
-		if len(parsed.Metadata) > 0 {
-			metadataArg = string(parsed.Metadata)
-		}
-
-		if err := s.db.WithContext(ctx).Exec(query, parsed.Name, parsed.Description, parsed.Path, s.globalSkillsPath, metadataArg).Error; err != nil {
+		if err := s.db.WithContext(ctx).Exec(query, parsed.Name, parsed.Description, parsed.Path, parsed.Path, metadataArg).Error; err != nil {
 			slog.WarnContext(ctx, "failed to propagate skill to session", "sessionId", sessionID, "error", err)
 		}
 	}
@@ -482,11 +593,11 @@ func (s *SkillService) PopulateSessionSkills(ctx context.Context, sessionID uuid
 
 	copyGlobalSQL := fmt.Sprintf(`
 		INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
-		SELECT uuidv7(), name, description, skill_md_path, 'global', $1, metadata, created_at, updated_at
+		SELECT id, name, description, skill_md_path, 'global', skill_md_path, metadata, created_at, updated_at
 		FROM skills
 	`, tableName)
 
-	if err := s.db.WithContext(ctx).Exec(copyGlobalSQL, s.globalSkillsPath).Error; err != nil {
+	if err := s.db.WithContext(ctx).Exec(copyGlobalSQL).Error; err != nil {
 		return fmt.Errorf("failed to copy global skills to session table: %w", err)
 	}
 
@@ -879,6 +990,7 @@ func (s *SkillService) ListSessionSkillSummaries(ctx context.Context, sessionID 
 			Name:        skill.Name,
 			Description: skill.Description,
 			SkillMDPath: skill.SkillMDPath,
+			Scope:       models.SkillScopeGlobal,
 		})
 	}
 	return results, nil
