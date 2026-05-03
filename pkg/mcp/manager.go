@@ -29,10 +29,10 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
+	"github.com/masteryyh/agenty/pkg/tools"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )

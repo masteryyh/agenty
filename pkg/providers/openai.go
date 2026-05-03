@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/tools"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"

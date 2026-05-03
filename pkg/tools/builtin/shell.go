@@ -26,7 +26,7 @@ import (
 	"time"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type RunShellCommandTool struct{}

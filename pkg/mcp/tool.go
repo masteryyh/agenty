@@ -24,7 +24,7 @@ import (
 	json "github.com/bytedance/sonic"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 	"github.com/masteryyh/agenty/pkg/utils"
 )
 

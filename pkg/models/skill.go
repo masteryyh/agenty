@@ -73,6 +73,7 @@ func (s *Skill) ToDto() *SkillDto {
 		Name:        s.Name,
 		Description: s.Description,
 		SkillMDPath: s.SkillMDPath,
+		Scope:       SkillScopeGlobal,
 		CreatedAt:   s.CreatedAt,
 		UpdatedAt:   s.UpdatedAt,
 	}

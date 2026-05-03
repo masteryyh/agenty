@@ -22,7 +22,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type TodoTool struct{}

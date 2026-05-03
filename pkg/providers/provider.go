@@ -19,8 +19,8 @@ package providers
 import (
 	"context"
 
-	"github.com/masteryyh/agenty/pkg/chat/tools"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type StreamEventType string

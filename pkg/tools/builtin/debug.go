@@ -4,7 +4,7 @@ import (
 	"context"
 
 	json "github.com/bytedance/sonic"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 type DebugTool struct{}

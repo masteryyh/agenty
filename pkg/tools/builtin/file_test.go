@@ -26,7 +26,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/gofrs/flock"
-	"github.com/masteryyh/agenty/pkg/chat/tools"
+	"github.com/masteryyh/agenty/pkg/tools"
 )
 
 func TestReadFileTool(t *testing.T) {
