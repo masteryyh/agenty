@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"strings"
 	"sync"
@@ -136,7 +137,9 @@ func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessi
 		return nil, err
 	}
 
-	go s.saveLastSessionAsMemory(dto.AgentID)
+	safe.GoOnce("save-last-session-memory-"+dto.AgentID.String(), func() {
+		s.saveLastSessionAsMemory(dto.AgentID)
+	})
 
 	return session.ToDto(nil), nil
 }
@@ -324,8 +327,10 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	}
 
 	skillsXML := s.resolveSkillsXML(ctx, &res.session, data.Message, messages)
+	memoriesXML := s.resolveMemoriesXML(ctx, &res.session, data.Message)
+	todosXML := s.resolveTodosXML(res.session.ID)
 
-	systemPrompt, err := buildSystemPrompt(&res.agent, &res.session, skillsXML)
+	systemPrompt, err := buildSystemPrompt(&res.agent, &res.session, skillsXML, memoriesXML, todosXML)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
@@ -397,8 +402,10 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 	}
 
 	skillsXML := s.resolveSkillsXML(ctx, &session, data.Message, baseMessages)
+	memoriesXML := s.resolveMemoriesXML(ctx, &session, data.Message)
+	todosXML := s.resolveTodosXML(session.ID)
 
-	systemPrompt, err := buildSystemPrompt(&agent, &session, skillsXML)
+	systemPrompt, err := buildSystemPrompt(&agent, &session, skillsXML, memoriesXML, todosXML)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build system prompt", "error", err)
 		return nil, err
@@ -538,6 +545,7 @@ func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResour
 }
 
 const skillCountThreshold = 30
+const relevantMemoryLimit = 6
 
 func formatSkillsXML(skills []models.SkillDto) string {
 	if len(skills) == 0 {
@@ -559,6 +567,38 @@ func formatSearchResultsXML(skills []models.SkillSearchResult) string {
 	var sb strings.Builder
 	for _, skill := range skills {
 		fmt.Fprintf(&sb, "<skill>\n    <name>%s</name>\n    <description>%s</description>\n    <path>%s</path>\n</skill>\n", skill.Name, skill.Description, skill.SkillMDPath)
+	}
+	return sb.String()
+}
+
+func formatMemoriesXML(memories []models.KBSearchResult) string {
+	if len(memories) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, memory := range memories {
+		title := memory.ItemTitle
+		if title == "" {
+			title = memory.ItemID.String()
+		}
+		content := strings.TrimSpace(memory.Content)
+		if len(content) > 1200 {
+			content = content[:1197] + "..."
+		}
+		fmt.Fprintf(&sb, "<memory>\n    <category>%s</category>\n    <title>%s</title>\n    <chunkIndex>%d</chunkIndex>\n    <content>%s</content>\n</memory>\n", html.EscapeString(string(memory.Category)), html.EscapeString(title), memory.ChunkIndex, html.EscapeString(content))
+	}
+	return sb.String()
+}
+
+func formatTodosXML(todos []models.TodoItemDto) string {
+	if len(todos) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, todo := range todos {
+		fmt.Fprintf(&sb, "<todo id=\"%d\" status=\"%s\">%s</todo>\n", todo.ID, html.EscapeString(todo.Status), html.EscapeString(todo.Content))
 	}
 	return sb.String()
 }
@@ -587,6 +627,22 @@ func (s *ChatService) resolveSkillsXML(ctx context.Context, session *models.Chat
 
 	results := s.preSelectSkills(ctx, session, userMessage, historyMessages)
 	return formatSearchResultsXML(results)
+}
+
+func (s *ChatService) resolveMemoriesXML(ctx context.Context, session *models.ChatSession, userMessage string) string {
+	if strings.TrimSpace(userMessage) == "" {
+		return ""
+	}
+
+	memories, err := GetKnowledgeService().HybridSearch(ctx, session.AgentID, userMessage, relevantMemoryLimit)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to resolve relevant memories", "error", err, "sessionId", session.ID)
+	}
+	return formatMemoriesXML(memories)
+}
+
+func (s *ChatService) resolveTodosXML(sessionID uuid.UUID) string {
+	return formatTodosXML(s.todosManager.List(sessionID))
 }
 
 func (s *ChatService) preSelectSkills(ctx context.Context, session *models.ChatSession, userMessage string, historyMessages []providers.Message) []models.SkillSearchResult {
@@ -887,7 +943,7 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 	return res, nil
 }
 
-func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsXML string) (string, error) {
+func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsXML, memoriesXML, todosXML string) (string, error) {
 	var sb strings.Builder
 	data := map[string]any{
 		"DateTime":  time.Now().Format(time.RFC3339),
@@ -895,11 +951,20 @@ func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsX
 		"AgentID":   agent.ID,
 		"Soul":      agent.Soul,
 	}
+	if session != nil && session.Cwd != nil {
+		data["Cwd"] = *session.Cwd
+	}
 	if session != nil && session.AgentsMD != nil {
 		data["AgentsMD"] = *session.AgentsMD
 	}
 	if skillsXML != "" {
 		data["SkillsXML"] = skillsXML
+	}
+	if memoriesXML != "" {
+		data["MemoriesXML"] = memoriesXML
+	}
+	if todosXML != "" {
+		data["TodosXML"] = todosXML
 	}
 	if err := consts.AgentBasePrompt.Execute(&sb, data); err != nil {
 		return "", err

@@ -168,23 +168,26 @@ func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 				s.buf.WriteString(streamRenderToolSuccess())
 			}
 			lines, moreCount := renderBuiltinToolResultLines(evt.ToolResult.Name, stripCR(evt.ToolResult.Content), maxToolResultLines)
-			wrapW := renderWidth - 10
-			if wrapW < 20 {
-				wrapW = 20
-			}
+			wrapW := max(renderWidth-10, 20)
 			for _, l := range lines {
-				for _, wl := range strings.Split(wordwrap.String(l, wrapW), "\n") {
+				for wl := range strings.SplitSeq(wordwrap.String(l, wrapW), "\n") {
 					if ansi.PrintableRuneWidth(wl) > wrapW {
-						for _, hw := range strings.Split(wrap.String(wl, wrapW), "\n") {
-							s.buf.WriteString(contentIndent + "    " + styleToolResult.Render(hw) + "\n")
+						for hw := range strings.SplitSeq(wrap.String(wl, wrapW), "\n") {
+							s.buf.WriteString(contentIndent + "    ")
+							s.buf.WriteString(styleToolResult.Render(hw))
+							s.buf.WriteString("\n")
 						}
 					} else {
-						s.buf.WriteString(contentIndent + "    " + styleToolResult.Render(wl) + "\n")
+						s.buf.WriteString(contentIndent + "    ")
+						s.buf.WriteString(styleToolResult.Render(wl))
+						s.buf.WriteString("\n")
 					}
 				}
 			}
 			if moreCount > 0 {
-				s.buf.WriteString(contentIndent + "    " + styleGray.Render(fmt.Sprintf("...(%d more results)", moreCount)) + "\n")
+				s.buf.WriteString(contentIndent + "    ")
+				s.buf.WriteString(styleGray.Render(fmt.Sprintf("...(%d more results)", moreCount)))
+				s.buf.WriteString("\n")
 			}
 			s.atLineStart = true
 		}

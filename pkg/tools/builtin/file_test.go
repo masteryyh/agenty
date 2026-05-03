@@ -219,6 +219,26 @@ func TestReadFileToolLineRange(t *testing.T) {
 	}
 }
 
+func TestReadFileToolLineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lines.txt")
+	content := "line1\nline2\nline3"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	tool := &ReadFileTool{}
+
+	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 3, "withLineNumbers": true})
+	result, err := tool.Execute(context.Background(), tools.ToolCallContext{}, string(args))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "2: line2\n3: line3" {
+		t.Fatalf("expected numbered lines, got '%s'", result)
+	}
+}
+
 func TestReplaceInFileTool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "replace.txt")

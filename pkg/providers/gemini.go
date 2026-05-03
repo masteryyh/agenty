@@ -163,12 +163,26 @@ func buildGeminiContents(messages []Message) []*genai.Content {
 			return nil, false
 
 		case models.RoleSystem:
-			return genai.NewContentFromText(msg.Content, genai.RoleUser), true
+			return nil, false
 
 		default:
 			return nil, false
 		}
 	})
+}
+
+func extractGeminiSystemInstruction(messages []Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		if msg.Role != models.RoleSystem || msg.Content == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(msg.Content)
+	}
+	return sb.String()
 }
 
 func buildGeminiTools(defs []tools.ToolDefinition) []*genai.Tool {
@@ -228,6 +242,9 @@ func validateGeminiThinkingLevel(level string) genai.ThinkingLevel {
 
 func (p *GeminiProvider) buildContentConfig(req *ChatRequest) *genai.GenerateContentConfig {
 	config := &genai.GenerateContentConfig{}
+	if systemInstruction := extractGeminiSystemInstruction(req.Messages); systemInstruction != "" {
+		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: systemInstruction}}}
+	}
 	if len(req.Tools) > 0 {
 		config.Tools = buildGeminiTools(req.Tools)
 	}

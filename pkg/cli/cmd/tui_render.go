@@ -159,15 +159,17 @@ func renderUserHeader(t time.Time) string {
 func renderReasoningContent(reasoning string) string {
 	wrapWidth := max(renderWidth-len(contentIndent)-2, 20)
 	var buf strings.Builder
-	for _, line := range strings.Split(reasoning, "\n") {
-		for _, wl := range strings.Split(wordwrap.String(line, wrapWidth), "\n") {
+	for line := range strings.SplitSeq(reasoning, "\n") {
+		for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
 			if ansi.PrintableRuneWidth(wl) > wrapWidth {
-				for _, hw := range strings.Split(wrap.String(wl, wrapWidth), "\n") {
-					buf.WriteString(contentIndent + styleReasoning.Render(hw))
+				for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
+					buf.WriteString(contentIndent)
+					buf.WriteString(styleReasoning.Render(hw))
 					buf.WriteString("\n")
 				}
 			} else {
-				buf.WriteString(contentIndent + styleReasoning.Render(wl))
+				buf.WriteString(contentIndent)
+				buf.WriteString(styleReasoning.Render(wl))
 				buf.WriteString("\n")
 			}
 		}
@@ -185,7 +187,8 @@ func renderReasoningBlock(reasoning string, show bool) string {
 		return contentIndent + styleReasoningLabel.Render("thinking") + "\n\n"
 	}
 	var buf strings.Builder
-	buf.WriteString(contentIndent + styleReasoningLabel.Render("thinking:"))
+	buf.WriteString(contentIndent)
+	buf.WriteString(styleReasoningLabel.Render("thinking:"))
 	buf.WriteString("\n")
 	buf.WriteString(renderReasoningContent(reasoning))
 	buf.WriteString("\n")
@@ -199,18 +202,22 @@ func renderContentBlock(content string) string {
 	maxW := max(renderWidth-len(contentIndent), 20)
 
 	var buf strings.Builder
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		stripped := trimLeadingVisibleSpaces(line, 2)
 		// Word-level wrap first (preserves English word boundaries, handles spacing).
-		for _, wl := range strings.Split(wordwrap.String(stripped, maxW), "\n") {
+		for wl := range strings.SplitSeq(wordwrap.String(stripped, maxW), "\n") {
 			if ansi.PrintableRuneWidth(wl) > maxW {
 				// Fallback to character-level hard wrap for CJK text, long URLs,
 				// or any other token that wordwrap could not break.
-				for _, hw := range strings.Split(wrap.String(wl, maxW), "\n") {
-					buf.WriteString(contentIndent + hw + "\n")
+				for hw := range strings.SplitSeq(wrap.String(wl, maxW), "\n") {
+					buf.WriteString(contentIndent)
+					buf.WriteString(hw)
+					buf.WriteString("\n")
 				}
 			} else {
-				buf.WriteString(contentIndent + wl + "\n")
+				buf.WriteString(contentIndent)
+				buf.WriteString(wl)
+				buf.WriteString("\n")
 			}
 		}
 	}
@@ -249,14 +256,16 @@ func renderUserPlainBlock(content string) string {
 	content = stripCR(content)
 	wrapWidth := max(renderWidth-len(contentIndent)-2, 20)
 	var buf strings.Builder
-	for _, line := range strings.Split(content, "\n") {
-		for _, wl := range strings.Split(wordwrap.String(line, wrapWidth), "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
+		for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
 			if ansi.PrintableRuneWidth(wl) > wrapWidth {
-				for _, hw := range strings.Split(wrap.String(wl, wrapWidth), "\n") {
-					buf.WriteString(styleContent.Render(contentIndent+hw) + "\n")
+				for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
+					buf.WriteString(styleContent.Render(contentIndent + hw))
+					buf.WriteString("\n")
 				}
 			} else {
-				buf.WriteString(styleContent.Render(contentIndent+wl) + "\n")
+				buf.WriteString(styleContent.Render(contentIndent + wl))
+				buf.WriteString("\n")
 			}
 		}
 	}
@@ -265,13 +274,11 @@ func renderUserPlainBlock(content string) string {
 
 func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[string]*models.ChatMessageDto) string {
 	var buf strings.Builder
-	buf.WriteString(contentIndent + styleToolLabel.Render("🔧 tool execution:"))
+	buf.WriteString(contentIndent)
+	buf.WriteString(styleToolLabel.Render("🔧 tool execution:"))
 	buf.WriteString("\n")
 
-	wrapWidth := renderWidth - 10
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
+	wrapWidth := max(renderWidth-10, 20)
 
 	for i, tc := range toolCalls {
 		isLast := i == len(toolCalls)-1
@@ -288,27 +295,36 @@ func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[strin
 		summary := renderBuiltinToolCallSummary(tc.Name, tc.Arguments)
 		summaryLine := namePrefix + styleToolName.Render(tc.Name) + "  " + summary
 		summaryWrapW := max(renderWidth-4, 20)
-		for _, wl := range strings.Split(wordwrap.String(summaryLine, summaryWrapW), "\n") {
-			buf.WriteString(wl + "\n")
+		for wl := range strings.SplitSeq(wordwrap.String(summaryLine, summaryWrapW), "\n") {
+			buf.WriteString(wl)
+			buf.WriteString("\n")
 		}
 
 		if toolResultMsg, ok := toolResults[tc.ID]; ok {
 			if toolResultMsg.ToolResult.IsError {
-				buf.WriteString(contPrefix + styleToolError.Render("✗ error") + "\n")
+				buf.WriteString(contPrefix)
+				buf.WriteString(styleToolError.Render("✗ error"))
+				buf.WriteString("\n")
 			} else {
-				buf.WriteString(contPrefix + styleToolSuccess.Render("✓ ok") + "\n")
+				buf.WriteString(contPrefix)
+				buf.WriteString(styleToolSuccess.Render("✓ ok"))
+				buf.WriteString("\n")
 			}
 
 			resultContent := stripCR(toolResultMsg.ToolResult.Content)
 			lines, moreCount := renderBuiltinToolResultLines(toolResultMsg.ToolResult.Name, resultContent, maxToolResultLines)
 			for _, line := range lines {
-				for _, wl := range strings.Split(wordwrap.String(line, wrapWidth), "\n") {
+				for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
 					if ansi.PrintableRuneWidth(wl) > wrapWidth {
-						for _, hw := range strings.Split(wrap.String(wl, wrapWidth), "\n") {
-							buf.WriteString(contPrefix + styleToolResult.Render(hw) + "\n")
+						for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
+							buf.WriteString(contPrefix)
+							buf.WriteString(styleToolResult.Render(hw))
+							buf.WriteString("\n")
 						}
 					} else {
-						buf.WriteString(contPrefix + styleToolResult.Render(wl) + "\n")
+						buf.WriteString(contPrefix)
+						buf.WriteString(styleToolResult.Render(wl))
+						buf.WriteString("\n")
 					}
 				}
 			}
@@ -317,7 +333,9 @@ func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[strin
 				if isLineBasedTool(tc.Name) {
 					moreLabel = "more lines"
 				}
-				buf.WriteString(contPrefix + styleGray.Render(fmt.Sprintf("...(%d %s)", moreCount, moreLabel)) + "\n")
+				buf.WriteString(contPrefix)
+				buf.WriteString(styleGray.Render(fmt.Sprintf("...(%d %s)", moreCount, moreLabel)))
+				buf.WriteString("\n")
 			}
 		}
 	}
@@ -345,7 +363,8 @@ func renderToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults 
 
 	if finalResponse != nil && finalResponse.Content != "" {
 		buf.WriteString("\n")
-		buf.WriteString(contentIndent + styleFinalLabel.Render("📝 final response:"))
+		buf.WriteString(contentIndent)
+		buf.WriteString(styleFinalLabel.Render("📝 final response:"))
 		buf.WriteString("\n")
 		buf.WriteString(renderContentBlock(finalResponse.Content))
 	}
@@ -474,13 +493,15 @@ func WrapForDisplay(s string) string {
 			buf.WriteString("\n")
 			continue
 		}
-		for _, wl := range strings.Split(wordwrap.String(line, w), "\n") {
+		for wl := range strings.SplitSeq(wordwrap.String(line, w), "\n") {
 			if ansi.PrintableRuneWidth(wl) > w {
-				for _, hw := range strings.Split(wrap.String(wl, w), "\n") {
-					buf.WriteString(hw + "\n")
+				for hw := range strings.SplitSeq(wrap.String(wl, w), "\n") {
+					buf.WriteString(hw)
+					buf.WriteString("\n")
 				}
 			} else {
-				buf.WriteString(wl + "\n")
+				buf.WriteString(wl)
+				buf.WriteString("\n")
 			}
 		}
 	}
