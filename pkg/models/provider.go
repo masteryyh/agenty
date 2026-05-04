@@ -35,15 +35,15 @@ const (
 )
 
 type ModelProvider struct {
-	ID                                uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	Name                              string    `gorm:"type:varchar(255);not null"`
-	Type                              APIType   `gorm:"type:varchar(50);not null"`
-	BaseURL                           string    `gorm:"type:varchar(255);not null"`
-	BailianMultiModalEmbeddingBaseURL *string   `gorm:"type:varchar(255)"`
-	APIKey                            string    `gorm:"type:varchar(255);not null;default:''" json:"-"`
-	IsPreset                          bool      `gorm:"default:false"`
-	CreatedAt                         time.Time `gorm:"autoCreateTime"`
-	UpdatedAt                         time.Time `gorm:"autoUpdateTime"`
+	ID                                uuid.UUID
+	Name                              string
+	Type                              APIType
+	BaseURL                           string
+	BailianMultiModalEmbeddingBaseURL *string
+	APIKey                            string `json:"-"`
+	IsPreset                          bool
+	CreatedAt                         time.Time
+	UpdatedAt                         time.Time
 	DeletedAt                         *time.Time
 }
 

@@ -31,13 +31,13 @@ const (
 )
 
 type Skill struct {
-	ID          uuid.UUID      `gorm:"type:uuid;default:uuidv7();primaryKey"`
-	Name        string         `gorm:"type:varchar(255);not null"`
-	Description string         `gorm:"type:text;not null"`
-	SkillMDPath string         `gorm:"column:skill_md_path;type:text;not null"`
-	Metadata    datatypes.JSON `gorm:"type:jsonb"`
-	CreatedAt   time.Time      `gorm:"autoCreateTime:milli"`
-	UpdatedAt   time.Time      `gorm:"autoUpdateTime:milli"`
+	ID          uuid.UUID
+	Name        string
+	Description string
+	SkillMDPath string
+	Metadata    datatypes.JSON
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (Skill) TableName() string {
@@ -45,15 +45,15 @@ func (Skill) TableName() string {
 }
 
 type SessionSkill struct {
-	ID          uuid.UUID      `gorm:"type:uuid;default:uuidv7();primaryKey"`
-	Name        string         `gorm:"type:varchar(255);not null"`
-	Description string         `gorm:"type:text;not null"`
-	SkillMDPath string         `gorm:"column:skill_md_path;type:text;not null"`
-	Scope       SkillScope     `gorm:"type:varchar(20);not null;default:'global'"`
-	SourceDir   string         `gorm:"type:text;not null"`
-	Metadata    datatypes.JSON `gorm:"type:jsonb"`
-	CreatedAt   time.Time      `gorm:"autoCreateTime:milli"`
-	UpdatedAt   time.Time      `gorm:"autoUpdateTime:milli"`
+	ID          uuid.UUID
+	Name        string
+	Description string
+	SkillMDPath string
+	Scope       SkillScope
+	SourceDir   string
+	Metadata    datatypes.JSON
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type SkillDto struct {

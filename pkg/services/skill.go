@@ -469,13 +469,13 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 		if parsed.ID != nil {
 			query := fmt.Sprintf(`
 				INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, 'global', $5, $6, NOW(), NOW())
+				VALUES (?, ?, ?, ?, 'global', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 				ON CONFLICT (skill_md_path) DO UPDATE SET
 					id = EXCLUDED.id,
 					name = EXCLUDED.name,
 					description = EXCLUDED.description,
 					metadata = EXCLUDED.metadata,
-					updated_at = NOW()
+					updated_at = CURRENT_TIMESTAMP
 			`, tableName)
 
 			if err := s.db.WithContext(ctx).Exec(query, *parsed.ID, parsed.Name, parsed.Description, parsed.Path, parsed.Path, metadataArg).Error; err != nil {
@@ -486,15 +486,20 @@ func (s *SkillService) upsertGlobalSkill(ctx context.Context, parsed *parsedSkil
 
 		query := fmt.Sprintf(`
 			INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
-			VALUES (uuidv7(), $1, $2, $3, 'global', $4, $5, NOW(), NOW())
+			VALUES (?, ?, ?, ?, 'global', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 			ON CONFLICT (skill_md_path) DO UPDATE SET
 				name = EXCLUDED.name,
 				description = EXCLUDED.description,
 				metadata = EXCLUDED.metadata,
-				updated_at = NOW()
+				updated_at = CURRENT_TIMESTAMP
 		`, tableName)
 
-		if err := s.db.WithContext(ctx).Exec(query, parsed.Name, parsed.Description, parsed.Path, parsed.Path, metadataArg).Error; err != nil {
+		id, idErr := uuid.NewV7()
+		if idErr != nil {
+			slog.WarnContext(ctx, "failed to generate skill id", "sessionId", sessionID, "error", idErr)
+			continue
+		}
+		if err := s.db.WithContext(ctx).Exec(query, id, parsed.Name, parsed.Description, parsed.Path, parsed.Path, metadataArg).Error; err != nil {
 			slog.WarnContext(ctx, "failed to propagate skill to session", "sessionId", sessionID, "error", err)
 		}
 	}
@@ -521,7 +526,7 @@ func (s *SkillService) removeGlobalSkillFromSessions(ctx context.Context, skillM
 
 	for _, sessionID := range sessionIDs {
 		tableName := s.sessionTableName(sessionID)
-		query := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = $1 AND scope = 'global'`, tableName)
+		query := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = ? AND scope = 'global'`, tableName)
 		if err := s.db.WithContext(ctx).Exec(query, skillMDPath).Error; err != nil {
 			slog.WarnContext(ctx, "failed to remove skill from session", "sessionId", sessionID, "error", err)
 		}
@@ -532,36 +537,63 @@ func (s *SkillService) sessionTableName(sessionID uuid.UUID) string {
 	return fmt.Sprintf("session_skills_%s", strings.ReplaceAll(sessionID.String(), "-", ""))
 }
 
-func (s *SkillService) CreateSessionTable(ctx context.Context, sessionID uuid.UUID) error {
+func (s *SkillService) sessionFTSTableName(sessionID uuid.UUID) string {
+	return fmt.Sprintf("%s_fts", s.sessionTableName(sessionID))
+}
+
+func (s *SkillService) createSessionTableSQL(sessionID uuid.UUID) string {
 	tableName := s.sessionTableName(sessionID)
-
-	createTableSQL := fmt.Sprintf(`
-		CREATE UNLOGGED TABLE IF NOT EXISTS %s (
-			id               UUID         PRIMARY KEY DEFAULT uuidv7(),
-			name             VARCHAR(255) NOT NULL,
-			description      TEXT         NOT NULL,
-			skill_md_path    TEXT         NOT NULL UNIQUE,
-			scope            VARCHAR(20)  NOT NULL DEFAULT 'global',
-			source_dir       TEXT         NOT NULL,
-			metadata         JSONB,
-			created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-			updated_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-		)
-	`, tableName)
-
-	if err := s.db.WithContext(ctx).Exec(createTableSQL).Error; err != nil {
-		return fmt.Errorf("failed to create session skills table: %w", err)
+	if usingSQLite() {
+		ftsTableName := s.sessionFTSTableName(sessionID)
+		return fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				description TEXT NOT NULL,
+				skill_md_path TEXT NOT NULL UNIQUE,
+				scope TEXT NOT NULL DEFAULT 'global',
+				source_dir TEXT NOT NULL,
+				metadata TEXT,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			);
+			CREATE VIRTUAL TABLE IF NOT EXISTS %s USING fts5(id UNINDEXED, name, description);
+			CREATE TRIGGER IF NOT EXISTS %s_fts_ai AFTER INSERT ON %s BEGIN
+				INSERT INTO %s(rowid, id, name, description) VALUES (new.rowid, new.id, new.name, new.description);
+			END;
+			CREATE TRIGGER IF NOT EXISTS %s_fts_ad AFTER DELETE ON %s BEGIN
+				DELETE FROM %s WHERE rowid = old.rowid;
+			END;
+			CREATE TRIGGER IF NOT EXISTS %s_fts_au AFTER UPDATE ON %s BEGIN
+				DELETE FROM %s WHERE rowid = old.rowid;
+				INSERT INTO %s(rowid, id, name, description) VALUES (new.rowid, new.id, new.name, new.description);
+			END
+		`, tableName, ftsTableName, tableName, tableName, ftsTableName, tableName, tableName, ftsTableName, tableName, tableName, ftsTableName, ftsTableName)
 	}
 
-	createIndexSQL := fmt.Sprintf(`
-		CREATE INDEX IF NOT EXISTS idx_%s_bm25
+	indexName := "idx_" + strings.ReplaceAll(sessionID.String(), "-", "") + "_bm25"
+	return fmt.Sprintf(`
+		CREATE UNLOGGED TABLE IF NOT EXISTS %s (
+			id UUID PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			description TEXT NOT NULL,
+			skill_md_path TEXT NOT NULL UNIQUE,
+			scope VARCHAR(20) NOT NULL DEFAULT 'global',
+			source_dir TEXT NOT NULL,
+			metadata JSONB,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS %s
 		ON %s
 		USING bm25 (id, name, description)
 		WITH (key_field = 'id')
-	`, strings.ReplaceAll(sessionID.String(), "-", ""), tableName)
+	`, tableName, indexName, tableName)
+}
 
-	if err := s.db.WithContext(ctx).Exec(createIndexSQL).Error; err != nil {
-		slog.WarnContext(ctx, "failed to create BM25 index on session table", "table", tableName, "error", err)
+func (s *SkillService) CreateSessionTable(ctx context.Context, sessionID uuid.UUID) error {
+	if err := execStatements(ctx, s.db, s.createSessionTableSQL(sessionID)); err != nil {
+		return fmt.Errorf("failed to create session skills table: %w", err)
 	}
 
 	s.mu.Lock()
@@ -573,6 +605,12 @@ func (s *SkillService) CreateSessionTable(ctx context.Context, sessionID uuid.UU
 
 func (s *SkillService) DropSessionTable(ctx context.Context, sessionID uuid.UUID) error {
 	tableName := s.sessionTableName(sessionID)
+	if usingSQLite() {
+		ftsTableName := s.sessionFTSTableName(sessionID)
+		if err := s.db.WithContext(ctx).Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", ftsTableName)).Error; err != nil {
+			return fmt.Errorf("failed to drop session skills fts table: %w", err)
+		}
+	}
 
 	dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
 	if err := s.db.WithContext(ctx).Exec(dropSQL).Error; err != nil {
@@ -616,7 +654,7 @@ func (s *SkillService) PopulateSessionSkills(ctx context.Context, sessionID uuid
 		for _, parsed := range skills {
 			insertSQL := fmt.Sprintf(`
 				INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
-				VALUES (uuidv7(), $1, $2, $3, 'project', $4, $5, NOW(), NOW())
+				VALUES (?, ?, ?, ?, 'project', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 				ON CONFLICT (skill_md_path) DO NOTHING
 			`, tableName)
 
@@ -625,7 +663,12 @@ func (s *SkillService) PopulateSessionSkills(ctx context.Context, sessionID uuid
 				metadataArg = string(parsed.Metadata)
 			}
 
-			if err := s.db.WithContext(ctx).Exec(insertSQL, parsed.Name, parsed.Description, parsed.Path, dir, metadataArg).Error; err != nil {
+			id, idErr := uuid.NewV7()
+			if idErr != nil {
+				slog.WarnContext(ctx, "failed to generate project skill id", "path", parsed.Path, "error", idErr)
+				continue
+			}
+			if err := s.db.WithContext(ctx).Exec(insertSQL, id, parsed.Name, parsed.Description, parsed.Path, dir, metadataArg).Error; err != nil {
 				slog.WarnContext(ctx, "failed to insert project skill", "path", parsed.Path, "error", err)
 			}
 		}
@@ -748,12 +791,12 @@ func (s *SkillService) handleProjectFileEvent(ctx context.Context, sessionID uui
 
 		insertSQL := fmt.Sprintf(`
 			INSERT INTO %s (id, name, description, skill_md_path, scope, source_dir, metadata, created_at, updated_at)
-			VALUES (uuidv7(), $1, $2, $3, 'project', $4, $5, NOW(), NOW())
+			VALUES (?, ?, ?, ?, 'project', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 			ON CONFLICT (skill_md_path) DO UPDATE SET
 				name = EXCLUDED.name,
 				description = EXCLUDED.description,
 				metadata = EXCLUDED.metadata,
-				updated_at = NOW()
+				updated_at = CURRENT_TIMESTAMP
 		`, tableName)
 
 		var metadataArg any
@@ -761,12 +804,17 @@ func (s *SkillService) handleProjectFileEvent(ctx context.Context, sessionID uui
 			metadataArg = string(parsed.Metadata)
 		}
 
-		if err := s.db.WithContext(ctx).Exec(insertSQL, parsed.Name, parsed.Description, parsed.Path, sourceDir, metadataArg).Error; err != nil {
+		id, idErr := uuid.NewV7()
+		if idErr != nil {
+			slog.WarnContext(ctx, "failed to generate project skill id", "path", parsed.Path, "error", idErr)
+			return
+		}
+		if err := s.db.WithContext(ctx).Exec(insertSQL, id, parsed.Name, parsed.Description, parsed.Path, sourceDir, metadataArg).Error; err != nil {
 			slog.WarnContext(ctx, "failed to upsert project skill", "path", parsed.Path, "error", err)
 		}
 
 	case event.Op&fsnotify.Remove != 0 || event.Op&fsnotify.Rename != 0:
-		deleteSQL := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = $1 AND scope = 'project'`, tableName)
+		deleteSQL := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = ? AND scope = 'project'`, tableName)
 		if err := s.db.WithContext(ctx).Exec(deleteSQL, skillMDPath).Error; err != nil {
 			slog.WarnContext(ctx, "failed to remove project skill", "path", skillMDPath, "error", err)
 		}
@@ -787,15 +835,35 @@ func (s *SkillService) SearchSkills(ctx context.Context, sessionID *uuid.UUID, q
 
 		if hasTable {
 			tableName := s.sessionTableName(*sessionID)
-			searchSQL := fmt.Sprintf(`
-				SELECT id, name, description, skill_md_path, scope, paradedb.score(id) as score
-				FROM %s
-				WHERE name @@@ ? OR description @@@ ?
-				ORDER BY score DESC
-				LIMIT ?
-			`, tableName)
+			var searchSQL string
+			var args []any
+			if usingSQLite() {
+				ftsQuery := sqliteFTSQuery(query)
+				if ftsQuery == "" {
+					return results, nil
+				}
+				ftsTableName := s.sessionFTSTableName(*sessionID)
+				searchSQL = fmt.Sprintf(`
+					SELECT %s.id, %s.name, %s.description, %s.skill_md_path, %s.scope, -bm25(%s) as score
+					FROM %s
+					JOIN %s ON %s.id = %s.id
+					WHERE %s MATCH ?
+					ORDER BY bm25(%s) ASC
+					LIMIT ?
+				`, tableName, tableName, tableName, tableName, tableName, ftsTableName, ftsTableName, tableName, tableName, ftsTableName, ftsTableName, ftsTableName)
+				args = []any{ftsQuery, limit}
+			} else {
+				searchSQL = fmt.Sprintf(`
+					SELECT id, name, description, skill_md_path, scope, paradedb.score(id) as score
+					FROM %s
+					WHERE name @@@ ? OR description @@@ ?
+					ORDER BY score DESC
+					LIMIT ?
+				`, tableName)
+				args = []any{query, query, limit}
+			}
 
-			rows, err := s.db.WithContext(ctx).Raw(searchSQL, query, query, limit).Rows()
+			rows, err := s.db.WithContext(ctx).Raw(searchSQL, args...).Rows()
 			if err != nil {
 				return nil, fmt.Errorf("skill search failed, error: %w", err)
 			}
@@ -812,15 +880,34 @@ func (s *SkillService) SearchSkills(ctx context.Context, sessionID *uuid.UUID, q
 		}
 	}
 
-	searchSQL := `
-		SELECT id, name, description, skill_md_path, paradedb.score(id) as score
-		FROM skills
-		WHERE name @@@ ? OR description @@@ ?
-		ORDER BY score DESC
-		LIMIT ?
-	`
+	var searchSQL string
+	var args []any
+	if usingSQLite() {
+		ftsQuery := sqliteFTSQuery(query)
+		if ftsQuery == "" {
+			return results, nil
+		}
+		searchSQL = `
+			SELECT skills.id, skills.name, skills.description, skills.skill_md_path, -bm25(skills_fts) as score
+			FROM skills_fts
+			JOIN skills ON skills.id = skills_fts.id
+			WHERE skills_fts MATCH ?
+			ORDER BY bm25(skills_fts) ASC
+			LIMIT ?
+		`
+		args = []any{ftsQuery, limit}
+	} else {
+		searchSQL = `
+			SELECT id, name, description, skill_md_path, paradedb.score(id) as score
+			FROM skills
+			WHERE name @@@ ? OR description @@@ ?
+			ORDER BY score DESC
+			LIMIT ?
+		`
+		args = []any{query, query, limit}
+	}
 
-	rows, err := s.db.WithContext(ctx).Raw(searchSQL, query, query, limit).Rows()
+	rows, err := s.db.WithContext(ctx).Raw(searchSQL, args...).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("skill search failed, error: %w", err)
 	}

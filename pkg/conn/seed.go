@@ -169,7 +169,7 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 		if len(jsonProviderIDs) > 0 {
 			if err := tx.Model(&models.ModelProvider{}).
 				Where("is_preset = TRUE AND id NOT IN ? AND deleted_at IS NULL", jsonProviderIDs).
-				Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+				Update("deleted_at", NowExpr()).Error; err != nil {
 				return err
 			}
 		}
@@ -177,7 +177,7 @@ func seedPresets(ctx context.Context, db *gorm.DB) error {
 		if len(jsonModelIDs) > 0 {
 			if err := tx.Model(&models.Model{}).
 				Where("is_preset = TRUE AND id NOT IN ? AND deleted_at IS NULL", jsonModelIDs).
-				Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+				Update("deleted_at", NowExpr()).Error; err != nil {
 				return err
 			}
 		}

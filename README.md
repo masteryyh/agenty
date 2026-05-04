@@ -9,7 +9,7 @@ This project is still under construction, expect frequent updates and breaking c
 ### Prerequisites
 
 - Go 1.26+
-- PostgreSQL 18 with the [pgvector](https://github.com/pgvector/pgvector) extension enabled
+- SQLite with FTS5 enabled, or PostgreSQL 18 with `pgvector` and `pg_search`
 - At least one LLM provider API key
 
 ### Building
@@ -37,11 +37,16 @@ port: 8080
 debug: false
 
 db:
-  host: 127.0.0.1
-  port: 5432
-  username: postgres
-  password: your_password
-  database: agenty
+  type: sqlite
+
+# Optional PostgreSQL configuration:
+# db:
+#   type: postgres
+#   host: 127.0.0.1
+#   port: 5432
+#   username: postgres
+#   password: your_password
+#   database: agenty
 
 # Optional: HTTP Basic Auth (for daemon mode)
 auth:
@@ -102,11 +107,13 @@ All providers support **extended thinking** configuration with per-model thinkin
 |-----|---------|-------------|
 | `port` | `8080` | HTTP server listen port (daemon mode only) |
 | `debug` | `false` | Enable debug mode and the debug tool |
+| `db.type` | `sqlite` | Database backend: `sqlite` or `postgres` |
 | `db.host` | `127.0.0.1` | PostgreSQL host |
 | `db.port` | `5432` | PostgreSQL port |
 | `db.username` | `postgres` | PostgreSQL user |
-| `db.password` | *(required)* | PostgreSQL password |
+| `db.password` | *(required for PostgreSQL)* | PostgreSQL password |
 | `db.database` | `agenty` | PostgreSQL database name |
+| `db.sqliteVectorExtensionPath` | `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` | sqlite-vector extension path; missing files are downloaded automatically |
 | `auth.enabled` | `false` | Enable HTTP Basic Auth (daemon mode only) |
 | `auth.username` | — | Basic auth username |
 | `auth.password` | — | Basic auth password |
@@ -118,17 +125,23 @@ All settings can be overridden with environment variables using the `AGENTY_` pr
 
 ## Database Setup
 
-Agenty requires PostgreSQL with the `pgvector` extension for memory features.
+SQLite is the default local backend. The database file is stored under `os.UserConfigDir()/agenty/agenty.db`, so it survives binary updates and reinstalls.
+
+SQLite startup requires:
+
+- FTS5 support in the SQLite driver. When building from source with `go-sqlite3`, use the `sqlite_fts5` build tag if your build does not enable it by default.
+- The sqlite-vector native extension. Agenty checks `db.sqliteVectorExtensionPath` or `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` first; if the file is missing, it fetches the latest sqlite-vector GitHub release, selects the current OS/CPU asset, downloads it, and installs the extracted library at that path.
+
+PostgreSQL remains supported for daemon deployments:
 
 ```sql
--- Enable pgvector (run as superuser)
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_search;
 
--- Create database
 CREATE DATABASE agenty;
 ```
 
-Agenty handles table creation automatically via GORM `AutoMigrate` on startup.
+Agenty initializes tables from embedded SQL schema files at startup.
 
 ## License
 

@@ -25,22 +25,22 @@ import (
 )
 
 type Model struct {
-	ID                        uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	ProviderID                uuid.UUID      `gorm:"type:uuid;not null"`
-	Name                      string         `gorm:"type:varchar(255);not null"`
-	Code                      string         `gorm:"type:varchar(255);not null"`
-	DefaultModel              bool           `gorm:"default:false"`
-	EmbeddingModel            bool           `gorm:"default:false"`
-	ContextCompressionModel   bool           `gorm:"default:false"`
-	MultiModal                bool           `gorm:"default:false"`
-	Light                     bool           `gorm:"default:false"`
-	Thinking                  bool           `gorm:"default:false"`
-	ThinkingLevels            datatypes.JSON `gorm:"type:jsonb;default:'[]'::jsonb"`
-	AnthropicAdaptiveThinking bool           `gorm:"default:false"`
-	IsPreset                  bool           `gorm:"default:false"`
-	ContextWindow             int            `gorm:"default:0"`
-	CreatedAt                 time.Time      `gorm:"autoCreateTime"`
-	UpdatedAt                 time.Time      `gorm:"autoUpdateTime"`
+	ID                        uuid.UUID
+	ProviderID                uuid.UUID
+	Name                      string
+	Code                      string
+	DefaultModel              bool
+	EmbeddingModel            bool
+	ContextCompressionModel   bool
+	MultiModal                bool
+	Light                     bool
+	Thinking                  bool
+	ThinkingLevels            datatypes.JSON
+	AnthropicAdaptiveThinking bool
+	IsPreset                  bool
+	ContextWindow             int
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 	DeletedAt                 *time.Time
 }
 

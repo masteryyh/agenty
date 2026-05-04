@@ -1,17 +1,19 @@
-# Data Model and DTO Patterns
+# Data Model and Database Patterns
 
 ## GORM Model Definition
 
+Persistent model structs should stay database-agnostic. Do not encode PostgreSQL-only types, defaults, indexes, or column constraints in `gorm` tags.
+
 ```go
 type Foo struct {
-    ID          uuid.UUID      `gorm:"type:uuid;default:uuidv7();primaryKey"`
-    Name        string         `gorm:"type:varchar(255);not null"`
-    Description string         `gorm:"type:text;not null"`
-    Metadata    datatypes.JSON `gorm:"type:jsonb"`
-    ParentID    *uuid.UUID     `gorm:"type:uuid"`           // nullable → pointer
-    CreatedAt   time.Time      `gorm:"autoCreateTime:milli"`
-    UpdatedAt   time.Time      `gorm:"autoUpdateTime:milli"`
-    DeletedAt   *time.Time                                  // soft delete
+    ID          uuid.UUID
+    Name        string
+    Description string
+    Metadata    datatypes.JSON
+    ParentID    *uuid.UUID
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+    DeletedAt   *time.Time
 }
 
 func (Foo) TableName() string {
@@ -19,20 +21,59 @@ func (Foo) TableName() string {
 }
 ```
 
-### Field Type Reference
+Generate UUIDs in Go for new rows, normally through model `BeforeCreate` hooks in `pkg/models/hooks.go`. Keep JSON API tags lowerCamelCase and separate from persistence concerns.
 
-| Go Type | GORM Tag | PostgreSQL Type |
-|---|---|---|
-| `uuid.UUID` | `type:uuid;default:uuidv7()` | UUID |
-| `string` | `type:varchar(255)` | VARCHAR(255) |
-| `string` | `type:text` | TEXT |
-| `bool` | `default:false` | BOOLEAN |
-| `int64` | `not null;default:0` | BIGINT |
-| `datatypes.JSON` | `type:jsonb` | JSONB |
-| `time.Time` | `autoCreateTime:milli` | TIMESTAMPTZ |
-| `*time.Time` | _(no extra tag)_ | TIMESTAMPTZ NULL |
-| `*string` | `type:text` | TEXT NULL |
-| `*uuid.UUID` | `type:uuid` | UUID NULL |
+## Schema SQL
+
+Do not use GORM `AutoMigrate`. Static table DDL lives in embedded SQL files:
+
+| Backend | File |
+|---|---|
+| PostgreSQL | `pkg/conn/db/postgres.sql` |
+| SQLite | `pkg/conn/db/sqlite.sql` |
+
+When adding a persistent table or index, update both files unless the feature is backend-specific. Use `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`.
+
+PostgreSQL schema can use `UUID`, `JSONB`, `TIMESTAMPTZ`, `vector(1024)`, and ParadeDB BM25 indexes. SQLite schema should use `TEXT` UUIDs, `TEXT` JSON, `DATETIME`, FTS5 virtual tables for BM25-style search, and `BLOB` for sqlite-vector embeddings.
+
+## Database Type Branches
+
+Use `conn.GetDBType()` or the local service helper `usingSQLite()` when raw SQL must differ by backend. Prefer shared SQL where possible:
+
+```go
+query := "LOWER(content) LIKE LOWER(?)"
+```
+
+Use `CURRENT_TIMESTAMP` instead of `NOW()` in cross-backend raw SQL. For GORM expressions, use `conn.NowExpr()`.
+
+## Raw Query Rules
+
+GORM `Raw().Rows()` and `Exec()` should use `?` placeholders. Do not use `$1`/`$2`; SQLite does not share PostgreSQL parameter semantics, and this project standardizes on GORM binding.
+
+```go
+rows, err := s.db.WithContext(ctx).Raw(`
+    SELECT id, name
+    FROM items
+    WHERE name = ?
+    LIMIT ?
+`, name, limit).Rows()
+```
+
+## Search Backends
+
+Knowledge search must preserve the same user-facing contract across backends:
+
+- PostgreSQL vector search uses pgvector ordering.
+- SQLite vector search uses sqlite-vector and stores embeddings as Float32 BLOBs through `models.EmbeddingVector`.
+- PostgreSQL BM25 uses ParadeDB.
+- SQLite BM25-style search uses FTS5 virtual tables and `bm25(...)`.
+- Keyword fallback should use backend-neutral SQL such as `LOWER(column) LIKE LOWER(?)`.
+
+SQLite startup must verify FTS5 and sqlite-vector availability. If the sqlite-vector library is missing at `db.sqliteVectorExtensionPath` or the default user config path, startup should fetch the latest GitHub release, derive the asset name from the release version, OS, architecture, and Linux libc, then install it before loading. Asset names follow `vector-<os>[-musl]-<arch>-<version>.tar.gz`, where OS tags are `macos`, `linux`, `windows`, architecture tags are `x86_64` and `arm64`, and Linux musl uses `vector-linux-musl-...`. Do not silently degrade search features when the required extension cannot be installed or loaded.
+
+## Dynamic Session Tables
+
+Session skill tables are created manually in `SkillService`. Keep PostgreSQL and SQLite DDL branches together in the service. PostgreSQL session tables can use ParadeDB BM25 indexes; SQLite session tables need a sibling FTS5 table and triggers.
 
 ## DTO Design
 
@@ -41,146 +82,10 @@ type FooDto struct {
     ID          uuid.UUID  `json:"id"`
     Name        string     `json:"name"`
     Description string     `json:"description"`
-    ParentID    *uuid.UUID `json:"parentId,omitempty"`  // optional fields use omitempty
+    ParentID    *uuid.UUID `json:"parentId,omitempty"`
     CreatedAt   time.Time  `json:"createdAt"`
     UpdatedAt   time.Time  `json:"updatedAt"`
 }
-
-// Create request DTO
-type CreateFooDto struct {
-    Name        string  `json:"name" binding:"required"`
-    Description string  `json:"description"`
-    ParentID    *string `json:"parentId"`
-}
-
-// Update request DTO (all fields optional)
-type UpdateFooDto struct {
-    Name        *string `json:"name"`
-    Description *string `json:"description"`
-}
 ```
 
-## Model → DTO Conversion
-
-```go
-func (m *Foo) ToDto() *FooDto {
-    return &FooDto{
-        ID:          m.ID,
-        Name:        m.Name,
-        Description: m.Description,
-        ParentID:    m.ParentID,
-        CreatedAt:   m.CreatedAt,
-        UpdatedAt:   m.UpdatedAt,
-    }
-}
-```
-
-## AutoMigrate Registration (`pkg/conn/db.go`)
-
-Append the new model to the `AutoMigrate` call in `InitDB`:
-
-```go
-if err := dbConn.AutoMigrate(
-    &models.SystemSettings{},
-    &models.ModelProvider{},
-    &models.Model{},
-    // ... existing models ...
-    &models.Foo{},   // add here
-); err != nil {
-    return fmt.Errorf("failed to migrate database: %w", err)
-}
-```
-
-Create indexes after AutoMigrate:
-
-```go
-if err := dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_foos_bar ON foos (bar_field)`).Error; err != nil {
-    return fmt.Errorf("failed to create index: %w", err)
-}
-```
-
-## JSONB Field Handling
-
-```go
-import (
-    json "github.com/bytedance/sonic"
-    "gorm.io/datatypes"
-)
-
-// Write
-metaBytes, _ := json.Marshal(metaMap)
-model.Metadata = datatypes.JSON(metaBytes)
-
-// Read as map
-var meta map[string]string
-json.Unmarshal(model.Metadata, &meta)
-
-// Read as slice
-var levels []string
-json.Unmarshal(model.ThinkingLevels, &levels)
-```
-
-## Dynamic Unlogged Tables (Session-Scoped)
-
-Session tables are not managed by AutoMigrate; create them manually with `Exec`:
-
-```go
-func (s *Service) createSessionTable(ctx context.Context, sessionID uuid.UUID) error {
-    tableName := fmt.Sprintf("session_items_%s", strings.ReplaceAll(sessionID.String(), "-", ""))
-
-    createSQL := fmt.Sprintf(`
-        CREATE UNLOGGED TABLE IF NOT EXISTS %s (
-            id          UUID         PRIMARY KEY DEFAULT uuidv7(),
-            name        VARCHAR(255) NOT NULL,
-            scope       VARCHAR(20)  NOT NULL DEFAULT 'global',
-            created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-            updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-        )
-    `, tableName)
-
-    if err := s.db.WithContext(ctx).Exec(createSQL).Error; err != nil {
-        return fmt.Errorf("failed to create session table: %w", err)
-    }
-
-    // BM25 index — failure is non-fatal (warn only)
-    indexSQL := fmt.Sprintf(`
-        CREATE INDEX IF NOT EXISTS idx_%s_bm25
-        ON %s
-        USING bm25 (id, name)
-        WITH (key_field = 'id')
-    `, strings.ReplaceAll(sessionID.String(), "-", ""), tableName)
-
-    if err := s.db.WithContext(ctx).Exec(indexSQL).Error; err != nil {
-        slog.WarnContext(ctx, "failed to create BM25 index on session table",
-            "table", tableName, "error", err)
-    }
-    return nil
-}
-```
-
-## Backend Interface Extension
-
-Every new feature must be reflected in all three files:
-
-**1. `pkg/backend/backend.go` (interface declaration)**
-```go
-type Backend interface {
-    // ...existing methods...
-    ListFoos(sessionID uuid.UUID) ([]models.FooDto, error)
-    GetFoo(fooID uuid.UUID) (*models.FooDto, error)
-}
-```
-
-**2. `pkg/backend/local.go` (local implementation — calls the service)**
-```go
-func (l *LocalBackend) ListFoos(sessionID uuid.UUID) ([]models.FooDto, error) {
-    return l.fooSvc.List(signal.GetBaseContext(), sessionID)
-}
-```
-
-**3. `pkg/backend/remote.go` (remote implementation — calls the HTTP API)**
-```go
-func (r *RemoteBackend) ListFoos(sessionID uuid.UUID) ([]models.FooDto, error) {
-    return r.client.ListFoos(sessionID)
-}
-```
+Create/update DTOs should use lowerCamelCase JSON fields and Gin binding tags only for request validation.

@@ -19,79 +19,68 @@ package conn
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/masteryyh/agenty/pkg/config"
+	dbschema "github.com/masteryyh/agenty/pkg/conn/db"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
 	db     *gorm.DB
+	dbType string
 	dbOnce sync.Once
 )
 
 func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 	var err error
 	dbOnce.Do(func() {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		initTimeout := 10 * time.Second
+		if cfg.Type == config.DatabaseTypeSQLite {
+			initTimeout = 2 * time.Minute
+		}
+		timeoutCtx, cancel := context.WithTimeout(ctx, initTimeout)
 		defer cancel()
 
-		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
-			cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
-		dbConn, connErr := gorm.Open(postgres.Open(dsn), &gorm.Config{
-			TranslateError: true,
-			Logger:         logger.NewGormLogger(debug),
-		})
+		var dbConn *gorm.DB
+		var connErr error
+		switch cfg.Type {
+		case config.DatabaseTypePostgres:
+			dbConn, connErr = openPostgres(cfg, debug)
+		case config.DatabaseTypeSQLite:
+			dbConn, connErr = openSQLite(timeoutCtx, cfg, debug)
+		default:
+			connErr = fmt.Errorf("unsupported database type: %s", cfg.Type)
+		}
 		if connErr != nil {
 			err = fmt.Errorf("failed to connect to database: %w", connErr)
 			return
 		}
 
-		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; extErr != nil {
-			err = fmt.Errorf("pgvector extension is required but could not be created: %w", extErr)
+		schema, schemaErr := dbschema.Schema(cfg.Type)
+		if schemaErr != nil {
+			err = fmt.Errorf("failed to load database schema: %w", schemaErr)
+			return
+		}
+		if schemaErr := execSQLScript(timeoutCtx, dbConn, schema); schemaErr != nil {
+			err = fmt.Errorf("failed to initialize database schema: %w", schemaErr)
 			return
 		}
 
-		if extErr := dbConn.WithContext(timeoutCtx).Exec("CREATE EXTENSION IF NOT EXISTS pg_search").Error; extErr != nil {
-			err = fmt.Errorf("pg_search extension is required but could not be created: %w", extErr)
-			return
-		}
-
-		if migrateErr := dbConn.WithContext(timeoutCtx).
-			AutoMigrate(
-				&models.SystemSettings{},
-				&models.ChatSession{},
-				&models.ChatMessage{},
-				&models.ModelProvider{},
-				&models.Model{},
-				&models.Agent{},
-				&models.AgentModel{},
-				&models.MCPServer{},
-				&models.KnowledgeItem{},
-				&models.KnowledgeBaseData{},
-				&models.Skill{},
-			); migrateErr != nil {
-			err = fmt.Errorf("failed to migrate database: %w", migrateErr)
-			return
-		}
-
-		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_text_embedding_hnsw ON kb_data USING hnsw (text_embedding vector_ip_ops)`).Error; idxErr != nil {
-			err = fmt.Errorf("failed to create index: %w", idxErr)
-			return
-		}
-
-		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_kb_data_bm25 ON kb_data USING bm25 (id, agent_id, item_id, chunk_content, created_at) WITH (key_field = 'id')`).Error; idxErr != nil {
-			err = fmt.Errorf("failed to create knowledge base BM25 index: %w", idxErr)
-			return
-		}
-
-		if idxErr := dbConn.WithContext(timeoutCtx).Exec(`CREATE INDEX IF NOT EXISTS idx_skills_bm25 ON skills USING bm25 (id, name, description) WITH (key_field = 'id')`).Error; idxErr != nil {
-			err = fmt.Errorf("failed to create skills BM25 index: %w", idxErr)
-			return
+		if cfg.Type == config.DatabaseTypeSQLite {
+			if initErr := initSQLiteVector(timeoutCtx, dbConn); initErr != nil {
+				err = initErr
+				return
+			}
 		}
 
 		if seedErr := seedPresets(timeoutCtx, dbConn); seedErr != nil {
@@ -99,6 +88,8 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 			return
 		}
 		db = dbConn
+		dbType = cfg.Type
+		models.SetVectorStorage(cfg.Type)
 	})
 	return err
 }
@@ -108,4 +99,129 @@ func GetDB() *gorm.DB {
 		panic("database not initialized, call InitDB first")
 	}
 	return db
+}
+
+func GetDBType() string {
+	if dbType == "" {
+		return config.DatabaseTypePostgres
+	}
+	return dbType
+}
+
+func NowExpr() clause.Expr {
+	return gorm.Expr("CURRENT_TIMESTAMP")
+}
+
+func openPostgres(cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
+		cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
+	return gorm.Open(postgres.Open(dsn), &gorm.Config{
+		TranslateError: true,
+		Logger:         logger.NewGormLogger(debug),
+	})
+}
+
+func openSQLite(ctx context.Context, cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve user config dir: %w", err)
+	}
+	agentyDir := filepath.Join(configDir, "agenty")
+	if err = os.MkdirAll(agentyDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create sqlite config dir: %w", err)
+	}
+
+	dbPath := filepath.Join(agentyDir, "agenty.db")
+	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_busy_timeout=5000", dbPath)
+	dbConn, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		TranslateError: true,
+		Logger:         logger.NewGormLogger(debug),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := dbConn.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+
+	if err = ensureSQLiteFTS5(ctx, dbConn); err != nil {
+		return nil, err
+	}
+	if err = loadSQLiteVector(ctx, sqlDB, cfg.SQLiteVectorExtensionPath, agentyDir); err != nil {
+		return nil, err
+	}
+	if err = verifySQLiteVector(ctx, dbConn); err != nil {
+		return nil, err
+	}
+	return dbConn, nil
+}
+
+func ensureSQLiteFTS5(ctx context.Context, dbConn *gorm.DB) error {
+	if err := dbConn.WithContext(ctx).Exec("CREATE VIRTUAL TABLE temp.agenty_fts5_check USING fts5(content)").Error; err != nil {
+		return fmt.Errorf("sqlite fts5 extension is required but unavailable: %w", err)
+	}
+	return dbConn.WithContext(ctx).Exec("DROP TABLE temp.agenty_fts5_check").Error
+}
+
+func verifySQLiteVector(ctx context.Context, dbConn *gorm.DB) error {
+	if err := dbConn.WithContext(ctx).Exec("SELECT vector_version()").Error; err != nil {
+		return fmt.Errorf("sqlite-vector extension is required but unavailable: %w", err)
+	}
+	return nil
+}
+
+func initSQLiteVector(ctx context.Context, dbConn *gorm.DB) error {
+	if err := dbConn.WithContext(ctx).Exec("SELECT vector_init('kb_data', 'text_embedding', 'type=FLOAT32,dimension=1024,distance=DOT')").Error; err != nil {
+		return fmt.Errorf("failed to initialize sqlite-vector column: %w", err)
+	}
+	return dbConn.WithContext(ctx).Exec("SELECT vector_quantize('kb_data', 'text_embedding')").Error
+}
+
+func execSQLScript(ctx context.Context, dbConn *gorm.DB, script string) error {
+	for _, stmt := range splitSQLScript(script) {
+		if stmt == "" {
+			continue
+		}
+		if err := dbConn.WithContext(ctx).Exec(stmt).Error; err != nil {
+			return fmt.Errorf("failed statement %q: %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+func splitSQLScript(script string) []string {
+	var stmts []string
+	var buf strings.Builder
+	inTrigger := false
+	for line := range strings.SplitSeq(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "CREATE TRIGGER") {
+			inTrigger = true
+		}
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+		if inTrigger {
+			if upper == "END;" || strings.HasPrefix(upper, "END;") {
+				stmts = append(stmts, strings.TrimSuffix(strings.TrimSpace(buf.String()), ";"))
+				buf.Reset()
+				inTrigger = false
+			}
+			continue
+		}
+		if strings.HasSuffix(trimmed, ";") {
+			stmts = append(stmts, strings.TrimSuffix(strings.TrimSpace(buf.String()), ";"))
+			buf.Reset()
+		}
+	}
+	if strings.TrimSpace(buf.String()) != "" {
+		stmts = append(stmts, strings.TrimSpace(buf.String()))
+	}
+	return stmts
 }

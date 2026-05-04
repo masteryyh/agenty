@@ -1,12 +1,12 @@
 ---
 name: agenty-conventions
-description: Project-specific coding conventions and patterns for the agenty repository. Covers Go 1.26 style rules, GORM query patterns, Gin route conventions, tool registration, model/DTO design, and correct ParadeDB BM25 search usage. Must be loaded whenever adding new code to the agenty codebase.
+description: Project-specific coding conventions and patterns for the agenty repository. Covers Go 1.26 style rules, GORM query patterns, embedded DB schema, Gin route conventions, tool registration, model/DTO design, and BM25/vector search usage. Must be loaded whenever adding new code to the agenty codebase.
 license: Apache-2.0
 metadata:
   author: masteryyh
   version: "1.0.0"
   domain: project-conventions
-  triggers: agenty, Go service, GORM, Gin route, tool registration, BM25, ParadeDB, service pattern, model DTO
+  triggers: agenty, Go service, GORM, SQLite, PostgreSQL, Gin route, tool registration, BM25, ParadeDB, FTS5, service pattern, model DTO
   role: specialist
   scope: implementation
   output-format: code
@@ -14,7 +14,7 @@ metadata:
 
 # agenty Project Coding Conventions
 
-agenty is an AI Agent application written in Go 1.26. It consists of a backend service (Gin + GORM + PostgreSQL/ParadeDB) and a CLI client, supporting tool calling, agentic looping, and a skills system.
+agenty is an AI Agent application written in Go 1.26. It consists of a backend service (Gin + GORM + SQLite/PostgreSQL) and a CLI client, supporting tool calling, agentic looping, and a skills system.
 
 ## Hard Rules (Non-Negotiable)
 
@@ -26,6 +26,8 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 6. Use `fmt.Fprintf` instead of `strings.Builder.WriteString()`
 7. GORM `Raw().Rows()` must use `?` placeholders — **never use `$1`/`$2` directly**
 8. JSON field names and JSON tags must use lowerCamelCase for API/tool request and response payloads
+9. Do not use GORM `AutoMigrate`; table definitions live in embedded SQL under `pkg/conn/db`
+10. Persistent GORM model structs should avoid database-specific `gorm` tags; keep schema details in SQL files
 
 ## Detailed Coding Patterns
 
@@ -43,6 +45,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 | `pkg/chat/tools/builtin/` | Built-in tool implementations |
 | `pkg/chat/tools/tool.go` | Tool interface definition and global registry |
 | `pkg/conn/` | DB, HTTP client, SSE, GORM logger |
+| `pkg/conn/db/` | Embedded PostgreSQL/SQLite schema SQL |
 | `pkg/customerrors/` | Business error definitions |
 | `pkg/utils/response/` | Gin unified response helpers |
 | `pkg/utils/safe/` | Safe goroutine launcher |
@@ -58,7 +61,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 | Service layer patterns | `references/service-patterns.md` | Adding/modifying `pkg/services/` |
 | Route patterns | `references/route-patterns.md` | Adding/modifying `pkg/routes/` |
 | Tool patterns | `references/tool-patterns.md` | Adding a new built-in tool |
-| Database patterns | `references/database-patterns.md` | Working with GORM, BM25, or ParadeDB |
+| Database patterns | `references/database-patterns.md` | Working with GORM, schema SQL, BM25, FTS5, sqlite-vector, or ParadeDB |
 
 ## Implementation Checklist
 
@@ -69,6 +72,7 @@ Verify each item when adding new functionality:
 - [ ] JSON tags use lowerCamelCase for API/tool payload fields
 - [ ] `strings.Builder` uses `fmt.Fprintf`, not `sb.WriteString`
 - [ ] GORM `Raw().Rows()` uses `?` placeholders
+- [ ] New persistent tables are added to both `pkg/conn/db/postgres.sql` and `pkg/conn/db/sqlite.sql`
 - [ ] New services are singletons initialized with `sync.Once`, exposing a `GetXxxService()` function
 - [ ] New routes are singletons implementing `RegisterRoutes(*gin.RouterGroup)`
 - [ ] Route responses use `response.OK` / `response.Failed`

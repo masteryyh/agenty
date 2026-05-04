@@ -20,6 +20,11 @@ import (
 	"fmt"
 )
 
+const (
+	DatabaseTypePostgres = "postgres"
+	DatabaseTypeSQLite   = "sqlite"
+)
+
 // MCPConfig holds runtime parameters for MCP client connections
 type MCPConfig struct {
 	HealthCheckInterval int `mapstructure:"healthCheckInterval"`
@@ -91,8 +96,10 @@ type AuthConfig struct {
 	Password string `mapstructure:"password"`
 }
 
-// DatabaseConfig is the config definition for database connection, only postgresql is supported for now
+// DatabaseConfig is the config definition for database connection.
 type DatabaseConfig struct {
+	Type string `mapstructure:"type"`
+
 	// Host of the database server
 	Host string `mapstructure:"host"`
 
@@ -107,9 +114,21 @@ type DatabaseConfig struct {
 
 	// Database name
 	Database string `mapstructure:"database"`
+
+	SQLiteVectorExtensionPath string `mapstructure:"sqliteVectorExtensionPath"`
 }
 
 func (c *DatabaseConfig) Validate() error {
+	if c.Type == "" {
+		c.Type = DatabaseTypeSQLite
+	}
+	switch c.Type {
+	case DatabaseTypeSQLite:
+		return nil
+	case DatabaseTypePostgres:
+	default:
+		return fmt.Errorf("unsupported database type: %s", c.Type)
+	}
 	if c.Host == "" {
 		c.Host = "127.0.0.1"
 	}

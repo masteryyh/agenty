@@ -36,17 +36,17 @@ const (
 )
 
 type ChatMessage struct {
-	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	SessionID         uuid.UUID      `gorm:"type:uuid;not null"`
-	AgentID           uuid.UUID      `gorm:"type:uuid;not null"`
-	Role              MessageRole    `gorm:"type:varchar(50);not null"`
-	Content           string         `gorm:"type:text"`
-	ToolCalls         datatypes.JSON `gorm:"type:jsonb"`
-	ToolResults       datatypes.JSON `gorm:"type:jsonb"`
-	ModelID           uuid.UUID      `gorm:"type:uuid"`
-	ReasoningContent  string         `gorm:"type:text"`
-	ProviderSpecifics datatypes.JSON `gorm:"type:jsonb"`
-	CreatedAt         time.Time      `gorm:"autoCreateTime:milli"`
+	ID                uuid.UUID
+	SessionID         uuid.UUID
+	AgentID           uuid.UUID
+	Role              MessageRole
+	Content           string
+	ToolCalls         datatypes.JSON
+	ToolResults       datatypes.JSON
+	ModelID           uuid.UUID
+	ReasoningContent  string
+	ProviderSpecifics datatypes.JSON
+	CreatedAt         time.Time
 	DeletedAt         *time.Time
 }
 

@@ -9,7 +9,8 @@
             "program": "${workspaceFolder}/cmd/main.go",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "args": ["--daemon"]
+            "args": ["--daemon"],
+            "buildFlags": ["-tags=fts5"]
         },
         {
             "name": "Launch agenty in local mode",
@@ -18,7 +19,8 @@
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/main.go",
             "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "buildFlags": ["-tags=fts5"]
         },
         {
             "name": "Launch agenty in client mode",
@@ -28,7 +30,7 @@
             "program": "${workspaceFolder}/cmd/main.go",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "args": ["--config", "agenty-local.yaml"]
+            "args": ["--config", "agenty-client.yaml"]
         }
     ]
 }

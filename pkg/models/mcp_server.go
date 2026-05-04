@@ -33,17 +33,17 @@ const (
 )
 
 type MCPServer struct {
-	ID        uuid.UUID        `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	Name      string           `gorm:"type:varchar(255);not null;uniqueIndex:idx_mcp_servers_name,where:deleted_at IS NULL"`
-	Transport MCPTransportType `gorm:"type:varchar(50);not null"`
-	Enabled   bool             `gorm:"not null;default:true"`
-	Command   string           `gorm:"type:varchar(512)"`
-	Args      datatypes.JSON   `gorm:"type:jsonb"`
-	Env       datatypes.JSON   `gorm:"type:jsonb"`
-	URL       string           `gorm:"type:varchar(512)"`
-	Headers   datatypes.JSON   `gorm:"type:jsonb"`
-	CreatedAt time.Time        `gorm:"autoCreateTime"`
-	UpdatedAt time.Time        `gorm:"autoUpdateTime"`
+	ID        uuid.UUID
+	Name      string
+	Transport MCPTransportType
+	Enabled   bool
+	Command   string
+	Args      datatypes.JSON
+	Env       datatypes.JSON
+	URL       string
+	Headers   datatypes.JSON
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
 
