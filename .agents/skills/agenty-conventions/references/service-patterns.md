@@ -109,42 +109,29 @@ rows, err := s.db.WithContext(ctx).Raw(`
 .Raw(sql, query, query, limit)
 ```
 
-### `Exec()` Can Use `$N`
+### `Exec()` Also Uses `?`
 
-`Exec()` passes SQL directly to the pgx driver, so `$N` works correctly:
+Keep `Exec()` placeholders backend-neutral:
 
 ```go
-// ✅ $N works fine with Exec
-deleteSQL := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = $1`, tableName)
+deleteSQL := fmt.Sprintf(`DELETE FROM %s WHERE skill_md_path = ?`, tableName)
 s.db.WithContext(ctx).Exec(deleteSQL, skillMDPath)
 
 upsertSQL := fmt.Sprintf(`
     INSERT INTO %s (id, name, path)
-    VALUES (uuidv7(), $1, $2)
+    VALUES (?, ?, ?)
     ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name
 `, tableName)
-s.db.WithContext(ctx).Exec(upsertSQL, name, path)
+s.db.WithContext(ctx).Exec(upsertSQL, id, name, path)
 ```
 
-## ParadeDB BM25 Search
+## BM25 Search
 
-### Index Creation (After AutoMigrate in `pkg/conn/db.go`)
+PostgreSQL uses ParadeDB. SQLite uses FTS5 virtual tables plus `bm25(...)`. Branch on `usingSQLite()` when writing raw search SQL.
 
-```go
-// Static global table index
-dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_skills_bm25
-    ON skills
-    USING bm25 (id, name, description)
-    WITH (key_field = 'id')`)
+### Index Creation
 
-// Dynamic session table index
-createIndexSQL := fmt.Sprintf(`
-    CREATE INDEX IF NOT EXISTS idx_%s_bm25
-    ON %s
-    USING bm25 (id, name, description)
-    WITH (key_field = 'id')
-`, indexSuffix, tableName)
-```
+Static schema belongs in `pkg/conn/db/postgres.sql` and `pkg/conn/db/sqlite.sql`, not `AutoMigrate`. Dynamic session skill tables create their backend-specific search structures in `SkillService`.
 
 ### BM25 Search Query (Use `?` + Repeated Arguments)
 

@@ -32,17 +32,17 @@ const (
 )
 
 type SystemSettings struct {
-	ID                        uuid.UUID         `gorm:"type:uuid;primaryKey"`
-	Initialized               bool              `gorm:"not null;default:false"`
-	EmbeddingModelID          *uuid.UUID        `gorm:"type:uuid"`
-	ContextCompressionModelID *uuid.UUID        `gorm:"type:uuid"`
-	WebSearchProvider         WebSearchProvider `gorm:"type:varchar(50);not null;default:'disabled'"`
-	BraveAPIKey               string            `gorm:"type:varchar(255);not null;default:''"`
-	TavilyAPIKey              string            `gorm:"type:varchar(255);not null;default:''"`
-	FirecrawlAPIKey           string            `gorm:"type:varchar(255);not null;default:''"`
-	FirecrawlBaseURL          string            `gorm:"type:varchar(255);not null;default:'https://api.firecrawl.dev'"`
-	CreatedAt                 time.Time         `gorm:"autoCreateTime:milli"`
-	UpdatedAt                 time.Time         `gorm:"autoUpdateTime:milli"`
+	ID                        uuid.UUID
+	Initialized               bool
+	EmbeddingModelID          *uuid.UUID
+	ContextCompressionModelID *uuid.UUID
+	WebSearchProvider         WebSearchProvider
+	BraveAPIKey               string
+	TavilyAPIKey              string
+	FirecrawlAPIKey           string
+	FirecrawlBaseURL          string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 }
 
 func (SystemSettings) TableName() string {

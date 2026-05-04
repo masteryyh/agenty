@@ -1,0 +1,74 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package models
+
+import (
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+func (m *Agent) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *ChatMessage) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *ChatSession) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *KnowledgeBaseData) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *KnowledgeItem) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *MCPServer) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *Model) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *ModelProvider) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *SessionSkill) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *Skill) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func ensureUUID(id *uuid.UUID) error {
+	if *id != uuid.Nil {
+		return nil
+	}
+	newID, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	*id = newID
+	return nil
+}

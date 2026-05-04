@@ -213,14 +213,14 @@ func (s *ProviderService) DeleteProvider(ctx context.Context, providerID uuid.UU
 			}
 			if _, err := gorm.G[models.Model](tx).
 				Where("provider_id = ? AND deleted_at IS NULL", providerID).
-				Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+				Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 				return fmt.Errorf("failed to delete models under provider: %w", err)
 			}
 		}
 
 		if _, err := gorm.G[models.ModelProvider](tx).
 			Where("id = ? AND deleted_at IS NULL", providerID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			return fmt.Errorf("failed to delete provider: %w", err)
 		}
 		return nil

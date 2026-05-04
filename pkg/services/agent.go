@@ -335,19 +335,19 @@ func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, err := gorm.G[models.ChatMessage](tx).
 			Where("agent_id = ? AND deleted_at IS NULL", agentID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			return err
 		}
 
 		if _, err := gorm.G[models.ChatSession](tx).
 			Where("agent_id = ? AND deleted_at IS NULL", agentID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			return err
 		}
 
 		if _, err := gorm.G[models.KnowledgeItem](tx).
 			Where("agent_id = ? AND deleted_at IS NULL", agentID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			return err
 		}
 
@@ -357,7 +357,7 @@ func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 
 		if _, err := gorm.G[models.Agent](tx).
 			Where("id = ? AND deleted_at IS NULL", agentID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			return err
 		}
 		return nil

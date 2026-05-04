@@ -515,7 +515,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error
 
 		if _, err := gorm.G[models.Model](tx).
 			Where("id = ? AND deleted_at IS NULL", modelID).
-			Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+			Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 			slog.ErrorContext(ctx, "failed to delete model", "error", err, "modelId", modelID)
 			return err
 		}

@@ -14,31 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package db
 
-import "strings"
+import (
+	"embed"
+	"fmt"
+)
 
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+//go:embed *.sql
+var schemaFS embed.FS
+
+func Schema(dbType string) (string, error) {
+	switch dbType {
+	case "postgres":
+		return readSchema("postgres.sql")
+	case "sqlite":
+		return readSchema("sqlite.sql")
+	default:
+		return "", fmt.Errorf("unsupported database type: %s", dbType)
 	}
-	return ""
 }
 
-func Truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func readSchema(name string) (string, error) {
+	data, err := schemaFS.ReadFile(name)
+	if err != nil {
+		return "", err
 	}
-	return s[:maxLen] + "..."
-}
-
-func ContainsAny(s string, needles []string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
+	return string(data), nil
 }

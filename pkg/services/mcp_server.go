@@ -295,7 +295,7 @@ func (s *MCPServerService) DeleteMCPServer(ctx context.Context, serverID uuid.UU
 
 	if _, err := gorm.G[models.MCPServer](s.db).
 		Where("id = ? AND deleted_at IS NULL", serverID).
-		Update(ctx, "deleted_at", gorm.Expr("NOW()")); err != nil {
+		Update(ctx, "deleted_at", conn.NowExpr()); err != nil {
 		slog.ErrorContext(ctx, "failed to delete mcp server", "error", err, "server_id", serverID)
 		return err
 	}

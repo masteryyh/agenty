@@ -55,15 +55,17 @@ func (cm *ConfigManager) BindEnvVariables() {
 	cm.vipers.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	envs := map[string]string{
-		"port":            "AGENTY_PORT",
-		"db.host":         "AGENTY_DB_HOST",
-		"db.port":         "AGENTY_DB_PORT",
-		"db.username":     "AGENTY_DB_USERNAME",
-		"db.password":     "AGENTY_DB_PASSWORD",
-		"db.database":     "AGENTY_DB_DATABASE",
-		"server.url":      "AGENTY_SERVER_URL",
-		"server.username": "AGENTY_SERVER_USERNAME",
-		"server.password": "AGENTY_SERVER_PASSWORD",
+		"port":                         "AGENTY_PORT",
+		"db.type":                      "AGENTY_DB_TYPE",
+		"db.host":                      "AGENTY_DB_HOST",
+		"db.port":                      "AGENTY_DB_PORT",
+		"db.username":                  "AGENTY_DB_USERNAME",
+		"db.password":                  "AGENTY_DB_PASSWORD",
+		"db.database":                  "AGENTY_DB_DATABASE",
+		"db.sqliteVectorExtensionPath": "AGENTY_DB_SQLITE_VECTOR_EXTENSION_PATH",
+		"server.url":                   "AGENTY_SERVER_URL",
+		"server.username":              "AGENTY_SERVER_USERNAME",
+		"server.password":              "AGENTY_SERVER_PASSWORD",
 	}
 
 	for key, env := range envs {
@@ -73,6 +75,7 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 func (cm *ConfigManager) SetDefaults() {
 	cm.vipers.SetDefault("port", 8080)
+	cm.vipers.SetDefault("db.type", DatabaseTypeSQLite)
 	cm.vipers.SetDefault("db.host", "localhost")
 	cm.vipers.SetDefault("db.port", 5432)
 	cm.vipers.SetDefault("db.username", "postgres")

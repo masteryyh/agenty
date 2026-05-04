@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pgvector/pgvector-go"
 	"gorm.io/datatypes"
 )
 
@@ -39,17 +38,17 @@ const (
 )
 
 type KnowledgeItem struct {
-	ID              uuid.UUID            `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	AgentID         uuid.UUID            `gorm:"type:uuid;not null;index"`
-	Category        KnowledgeCategory    `gorm:"type:varchar(50);not null;index"`
-	ContentType     KnowledgeContentType `gorm:"type:varchar(50);not null;default:'text'"`
-	Title           string               `gorm:"type:varchar(500)"`
-	Content         string               `gorm:"type:text;not null"`
-	Language        string               `gorm:"type:varchar(20)"`
-	Metadata        datatypes.JSON       `gorm:"type:jsonb"`
-	SourceSessionID *uuid.UUID           `gorm:"type:uuid;uniqueIndex"`
-	CreatedAt       time.Time            `gorm:"autoCreateTime:milli"`
-	UpdatedAt       time.Time            `gorm:"autoUpdateTime:milli"`
+	ID              uuid.UUID
+	AgentID         uuid.UUID
+	Category        KnowledgeCategory
+	ContentType     KnowledgeContentType
+	Title           string
+	Content         string
+	Language        string
+	Metadata        datatypes.JSON
+	SourceSessionID *uuid.UUID
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 	DeletedAt       *time.Time
 }
 
@@ -122,14 +121,14 @@ type CreateKnowledgeItemDto struct {
 }
 
 type KnowledgeBaseData struct {
-	ID            uuid.UUID       `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	ItemID        uuid.UUID       `gorm:"type:uuid;not null;index"`
-	AgentID       uuid.UUID       `gorm:"type:uuid;not null;index"`
-	ChunkIndex    int             `gorm:"not null;default:0"`
-	ChunkContent  string          `gorm:"type:text;not null"`
-	TextEmbedding pgvector.Vector `gorm:"type:vector(1024)"`
-	CreatedAt     time.Time       `gorm:"autoCreateTime:milli"`
-	UpdatedAt     time.Time       `gorm:"autoUpdateTime:milli"`
+	ID            uuid.UUID
+	ItemID        uuid.UUID
+	AgentID       uuid.UUID
+	ChunkIndex    int
+	ChunkContent  string
+	TextEmbedding EmbeddingVector
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (KnowledgeBaseData) TableName() string {

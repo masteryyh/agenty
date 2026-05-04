@@ -14,6 +14,8 @@ const (
 	FileReadMaxSize = 512 * 1024
 
 	WorkspaceSearchMaxFileSize = 512 * 1024
+
+	SQLiteVectorLatestReleaseURL = "https://api.github.com/repos/sqliteai/sqlite-vector/releases/latest"
 )
 
 var (

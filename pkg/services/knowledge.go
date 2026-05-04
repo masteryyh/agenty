@@ -32,7 +32,6 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/chunk"
 	"github.com/masteryyh/agenty/pkg/utils/safe"
-	"github.com/pgvector/pgvector-go"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -301,7 +300,7 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 				AgentID:       item.AgentID,
 				ChunkIndex:    i + j,
 				ChunkContent:  chunkText,
-				TextEmbedding: pgvector.NewVector(vec),
+				TextEmbedding: models.NewEmbeddingVector(vec),
 			})
 		}
 	}
@@ -309,6 +308,11 @@ func (s *KnowledgeService) chunkAndEmbed(ctx context.Context, item *models.Knowl
 	if len(allData) > 0 {
 		if err := s.db.WithContext(ctx).CreateInBatches(&allData, 100).Error; err != nil {
 			return fmt.Errorf("failed to save knowledge chunks: %w", err)
+		}
+		if usingSQLite() {
+			if err := s.db.WithContext(ctx).Exec("SELECT vector_quantize('kb_data', 'text_embedding')").Error; err != nil {
+				return fmt.Errorf("failed to quantize sqlite vector data: %w", err)
+			}
 		}
 	}
 	return nil
@@ -329,6 +333,9 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed query: %w", err)
 	}
+	if usingSQLite() {
+		return s.sqliteVectorSearch(ctx, agentID, embedding, limit)
+	}
 
 	type chunkWithItem struct {
 		models.KnowledgeBaseData
@@ -343,7 +350,7 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 		Joins("JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL").
 		Where("kb_data.agent_id = ?", agentID).
 		Clauses(clause.OrderBy{
-			Expression: clause.Expr{SQL: "kb_data.text_embedding <#> ?", Vars: []any{pgvector.NewVector(embedding)}},
+			Expression: clause.Expr{SQL: "kb_data.text_embedding <#> ?", Vars: []any{models.NewEmbeddingVector(embedding)}},
 		}).
 		Limit(limit).
 		Find(&results).Error; err != nil {
@@ -351,6 +358,50 @@ func (s *KnowledgeService) vectorSearch(ctx context.Context, agentID uuid.UUID, 
 	}
 
 	return lo.Map(results, func(r chunkWithItem, i int) kbRankedItem {
+		return kbRankedItem{
+			chunkID:    r.ID,
+			itemID:     r.ItemID,
+			itemTitle:  r.ItemTitle,
+			category:   r.Category,
+			chunkIndex: r.ChunkIndex,
+			content:    r.ChunkContent,
+			rank:       i + 1,
+		}
+	}), nil
+}
+
+type sqliteChunkWithItem struct {
+	ID           uuid.UUID                `gorm:"column:id"`
+	ItemID       uuid.UUID                `gorm:"column:item_id"`
+	ItemTitle    string                   `gorm:"column:item_title"`
+	Category     models.KnowledgeCategory `gorm:"column:category"`
+	ChunkIndex   int                      `gorm:"column:chunk_index"`
+	ChunkContent string                   `gorm:"column:chunk_content"`
+	Distance     float64                  `gorm:"column:distance"`
+}
+
+func (s *KnowledgeService) sqliteVectorSearch(ctx context.Context, agentID uuid.UUID, embedding []float32, limit int) ([]kbRankedItem, error) {
+	var results []sqliteChunkWithItem
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT kb_data.id,
+		       kb_data.item_id,
+		       knowledge_items.title AS item_title,
+		       knowledge_items.category AS category,
+		       kb_data.chunk_index,
+		       kb_data.chunk_content,
+		       vector_matches.distance AS distance
+		FROM vector_quantize_scan('kb_data', 'text_embedding', ?, ?) AS vector_matches
+		JOIN kb_data ON kb_data.rowid = vector_matches.rowid
+		JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL
+		WHERE kb_data.agent_id = ?
+		ORDER BY vector_matches.distance ASC
+		LIMIT ?
+	`, models.NewEmbeddingVector(embedding), limit, agentID, limit).Scan(&results).Error
+	if err != nil {
+		return nil, fmt.Errorf("kb sqlite vector search failed: %w", err)
+	}
+
+	return lo.Map(results, func(r sqliteChunkWithItem, i int) kbRankedItem {
 		return kbRankedItem{
 			chunkID:    r.ID,
 			itemID:     r.ItemID,
@@ -375,7 +426,29 @@ func (s *KnowledgeService) bm25Search(ctx context.Context, agentID uuid.UUID, qu
 	}
 
 	var results []chunkWithItem
-	err := s.db.WithContext(ctx).Raw(`
+	var err error
+	if usingSQLite() {
+		ftsQuery := sqliteFTSQuery(query)
+		if ftsQuery == "" {
+			return nil, nil
+		}
+		err = s.db.WithContext(ctx).Raw(`
+			SELECT kb_data.id,
+			       kb_data.item_id,
+			       knowledge_items.title AS item_title,
+			       knowledge_items.category AS category,
+			       kb_data.chunk_index,
+			       kb_data.chunk_content,
+			       -bm25(kb_data_fts) AS score
+			FROM kb_data_fts
+			JOIN kb_data ON kb_data.id = kb_data_fts.id
+			JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL
+			WHERE kb_data.agent_id = ? AND kb_data_fts MATCH ?
+			ORDER BY bm25(kb_data_fts) ASC
+			LIMIT ?
+		`, agentID, ftsQuery, limit).Scan(&results).Error
+	} else {
+		err = s.db.WithContext(ctx).Raw(`
 		SELECT kb_data.id,
 		       kb_data.item_id,
 		       knowledge_items.title AS item_title,
@@ -389,6 +462,7 @@ func (s *KnowledgeService) bm25Search(ctx context.Context, agentID uuid.UUID, qu
 		ORDER BY score DESC
 		LIMIT ?
 	`, agentID, query, limit).Scan(&results).Error
+	}
 	if err != nil {
 		return nil, fmt.Errorf("kb bm25 search failed: %w", err)
 	}
@@ -428,9 +502,9 @@ func (s *KnowledgeService) keywordSearch(ctx context.Context, agentID uuid.UUID,
 		Joins("JOIN knowledge_items ON knowledge_items.id = kb_data.item_id AND knowledge_items.deleted_at IS NULL").
 		Where("kb_data.agent_id = ?", agentID)
 
-	orConditions := s.db.Where("kb_data.chunk_content ILIKE ?", patterns[0])
+	orConditions := s.db.Where("LOWER(kb_data.chunk_content) LIKE LOWER(?)", patterns[0])
 	for _, p := range patterns[1:] {
-		orConditions = orConditions.Or("kb_data.chunk_content ILIKE ?", p)
+		orConditions = orConditions.Or("LOWER(kb_data.chunk_content) LIKE LOWER(?)", p)
 	}
 	tx = tx.Where(orConditions).Order("kb_data.created_at DESC")
 

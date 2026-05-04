@@ -7,12 +7,12 @@ import (
 )
 
 type Agent struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuidv7()"`
-	Name      string    `gorm:"type:varchar(255);not null"`
-	Soul      string    `gorm:"type:text;not null"`
-	IsDefault bool      `gorm:"type:boolean;default:false"`
-	CreatedAt time.Time `gorm:"autoCreateTime:milli"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime:milli"`
+	ID        uuid.UUID
+	Name      string
+	Soul      string
+	IsDefault bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
 
@@ -32,9 +32,9 @@ func (a *Agent) ToDto() *AgentDto {
 }
 
 type AgentModel struct {
-	AgentID   uuid.UUID `gorm:"type:uuid;primaryKey"`
-	ModelID   uuid.UUID `gorm:"type:uuid;primaryKey"`
-	SortOrder int       `gorm:"not null;default:0"`
+	AgentID   uuid.UUID
+	ModelID   uuid.UUID
+	SortOrder int
 }
 
 func (AgentModel) TableName() string {
