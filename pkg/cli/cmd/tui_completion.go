@@ -50,13 +50,13 @@ func (c *completionModel) height() int {
 	return n
 }
 
-func (c *completionModel) handleTab(inputValue string, b backend.Backend, modelID uuid.UUID) (newInput string, inputChanged bool, cmd tea.Cmd) {
+func (c *completionModel) handleTab(inputValue string, b backend.Backend, modelID uuid.UUID, localMode bool) (newInput string, inputChanged bool, cmd tea.Cmd) {
 	if strings.HasPrefix(inputValue, "/") {
 		spaceIdx := strings.Index(inputValue, " ")
 		if spaceIdx > 0 {
 			cmdName := strings.ToLower(strings.TrimSpace(inputValue[:spaceIdx]))
 			argPrefix := inputValue[spaceIdx+1:]
-			found := findCommand(cmdName)
+			found := findCommand(cmdName, localMode)
 			if found != nil && len(found.Args) > 0 {
 				c.mode = completeArgMode
 				if c.argCmd != found || len(c.allArgs) == 0 {
@@ -114,7 +114,7 @@ func (c *completionModel) handleTab(inputValue string, b backend.Backend, modelI
 		return "", false, nil
 	}
 
-	c.recompute(inputValue)
+	c.recompute(inputValue, localMode)
 	switch len(c.items) {
 	case 0:
 		c.visible = false
@@ -164,7 +164,7 @@ func (c *completionModel) handleArgMsg(msg argCompletionMsg) {
 	}
 }
 
-func (c *completionModel) updateLive(inputValue string) {
+func (c *completionModel) updateLive(inputValue string, localMode bool) {
 	if !strings.HasPrefix(inputValue, "/") {
 		c.mode = completeCmdMode
 		c.argCmd = nil
@@ -176,7 +176,7 @@ func (c *completionModel) updateLive(inputValue string) {
 	spaceIdx := strings.Index(inputValue, " ")
 	if spaceIdx > 0 {
 		cmdName := strings.ToLower(strings.TrimSpace(inputValue[:spaceIdx]))
-		found := findCommand(cmdName)
+		found := findCommand(cmdName, localMode)
 		if found != nil && len(found.Args) > 0 && c.argCmd == found && len(c.allArgs) > 0 {
 			argPrefix := inputValue[spaceIdx+1:]
 			c.items = filterByPrefix(c.allArgs, argPrefix)
@@ -193,7 +193,7 @@ func (c *completionModel) updateLive(inputValue string) {
 		c.mode = completeCmdMode
 		c.argCmd = nil
 		c.allArgs = nil
-		c.recompute(inputValue)
+		c.recompute(inputValue, localMode)
 		if len(c.items) > 0 {
 			c.visible = true
 			c.idx = 0
@@ -206,11 +206,11 @@ func (c *completionModel) updateLive(inputValue string) {
 	c.visible = false
 }
 
-func (c *completionModel) recompute(inputValue string) {
+func (c *completionModel) recompute(inputValue string, localMode bool) {
 	input := strings.ToLower(strings.TrimSpace(inputValue))
 	c.items = nil
 	for _, cmd := range commands {
-		if strings.HasPrefix(strings.ToLower(cmd.Name), input) {
+		if commandVisible(cmd, localMode) && strings.HasPrefix(strings.ToLower(cmd.Name), input) {
 			c.items = append(c.items, cmd.Name)
 		}
 	}
@@ -246,7 +246,7 @@ func (c *completionModel) render() string {
 				buf.WriteString(styleModelInfo.Render("  " + item))
 			}
 		} else {
-			cmd := findCommand(item)
+			cmd := findCommand(item, true)
 			argsRef := ""
 			desc := ""
 			if cmd != nil {

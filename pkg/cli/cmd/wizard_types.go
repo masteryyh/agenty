@@ -16,10 +16,7 @@ limitations under the License.
 
 package cmd
 
-import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/masteryyh/agenty/pkg/models"
-)
+import "github.com/masteryyh/agenty/pkg/models"
 
 type wizStep int
 
@@ -59,43 +56,6 @@ var wizWSProviders = []wizWSEntry{
 	{"Firecrawl", models.WebSearchProviderFirecrawl},
 }
 
-// wizNav is a value-type navigation cursor for list steps.
-// pos is the current position; max is the inclusive upper bound.
-type wizNav struct {
-	pos int
-	max int
-}
+type wizNav = selectionModel
 
-func newWizNav(max int) wizNav { return wizNav{max: max} }
-
-func (n wizNav) Up() wizNav {
-	if n.pos > 0 {
-		n.pos--
-	}
-	return n
-}
-
-func (n wizNav) Down() wizNav {
-	if n.pos < n.max {
-		n.pos++
-	}
-	return n
-}
-
-// HandleNavKey moves the cursor on ↑/↓/k/j. Returns (updated nav, consumed).
-func (n wizNav) HandleNavKey(msg tea.KeyMsg) (wizNav, bool) {
-	switch msg.Type {
-	case tea.KeyUp:
-		return n.Up(), true
-	case tea.KeyDown:
-		return n.Down(), true
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "k":
-			return n.Up(), true
-		case "j":
-			return n.Down(), true
-		}
-	}
-	return n, false
-}
+func newWizNav(max int) wizNav { return newSelectionModel(max) }

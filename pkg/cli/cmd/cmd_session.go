@@ -18,6 +18,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -38,6 +40,21 @@ func handleNewCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 	bridge.Printf("  %s  %s\n", styleGray.Render("Session"), styleGray.Render(session.ID.String()[:8]+"…  (new)"))
 	bridge.Printf("  %s\n", styleGray.Render(fmt.Sprintf("Type %s for commands  ·  %s to quit",
 		styleWhite.Render("/help"), styleWhite.Render("/exit"))))
+
+	if state.LocalMode {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			var agentsMD *string
+			for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+				candidate := filepath.Join(cwd, name)
+				if data, readErr := os.ReadFile(candidate); readErr == nil {
+					content := string(data)
+					agentsMD = &content
+					break
+				}
+			}
+			_ = b.SetSessionCwd(session.ID, &cwd, agentsMD)
+		}
+	}
 
 	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
 }

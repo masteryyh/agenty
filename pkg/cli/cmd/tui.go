@@ -24,7 +24,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -81,14 +83,6 @@ const (
 	completeArgMode
 )
 
-type spinTickMsg time.Time
-
-func tickCmd() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg {
-		return spinTickMsg(t)
-	})
-}
-
 type chatModel struct {
 	backend   backend.Backend
 	bridge    *UIBridge
@@ -117,6 +111,8 @@ type chatModel struct {
 
 	stream     streamModel
 	completion completionModel
+	spinner    spinner.Model
+	help       help.Model
 
 	pendingHistory bool
 
@@ -129,7 +125,7 @@ type chatModel struct {
 
 const maxInputLines = 5
 
-func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto) chatModel {
+func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, isLocal bool) chatModel {
 	ta := textarea.New()
 	ta.Prompt = "  "
 	ta.Placeholder = "Type a message or /help for commands..."
@@ -154,6 +150,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 	historyContent := renderMessageHistoryToString(messages, false)
 
 	defaultState := defaultChatState(b, modelID)
+	defaultState.LocalMode = isLocal
 	m := chatModel{
 		backend:      b,
 		bridge:       bridge,
@@ -169,6 +166,8 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		outputLog:    new(strings.Builder),
 		lastMessages: messages,
 		stream:       newStreamModel(),
+		spinner:      newSpinnerModel(),
+		help:         newHelpModel(),
 	}
 
 	bannerLine := renderBannerCard()
@@ -193,6 +192,20 @@ func defaultChatState(b backend.Backend, modelID uuid.UUID) ChatState {
 		}
 	}
 	return ChatState{Thinking: true, ThinkingLevel: level}
+}
+
+func newSpinnerModel() spinner.Model {
+	return spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styleSpinner))
+}
+
+func newHelpModel() help.Model {
+	h := help.New()
+	h.ShortSeparator = " · "
+	h.Styles.ShortKey = styleHintMuted
+	h.Styles.ShortDesc = styleHintMuted
+	h.Styles.ShortSeparator = styleHintMuted
+	h.Styles.Ellipsis = styleHintMuted
+	return h
 }
 
 func (m chatModel) Init() tea.Cmd {
@@ -248,6 +261,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		SetRenderWidth(msg.Width)
+		m.help.Width = msg.Width
 		m.input.SetWidth(m.width - 4)
 		vpHeight := m.calcViewportHeight()
 		if !m.ready {
@@ -279,6 +293,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenConsumed = msg.tokenConsumed
 		m.lastMessages = msg.messages
 		m.pendingHistory = false
+		m.stream.close()
 		m.chatLog.Reset()
 		m.chatLog.WriteString(m.bannerContent)
 		if len(msg.messages) > 0 {
@@ -292,7 +307,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req := msg.request
 		switch req.kind {
 		case overlayKindList:
-			o := newListOverlay(req.title, req.items, req.hints, req.responseCh)
+			o := newListOverlay(req.title, req.items, req.hints, req.cursor, req.responseCh)
 			o.subtitle = req.subtitle
 			m.overlay = o
 		case overlayKindMultiSelect:
@@ -353,6 +368,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamEventMsg:
 		if msg.event.Type == providers.EventModelSwitch {
+			m.stream.resetAttempt()
 			if id, err := uuid.Parse(msg.event.ModelID); err == nil {
 				m.modelID = id
 			}
@@ -363,19 +379,24 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.stream.waitForEvent()
 		}
 		m.stream.handleEvent(msg.event, m.modelName)
+		if msg.event.Type == providers.EventDone {
+			m.stream.finish()
+		}
 		m.refreshViewport()
 		return m, m.stream.waitForEvent()
 
 	case streamDoneMsg:
-		m.stream.active = false
-		content := m.stream.finalize(m.showReasoning)
-		m.chatLog.WriteString(content)
-		m.refreshViewport()
 		if msg.err != nil {
+			content := m.stream.finalize(m.showReasoning)
+			m.stream.close()
+			m.chatLog.WriteString(content)
+			m.refreshViewport()
 			m.appendToChatLog(renderErrorMessage(msg.err.Error()))
 			m.refreshViewport()
 			return m, m.fetchTokenCount()
 		}
+		m.stream.finish()
+		m.refreshViewport()
 		m.pendingHistory = true
 		return m, m.fetchAndRefreshHistory()
 
@@ -387,11 +408,11 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayout()
 		return m, nil
 
-	case spinTickMsg:
-		if m.stream.active {
-			m.stream.spinIdx = (m.stream.spinIdx + 1) % len(spinnerFrames)
-			m.stream.tickCount++
-			return m, tickCmd()
+	case spinner.TickMsg:
+		if m.stream.showIndicator {
+			var spinCmd tea.Cmd
+			m.spinner, spinCmd = m.spinner.Update(msg)
+			return m, spinCmd
 		}
 		return m, nil
 
@@ -518,8 +539,8 @@ func (m chatModel) renderTopSeparator() string {
 		leftWidth = 0
 	}
 
-	if m.stream.active && m.stream.phrase != "" {
-		frame := styleSpinner.Render(spinnerFrames[m.stream.spinIdx%len(spinnerFrames)])
+	if m.stream.showIndicator && m.stream.phrase != "" {
+		frame := m.spinner.View()
 		phrase := styleSpinTxt.Render(m.stream.phrase)
 		indicator := frame + " " + phrase
 		indicatorWidth := lipgloss.Width(indicator)
@@ -542,14 +563,14 @@ func (m chatModel) renderBottomSeparator() string {
 func (m chatModel) renderHintsLine() string {
 	var leftItems []string
 	leftItems = append(leftItems, styleGray.Render(fmt.Sprintf("tokens: %d", m.tokenConsumed)))
-	if m.stream.active {
+	if m.stream.showIndicator {
 		leftItems = append(leftItems, styleStreaming.Render("streaming..."))
 	}
 
 	sepStr := styleHintMuted.Render(" · ")
 	leftStr := "  " + strings.Join(leftItems, sepStr)
 
-	rightStr := styleHintMuted.Render("/help · alt+↵ newline · ctrl+r thinking  ")
+	rightStr := m.renderShortHelp()
 
 	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(rightStr)
 	if gap < 0 {
@@ -559,9 +580,19 @@ func (m chatModel) renderHintsLine() string {
 	return leftStr + strings.Repeat(" ", gap) + rightStr
 }
 
-func findCommand(name string) *Command {
+func (m chatModel) renderShortHelp() string {
+	bindings := []key.Binding{
+		key.NewBinding(key.WithKeys("/help"), key.WithHelp("/help", "commands")),
+		key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+↵", "newline")),
+		key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "thinking")),
+	}
+	bindings[1].SetEnabled(!m.stream.busy())
+	return m.help.ShortHelpView(bindings) + "  "
+}
+
+func findCommand(name string, localMode bool) *Command {
 	for i := range commands {
-		if commands[i].Name == name {
+		if commandVisible(commands[i], localMode) && commands[i].Name == name {
 			return &commands[i]
 		}
 	}
@@ -569,14 +600,7 @@ func findCommand(name string) *Command {
 }
 
 func (m *chatModel) calcViewportHeight() int {
-	inputH := m.input.LineCount()
-	if inputH < 1 {
-		inputH = 1
-	}
-	if inputH > maxInputLines {
-		inputH = maxInputLines
-	}
-
+	inputH := clampInputHeight(m.input.LineCount())
 	completionsH := m.completion.height()
 
 	h := m.height - 1 - inputH - completionsH - 1 - 1
@@ -584,6 +608,17 @@ func (m *chatModel) calcViewportHeight() int {
 		h = 1
 	}
 	return h
+}
+
+func clampInputHeight(lineCount int) int {
+	return min(max(lineCount, 1), maxInputLines)
+}
+
+func (m *chatModel) syncInputHeight() {
+	newH := clampInputHeight(m.input.LineCount())
+	if m.input.Height() != newH {
+		m.input.SetHeight(newH)
+	}
 }
 
 func (m *chatModel) updateLayout() {
@@ -641,7 +676,7 @@ func (m *chatModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		newInput, changed, cmd := m.completion.handleTab(m.input.Value(), m.backend, m.modelID)
+		newInput, changed, cmd := m.completion.handleTab(m.input.Value(), m.backend, m.modelID, m.chatState.LocalMode)
 		if changed {
 			m.input.SetValue(newInput)
 			m.input.CursorEnd()
@@ -661,16 +696,7 @@ func (m *chatModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Alt {
 			var taCmd tea.Cmd
 			m.input, taCmd = m.input.Update(msg)
-			newH := m.input.LineCount()
-			if newH < 1 {
-				newH = 1
-			}
-			if newH > maxInputLines {
-				newH = maxInputLines
-			}
-			if m.input.Height() != newH {
-				m.input.SetHeight(newH)
-			}
+			m.syncInputHeight()
 			m.updateLayout()
 			return m, taCmd
 		}
@@ -682,7 +708,7 @@ func (m *chatModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleSlashInput(selected)
 		}
 
-		if m.stream.active {
+		if m.stream.busy() {
 			return m, nil
 		}
 
@@ -703,25 +729,15 @@ func (m *chatModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleChatInput(input)
 	}
 
-	if m.stream.active {
+	if m.stream.busy() {
 		return m, nil
 	}
 
 	var taCmd tea.Cmd
 	m.input, taCmd = m.input.Update(msg)
 
-	m.completion.updateLive(m.input.Value())
-
-	newH := m.input.LineCount()
-	if newH < 1 {
-		newH = 1
-	}
-	if newH > maxInputLines {
-		newH = maxInputLines
-	}
-	if m.input.Height() != newH {
-		m.input.SetHeight(newH)
-	}
+	m.completion.updateLive(m.input.Value(), m.chatState.LocalMode)
+	m.syncInputHeight()
 	m.updateLayout()
 
 	return m, taCmd
@@ -733,17 +749,6 @@ func (m *chatModel) handleSlashInput(input string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	command := strings.ToLower(parts[0])
-
-	switch command {
-	case "/exit":
-		return m, tea.Quit
-	case "/help":
-		m.appendToChatLog(renderCommandHintsToString())
-		m.refreshViewport()
-		return m, nil
-	}
-
 	return m.execInteractiveCommand(input)
 }
 
@@ -752,9 +757,10 @@ func (m *chatModel) execInteractiveCommand(input string) (tea.Model, tea.Cmd) {
 	command := strings.ToLower(parts[0])
 	args := parts[1:]
 
-	handler, ok := commandRegistry[command]
-	if !ok {
-		m.appendToChatLog(renderMatchingCommandHints(input))
+	cmdSpec := findCommand(command, m.chatState.LocalMode)
+	handler := commandHandler(command)
+	if cmdSpec == nil || handler == nil {
+		m.appendToChatLog(renderMatchingCommandHints(input, m.chatState.LocalMode))
 		m.refreshViewport()
 		return m, nil
 	}
@@ -840,25 +846,22 @@ func (m *chatModel) handleChatInput(input string) (tea.Model, tea.Cmd) {
 			m.stream.ch <- evt
 			return nil
 		})
-		close(m.stream.ch)
 		m.stream.doneCh <- err
+		close(m.stream.ch)
 	}()
 
-	return m, tea.Batch(m.stream.waitForEvent(), tickCmd())
+	return m, tea.Batch(m.stream.waitForEvent(), m.spinner.Tick)
 }
 
 func (m *chatModel) toggleReasoning() (tea.Model, tea.Cmd) {
 	m.showReasoning = !m.showReasoning
-	if m.pendingHistory {
-		return m, nil
-	}
-	if len(m.lastMessages) > 0 {
+	if len(m.lastMessages) > 0 && !m.pendingHistory {
 		history := renderMessageHistoryToString(m.lastMessages, m.showReasoning)
 		m.chatLog.Reset()
 		m.chatLog.WriteString(m.bannerContent)
 		m.chatLog.WriteString(history)
-		m.refreshViewport()
 	}
+	m.refreshViewport()
 	return m, nil
 }
 
@@ -893,7 +896,7 @@ func (m *chatModel) viewportContent() string {
 	if m.outputLog.Len() > 0 {
 		content += m.outputLog.String()
 	}
-	if m.stream.active {
+	if m.stream.visible() {
 		content += m.stream.liveContent(m.showReasoning)
 	}
 	return content

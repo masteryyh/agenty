@@ -30,31 +30,6 @@ import (
 )
 
 func startChat(b backend.Backend, isLocal bool) error {
-	if isLocal {
-		registerCommand(
-			Command{Name: "/logs", Description: "View debug logs", Usage: "/logs"},
-			handleLogsCmd,
-		)
-		commandRegistry["/new"] = func(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-			result, err := handleNewCmd(b, bridge, args, sessionID, modelID, agentID, state)
-			if err == nil && result.NewSessionID != uuid.Nil {
-				if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-					var agentsMD *string
-					for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-						candidate := filepath.Join(cwd, name)
-						if data, readErr := os.ReadFile(candidate); readErr == nil {
-							content := string(data)
-							agentsMD = &content
-							break
-						}
-					}
-					_ = b.SetSessionCwd(result.NewSessionID, &cwd, agentsMD)
-				}
-			}
-			return result, err
-		}
-	}
-
 	initialized, err := b.IsInitialized()
 	if err != nil {
 		return fmt.Errorf("failed to check initialization status: %w", err)
@@ -191,7 +166,7 @@ func startChat(b backend.Backend, isLocal bool) error {
 	refreshRenderStyles()
 
 	bridge := newUIBridge()
-	model := newChatModel(b, bridge, sessionID, modelID, agentID, modelInfo, agentName, session.Messages)
+	model := newChatModel(b, bridge, sessionID, modelID, agentID, modelInfo, agentName, session.Messages, isLocal)
 
 	p := tea.NewProgram(
 		model,

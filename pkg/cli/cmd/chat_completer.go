@@ -32,12 +32,15 @@ type Command struct {
 	Name        string
 	Description string
 	Usage       string
+	LocalOnly   bool
+	Hidden      bool
 	Args        []ArgCompleter
 }
 
 var commands = []Command{
 	{Name: "/new", Description: "Start a new chat session", Usage: "/new"},
 	{Name: "/status", Description: "Show current session status", Usage: "/status"},
+	{Name: "/history", Description: "Print current session history", Usage: "/history"},
 	{
 		Name:        "/model",
 		Description: "Manage and switch models",
@@ -51,7 +54,7 @@ var commands = []Command{
 				}
 				names := make([]string, 0, len(result.Data))
 				for _, m := range result.Data {
-					if m.Provider != nil && !m.EmbeddingModel {
+					if modelSwitchable(m) {
 						names = append(names, m.Provider.Name+"/"+m.Name)
 					}
 				}
@@ -120,11 +123,12 @@ var commands = []Command{
 			},
 		}},
 	},
+	{Name: "/logs", Description: "View debug logs", Usage: "/logs", LocalOnly: true},
 	{Name: "/help", Description: "Show available commands", Usage: "/help"},
 	{Name: "/exit", Description: "Quit the chat", Usage: "/exit"},
 }
 
-func matchingCommands(input string) []Command {
+func matchingCommands(input string, localMode bool) []Command {
 	trimmed := strings.ToLower(strings.TrimSpace(input))
 	if trimmed == "" || !strings.HasPrefix(trimmed, "/") {
 		return nil
@@ -132,7 +136,7 @@ func matchingCommands(input string) []Command {
 
 	matches := make([]Command, 0, len(commands))
 	for _, cmd := range commands {
-		if strings.HasPrefix(strings.ToLower(cmd.Name), trimmed) {
+		if commandVisible(cmd, localMode) && strings.HasPrefix(strings.ToLower(cmd.Name), trimmed) {
 			matches = append(matches, cmd)
 		}
 	}
@@ -152,4 +156,8 @@ func filterByPrefix(items []string, prefix string) []string {
 		}
 	}
 	return result
+}
+
+func commandVisible(cmd Command, localMode bool) bool {
+	return !cmd.Hidden && (!cmd.LocalOnly || localMode)
 }
