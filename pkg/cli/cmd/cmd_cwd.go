@@ -27,6 +27,23 @@ import (
 )
 
 func handleCwdCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if !state.LocalMode {
+		if len(args) > 0 {
+			bridge.Error("/cwd is only available in local mode. Remote sessions run tools on the daemon host, so client paths cannot be applied safely.")
+			return CommandResult{Handled: true}, nil
+		}
+		session, err := b.GetSession(sessionID)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to get session: %w", err)
+		}
+		if session.Cwd == nil {
+			bridge.Info("No remote working directory is set for this session.")
+		} else {
+			bridge.Info("Remote working directory: %s", styleGreen.Render(*session.Cwd))
+		}
+		return CommandResult{Handled: true}, nil
+	}
+
 	if len(args) == 0 {
 		session, err := b.GetSession(sessionID)
 		if err != nil {

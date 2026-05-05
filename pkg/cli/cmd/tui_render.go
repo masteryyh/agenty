@@ -25,9 +25,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/masteryyh/agenty/pkg/cli/theme"
 	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/muesli/reflow/ansi"
-	"github.com/muesli/reflow/wordwrap"
-	"github.com/muesli/reflow/wrap"
+	"github.com/masteryyh/agenty/pkg/utils/termwrap"
 )
 
 const contentIndent = "    "
@@ -41,8 +39,7 @@ func SetRenderWidth(w int) {
 }
 
 func stripCR(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.ReplaceAll(s, "\r", "")
+	return termwrap.StripCR(s)
 }
 
 var (
@@ -157,24 +154,17 @@ func renderUserHeader(t time.Time) string {
 }
 
 func renderReasoningContent(reasoning string) string {
-	wrapWidth := max(renderWidth-len(contentIndent)-2, 20)
-	var buf strings.Builder
-	for line := range strings.SplitSeq(reasoning, "\n") {
-		for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
-			if ansi.PrintableRuneWidth(wl) > wrapWidth {
-				for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
-					buf.WriteString(contentIndent)
-					buf.WriteString(styleReasoning.Render(hw))
-					buf.WriteString("\n")
-				}
-			} else {
-				buf.WriteString(contentIndent)
-				buf.WriteString(styleReasoning.Render(wl))
-				buf.WriteString("\n")
-			}
-		}
-	}
-	return buf.String()
+	return renderWrappedLines(reasoning, wrapOptions{
+		Width:  renderWidth - len(contentIndent) - 2,
+		Indent: contentIndent,
+		Style:  styleReasoning,
+	})
+}
+
+type wrapOptions = termwrap.Options
+
+func renderWrappedLines(text string, opts wrapOptions) string {
+	return termwrap.WrapLines(text, opts)
 }
 
 func renderReasoningBlock(reasoning string, show bool) string {
@@ -198,78 +188,19 @@ func renderReasoningBlock(reasoning string, show bool) string {
 func renderContentBlock(content string) string {
 	content = stripCR(content)
 	rendered := renderMarkdown(content)
-
-	maxW := max(renderWidth-len(contentIndent), 20)
-
-	var buf strings.Builder
-	for line := range strings.SplitSeq(rendered, "\n") {
-		stripped := trimLeadingVisibleSpaces(line, 2)
-		// Word-level wrap first (preserves English word boundaries, handles spacing).
-		for wl := range strings.SplitSeq(wordwrap.String(stripped, maxW), "\n") {
-			if ansi.PrintableRuneWidth(wl) > maxW {
-				// Fallback to character-level hard wrap for CJK text, long URLs,
-				// or any other token that wordwrap could not break.
-				for hw := range strings.SplitSeq(wrap.String(wl, maxW), "\n") {
-					buf.WriteString(contentIndent)
-					buf.WriteString(hw)
-					buf.WriteString("\n")
-				}
-			} else {
-				buf.WriteString(contentIndent)
-				buf.WriteString(wl)
-				buf.WriteString("\n")
-			}
-		}
-	}
-	return buf.String()
-}
-
-// trimLeadingVisibleSpaces strips up to n leading visible (non-ANSI) spaces from s,
-// preserving any ANSI escape sequences encountered before or between those spaces.
-func trimLeadingVisibleSpaces(s string, n int) string {
-	stripped := 0
-	var kept strings.Builder
-	i := 0
-	for i < len(s) && stripped < n {
-		if s[i] == '\033' && i+1 < len(s) && s[i+1] == '[' {
-			// CSI sequence: \033[ ... <final byte 0x40-0x7E>
-			j := i + 2
-			for j < len(s) && !(s[j] >= 0x40 && s[j] <= 0x7e) {
-				j++
-			}
-			if j < len(s) {
-				j++ // include final byte
-			}
-			kept.WriteString(s[i:j])
-			i = j
-		} else if s[i] == ' ' {
-			stripped++
-			i++
-		} else {
-			break
-		}
-	}
-	return kept.String() + s[i:]
+	return renderWrappedLines(rendered, wrapOptions{
+		Width:                    renderWidth - len(contentIndent),
+		Indent:                   contentIndent,
+		TrimLeadingVisibleSpaces: 2,
+	})
 }
 
 func renderUserPlainBlock(content string) string {
-	content = stripCR(content)
-	wrapWidth := max(renderWidth-len(contentIndent)-2, 20)
-	var buf strings.Builder
-	for line := range strings.SplitSeq(content, "\n") {
-		for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
-			if ansi.PrintableRuneWidth(wl) > wrapWidth {
-				for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
-					buf.WriteString(styleContent.Render(contentIndent + hw))
-					buf.WriteString("\n")
-				}
-			} else {
-				buf.WriteString(styleContent.Render(contentIndent + wl))
-				buf.WriteString("\n")
-			}
-		}
-	}
-	return buf.String()
+	return renderWrappedLines(content, wrapOptions{
+		Width:  renderWidth - len(contentIndent) - 2,
+		Indent: contentIndent,
+		Style:  styleContent,
+	})
 }
 
 func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[string]*models.ChatMessageDto) string {
@@ -295,10 +226,7 @@ func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[strin
 		summary := renderBuiltinToolCallSummary(tc.Name, tc.Arguments)
 		summaryLine := namePrefix + styleToolName.Render(tc.Name) + "  " + summary
 		summaryWrapW := max(renderWidth-4, 20)
-		for wl := range strings.SplitSeq(wordwrap.String(summaryLine, summaryWrapW), "\n") {
-			buf.WriteString(wl)
-			buf.WriteString("\n")
-		}
+		buf.WriteString(renderWrappedLines(summaryLine, wrapOptions{Width: summaryWrapW}))
 
 		if toolResultMsg, ok := toolResults[tc.ID]; ok {
 			if toolResultMsg.ToolResult.IsError {
@@ -314,19 +242,11 @@ func renderToolExecutionBlock(toolCalls []models.ToolCall, toolResults map[strin
 			resultContent := stripCR(toolResultMsg.ToolResult.Content)
 			lines, moreCount := renderBuiltinToolResultLines(toolResultMsg.ToolResult.Name, resultContent, maxToolResultLines)
 			for _, line := range lines {
-				for wl := range strings.SplitSeq(wordwrap.String(line, wrapWidth), "\n") {
-					if ansi.PrintableRuneWidth(wl) > wrapWidth {
-						for hw := range strings.SplitSeq(wrap.String(wl, wrapWidth), "\n") {
-							buf.WriteString(contPrefix)
-							buf.WriteString(styleToolResult.Render(hw))
-							buf.WriteString("\n")
-						}
-					} else {
-						buf.WriteString(contPrefix)
-						buf.WriteString(styleToolResult.Render(wl))
-						buf.WriteString("\n")
-					}
-				}
+				buf.WriteString(renderWrappedLines(line, wrapOptions{
+					Width:  wrapWidth,
+					Indent: contPrefix,
+					Style:  styleToolResult,
+				}))
 			}
 			if moreCount > 0 {
 				moreLabel := "more results"
@@ -435,7 +355,7 @@ func renderMessageHistoryToString(messages []models.ChatMessageDto, showReasonin
 	return buf.String()
 }
 
-func renderCommandHintsToString() string {
+func renderCommandHintsToString(localMode bool) string {
 	var buf strings.Builder
 	sep := styleSep.Render(strings.Repeat("─", 56))
 
@@ -444,6 +364,9 @@ func renderCommandHintsToString() string {
 		bold.Foreground(theme.Colors.Text).Render("commands"),
 		sep)
 	for _, cmd := range commands {
+		if !commandVisible(cmd, localMode) {
+			continue
+		}
 		usage := styleCyan.Render(fmt.Sprintf("%-24s", cmd.Usage))
 		desc := styleGray.Render(cmd.Description)
 		fmt.Fprintf(&buf, "  %s  %s\n", usage, desc)
@@ -455,9 +378,9 @@ func renderCommandHintsToString() string {
 	return buf.String()
 }
 
-func renderMatchingCommandHints(input string) string {
+func renderMatchingCommandHints(input string, localMode bool) string {
 	trimmed := strings.TrimSpace(input)
-	matches := matchingCommands(trimmed)
+	matches := matchingCommands(trimmed, localMode)
 	if len(matches) == 0 {
 		return fmt.Sprintf("  %s  %s\n",
 			styleSysErr.Render("✗"),
@@ -486,26 +409,7 @@ func renderErrorMessage(text string) string {
 }
 
 func WrapForDisplay(s string) string {
-	w := max(renderWidth-4, 20)
-	var buf strings.Builder
-	for _, line := range strings.Split(s, "\n") {
-		if strings.TrimSpace(line) == "" {
-			buf.WriteString("\n")
-			continue
-		}
-		for wl := range strings.SplitSeq(wordwrap.String(line, w), "\n") {
-			if ansi.PrintableRuneWidth(wl) > w {
-				for hw := range strings.SplitSeq(wrap.String(wl, w), "\n") {
-					buf.WriteString(hw)
-					buf.WriteString("\n")
-				}
-			} else {
-				buf.WriteString(wl)
-				buf.WriteString("\n")
-			}
-		}
-	}
-	return buf.String()
+	return renderWrappedLines(s, wrapOptions{Width: renderWidth - 4})
 }
 
 func refreshRenderStyles() {

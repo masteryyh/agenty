@@ -29,6 +29,7 @@ type ChatState struct {
 	Thinking      bool
 	ThinkingLevel string
 	HistoryOffset int
+	LocalMode     bool
 }
 
 type CommandResult struct {
@@ -44,23 +45,6 @@ type CommandResult struct {
 }
 
 type CommandHandler func(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error)
-
-var commandRegistry = map[string]CommandHandler{
-	"/new":      handleNewCmd,
-	"/status":   handleStatusCmd,
-	"/history":  handleHistoryCmd,
-	"/model":    handleModelCmd,
-	"/think":    handleThinkCmd,
-	"/help":     handleHelpCmd,
-	"/exit":     handleExitCmd,
-	"/agent":    handleAgentCmd,
-	"/provider": handleProviderCmd,
-	"/mcp":      handleMCPCmd,
-	"/settings": handleSettingsCmd,
-	"/memory":   handleMemoryCmd,
-	"/cwd":      handleCwdCmd,
-	"/skill":    handleSkillCmd,
-}
 
 func parseSlashInput(input string) []string {
 	var parts []string
@@ -120,6 +104,9 @@ func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 
 	for _, m := range modelsList.Data {
 		if m.Provider != nil && m.Provider.ID == providerID && strings.EqualFold(m.Name, modelName) {
+			if !modelSwitchable(m) {
+				return uuid.Nil, "", fmt.Errorf("model '%s/%s' is not a configured chat model", m.Provider.Name, m.Name)
+			}
 			return m.ID, fmt.Sprintf("%s/%s", m.Provider.Name, m.Name), nil
 		}
 	}
@@ -129,7 +116,38 @@ func resolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 
 var listHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  Ctrl+D delete  ·  Esc back"
 
-func registerCommand(cmd Command, handler CommandHandler) {
-	commandRegistry[cmd.Name] = handler
-	commands = append(commands, cmd)
+func commandHandler(name string) CommandHandler {
+	switch name {
+	case "/new":
+		return handleNewCmd
+	case "/status":
+		return handleStatusCmd
+	case "/history":
+		return handleHistoryCmd
+	case "/model":
+		return handleModelCmd
+	case "/think":
+		return handleThinkCmd
+	case "/help":
+		return handleHelpCmd
+	case "/exit":
+		return handleExitCmd
+	case "/agent":
+		return handleAgentCmd
+	case "/provider":
+		return handleProviderCmd
+	case "/mcp":
+		return handleMCPCmd
+	case "/settings":
+		return handleSettingsCmd
+	case "/memory":
+		return handleMemoryCmd
+	case "/cwd":
+		return handleCwdCmd
+	case "/skill":
+		return handleSkillCmd
+	case "/logs":
+		return handleLogsCmd
+	}
+	return nil
 }

@@ -22,9 +22,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/muesli/reflow/truncate"
 )
 
 func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
@@ -42,18 +44,11 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 		if err != nil {
 			return CommandResult{Handled: true}, fmt.Errorf("failed to list models: %w", err)
 		}
-
-		var filtered []models.ModelDto
-		for _, mdl := range result.Data {
-			if mdl.Provider != nil && mdl.Provider.APIKeyCensored != "<not set>" && !mdl.EmbeddingModel {
-				filtered = append(filtered, mdl)
-			}
-		}
-		result.Data = filtered
+		result.Data = filterSwitchableModels(result.Data)
 
 		if len(result.Data) == 0 {
-			bridge.Warning("No models from configured providers found")
-			res, err := bridge.ShowList("Models", []string{"(no models)"}, "a add  ·  Esc back")
+			bridge.Warning("No configured chat models found")
+			res, err := bridge.ShowList("Models", []string{"(no configured chat models)"}, "a add  ·  Esc back")
 			if err != nil {
 				return CommandResult{Handled: true}, err
 			}
@@ -66,15 +61,8 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 			return CommandResult{Handled: true}, nil
 		}
 
-		items := make([]string, len(result.Data))
-		for i, m := range result.Data {
-			items[i] = modelLabel(m)
-		}
-
-		legend := styleGreen.Render("●") + styleGray.Render(" default  ") +
-			styleMagenta.Render("●") + styleGray.Render(" preset  ") +
-			styleCyan.Render("●") + styleGray.Render(" light")
-		res, err := bridge.ShowList("Models  "+styleGray.Render("(select to switch)"), items, listHints, legend)
+		items, cursor := renderModelTableRows(result.Data, modelID)
+		res, err := bridge.ShowListWithCursor("Models  "+styleGray.Render("(select chat model to switch)"), items, listHints, cursor, modelTableSubtitle())
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -123,26 +111,83 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 	}
 }
 
-func modelLabel(m models.ModelDto) string {
+func filterSwitchableModels(modelList []models.ModelDto) []models.ModelDto {
+	result := make([]models.ModelDto, 0, len(modelList))
+	for _, m := range modelList {
+		if modelSwitchable(m) {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+func renderModelTableRows(models []models.ModelDto, currentModelID uuid.UUID) ([]string, int) {
+	rows := make([]string, len(models))
+	cursor := -1
+	for i, m := range models {
+		rows[i] = modelTableRow(m, m.ID == currentModelID)
+		if cursor == -1 && m.ID == currentModelID && modelSwitchable(m) {
+			cursor = i
+		}
+	}
+	if cursor == -1 {
+		for i, m := range models {
+			if modelSwitchable(m) {
+				cursor = i
+				break
+			}
+		}
+	}
+	if cursor == -1 {
+		cursor = 0
+	}
+	return rows, cursor
+}
+
+func modelTableSubtitle() string {
+	header := modelTableFormat("Provider", "Model", "Code")
+	return "  " + header + "\n  " + strings.Repeat("─", lipgloss.Width(header))
+}
+
+func modelTableRow(m models.ModelDto, current bool) string {
 	providerName := ""
 	if m.Provider != nil {
 		providerName = m.Provider.Name
 	}
-	var dots []string
-	if m.DefaultModel {
-		dots = append(dots, styleGreen.Render("●"))
+
+	if current {
+		providerName = "* " + providerName
+	} else {
+		providerName = "  " + providerName
 	}
-	if m.IsPreset {
-		dots = append(dots, styleMagenta.Render("●"))
+	return modelTableFormat(providerName, m.Name, m.Code)
+}
+
+func modelTableFormat(provider, name, code string) string {
+	return fmt.Sprintf("%s  %s  %s",
+		modelTableCell(provider, 18),
+		modelTableCell(name, 28),
+		modelTableCell(code, 24),
+	)
+}
+
+func modelTableCell(s string, width int) string {
+	if s == "" {
+		return "-"
 	}
-	if m.Light {
-		dots = append(dots, styleCyan.Render("●"))
+	value := truncate.StringWithTail(s, uint(width), "...")
+	if padding := width - lipgloss.Width(value); padding > 0 {
+		return value + strings.Repeat(" ", padding)
 	}
-	dotStr := ""
-	if len(dots) > 0 {
-		dotStr = " " + strings.Join(dots, "")
-	}
-	return fmt.Sprintf("%s/%s (%s)%s", providerName, m.Name, m.Code, dotStr)
+	return value
+}
+
+func modelSwitchable(m models.ModelDto) bool {
+	return !m.EmbeddingModel && modelProviderConfigured(m)
+}
+
+func modelProviderConfigured(m models.ModelDto) bool {
+	return m.Provider != nil && m.Provider.APIKeyCensored != "<not set>"
 }
 
 func doCreateModel(b backend.Backend, bridge *UIBridge) error {

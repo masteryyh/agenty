@@ -30,47 +30,42 @@ type listOverlay struct {
 	subtitle   string
 	items      []string
 	hints      string
-	cursor     int
-	offset     int
+	selection  selectionModel
 	responseCh chan overlayResponse
 }
 
-func newListOverlay(title string, items []string, hints string, ch chan overlayResponse) *listOverlay {
-	return &listOverlay{title: title, items: items, hints: hints, responseCh: ch}
+func newListOverlay(title string, items []string, hints string, cursor int, ch chan overlayResponse) *listOverlay {
+	return &listOverlay{
+		title:      title,
+		items:      items,
+		hints:      hints,
+		selection:  newSelectionModel(len(items) - 1).withCursor(cursor),
+		responseCh: ch,
+	}
 }
 
 func (l *listOverlay) handleKey(msg tea.KeyMsg) bool {
+	if selection, ok := l.selection.HandleNavKey(msg); ok {
+		l.selection = selection
+		return false
+	}
 	switch msg.Type {
-	case tea.KeyUp:
-		if l.cursor > 0 {
-			l.cursor--
-			if l.cursor < l.offset {
-				l.offset = l.cursor
-			}
-		}
-	case tea.KeyDown:
-		if l.cursor < len(l.items)-1 {
-			l.cursor++
-			if l.cursor >= l.offset+listMaxVisible {
-				l.offset = l.cursor - listMaxVisible + 1
-			}
-		}
 	case tea.KeyEnter:
-		l.responseCh <- overlayResponse{listAction: ListActionSelect, listIndex: l.cursor}
+		l.responseCh <- overlayResponse{listAction: ListActionSelect, listIndex: l.selection.pos}
 		return true
 	case tea.KeyEsc, tea.KeyCtrlC:
 		l.responseCh <- overlayResponse{listAction: ListActionCancel, listIndex: -1}
 		return true
 	case tea.KeyCtrlD:
-		l.responseCh <- overlayResponse{listAction: ListActionDelete, listIndex: l.cursor}
+		l.responseCh <- overlayResponse{listAction: ListActionDelete, listIndex: l.selection.pos}
 		return true
 	case tea.KeyRunes:
 		switch string(msg.Runes) {
 		case "a", "A":
-			l.responseCh <- overlayResponse{listAction: ListActionAdd, listIndex: l.cursor}
+			l.responseCh <- overlayResponse{listAction: ListActionAdd, listIndex: l.selection.pos}
 			return true
 		case "e", "E":
-			l.responseCh <- overlayResponse{listAction: ListActionEdit, listIndex: l.cursor}
+			l.responseCh <- overlayResponse{listAction: ListActionEdit, listIndex: l.selection.pos}
 			return true
 		}
 	}
@@ -83,13 +78,15 @@ func (l *listOverlay) render(width, _ int) string {
 	fmt.Fprintf(&buf, "\n  %s\n", styleBold.Render(l.title))
 	fmt.Fprintf(&buf, "  %s\n", styleGray.Render(strings.Repeat("─", sep)))
 	if l.subtitle != "" {
-		fmt.Fprintf(&buf, "  %s\n", l.subtitle)
+		for line := range strings.SplitSeq(l.subtitle, "\n") {
+			fmt.Fprintf(&buf, "  %s\n", line)
+		}
 	}
 	buf.WriteString("\n")
 
-	end := min(l.offset+listMaxVisible, len(l.items))
-	for i := l.offset; i < end; i++ {
-		if i == l.cursor {
+	end := min(l.selection.offset+listMaxVisible, len(l.items))
+	for i := l.selection.offset; i < end; i++ {
+		if i == l.selection.pos {
 			fmt.Fprintf(&buf, "  %s %s\n", styleCyan.Render("❯"), l.items[i])
 		} else {
 			fmt.Fprintf(&buf, "    %s\n", l.items[i])
@@ -97,7 +94,7 @@ func (l *listOverlay) render(width, _ int) string {
 	}
 
 	if len(l.items) > listMaxVisible {
-		fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(fmt.Sprintf("(%d/%d)", l.cursor+1, len(l.items))))
+		fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(fmt.Sprintf("(%d/%d)", l.selection.pos+1, len(l.items))))
 	}
 	fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(l.hints))
 	return buf.String()
@@ -106,67 +103,30 @@ func (l *listOverlay) render(width, _ int) string {
 type multiSelectOverlay struct {
 	title      string
 	options    []string
-	cursor     int
-	selected   []int
+	selection  selectionModel
 	responseCh chan overlayResponse
 }
 
 func newMultiSelectOverlay(title string, options []string, defaultSelected []int, ch chan overlayResponse) *multiSelectOverlay {
-	selected := make([]int, 0, len(defaultSelected))
-	selected = append(selected, defaultSelected...)
-	return &multiSelectOverlay{title: title, options: options, selected: selected, responseCh: ch}
-}
-
-func (s *multiSelectOverlay) selectionPos(idx int) int {
-	for i, sel := range s.selected {
-		if sel == idx {
-			return i
-		}
-	}
-	return -1
-}
-
-func (s *multiSelectOverlay) toggle(idx int) {
-	for i, sel := range s.selected {
-		if sel == idx {
-			s.selected = append(s.selected[:i], s.selected[i+1:]...)
-			return
-		}
-	}
-	if len(s.selected) >= wizMaxModels {
-		return
-	}
-	s.selected = append(s.selected, idx)
+	selection := newSelectionModel(len(options)-1).withMultiSelect(defaultSelected, wizMaxModels)
+	return &multiSelectOverlay{title: title, options: options, selection: selection, responseCh: ch}
 }
 
 func (s *multiSelectOverlay) handleKey(msg tea.KeyMsg) bool {
+	if selection, ok := s.selection.HandleNavKey(msg); ok {
+		s.selection = selection
+		return false
+	}
 	switch msg.Type {
-	case tea.KeyUp:
-		if s.cursor > 0 {
-			s.cursor--
-		}
-	case tea.KeyDown:
-		if s.cursor < len(s.options)-1 {
-			s.cursor++
-		}
 	case tea.KeyRunes:
-		switch string(msg.Runes) {
-		case "k":
-			if s.cursor > 0 {
-				s.cursor--
-			}
-		case "j":
-			if s.cursor < len(s.options)-1 {
-				s.cursor++
-			}
-		case " ":
-			s.toggle(s.cursor)
+		if string(msg.Runes) == " " {
+			s.selection = s.selection.toggle(s.selection.pos)
 		}
 	case tea.KeySpace:
-		s.toggle(s.cursor)
+		s.selection = s.selection.toggle(s.selection.pos)
 	case tea.KeyEnter:
-		if len(s.selected) > 0 {
-			s.responseCh <- overlayResponse{selectedIndices: s.selected}
+		if len(s.selection.selected) > 0 {
+			s.responseCh <- overlayResponse{selectedIndices: s.selection.selected}
 			return true
 		}
 	case tea.KeyEsc, tea.KeyCtrlC:
@@ -186,9 +146,9 @@ func (s *multiSelectOverlay) render(width, _ int) string {
 	buf.WriteString(fmt.Sprintf("  %s\n\n", styleGray.Render(strings.Repeat("─", sep))))
 
 	for i, opt := range s.options {
-		selPos := s.selectionPos(i)
+		selPos := s.selection.selectionPos(i)
 		cursor := "  "
-		if i == s.cursor {
+		if i == s.selection.pos {
 			cursor = styleCyan.Render("❯") + " "
 		}
 		var badge string
@@ -201,7 +161,7 @@ func (s *multiSelectOverlay) render(width, _ int) string {
 			label = styleWhite.Render(opt)
 		} else {
 			badge = styleGray.Render("○")
-			if i == s.cursor {
+			if i == s.selection.pos {
 				label = styleWhite.Render(opt)
 			} else {
 				label = styleGray.Render(opt)
@@ -211,20 +171,20 @@ func (s *multiSelectOverlay) render(width, _ int) string {
 	}
 
 	buf.WriteString("\n")
-	if len(s.selected) == 0 {
+	if len(s.selection.selected) == 0 {
 		buf.WriteString(fmt.Sprintf("  %s  %s\n", styleYellow.Render("⚠"), styleGray.Render("Select at least one model")))
-	} else if len(s.selected) == 1 {
+	} else if len(s.selection.selected) == 1 {
 		buf.WriteString(fmt.Sprintf("  %s  %s %s  %s\n",
 			styleGreen.Render("✓"),
 			styleYellow.Render("★"),
-			styleWhite.Render(s.options[s.selected[0]]),
+			styleWhite.Render(s.options[s.selection.selected[0]]),
 			styleGray.Render("(primary)")))
 	} else {
 		buf.WriteString(fmt.Sprintf("  %s  %s %s  %s\n",
 			styleGreen.Render("✓"),
 			styleYellow.Render("★"),
-			styleWhite.Render(s.options[s.selected[0]]),
-			styleGray.Render(fmt.Sprintf("+ %d fallback(s)", len(s.selected)-1))))
+			styleWhite.Render(s.options[s.selection.selected[0]]),
+			styleGray.Render(fmt.Sprintf("+ %d fallback(s)", len(s.selection.selected)-1))))
 	}
 
 	buf.WriteString(fmt.Sprintf("\n  %s\n",

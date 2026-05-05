@@ -67,6 +67,8 @@ agentic looping and skills usage capabilities.`,
 			}
 
 			if cfg.IsRemoteMode() {
+				_, cancel := signal.SetupContext()
+				defer cancel()
 				b := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
 				return startChat(b, false)
 			}

@@ -211,10 +211,23 @@ func renderDefaultCallSummary(argsJSON string) string {
 	return styleToolArgs.Render(display)
 }
 
+func shortToolCallID(callID string) string {
+	if callID == "" {
+		return ""
+	}
+	if len(callID) <= 8 {
+		return callID
+	}
+	return callID[:8]
+}
+
 // streamRenderBuiltinToolCallLine renders the complete tool call line for streaming output.
-func streamRenderBuiltinToolCallLine(name, argsJSON string) string {
+func streamRenderBuiltinToolCallLine(name, argsJSON, callID string) string {
 	summary := renderBuiltinToolCallSummary(name, argsJSON)
 	line := contentIndent + styleGray.Render("─") + " " + styleToolName.Render(name)
+	if id := shortToolCallID(callID); id != "" {
+		line += " " + styleGray.Render("["+id+"]")
+	}
 	if summary != "" {
 		line += "  " + summary
 	}

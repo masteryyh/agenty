@@ -79,6 +79,6 @@ func handleThinkCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 }
 
 func handleHelpCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	bridge.Print(renderCommandHintsToString())
+	bridge.Print(renderCommandHintsToString(state.LocalMode))
 	return CommandResult{Handled: true}, nil
 }

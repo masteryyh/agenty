@@ -23,66 +23,92 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/providers"
-	"github.com/muesli/reflow/ansi"
-	"github.com/muesli/reflow/wordwrap"
-	"github.com/muesli/reflow/wrap"
+)
+
+type streamState int
+
+const (
+	streamIdle streamState = iota
+	streamStreaming
+	streamFinishing
+	streamFailed
+)
+
+type streamSegmentKind int
+
+const (
+	streamSegmentHeader streamSegmentKind = iota
+	streamSegmentReasoning
+	streamSegmentContent
+	streamSegmentToolLabel
+	streamSegmentToolCall
+	streamSegmentToolResult
+	streamSegmentFinalLabel
+	streamSegmentError
 )
 
 type streamModel struct {
-	active         bool
-	headerPrinted  bool
-	hasReasoning   bool
-	hasToolSection bool
-	hadToolCalls   bool
-	hasContent     bool
-	atLineStart    bool
+	state         streamState
+	showIndicator bool
+	segments      []streamSegment
+	toolCalls     map[string]streamToolCall
 
-	buf            *strings.Builder
-	reasoningBuf   *strings.Builder
-	reasoningStart time.Time
-	inReasoning    bool
-	sectionPrefix  string
-	inContent      bool
-	contentBuf     *strings.Builder
+	currentReasoning int
+	currentContent   int
+	headerPrinted    bool
+	hasToolSection   bool
+	hadToolCalls     bool
+	hasContent       bool
 
 	ch     chan providers.StreamEvent
 	doneCh chan error
 
-	spinIdx   int
-	tickCount int
-	phrase    string
+	phrase string
+}
+
+type streamSegment struct {
+	kind       streamSegmentKind
+	modelName  string
+	text       string
+	toolCall   *models.ToolCall
+	toolResult *models.ToolResult
+	startedAt  time.Time
+	endedAt    time.Time
+}
+
+type streamToolCall struct {
+	name string
 }
 
 func newStreamModel() streamModel {
 	return streamModel{
-		buf:          new(strings.Builder),
-		reasoningBuf: new(strings.Builder),
-		contentBuf:   new(strings.Builder),
-		atLineStart:  true,
+		state:            streamIdle,
+		toolCalls:        make(map[string]streamToolCall),
+		currentReasoning: -1,
+		currentContent:   -1,
 	}
 }
 
 func (s *streamModel) start() {
-	s.active = true
-	s.spinIdx = 0
-	s.tickCount = 0
+	s.state = streamStreaming
+	s.showIndicator = true
 	s.phrase = streamingPhrases[rand.IntN(len(streamingPhrases))]
-	s.buf.Reset()
+	s.resetAttempt()
+	s.ch = make(chan providers.StreamEvent, 32)
+	s.doneCh = make(chan error, 1)
+}
+
+func (s *streamModel) resetAttempt() {
+	s.segments = nil
+	s.toolCalls = make(map[string]streamToolCall)
+	s.currentReasoning = -1
+	s.currentContent = -1
 	s.headerPrinted = false
-	s.hasReasoning = false
 	s.hasToolSection = false
 	s.hadToolCalls = false
 	s.hasContent = false
-	s.atLineStart = true
-	s.reasoningBuf.Reset()
-	s.contentBuf.Reset()
-	s.inReasoning = false
-	s.inContent = false
-	s.sectionPrefix = ""
-	s.reasoningStart = time.Time{}
-	s.ch = make(chan providers.StreamEvent, 32)
-	s.doneCh = make(chan error, 1)
 }
 
 func (s *streamModel) waitForEvent() tea.Cmd {
@@ -91,8 +117,12 @@ func (s *streamModel) waitForEvent() tea.Cmd {
 	return func() tea.Msg {
 		evt, ok := <-ch
 		if !ok {
-			err := <-doneCh
-			return streamDoneMsg{err: err}
+			select {
+			case err := <-doneCh:
+				return streamDoneMsg{err: err}
+			default:
+				return streamDoneMsg{}
+			}
 		}
 		return streamEventMsg{event: evt}
 	}
@@ -101,178 +131,221 @@ func (s *streamModel) waitForEvent() tea.Cmd {
 func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 	switch evt.Type {
 	case providers.EventReasoningDelta:
-		if !s.headerPrinted {
-			s.buf.WriteString(renderAssistantHeader(modelName, time.Now()))
-			s.buf.WriteString("\n")
-			s.headerPrinted = true
+		s.ensureHeader(modelName)
+		if s.currentReasoning == -1 {
+			s.currentReasoning = len(s.segments)
+			s.segments = append(s.segments, streamSegment{kind: streamSegmentReasoning, startedAt: time.Now()})
 		}
-		if !s.hasReasoning {
-			s.hasReasoning = true
-			s.reasoningStart = time.Now()
-			s.inReasoning = true
-			s.sectionPrefix = s.buf.String()
-		}
-		s.reasoningBuf.WriteString(evt.Reasoning)
+		s.segments[s.currentReasoning].text += evt.Reasoning
 
 	case providers.EventContentDelta:
-		if s.inReasoning {
-			s.finalizeReasoning(true)
-		}
-		if !s.headerPrinted {
-			s.buf.WriteString(renderAssistantHeader(modelName, time.Now()))
-			s.buf.WriteString("\n")
-			s.headerPrinted = true
-		}
-		if !s.inContent {
+		s.finishReasoning()
+		s.ensureHeader(modelName)
+		if s.currentContent == -1 {
 			if !s.hasContent && s.hadToolCalls {
-				s.buf.WriteString(streamRenderFinalLabel())
+				s.segments = append(s.segments, streamSegment{kind: streamSegmentFinalLabel})
 			}
+			s.currentContent = len(s.segments)
+			s.segments = append(s.segments, streamSegment{kind: streamSegmentContent})
 			s.hasContent = true
-			s.sectionPrefix = s.buf.String()
-			s.inContent = true
 		}
-		s.contentBuf.WriteString(evt.Content)
+		s.segments[s.currentContent].text += evt.Content
 
 	case providers.EventToolCallStart:
-		s.finalizeReasoning(true)
-		s.finalizeContent()
-		if !s.headerPrinted {
-			s.buf.WriteString(renderAssistantHeader(modelName, time.Now()))
-			s.buf.WriteString("\n")
-			s.headerPrinted = true
-		}
+		s.finishReasoning()
+		s.finishContent()
+		s.ensureHeader(modelName)
 		if !s.hasToolSection {
-			if s.hasContent || s.hasReasoning {
-				s.buf.WriteString("\n")
-			}
-			s.buf.WriteString(streamRenderToolLabel())
+			s.segments = append(s.segments, streamSegment{kind: streamSegmentToolLabel})
 			s.hasToolSection = true
 			s.hadToolCalls = true
 		}
-		s.atLineStart = true
-
-	case providers.EventToolCallDelta:
 
 	case providers.EventToolCallDone:
 		if evt.ToolCall != nil {
-			s.buf.WriteString(streamRenderBuiltinToolCallLine(evt.ToolCall.Name, evt.ToolCall.Arguments))
-			s.buf.WriteString("\n")
-			s.atLineStart = true
+			s.rememberToolCall(*evt.ToolCall)
+			tc := *evt.ToolCall
+			s.segments = append(s.segments, streamSegment{kind: streamSegmentToolCall, toolCall: &tc})
 		}
 
 	case providers.EventToolResult:
 		if evt.ToolResult != nil {
-			if evt.ToolResult.IsError {
-				s.buf.WriteString(streamRenderToolError())
-			} else {
-				s.buf.WriteString(streamRenderToolSuccess())
-			}
-			lines, moreCount := renderBuiltinToolResultLines(evt.ToolResult.Name, stripCR(evt.ToolResult.Content), maxToolResultLines)
-			wrapW := max(renderWidth-10, 20)
-			for _, l := range lines {
-				for wl := range strings.SplitSeq(wordwrap.String(l, wrapW), "\n") {
-					if ansi.PrintableRuneWidth(wl) > wrapW {
-						for hw := range strings.SplitSeq(wrap.String(wl, wrapW), "\n") {
-							s.buf.WriteString(contentIndent + "    ")
-							s.buf.WriteString(styleToolResult.Render(hw))
-							s.buf.WriteString("\n")
-						}
-					} else {
-						s.buf.WriteString(contentIndent + "    ")
-						s.buf.WriteString(styleToolResult.Render(wl))
-						s.buf.WriteString("\n")
-					}
+			tr := *evt.ToolResult
+			if tr.Name == "" {
+				if tc, ok := s.toolCalls[tr.CallID]; ok {
+					tr.Name = tc.name
 				}
 			}
-			if moreCount > 0 {
-				s.buf.WriteString(contentIndent + "    ")
-				s.buf.WriteString(styleGray.Render(fmt.Sprintf("...(%d more results)", moreCount)))
-				s.buf.WriteString("\n")
-			}
-			s.atLineStart = true
+			s.segments = append(s.segments, streamSegment{kind: streamSegmentToolResult, toolResult: &tr})
 		}
 
 	case providers.EventMessageDone:
-		s.finalizeReasoning(true)
-		s.finalizeContent()
-		if !s.atLineStart {
-			s.buf.WriteString("\n")
-		}
-		s.hasReasoning = false
+		s.finishReasoning()
+		s.finishContent()
 		s.hasToolSection = false
 		s.hasContent = false
-		s.atLineStart = true
 
 	case providers.EventError:
-		if !s.atLineStart {
-			s.buf.WriteString("\n")
-		}
-		s.buf.WriteString(styleSysErr.Render(fmt.Sprintf("  Error: %s\n", evt.Error)))
+		s.state = streamFailed
+		s.showIndicator = false
+		s.resetAttempt()
+		s.segments = append(s.segments, streamSegment{kind: streamSegmentError, text: evt.Error})
 	}
 }
 
-func (s *streamModel) finalizeReasoning(showReasoning bool) {
-	if !s.inReasoning {
-		return
+func (s *streamModel) finish() {
+	s.finishReasoning()
+	s.finishContent()
+	if s.state != streamFailed {
+		s.state = streamFinishing
 	}
-	dur := time.Since(s.reasoningStart)
-	label := contentIndent + styleReasoningLabel.Render(fmt.Sprintf("thinking: (%.1fs)", dur.Seconds())) + "\n"
-	s.buf.Reset()
-	s.buf.WriteString(s.sectionPrefix)
-	s.buf.WriteString(label)
-	if showReasoning && s.reasoningBuf.Len() > 0 {
-		s.buf.WriteString(renderReasoningContent(s.reasoningBuf.String()))
-	}
-	s.buf.WriteString("\n")
-	s.inReasoning = false
-	s.sectionPrefix = ""
-	s.reasoningBuf.Reset()
-	s.atLineStart = true
+	s.showIndicator = false
 }
 
-func (s *streamModel) finalizeContent() {
-	if !s.inContent {
+func (s *streamModel) close() {
+	s.state = streamIdle
+	s.showIndicator = false
+	s.resetAttempt()
+}
+
+func (s streamModel) busy() bool {
+	return s.state == streamStreaming
+}
+
+func (s streamModel) visible() bool {
+	return len(s.segments) > 0
+}
+
+func (s *streamModel) ensureHeader(modelName string) {
+	if s.headerPrinted {
 		return
 	}
-	rendered := renderContentBlock(s.contentBuf.String())
-	s.buf.Reset()
-	s.buf.WriteString(s.sectionPrefix)
-	s.buf.WriteString(rendered)
-	s.inContent = false
-	s.sectionPrefix = ""
-	s.contentBuf.Reset()
-	s.atLineStart = true
+	s.segments = append(s.segments, streamSegment{kind: streamSegmentHeader, modelName: modelName, startedAt: time.Now()})
+	s.headerPrinted = true
+}
+
+func (s *streamModel) finishReasoning() {
+	if s.currentReasoning == -1 {
+		return
+	}
+	if s.segments[s.currentReasoning].endedAt.IsZero() {
+		s.segments[s.currentReasoning].endedAt = time.Now()
+	}
+	s.currentReasoning = -1
+}
+
+func (s *streamModel) finishContent() {
+	s.currentContent = -1
+}
+
+func (s *streamModel) rememberToolCall(tc models.ToolCall) {
+	if tc.ID == "" {
+		return
+	}
+	s.toolCalls[tc.ID] = streamToolCall{name: tc.Name}
 }
 
 func (s *streamModel) finalize(showReasoning bool) string {
-	s.finalizeReasoning(showReasoning)
-	s.finalizeContent()
-	if s.buf.Len() > 0 {
-		result := s.buf.String() + "\n\n"
-		s.buf.Reset()
-		return result
+	s.finish()
+	if len(s.segments) == 0 {
+		return ""
 	}
-	return ""
+	result := s.render(showReasoning) + "\n\n"
+	s.resetAttempt()
+	return result
 }
 
 func (s *streamModel) liveContent(showReasoning bool) string {
-	if s.inReasoning {
-		elapsed := time.Since(s.reasoningStart)
-		label := contentIndent + styleReasoningLabel.Render(fmt.Sprintf("thinking: (%.1fs)", elapsed.Seconds())) + "\n"
-		part := s.sectionPrefix + label
-		if showReasoning && s.reasoningBuf.Len() > 0 {
-			part += renderReasoningContent(s.reasoningBuf.String())
-		}
-		return part
-	}
-	if s.inContent {
-		rendered := renderContentBlock(s.contentBuf.String())
-		return s.sectionPrefix + rendered
-	}
-	return s.buf.String()
+	return s.render(showReasoning)
 }
 
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+func (s *streamModel) render(showReasoning bool) string {
+	var buf strings.Builder
+	for _, segment := range s.segments {
+		switch segment.kind {
+		case streamSegmentHeader:
+			buf.WriteString(renderAssistantHeader(segment.modelName, segment.startedAt))
+			buf.WriteString("\n")
+		case streamSegmentReasoning:
+			buf.WriteString(renderStreamReasoning(segment, showReasoning))
+		case streamSegmentContent:
+			buf.WriteString(renderContentBlock(segment.text))
+		case streamSegmentToolLabel:
+			buf.WriteString(streamRenderToolLabel())
+		case streamSegmentToolCall:
+			if segment.toolCall != nil {
+				buf.WriteString(streamRenderBuiltinToolCallLine(segment.toolCall.Name, segment.toolCall.Arguments, segment.toolCall.ID))
+				buf.WriteString("\n")
+			}
+		case streamSegmentToolResult:
+			if segment.toolResult != nil {
+				buf.WriteString(renderStreamToolResult(segment.toolResult))
+			}
+		case streamSegmentFinalLabel:
+			buf.WriteString(streamRenderFinalLabel())
+		case streamSegmentError:
+			buf.WriteString(styleSysErr.Render(fmt.Sprintf("  Error: %s\n", segment.text)))
+		}
+	}
+	return buf.String()
+}
+
+func renderStreamReasoning(segment streamSegment, show bool) string {
+	end := segment.endedAt
+	if end.IsZero() {
+		end = time.Now()
+	}
+	duration := end.Sub(segment.startedAt)
+	if duration < 0 {
+		duration = 0
+	}
+	var buf strings.Builder
+	buf.WriteString(contentIndent)
+	buf.WriteString(styleReasoningLabel.Render(fmt.Sprintf("thinking: (%.1fs)", duration.Seconds())))
+	buf.WriteString("\n")
+	if show && segment.text != "" {
+		buf.WriteString(renderReasoningContent(segment.text))
+	}
+	buf.WriteString("\n")
+	return buf.String()
+}
+
+func renderStreamToolResult(result *models.ToolResult) string {
+	var buf strings.Builder
+	buf.WriteString(renderToolResultHeader(result))
+	lines, moreCount := renderBuiltinToolResultLines(result.Name, stripCR(result.Content), maxToolResultLines)
+	wrapW := max(renderWidth-10, 20)
+	for _, line := range lines {
+		buf.WriteString(renderWrappedLines(line, wrapOptions{
+			Width:  wrapW,
+			Indent: contentIndent + "    ",
+			Style:  styleToolResult,
+		}))
+	}
+	if moreCount > 0 {
+		buf.WriteString(contentIndent)
+		buf.WriteString("    ")
+		buf.WriteString(styleGray.Render(fmt.Sprintf("...(%d more results)", moreCount)))
+		buf.WriteString("\n")
+	}
+	return buf.String()
+}
+
+func renderToolResultHeader(result *models.ToolResult) string {
+	status := styleToolSuccess.Render("✓ ok")
+	if result.IsError {
+		status = styleToolError.Render("✗ error")
+	}
+	name := result.Name
+	if name == "" {
+		name = "tool"
+	}
+	id := shortToolCallID(result.CallID)
+	if id != "" {
+		return contentIndent + "  " + status + " " + styleGray.Render("for ") + styleToolName.Render(name) + styleGray.Render(" ["+id+"]") + "\n"
+	}
+	return contentIndent + "  " + status + " " + styleGray.Render("for ") + styleToolName.Render(name) + "\n"
+}
 
 var streamingPhrases = []string{
 	"Brainstorming...",
@@ -283,23 +356,10 @@ var streamingPhrases = []string{
 	"Crafting a response...",
 	"Pondering...",
 	"Working on it...",
-	"Consulting the oracle...",
-	"Firing synapses...",
-	"Chewing on that...",
-	"Hmm...",
-	"Reticulating splines...",
 }
 
 func streamRenderToolLabel() string {
 	return contentIndent + styleToolLabel.Render("🔧 tool execution:") + "\n"
-}
-
-func streamRenderToolSuccess() string {
-	return contentIndent + "  " + styleToolSuccess.Render("✓ ok") + "\n"
-}
-
-func streamRenderToolError() string {
-	return contentIndent + "  " + styleToolError.Render("✗ error") + "\n"
 }
 
 func streamRenderFinalLabel() string {

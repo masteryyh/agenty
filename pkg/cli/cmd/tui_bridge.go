@@ -57,6 +57,7 @@ type overlayRequest struct {
 	subtitle       string
 	items          []string
 	hints          string
+	cursor         int
 	options        []string
 	defaultIndices []int
 	huhForm        *huh.Form
@@ -98,6 +99,10 @@ func (b *UIBridge) Close() {
 }
 
 func (b *UIBridge) ShowList(title string, items []string, hints string, subtitle ...string) (*ListResult, error) {
+	return b.ShowListWithCursor(title, items, hints, 0, subtitle...)
+}
+
+func (b *UIBridge) ShowListWithCursor(title string, items []string, hints string, cursor int, subtitle ...string) (*ListResult, error) {
 	sub := ""
 	if len(subtitle) > 0 {
 		sub = subtitle[0]
@@ -110,6 +115,7 @@ func (b *UIBridge) ShowList(title string, items []string, hints string, subtitle
 			subtitle:   sub,
 			items:      items,
 			hints:      hints,
+			cursor:     cursor,
 			responseCh: respCh,
 		},
 	})
