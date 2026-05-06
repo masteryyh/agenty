@@ -26,47 +26,94 @@ import (
 const listMaxVisible = 12
 
 type listOverlay struct {
-	title      string
-	subtitle   string
-	items      []string
-	hints      string
-	selection  selectionModel
-	responseCh chan overlayResponse
+	title         string
+	subtitle      string
+	items         []string
+	hints         string
+	notice        string
+	validate      func(action ListAction, idx int) error
+	deleteConfirm func(idx int) string
+	confirmDelete bool
+	confirmText   string
+	selection     selectionModel
+	responseCh    chan overlayResponse
 }
 
-func newListOverlay(title string, items []string, hints string, cursor int, ch chan overlayResponse) *listOverlay {
+func newListOverlay(title string, items []string, hints string, cursor int, validate func(action ListAction, idx int) error, deleteConfirm func(idx int) string, ch chan overlayResponse) *listOverlay {
 	return &listOverlay{
-		title:      title,
-		items:      items,
-		hints:      hints,
-		selection:  newSelectionModel(len(items) - 1).withCursor(cursor),
-		responseCh: ch,
+		title:         title,
+		items:         items,
+		hints:         hints,
+		validate:      validate,
+		deleteConfirm: deleteConfirm,
+		selection:     newSelectionModel(len(items) - 1).withCursor(cursor),
+		responseCh:    ch,
 	}
+}
+
+func (l *listOverlay) emitAction(action ListAction) bool {
+	if l.validate != nil {
+		if err := l.validate(action, l.selection.pos); err != nil {
+			l.notice = err.Error()
+			return false
+		}
+	}
+	l.responseCh <- overlayResponse{listAction: action, listIndex: l.selection.pos}
+	return true
 }
 
 func (l *listOverlay) handleKey(msg tea.KeyMsg) bool {
 	if selection, ok := l.selection.HandleNavKey(msg); ok {
 		l.selection = selection
+		l.notice = ""
+		l.confirmDelete = false
+		l.confirmText = ""
+		return false
+	}
+	if l.confirmDelete {
+		switch msg.Type {
+		case tea.KeyEsc, tea.KeyCtrlC:
+			l.confirmDelete = false
+			l.confirmText = ""
+			return false
+		case tea.KeyEnter:
+			l.responseCh <- overlayResponse{listAction: ListActionDelete, listIndex: l.selection.pos}
+			return true
+		case tea.KeyRunes:
+			switch string(msg.Runes) {
+			case "y", "Y":
+				l.responseCh <- overlayResponse{listAction: ListActionDelete, listIndex: l.selection.pos}
+				return true
+			case "n", "N":
+				l.confirmDelete = false
+				l.confirmText = ""
+				return false
+			}
+		}
 		return false
 	}
 	switch msg.Type {
 	case tea.KeyEnter:
-		l.responseCh <- overlayResponse{listAction: ListActionSelect, listIndex: l.selection.pos}
-		return true
+		return l.emitAction(ListActionSelect)
 	case tea.KeyEsc, tea.KeyCtrlC:
 		l.responseCh <- overlayResponse{listAction: ListActionCancel, listIndex: -1}
 		return true
 	case tea.KeyCtrlD:
-		l.responseCh <- overlayResponse{listAction: ListActionDelete, listIndex: l.selection.pos}
-		return true
+		if l.deleteConfirm != nil {
+			if prompt := l.deleteConfirm(l.selection.pos); prompt != "" {
+				l.notice = ""
+				l.confirmDelete = true
+				l.confirmText = prompt
+				return false
+			}
+		}
+		return l.emitAction(ListActionDelete)
 	case tea.KeyRunes:
 		switch string(msg.Runes) {
 		case "a", "A":
-			l.responseCh <- overlayResponse{listAction: ListActionAdd, listIndex: l.selection.pos}
-			return true
+			return l.emitAction(ListActionAdd)
 		case "e", "E":
-			l.responseCh <- overlayResponse{listAction: ListActionEdit, listIndex: l.selection.pos}
-			return true
+			return l.emitAction(ListActionEdit)
 		}
 	}
 	return false
@@ -95,6 +142,14 @@ func (l *listOverlay) render(width, _ int) string {
 
 	if len(l.items) > listMaxVisible {
 		fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(fmt.Sprintf("(%d/%d)", l.selection.pos+1, len(l.items))))
+	}
+	if l.confirmDelete && l.confirmText != "" {
+		fmt.Fprintf(&buf, "\n  %s %s\n", styleYellow.Render("?"), styleYellow.Render(l.confirmText))
+		fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render("y confirm  ·  n cancel  ·  Esc cancel"))
+		return buf.String()
+	}
+	if l.notice != "" {
+		fmt.Fprintf(&buf, "\n  %s %s\n", styleRed.Render("!"), styleRed.Render(l.notice))
 	}
 	fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(l.hints))
 	return buf.String()

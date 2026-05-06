@@ -45,7 +45,6 @@ func handleMCPCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 		}
 
 		if len(result.Data) == 0 {
-			bridge.Warning("No MCP servers found")
 			res, err := bridge.ShowList("MCP Servers", []string{"(no servers)"}, "a add  ·  Esc back")
 			if err != nil {
 				return CommandResult{Handled: true}, err
@@ -79,7 +78,7 @@ func handleMCPCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 			items[i] = fmt.Sprintf("%s %s  %s  enabled:%s", statusIcon, mcpServerLabel(s), styleGray.Render(s.Status), enabled)
 		}
 
-		res, err := bridge.ShowList("MCP Servers", items, listHints)
+		res, err := bridge.ShowListWithCursorAndActions("MCP Servers", items, listHints, 0, nil, mcpDeleteConfirm(result.Data))
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -105,22 +104,25 @@ func handleMCPCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 
 		case ListActionDelete:
 			target := result.Data[res.Index]
-			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete MCP server '%s'?", target.Name))
-			if err != nil {
-				return CommandResult{Handled: true}, err
-			}
-			if confirmed {
-				if err := b.DeleteMCPServer(target.ID); err != nil {
-					bridge.Error("Failed to delete MCP server: %v", err)
-				} else {
-					bridge.Success("MCP server deleted: %s", target.Name)
-				}
+			if err := b.DeleteMCPServer(target.ID); err != nil {
+				bridge.Error("Failed to delete MCP server: %v", err)
+			} else {
+				bridge.Success("MCP server deleted: %s", target.Name)
 			}
 			continue
 
 		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
 		}
+	}
+}
+
+func mcpDeleteConfirm(serverList []models.MCPServerDto) func(idx int) string {
+	return func(idx int) string {
+		if idx < 0 || idx >= len(serverList) {
+			return ""
+		}
+		return fmt.Sprintf("Delete MCP server '%s'?", serverList[idx].Name)
 	}
 }
 
@@ -134,19 +136,29 @@ func doCreateMCPServer(b backend.Backend, bridge *UIBridge) error {
 	}
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&name),
 		huh.NewSelect[string]().Title("Transport").Options(transportOpts...).Value(&selectedTransport),
 		huh.NewInput().Title("Command").Placeholder("stdio only — executable path or name").Value(&command),
 		huh.NewInput().Title("Arguments").Placeholder("stdio only — space-separated args, leave blank for none").Value(&argsStr),
 		huh.NewInput().Title("Server URL").Placeholder("sse/streamable-http only — e.g. http://localhost:3000/sse").Value(&serverURL),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		switch models.MCPTransportType(selectedTransport) {
+		case models.MCPTransportStdio:
+			if strings.TrimSpace(command) == "" {
+				return fmt.Errorf("Command is required for stdio transport.")
+			}
+		case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
+			if strings.TrimSpace(serverURL) == "" {
+				return fmt.Errorf("Server URL is required for %s transport.", selectedTransport)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -220,7 +232,22 @@ func doUpdateMCPServer(b backend.Backend, bridge *UIBridge, target models.MCPSer
 	}
 
 	form := huh.NewForm(huh.NewGroup(fields...))
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(newName) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		switch target.Transport {
+		case models.MCPTransportStdio:
+			if strings.TrimSpace(newCommand) == "" {
+				return fmt.Errorf("Command is required for stdio transport.")
+			}
+		case models.MCPTransportSSE, models.MCPTransportStreamableHTTP:
+			if strings.TrimSpace(newURL) == "" {
+				return fmt.Errorf("URL is required for %s transport.", target.Transport)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}

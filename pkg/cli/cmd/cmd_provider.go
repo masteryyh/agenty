@@ -22,9 +22,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/muesli/reflow/truncate"
 )
 
 var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi", "bigmodel", "qwen", "deepseek"}
@@ -41,11 +43,7 @@ var providerDefaultBaseURLs = map[string]string{
 }
 
 func providerLabel(p models.ModelProviderDto) string {
-	label := fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
-	if p.IsPreset {
-		label += " " + styleMagenta.Render("[P]")
-	}
-	return label
+	return fmt.Sprintf("%s (%s)", p.Name, string(p.Type))
 }
 
 func handleProviderCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
@@ -70,12 +68,8 @@ func handleProviderCmd(b backend.Backend, bridge *UIBridge, args []string, sessi
 			return CommandResult{Handled: true}, nil
 		}
 
-		items := make([]string, len(result.Data))
-		for i, p := range result.Data {
-			items[i] = fmt.Sprintf("%s  %s  %s", providerLabel(p), styleGray.Render(p.BaseURL), styleGray.Render(p.APIKeyCensored))
-		}
-
-		res, err := bridge.ShowList("Providers", items, listHints)
+		items := providerTableRows(result.Data)
+		res, err := bridge.ShowListWithCursorAndActions("Providers", items, listHints, 0, validateProviderListAction(result.Data), providerDeleteConfirm(result.Data), providerTableSubtitle())
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -101,20 +95,10 @@ func handleProviderCmd(b backend.Backend, bridge *UIBridge, args []string, sessi
 
 		case ListActionDelete:
 			target := result.Data[res.Index]
-			if target.IsPreset {
-				bridge.Warning("'%s' is a preset provider and cannot be deleted.", target.Name)
-				continue
-			}
-			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete provider '%s' and all its models?", target.Name))
-			if err != nil {
-				return CommandResult{Handled: true}, err
-			}
-			if confirmed {
-				if err := b.DeleteProvider(target.ID, true); err != nil {
-					bridge.Error("Failed to delete provider: %v", err)
-				} else {
-					bridge.Success("Provider deleted: %s", target.Name)
-				}
+			if err := b.DeleteProvider(target.ID, true); err != nil {
+				bridge.Error("Failed to delete provider: %v", err)
+			} else {
+				bridge.Success("Provider deleted: %s", target.Name)
 			}
 			continue
 
@@ -122,6 +106,75 @@ func handleProviderCmd(b backend.Backend, bridge *UIBridge, args []string, sessi
 			return CommandResult{Handled: true}, nil
 		}
 	}
+}
+
+func providerDeleteConfirm(providerList []models.ModelProviderDto) func(idx int) string {
+	return func(idx int) string {
+		if idx < 0 || idx >= len(providerList) {
+			return ""
+		}
+		target := providerList[idx]
+		if target.IsPreset {
+			return ""
+		}
+		return fmt.Sprintf("Delete provider '%s' and all its models?", target.Name)
+	}
+}
+
+func validateProviderListAction(providerList []models.ModelProviderDto) func(action ListAction, idx int) error {
+	return func(action ListAction, idx int) error {
+		if idx < 0 || idx >= len(providerList) {
+			return nil
+		}
+		target := providerList[idx]
+		if !target.IsPreset {
+			return nil
+		}
+		switch action {
+		case ListActionSelect, ListActionEdit:
+			return fmt.Errorf("'%s' is a preset provider and cannot be modified.", target.Name)
+		case ListActionDelete:
+			return fmt.Errorf("'%s' is a preset provider and cannot be deleted.", target.Name)
+		default:
+			return nil
+		}
+	}
+}
+
+func providerTableRows(providers []models.ModelProviderDto) []string {
+	rows := make([]string, len(providers))
+	for i, p := range providers {
+		rows[i] = providerTableRow(p)
+	}
+	return rows
+}
+
+func providerTableSubtitle() string {
+	header := providerTableFormat("Name", "Base URL", "API Key")
+	return "  " + header + "\n  " + strings.Repeat("─", lipgloss.Width(header))
+}
+
+func providerTableRow(p models.ModelProviderDto) string {
+	return providerTableFormat(p.Name, p.BaseURL, p.APIKeyCensored)
+}
+
+func providerTableFormat(name, baseURL, apiKey string) string {
+	return fmt.Sprintf("%s  %s  %s",
+		providerTableCell(name, 18),
+		providerTableCell(baseURL, 34),
+		providerTableCell(apiKey, 18),
+	)
+}
+
+func providerTableCell(s string, width int) string {
+	if s == "" {
+		return "-"
+	}
+	value := truncate.StringWithTail(s, uint(width), "...")
+	if padding := width - lipgloss.Width(value); padding > 0 {
+		return value + strings.Repeat(" ", padding)
+	}
+	return value
 }
 
 func doCreateProvider(b backend.Backend, bridge *UIBridge) error {
@@ -135,23 +188,24 @@ func doCreateProvider(b backend.Backend, bridge *UIBridge) error {
 	baseURL = providerDefaultBaseURLs[selectedType]
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&name),
 		huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType),
-		huh.NewInput().Title("Base URL").Value(&baseURL).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Base URL").Value(&baseURL),
 		huh.NewInput().Title("API key").Value(&apiKey),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		if strings.TrimSpace(baseURL) == "" {
+			return fmt.Errorf("Base URL is required.")
+		}
+		if strings.TrimSpace(apiKey) == "" {
+			return fmt.Errorf("API key is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -192,23 +246,21 @@ func doUpdateProvider(b backend.Backend, bridge *UIBridge, target models.ModelPr
 	var newAPIKey string
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&newName).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&newName),
 		huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType),
-		huh.NewInput().Title("Base URL").Value(&newBaseURL).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Base URL").Value(&newBaseURL),
 		huh.NewInput().Title("API key").Placeholder("leave blank to keep").Value(&newAPIKey),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(newName) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		if strings.TrimSpace(newBaseURL) == "" {
+			return fmt.Errorf("Base URL is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
