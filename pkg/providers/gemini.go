@@ -61,12 +61,16 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		result.TotalToken = int64(resp.UsageMetadata.TotalTokenCount)
 	}
 
-	thinkBlock := ReasoningBlock{}
+	var reasoningBuilder strings.Builder
+	var thoughtSignature string
 	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		for _, part := range resp.Candidates[0].Content.Parts {
 			if part.Text != "" {
 				if part.Thought {
-					thinkBlock.Summary = part.Text
+					if reasoningBuilder.Len() > 0 {
+						reasoningBuilder.WriteString("\n")
+					}
+					reasoningBuilder.WriteString(part.Text)
 				} else {
 					if result.Content != "" {
 						result.Content += "\n"
@@ -91,13 +95,17 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 				})
 			}
 			if len(part.ThoughtSignature) > 0 {
-				thinkBlock.Signature = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+				thoughtSignature = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
 			}
 		}
 	}
-	if thinkBlock.Summary != "" || thinkBlock.Signature != "" {
-		result.ReasoningBlocks = append(result.ReasoningBlocks, thinkBlock)
+	if reasoningBuilder.Len() > 0 || thoughtSignature != "" {
+		result.ReasoningBlocks = append(result.ReasoningBlocks, ReasoningBlock{
+			Summary:   reasoningBuilder.String(),
+			Signature: thoughtSignature,
+		})
 	}
+	hydrateChatResponseReasoning(result)
 
 	return result, nil
 }
@@ -277,9 +285,10 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 	safe.GoOnce("gemini-stream", func() {
 		defer close(ch)
 		var contentBuilder strings.Builder
+		var reasoningBuilder strings.Builder
 		var toolCalls []models.ToolCall
 		var totalTokens int64
-		var reasoningBlocks []ReasoningBlock
+		var thoughtSignature string
 
 		for result, err := range client.Models.GenerateContentStream(ctx, req.Model, contents, config) {
 			if err != nil {
@@ -302,6 +311,10 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 								Type:      EventReasoningDelta,
 								Reasoning: part.Text,
 							}
+							if reasoningBuilder.Len() > 0 {
+								reasoningBuilder.WriteString("\n")
+							}
+							reasoningBuilder.WriteString(part.Text)
 						} else {
 							ch <- StreamEvent{
 								Type:    EventContentDelta,
@@ -337,9 +350,7 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 					}
 
 					if len(part.ThoughtSignature) > 0 {
-						sig := base64.StdEncoding.EncodeToString(part.ThoughtSignature)
-						block := ReasoningBlock{Signature: sig}
-						reasoningBlocks = append(reasoningBlocks, block)
+						thoughtSignature = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
 					}
 				}
 			}
@@ -351,21 +362,17 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 		}
 
 		msg := &Message{
-			Role:            models.RoleAssistant,
-			Content:         contentBuilder.String(),
-			ToolCalls:       toolCalls,
-			ReasoningBlocks: reasoningBlocks,
+			Role:      models.RoleAssistant,
+			Content:   contentBuilder.String(),
+			ToolCalls: toolCalls,
 		}
-		if len(reasoningBlocks) > 0 {
-			var summaryBuilder strings.Builder
-			for _, block := range reasoningBlocks {
-				if !block.Redacted {
-					summaryBuilder.WriteString(block.Summary)
-					summaryBuilder.WriteString("\n")
-				}
-			}
-			msg.ReasoningContent = summaryBuilder.String()
+		if reasoningBuilder.Len() > 0 || thoughtSignature != "" {
+			msg.ReasoningBlocks = append(msg.ReasoningBlocks, ReasoningBlock{
+				Summary:   reasoningBuilder.String(),
+				Signature: thoughtSignature,
+			})
 		}
+		HydrateMessageReasoning(msg)
 		ch <- StreamEvent{
 			Type:    EventMessageDone,
 			Message: msg,

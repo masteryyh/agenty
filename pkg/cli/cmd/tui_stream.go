@@ -216,6 +216,10 @@ func (s streamModel) visible() bool {
 	return len(s.segments) > 0
 }
 
+func (s streamModel) reasoningActive() bool {
+	return s.currentReasoning >= 0
+}
+
 func (s *streamModel) ensureHeader(modelName string) {
 	if s.headerPrinted {
 		return
@@ -301,7 +305,7 @@ func renderStreamReasoning(segment streamSegment, show bool) string {
 	}
 	var buf strings.Builder
 	buf.WriteString(contentIndent)
-	buf.WriteString(styleReasoningLabel.Render(fmt.Sprintf("thinking: (%.1fs)", duration.Seconds())))
+	buf.WriteString(styleReasoningLabel.Render(formatReasoningLabel(duration)))
 	buf.WriteString("\n")
 	if show && segment.text != "" {
 		buf.WriteString(renderReasoningContent(segment.text))

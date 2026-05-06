@@ -65,6 +65,8 @@ type tokenCountMsg struct {
 	count int
 }
 
+type thinkingTickMsg struct{}
+
 type refreshSessionMsg struct {
 	tokenConsumed int
 	messages      []models.ChatMessageDto
@@ -413,6 +415,15 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var spinCmd tea.Cmd
 			m.spinner, spinCmd = m.spinner.Update(msg)
 			return m, spinCmd
+		}
+		return m, nil
+
+	case thinkingTickMsg:
+		if m.stream.showIndicator {
+			if m.stream.reasoningActive() {
+				m.refreshViewport()
+			}
+			return m, thinkingTickCmd()
 		}
 		return m, nil
 
@@ -850,7 +861,7 @@ func (m *chatModel) handleChatInput(input string) (tea.Model, tea.Cmd) {
 		close(m.stream.ch)
 	}()
 
-	return m, tea.Batch(m.stream.waitForEvent(), m.spinner.Tick)
+	return m, tea.Batch(m.stream.waitForEvent(), m.spinner.Tick, thinkingTickCmd())
 }
 
 func (m *chatModel) toggleReasoning() (tea.Model, tea.Cmd) {
@@ -889,6 +900,12 @@ func (m *chatModel) adjustThinkingForModel(modelThinking bool, thinkingLevels []
 
 func (m *chatModel) appendToChatLog(s string) {
 	m.chatLog.WriteString(s)
+}
+
+func thinkingTickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return thinkingTickMsg{}
+	})
 }
 
 func (m *chatModel) viewportContent() string {

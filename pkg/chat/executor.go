@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
@@ -184,16 +184,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 
 	finalMessages := lo.Map(messages[len(params.Messages):], func(msg providers.Message, _ int) providers.Message {
 		if msg.Role == models.RoleAssistant {
-			if msg.ReasoningContent == "" && len(msg.ReasoningBlocks) > 0 {
-				var summaryBuilder strings.Builder
-				for _, block := range msg.ReasoningBlocks {
-					if !block.Redacted {
-						summaryBuilder.WriteString(block.Summary)
-						summaryBuilder.WriteString("\n")
-					}
-				}
-				msg.ReasoningContent = summaryBuilder.String()
-			}
+			providers.HydrateMessageReasoning(&msg)
 		} else {
 			msg.ReasoningContent = ""
 		}
@@ -246,10 +237,33 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 			}
 
 			var assistantMsg *providers.Message
+			var reasoningDuration time.Duration
+			var reasoningStartedAt time.Time
+			stopReasoningTimer := func(now time.Time) {
+				if reasoningStartedAt.IsZero() {
+					return
+				}
+				if now.Before(reasoningStartedAt) {
+					now = reasoningStartedAt
+				}
+				reasoningDuration += now.Sub(reasoningStartedAt)
+				reasoningStartedAt = time.Time{}
+			}
 			for evt := range providerCh {
+				now := time.Now()
+				if evt.Type == providers.EventReasoningDelta {
+					if reasoningStartedAt.IsZero() {
+						reasoningStartedAt = now
+					}
+				} else {
+					stopReasoningTimer(now)
+				}
 				switch evt.Type {
 				case providers.EventMessageDone:
 					assistantMsg = evt.Message
+					if assistantMsg != nil && reasoningDuration > 0 {
+						assistantMsg.ReasoningDurationMillis = reasoningDuration.Milliseconds()
+					}
 				case providers.EventUsage:
 					if evt.Usage != nil {
 						totalTokens += evt.Usage.TotalTokens
@@ -269,14 +283,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 			}
 
 			if assistantMsg.ReasoningContent == "" && len(assistantMsg.ReasoningBlocks) > 0 {
-				var sb strings.Builder
-				for _, block := range assistantMsg.ReasoningBlocks {
-					if !block.Redacted {
-						sb.WriteString(block.Summary)
-						sb.WriteString("\n")
-					}
-				}
-				assistantMsg.ReasoningContent = sb.String()
+				providers.HydrateMessageReasoning(assistantMsg)
 			}
 
 			messages = append(messages, *assistantMsg)
