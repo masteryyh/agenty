@@ -32,6 +32,7 @@ const (
 	APITypeGemini       APIType = "gemini"
 	APITypeBigModel     APIType = "bigmodel"
 	APITypeQwen         APIType = "qwen"
+	APITypeDeepSeek     APIType = "deepseek"
 )
 
 type ModelProvider struct {
@@ -86,7 +87,7 @@ type ModelProviderDto struct {
 
 type CreateModelProviderDto struct {
 	Name                              string  `json:"name" binding:"required"`
-	Type                              APIType `json:"type" binding:"required,oneof=openai openai-legacy anthropic kimi gemini bigmodel qwen"`
+	Type                              APIType `json:"type" binding:"required,oneof=openai openai-legacy anthropic kimi gemini bigmodel qwen deepseek"`
 	BaseURL                           string  `json:"baseUrl" binding:"required,url"`
 	BailianMultiModalEmbeddingBaseURL *string `json:"bailianMultiModalEmbeddingBaseUrl,omitempty" binding:"omitempty,url"`
 	APIKey                            string  `json:"apiKey" binding:"required"`
@@ -94,7 +95,7 @@ type CreateModelProviderDto struct {
 
 type UpdateModelProviderDto struct {
 	Name                              string  `json:"name" binding:"omitempty"`
-	Type                              APIType `json:"type" binding:"omitempty,oneof=openai openai-legacy anthropic kimi gemini bigmodel qwen"`
+	Type                              APIType `json:"type" binding:"omitempty,oneof=openai openai-legacy anthropic kimi gemini bigmodel qwen deepseek"`
 	BaseURL                           string  `json:"baseUrl" binding:"omitempty,url"`
 	BailianMultiModalEmbeddingBaseURL *string `json:"bailianMultiModalEmbeddingBaseUrl,omitempty" binding:"omitempty,url"`
 	APIKey                            string  `json:"apiKey" binding:"omitempty"`

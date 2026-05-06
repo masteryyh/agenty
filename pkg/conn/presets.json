@@ -7,6 +7,22 @@
             "baseUrl": "https://api.openai.com/v1",
             "models": [
                 {
+                    "id": "019dfb35-640a-7ccf-9f47-e693ea388aca",
+                    "name": "GPT-5.5",
+                    "code": "gpt-5.5-2026-04-23",
+                    "contextWindow": 1050000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ],
+                    "defaultModel": true
+                },
+                {
                     "id": "019d81b2-434f-7835-b472-cd0ef3b909a8",
                     "name": "GPT-5.4-Pro",
                     "code": "gpt-5.4-pro-2026-03-05",
@@ -34,8 +50,7 @@
                         "medium",
                         "high",
                         "xhigh"
-                    ],
-                    "defaultModel": true
+                    ]
                 },
                 {
                     "id": "019d81b2-434f-7845-8e95-319faec30aaf",
@@ -194,10 +209,26 @@
             "baseUrl": "https://api.anthropic.com",
             "models": [
                 {
+                    "id": "019dfb37-034c-7da4-90ca-3fb0eaffe897",
+                    "name": "Claude Opus 4.7",
+                    "code": "claude-opus-4-7",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
+                    "anthropicAdaptiveThinking": true
+                },
+                {
                     "id": "019d81b2-434f-78ae-83ec-3c5bd07990e2",
                     "name": "Claude Opus 4.6",
                     "code": "claude-opus-4-6",
-                    "contextWindow": 200000,
+                    "contextWindow": 1000000,
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
@@ -213,7 +244,7 @@
                     "id": "019d81b2-434f-78b6-9d0a-d26377456aaa",
                     "name": "Claude Sonnet 4.6",
                     "code": "claude-sonnet-4-6",
-                    "contextWindow": 200000,
+                    "contextWindow": 1000000,
                     "thinking": true,
                     "multiModal": true,
                     "light": false,
@@ -245,14 +276,23 @@
             "baseUrl": "https://api.moonshot.cn/v1",
             "models": [
                 {
+                    "id": "019dfb3b-65b5-7dcf-9474-dbfbf5d5bab1",
+                    "name": "Kimi k2.6",
+                    "code": "kimi-k2.6",
+                    "contextWindow": 262144,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "defaultModel": true
+                },
+                {
                     "id": "019d81b2-434f-78ca-af6b-9a125c63c192",
                     "name": "Kimi k2.5",
                     "code": "kimi-k2.5",
                     "contextWindow": 262144,
                     "thinking": true,
                     "multiModal": true,
-                    "light": false,
-                    "defaultModel": true
+                    "light": false
                 }
             ]
         },
@@ -424,6 +464,41 @@
                     "contextWindow": 32000,
                     "embeddingModel": true,
                     "multiModal": true
+                }
+            ]
+        },
+        {
+            "id": "019dfb41-1f8f-7935-bfca-dbf6801d5c17",
+            "name": "DeepSeek",
+            "type": "deepseek",
+            "baseUrl": "https://api.deepseek.com",
+            "models": [
+                {
+                    "id": "019dfb48-1f50-7812-954f-1e1e007d1019",
+                    "name": "DeepSeek V4 Flash",
+                    "code": "deepseek-v4-flash",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false,
+                    "thinkingLevels": [
+                        "high",
+                        "max"
+                    ],
+                    "defaultModel": true
+                },
+                {
+                    "id": "019dfb51-1792-7a65-925f-dd04d536ab4d",
+                    "name": "DeepSeek V4 Pro",
+                    "code": "deepseek-v4-pro",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false,
+                    "thinkingLevels": [
+                        "high",
+                        "max"
+                    ]
                 }
             ]
         }

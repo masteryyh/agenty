@@ -95,7 +95,10 @@ Agenty ships with pre-seeded configurations for these providers. Simply add your
 | **Anthropic** | `anthropic` | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
 | **Google Gemini** | `gemini` | `gemini-3.1-pro-preview`, `gemini-3-flash-preview` |
 | **Kimi** | `kimi` | `kimi-k2.5` (default model) |
-| **OpenAI-Completions** | `openai_legacy` | Any OpenAI /v1/chat/completions endpoint |
+| **BigModel** | `bigmodel` | GLM family models |
+| **Qwen** | `qwen` | `qwen3.6-plus`, `qwen3-max` |
+| **DeepSeek** | `deepseek` | `deepseek-v4-flash`, `deepseek-v4-pro` |
+| **OpenAI-Completions** | `openai-legacy` | Any OpenAI /v1/chat/completions endpoint |
 
 All providers support **extended thinking** configuration with per-model thinking levels (e.g., `low`, `medium`, `high`, `max`).
 

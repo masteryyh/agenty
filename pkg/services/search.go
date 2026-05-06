@@ -48,7 +48,6 @@ type SearchService struct {
 	db               *gorm.DB
 	knowledgeService *KnowledgeService
 	webSearchService *WebSearchService
-	providers        map[models.APIType]providers.Provider
 }
 
 var (
@@ -62,15 +61,6 @@ func GetSearchService() *SearchService {
 			db:               conn.GetDB(),
 			knowledgeService: GetKnowledgeService(),
 			webSearchService: GetWebSearchService(),
-			providers: map[models.APIType]providers.Provider{
-				models.APITypeOpenAI:       providers.NewOpenAIProvider(),
-				models.APITypeOpenAILegacy: providers.NewOpenAILegacyProvider(),
-				models.APITypeAnthropic:    providers.NewAnthropicProvider(),
-				models.APITypeKimi:         providers.NewKimiProvider(),
-				models.APITypeGemini:       providers.NewGeminiProvider(),
-				models.APITypeBigModel:     providers.NewBigModelProvider(),
-				models.APITypeQwen:         providers.NewQwenProvider(),
-			},
 		}
 	})
 	return searchService
@@ -120,7 +110,7 @@ func (s *SearchService) Search(ctx context.Context, sc models.SearchContext, req
 	}
 
 	resp.RankedResults = globalWeightedRRF(sets, searchRerankCandidateLimit)
-	if len(s.providers) > 0 && len(resp.RankedResults) > 1 {
+	if s.db != nil && len(providers.ModelProviders) > 0 && len(resp.RankedResults) > 1 {
 		if reranked, notes := s.rerankCandidates(ctx, collectAllQueries(req.Searches), resp.RankedResults); len(reranked) > 0 {
 			resp.RankedResults = reranked
 			resp.EvaluatorNotes = notes
@@ -368,7 +358,7 @@ func searchWorkspaceFiles(ctx context.Context, root string, spec models.SearchSp
 		if err != nil || !isPathWithin(clean, root) {
 			return nil
 		}
-		fileCandidates, err := scoreWorkspaceFile(spec, root, clean, rel, terms)
+		fileCandidates, err := scoreWorkspaceFile(spec, clean, rel, terms)
 		if err != nil {
 			return nil
 		}
@@ -391,7 +381,7 @@ func searchWorkspaceFiles(ctx context.Context, root string, spec models.SearchSp
 	return candidates, nil
 }
 
-func scoreWorkspaceFile(spec models.SearchSpec, root, path, rel string, terms []string) ([]models.RankedSearchResult, error) {
+func scoreWorkspaceFile(spec models.SearchSpec, path, rel string, terms []string) ([]models.RankedSearchResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -629,7 +619,10 @@ func (s *SearchService) fusionRerank(ctx context.Context, query string, candidat
 		return nil, fmt.Errorf("failed to marshal rerank candidates: %w", err)
 	}
 
-	p := s.providerFor(provider.Type)
+	p, ok := providers.ModelProviders[provider.Type]
+	if !ok {
+		return nil, fmt.Errorf("unsupported rerank provider type: %s", provider.Type)
+	}
 	resp, err := p.Chat(ctx, &providers.ChatRequest{
 		Model:    model.Code,
 		Messages: []providers.Message{{Role: models.RoleUser, Content: fmt.Sprintf(consts.SearchFusionRerankPrompt, query, candidatesJSON)}},
@@ -655,13 +648,6 @@ func (s *SearchService) fusionRerank(ctx context.Context, query string, candidat
 		result.OrderedIDs = result.OrderedIDs[:limit]
 	}
 	return &result, nil
-}
-
-func (s *SearchService) providerFor(apiType models.APIType) providers.Provider {
-	if p, ok := s.providers[apiType]; ok {
-		return p
-	}
-	return s.providers[models.APITypeOpenAI]
 }
 
 func (s *SearchService) resolveLightModel(ctx context.Context) (*models.Model, *models.ModelProvider, error) {

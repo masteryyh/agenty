@@ -127,3 +127,14 @@ type Provider interface {
 	Name() string
 	VectorNormalized() bool
 }
+
+var ModelProviders = map[models.APIType]Provider{
+	models.APITypeOpenAI:       NewOpenAIProvider(),
+	models.APITypeOpenAILegacy: NewOpenAILegacyProvider(),
+	models.APITypeAnthropic:    NewAnthropicProvider(),
+	models.APITypeKimi:         NewKimiProvider(),
+	models.APITypeGemini:       NewGeminiProvider(),
+	models.APITypeBigModel:     NewBigModelProvider(),
+	models.APITypeQwen:         NewQwenProvider(),
+	models.APITypeDeepSeek:     NewDeepSeekProvider(),
+}

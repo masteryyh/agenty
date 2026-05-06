@@ -27,7 +27,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
-var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi", "bigmodel"}
+var providerTypeOptions = []string{"openai", "anthropic", "gemini", "kimi", "bigmodel", "qwen", "deepseek"}
 
 var providerDefaultBaseURLs = map[string]string{
 	"openai":        "https://api.openai.com/v1",
@@ -36,6 +36,8 @@ var providerDefaultBaseURLs = map[string]string{
 	"gemini":        "https://generativelanguage.googleapis.com/v1beta",
 	"kimi":          "https://api.moonshot.cn/v1",
 	"bigmodel":      "https://open.bigmodel.cn/api/paas/v4",
+	"qwen":          "https://dashscope.aliyuncs.com/compatible-mode/v1",
+	"deepseek":      "https://api.deepseek.com",
 }
 
 func providerLabel(p models.ModelProviderDto) string {
