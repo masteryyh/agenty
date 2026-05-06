@@ -1012,6 +1012,7 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 			if thinking && len(cm.ProviderSpecifics) > 0 {
 				var ps models.ProviderSpecificData
 				if err := json.Unmarshal(cm.ProviderSpecifics, &ps); err == nil {
+					msg.ReasoningDurationMillis = ps.ReasoningDurationMillis
 					if len(ps.AnthropicThinkingBlocks) > 0 {
 						msg.ReasoningBlocks = lo.Map(ps.AnthropicThinkingBlocks, func(b models.AnthropicThinkingBlock, _ int) providers.ReasoningBlock {
 							if b.Type == "redacted_thinking" {
@@ -1103,8 +1104,9 @@ func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID
 		CreatedAt:        timestamp,
 	}
 
-	if m.Role == models.RoleAssistant && len(m.ReasoningBlocks) > 0 {
+	if m.Role == models.RoleAssistant {
 		var specificData models.ProviderSpecificData
+		specificData.ReasoningDurationMillis = m.ReasoningDurationMillis
 		switch providerType {
 		case models.APITypeAnthropic:
 			specificData.AnthropicThinkingBlocks = lo.Map(m.ReasoningBlocks, func(b providers.ReasoningBlock, _ int) models.AnthropicThinkingBlock {
@@ -1122,8 +1124,10 @@ func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID
 				return models.OpenAIReasoningBlock{Summary: b.Summary, EncryptedContent: b.Signature}
 			})
 		}
-		if raw, err := json.Marshal(specificData); err == nil {
-			chatMsg.ProviderSpecifics = datatypes.JSON(raw)
+		if specificData.ReasoningDurationMillis > 0 || len(specificData.AnthropicThinkingBlocks) > 0 || len(specificData.GeminiThinkingBlocks) > 0 || len(specificData.OpenAIReasoningBlocks) > 0 {
+			if raw, err := json.Marshal(specificData); err == nil {
+				chatMsg.ProviderSpecifics = datatypes.JSON(raw)
+			}
 		}
 	}
 

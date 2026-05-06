@@ -90,6 +90,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 		}
 	}
 
+	hydrateChatResponseReasoning(result)
+
 	return result, nil
 }
 
@@ -345,16 +347,7 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 			ToolCalls:       finalToolCalls,
 			ReasoningBlocks: reasoningBlocks,
 		}
-		if len(reasoningBlocks) > 0 {
-			var summaryBuilder strings.Builder
-			for _, block := range reasoningBlocks {
-				if !block.Redacted {
-					summaryBuilder.WriteString(block.Summary)
-					summaryBuilder.WriteString("\n")
-				}
-			}
-			msg.ReasoningContent = summaryBuilder.String()
-		}
+		HydrateMessageReasoning(msg)
 		ch <- StreamEvent{
 			Type:    EventMessageDone,
 			Message: msg,

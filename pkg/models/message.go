@@ -93,6 +93,9 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 		ReasoningContent:  m.ReasoningContent,
 		CreatedAt:         m.CreatedAt,
 	}
+	if providerSpecifics != nil {
+		dto.ReasoningDurationMillis = providerSpecifics.ReasoningDurationMillis
+	}
 
 	if model != nil {
 		dto.Model = model
@@ -101,16 +104,17 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 }
 
 type ChatMessageDto struct {
-	ID                uuid.UUID             `json:"id"`
-	AgentID           uuid.UUID             `json:"agentId"`
-	Role              MessageRole           `json:"role"`
-	Content           string                `json:"content"`
-	ToolCalls         []ToolCall            `json:"toolCalls,omitempty"`
-	ToolResult        *ToolResult           `json:"toolResult,omitempty"`
-	Model             *ModelDto             `json:"model,omitempty"`
-	ReasoningContent  string                `json:"reasoningContent,omitempty"`
-	ProviderSpecifics *ProviderSpecificData `json:"providerSpecifics,omitempty"`
-	CreatedAt         time.Time             `json:"createdAt"`
+	ID                      uuid.UUID             `json:"id"`
+	AgentID                 uuid.UUID             `json:"agentId"`
+	Role                    MessageRole           `json:"role"`
+	Content                 string                `json:"content"`
+	ToolCalls               []ToolCall            `json:"toolCalls,omitempty"`
+	ToolResult              *ToolResult           `json:"toolResult,omitempty"`
+	Model                   *ModelDto             `json:"model,omitempty"`
+	ReasoningContent        string                `json:"reasoningContent,omitempty"`
+	ReasoningDurationMillis int64                 `json:"reasoningDurationMillis,omitempty"`
+	ProviderSpecifics       *ProviderSpecificData `json:"providerSpecifics,omitempty"`
+	CreatedAt               time.Time             `json:"createdAt"`
 }
 
 type ChatDto struct {
@@ -156,4 +160,5 @@ type ProviderSpecificData struct {
 	AnthropicThinkingBlocks []AnthropicThinkingBlock `json:"anthropicThinkingBlocks,omitempty"`
 	GeminiThinkingBlocks    []GeminiThinkingData     `json:"geminiThinkingBlocks,omitempty"`
 	OpenAIReasoningBlocks   []OpenAIReasoningBlock   `json:"openaiReasoningBlocks,omitempty"`
+	ReasoningDurationMillis int64                    `json:"reasoningDurationMillis,omitempty"`
 }

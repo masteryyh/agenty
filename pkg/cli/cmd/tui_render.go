@@ -167,18 +167,25 @@ func renderWrappedLines(text string, opts wrapOptions) string {
 	return termwrap.WrapLines(text, opts)
 }
 
-func renderReasoningBlock(reasoning string, show bool) string {
+func formatReasoningLabel(duration time.Duration) string {
+	if duration <= 0 {
+		return "thinking:"
+	}
+	return fmt.Sprintf("thinking: (%.1fs)", duration.Seconds())
+}
+
+func renderReasoningBlock(reasoning string, duration time.Duration, show bool) string {
 	reasoning = strings.Trim(reasoning, " \n")
 	if reasoning == "" {
 		return ""
 	}
 	reasoning = stripCR(reasoning)
 	if !show {
-		return contentIndent + styleReasoningLabel.Render("thinking") + "\n\n"
+		return contentIndent + styleReasoningLabel.Render(formatReasoningLabel(duration)) + "\n\n"
 	}
 	var buf strings.Builder
 	buf.WriteString(contentIndent)
-	buf.WriteString(styleReasoningLabel.Render("thinking:"))
+	buf.WriteString(styleReasoningLabel.Render(formatReasoningLabel(duration)))
 	buf.WriteString("\n")
 	buf.WriteString(renderReasoningContent(reasoning))
 	buf.WriteString("\n")
@@ -272,7 +279,7 @@ func renderToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults 
 	}
 	buf.WriteString(renderAssistantHeader(modelName, assistantMsg.CreatedAt))
 	buf.WriteString("\n")
-	buf.WriteString(renderReasoningBlock(assistantMsg.ReasoningContent, showReasoning))
+	buf.WriteString(renderReasoningBlock(assistantMsg.ReasoningContent, time.Duration(assistantMsg.ReasoningDurationMillis)*time.Millisecond, showReasoning))
 
 	if assistantMsg.Content != "" {
 		buf.WriteString(renderContentBlock(assistantMsg.Content))
@@ -281,12 +288,18 @@ func renderToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults 
 
 	buf.WriteString(renderToolExecutionBlock(assistantMsg.ToolCalls, toolResults))
 
-	if finalResponse != nil && finalResponse.Content != "" {
-		buf.WriteString("\n")
-		buf.WriteString(contentIndent)
-		buf.WriteString(styleFinalLabel.Render("📝 final response:"))
-		buf.WriteString("\n")
-		buf.WriteString(renderContentBlock(finalResponse.Content))
+	if finalResponse != nil {
+		if finalResponse.ReasoningContent != "" {
+			buf.WriteString("\n")
+			buf.WriteString(renderReasoningBlock(finalResponse.ReasoningContent, time.Duration(finalResponse.ReasoningDurationMillis)*time.Millisecond, showReasoning))
+		}
+		if finalResponse.Content != "" {
+			buf.WriteString("\n")
+			buf.WriteString(contentIndent)
+			buf.WriteString(styleFinalLabel.Render("📝 final response:"))
+			buf.WriteString("\n")
+			buf.WriteString(renderContentBlock(finalResponse.Content))
+		}
 	}
 
 	buf.WriteString("\n")
@@ -309,7 +322,7 @@ func renderSingleMessage(msg *models.ChatMessageDto, showReasoning bool) string 
 		}
 		buf.WriteString(renderAssistantHeader(modelName, msg.CreatedAt))
 		buf.WriteString("\n")
-		buf.WriteString(renderReasoningBlock(msg.ReasoningContent, showReasoning))
+		buf.WriteString(renderReasoningBlock(msg.ReasoningContent, time.Duration(msg.ReasoningDurationMillis)*time.Millisecond, showReasoning))
 		if msg.Content != "" {
 			buf.WriteString(renderContentBlock(msg.Content))
 		}

@@ -18,6 +18,7 @@ package providers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/tools"
@@ -65,12 +66,13 @@ type ReasoningBlock struct {
 }
 
 type Message struct {
-	Role             models.MessageRole `json:"role"`
-	Content          string             `json:"content"`
-	ToolCalls        []models.ToolCall  `json:"toolCalls,omitempty"`
-	ToolResult       *models.ToolResult `json:"toolResult,omitempty"`
-	ReasoningContent string             `json:"reasoningContent,omitempty"`
-	ReasoningBlocks  []ReasoningBlock   `json:"reasoningBlocks,omitempty"`
+	Role                    models.MessageRole `json:"role"`
+	Content                 string             `json:"content"`
+	ToolCalls               []models.ToolCall  `json:"toolCalls,omitempty"`
+	ToolResult              *models.ToolResult `json:"toolResult,omitempty"`
+	ReasoningContent        string             `json:"reasoningContent,omitempty"`
+	ReasoningDurationMillis int64              `json:"reasoningDurationMillis,omitempty"`
+	ReasoningBlocks         []ReasoningBlock   `json:"reasoningBlocks,omitempty"`
 }
 
 type ResponseFormat struct {
@@ -106,6 +108,35 @@ type ChatResponse struct {
 	ReasoningBlocks  []ReasoningBlock
 	ToolCalls        []models.ToolCall
 	TotalToken       int64
+}
+
+func reasoningContentFromBlocks(blocks []ReasoningBlock) string {
+	summaries := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Redacted {
+			continue
+		}
+		summary := strings.TrimSpace(block.Summary)
+		if summary == "" {
+			continue
+		}
+		summaries = append(summaries, summary)
+	}
+	return strings.Join(summaries, "\n")
+}
+
+func HydrateMessageReasoning(msg *Message) {
+	if msg == nil || msg.ReasoningContent != "" {
+		return
+	}
+	msg.ReasoningContent = reasoningContentFromBlocks(msg.ReasoningBlocks)
+}
+
+func hydrateChatResponseReasoning(resp *ChatResponse) {
+	if resp == nil || resp.ReasoningContent != "" {
+		return
+	}
+	resp.ReasoningContent = reasoningContentFromBlocks(resp.ReasoningBlocks)
 }
 
 type EmbeddingRequest struct {

@@ -86,6 +86,8 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 		}
 	}
 
+	hydrateChatResponseReasoning(result)
+
 	return result, nil
 }
 
@@ -111,30 +113,30 @@ func buildAnthropicMessages(messages []Message) ([]anthropic.TextBlockParam, []a
 			return anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)), true
 
 		case models.RoleAssistant:
-			if len(msg.ToolCalls) > 0 {
-				var blocks []anthropic.ContentBlockParamUnion
-				if len(msg.ReasoningBlocks) > 0 {
-					thinkingBlocks := lo.Map(msg.ReasoningBlocks, func(rb ReasoningBlock, _ int) anthropic.ContentBlockParamUnion {
-						if rb.Redacted {
-							return anthropic.NewRedactedThinkingBlock(rb.Signature)
-						}
-						return anthropic.NewThinkingBlock(rb.Signature, rb.Summary)
-					})
-					blocks = append(thinkingBlocks, blocks...)
-				}
-				if msg.Content != "" {
-					blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
-				}
-				for _, tc := range msg.ToolCalls {
-					var input any
-					if err := sonic.Unmarshal([]byte(tc.Arguments), &input); err != nil {
-						input = map[string]any{}
+			var blocks []anthropic.ContentBlockParamUnion
+			if len(msg.ReasoningBlocks) > 0 {
+				thinkingBlocks := lo.Map(msg.ReasoningBlocks, func(rb ReasoningBlock, _ int) anthropic.ContentBlockParamUnion {
+					if rb.Redacted {
+						return anthropic.NewRedactedThinkingBlock(rb.Signature)
 					}
-					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, input, tc.Name))
-				}
-				return anthropic.NewAssistantMessage(blocks...), true
+					return anthropic.NewThinkingBlock(rb.Signature, rb.Summary)
+				})
+				blocks = append(blocks, thinkingBlocks...)
 			}
-			return anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)), true
+			if msg.Content != "" || (len(blocks) == 0 && len(msg.ToolCalls) == 0) {
+				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+			}
+			for _, tc := range msg.ToolCalls {
+				var input any
+				if err := sonic.Unmarshal([]byte(tc.Arguments), &input); err != nil {
+					input = map[string]any{}
+				}
+				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, input, tc.Name))
+			}
+			if len(blocks) == 0 {
+				return anthropic.MessageParam{}, false
+			}
+			return anthropic.NewAssistantMessage(blocks...), true
 
 		case models.RoleTool:
 			if msg.ToolResult != nil {
@@ -336,16 +338,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest) (<
 			ToolCalls:       toolCalls,
 			ReasoningBlocks: reasoningBlocks,
 		}
-		if len(reasoningBlocks) > 0 {
-			var summaryBuilder strings.Builder
-			for _, block := range reasoningBlocks {
-				if !block.Redacted {
-					summaryBuilder.WriteString(block.Summary)
-					summaryBuilder.WriteString("\n")
-				}
-			}
-			msg.ReasoningContent = summaryBuilder.String()
-		}
+		HydrateMessageReasoning(msg)
 		ch <- StreamEvent{
 			Type:    EventMessageDone,
 			Message: msg,
