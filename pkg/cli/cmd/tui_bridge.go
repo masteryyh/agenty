@@ -52,16 +52,19 @@ const (
 )
 
 type overlayRequest struct {
-	kind           overlayKind
-	title          string
-	subtitle       string
-	items          []string
-	hints          string
-	cursor         int
-	options        []string
-	defaultIndices []int
-	huhForm        *huh.Form
-	responseCh     chan overlayResponse
+	kind              overlayKind
+	title             string
+	subtitle          string
+	items             []string
+	hints             string
+	cursor            int
+	listValidate      func(action ListAction, idx int) error
+	listDeleteConfirm func(idx int) string
+	options           []string
+	defaultIndices    []int
+	huhForm           *huh.Form
+	formValidate      func() error
+	responseCh        chan overlayResponse
 }
 
 type overlayResponse struct {
@@ -99,10 +102,18 @@ func (b *UIBridge) Close() {
 }
 
 func (b *UIBridge) ShowList(title string, items []string, hints string, subtitle ...string) (*ListResult, error) {
-	return b.ShowListWithCursor(title, items, hints, 0, subtitle...)
+	return b.ShowListWithCursorAndActions(title, items, hints, 0, nil, nil, subtitle...)
 }
 
 func (b *UIBridge) ShowListWithCursor(title string, items []string, hints string, cursor int, subtitle ...string) (*ListResult, error) {
+	return b.ShowListWithCursorAndActions(title, items, hints, cursor, nil, nil, subtitle...)
+}
+
+func (b *UIBridge) ShowListWithCursorAndValidate(title string, items []string, hints string, cursor int, validate func(action ListAction, idx int) error, subtitle ...string) (*ListResult, error) {
+	return b.ShowListWithCursorAndActions(title, items, hints, cursor, validate, nil, subtitle...)
+}
+
+func (b *UIBridge) ShowListWithCursorAndActions(title string, items []string, hints string, cursor int, validate func(action ListAction, idx int) error, deleteConfirm func(idx int) string, subtitle ...string) (*ListResult, error) {
 	sub := ""
 	if len(subtitle) > 0 {
 		sub = subtitle[0]
@@ -110,13 +121,15 @@ func (b *UIBridge) ShowListWithCursor(title string, items []string, hints string
 	respCh := make(chan overlayResponse, 1)
 	b.program.Send(overlayRequestMsg{
 		request: overlayRequest{
-			kind:       overlayKindList,
-			title:      title,
-			subtitle:   sub,
-			items:      items,
-			hints:      hints,
-			cursor:     cursor,
-			responseCh: respCh,
+			kind:              overlayKindList,
+			title:             title,
+			subtitle:          sub,
+			items:             items,
+			hints:             hints,
+			cursor:            cursor,
+			listValidate:      validate,
+			listDeleteConfirm: deleteConfirm,
+			responseCh:        respCh,
 		},
 	})
 	select {
@@ -128,12 +141,17 @@ func (b *UIBridge) ShowListWithCursor(title string, items []string, hints string
 }
 
 func (b *UIBridge) ShowHuhForm(form *huh.Form) (bool, error) {
+	return b.ShowValidatedHuhForm(form, nil)
+}
+
+func (b *UIBridge) ShowValidatedHuhForm(form *huh.Form, validate func() error) (bool, error) {
 	respCh := make(chan overlayResponse, 1)
 	b.program.Send(overlayRequestMsg{
 		request: overlayRequest{
-			kind:       overlayKindHuhForm,
-			huhForm:    form,
-			responseCh: respCh,
+			kind:         overlayKindHuhForm,
+			huhForm:      form,
+			formValidate: validate,
+			responseCh:   respCh,
 		},
 	})
 	select {

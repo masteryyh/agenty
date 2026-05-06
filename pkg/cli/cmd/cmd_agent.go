@@ -66,7 +66,7 @@ func handleAgentCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 			items[i] = fmt.Sprintf("%s%s%s", a.Name, marker, styleGray.Render(current))
 		}
 
-		res, err := bridge.ShowList("Agents  "+styleGray.Render("(select to switch)"), items, listHints)
+		res, err := bridge.ShowListWithCursorAndActions("Agents  "+styleGray.Render("(select to switch)"), items, listHints, 0, nil, agentDeleteConfirm(agents.Data))
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -90,22 +90,25 @@ func handleAgentCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 
 		case ListActionDelete:
 			target := agents.Data[res.Index]
-			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete agent '%s'? This will also delete all sessions, messages and memories.", target.Name))
-			if err != nil {
-				return CommandResult{Handled: true}, err
-			}
-			if confirmed {
-				if err := b.DeleteAgent(target.ID); err != nil {
-					bridge.Error("Failed to delete agent: %v", err)
-				} else {
-					bridge.Success("Agent deleted: %s", target.Name)
-				}
+			if err := b.DeleteAgent(target.ID); err != nil {
+				bridge.Error("Failed to delete agent: %v", err)
+			} else {
+				bridge.Success("Agent deleted: %s", target.Name)
 			}
 			continue
 
 		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
 		}
+	}
+}
+
+func agentDeleteConfirm(agentList []models.AgentDto) func(idx int) string {
+	return func(idx int) string {
+		if idx < 0 || idx >= len(agentList) {
+			return ""
+		}
+		return fmt.Sprintf("Delete agent '%s'? This will also delete all sessions, messages and memories.", agentList[idx].Name)
 	}
 }
 
@@ -162,19 +165,19 @@ func doCreateAgent(b backend.Backend, bridge *UIBridge) error {
 	isDefault := false
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&name),
 		huh.NewInput().Title("Soul").Placeholder("system prompt, leave blank for default").Value(&soul),
 		huh.NewSelect[bool]().Title("Default agent").
 			Options(huh.NewOption("No", false), huh.NewOption("Yes", true)).
 			Value(&isDefault),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -206,19 +209,19 @@ func doUpdateAgent(b backend.Backend, bridge *UIBridge, target models.AgentDto) 
 	newIsDefault := target.IsDefault
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&newName).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&newName),
 		huh.NewInput().Title("Soul").Placeholder("system prompt").Value(&newSoul),
 		huh.NewSelect[bool]().Title("Default agent").
 			Options(huh.NewOption("No", false), huh.NewOption("Yes", true)).
 			Value(&newIsDefault),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(newName) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}

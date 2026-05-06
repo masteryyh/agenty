@@ -125,6 +125,14 @@ type chatModel struct {
 	ready  bool
 }
 
+type huhFormOverlay struct {
+	form       *huh.Form
+	validate   func() error
+	notice     string
+	responseCh chan overlayResponse
+	helpLine   string
+}
+
 const maxInputLines = 5
 
 func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, isLocal bool) chatModel {
@@ -218,41 +226,95 @@ func (m chatModel) updateHuhOverlay(msg tea.Msg) (chatModel, tea.Cmd, bool) {
 	if m.mode != modeOverlay {
 		return m, nil, false
 	}
-	form, ok := m.overlay.(*huh.Form)
+	overlay, ok := m.overlay.(*huhFormOverlay)
 	if !ok {
 		return m, nil, false
 	}
+	form := overlay.form
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		if m.overlayRespCh != nil {
-			m.overlayRespCh <- overlayResponse{formSubmitted: false}
+		if overlay.responseCh != nil {
+			overlay.responseCh <- overlayResponse{formSubmitted: false}
 			m.overlayRespCh = nil
 		}
 		m.mode = modeChat
 		m.overlay = nil
 		return m, nil, true
 	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		overlay.notice = ""
+		switch keyMsg.Type {
+		case tea.KeyTab:
+			if !huhFocusedFieldHasEnabledKey(form, "tab") {
+				m.overlay = overlay
+				return m, nil, true
+			}
+			return m.updateHuhFormOverlay(overlay, huh.NextField())
+		case tea.KeyShiftTab:
+			if !huhFocusedFieldHasEnabledKey(form, "shift+tab") {
+				m.overlay = overlay
+				return m, nil, true
+			}
+			return m.updateHuhFormOverlay(overlay, huh.PrevField())
+		case tea.KeyEnter:
+			if overlay.validate != nil && huhFocusedFieldIsLast(form) {
+				if err := overlay.validate(); err != nil {
+					overlay.notice = err.Error()
+					m.overlay = overlay
+					return m, nil, true
+				}
+			}
+		}
+	}
+	return m.updateHuhFormOverlay(overlay, msg)
+}
+
+func (m chatModel) updateHuhFormOverlay(overlay *huhFormOverlay, msg tea.Msg) (chatModel, tea.Cmd, bool) {
+	form := overlay.form
 	newModel, cmd := form.Update(msg)
 	if f, ok := newModel.(*huh.Form); ok {
-		m.overlay = f
+		overlay.form = f
 		form = f
 	}
 	switch form.State {
 	case huh.StateCompleted:
-		if m.overlayRespCh != nil {
-			m.overlayRespCh <- overlayResponse{formSubmitted: true}
+		if overlay.responseCh != nil {
+			overlay.responseCh <- overlayResponse{formSubmitted: true}
 			m.overlayRespCh = nil
 		}
 		m.mode = modeChat
 		m.overlay = nil
+		return m, cmd, true
 	case huh.StateAborted:
-		if m.overlayRespCh != nil {
-			m.overlayRespCh <- overlayResponse{formSubmitted: false}
+		if overlay.responseCh != nil {
+			overlay.responseCh <- overlayResponse{formSubmitted: false}
 			m.overlayRespCh = nil
 		}
 		m.mode = modeChat
 		m.overlay = nil
+		return m, cmd, true
 	}
+	m.overlay = overlay
 	return m, cmd, true
+}
+
+func huhFocusedFieldIsLast(form *huh.Form) bool {
+	return !huhFocusedFieldHasEnabledKey(form, "tab")
+}
+
+func huhFocusedFieldHasEnabledKey(form *huh.Form, key string) bool {
+	field := form.GetFocusedField()
+	if field == nil {
+		return false
+	}
+	for _, binding := range field.KeyBinds() {
+		if !binding.Enabled() {
+			continue
+		}
+		if slices.Contains(binding.Keys(), key) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -309,22 +371,21 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req := msg.request
 		switch req.kind {
 		case overlayKindList:
-			o := newListOverlay(req.title, req.items, req.hints, req.cursor, req.responseCh)
+			o := newListOverlay(req.title, req.items, req.hints, req.cursor, req.listValidate, req.listDeleteConfirm, req.responseCh)
 			o.subtitle = req.subtitle
 			m.overlay = o
 		case overlayKindMultiSelect:
 			m.overlay = newMultiSelectOverlay(req.title, req.options, req.defaultIndices, req.responseCh)
 		case overlayKindHuhForm:
-			formWidth := m.width - 8
-			if formWidth > 80 {
-				formWidth = 80
-			}
-			if formWidth < 20 {
-				formWidth = 20
-			}
+			formWidth := max(min(m.width-8, 80), 20)
 			m.huhFormWidth = formWidth
-			form := req.huhForm.WithWidth(formWidth).WithTheme(theme.NewHuhTheme())
-			m.overlay = form
+			form := req.huhForm.WithWidth(formWidth).WithTheme(theme.NewHuhTheme()).WithKeyMap(theme.NewHuhKeyMap()).WithShowHelp(false).WithShowErrors(false)
+			m.overlay = &huhFormOverlay{
+				form:       form,
+				validate:   req.formValidate,
+				responseCh: req.responseCh,
+				helpLine:   "Up/Down move in lists  ·  Tab next field  ·  Shift+Tab previous field  ·  Enter select/confirm  ·  Esc cancel",
+			}
 			m.overlayRespCh = req.responseCh
 			return m, form.Init()
 		case overlayKindLogViewer:
@@ -485,15 +546,19 @@ func (m chatModel) renderOverlay() string {
 		return o.render(m.width, m.height)
 	case *logViewerOverlay:
 		return o.render(m.width, m.height)
-	case *huh.Form:
-		view := o.View()
-		lines := strings.Split(view, "\n")
-		topPad := (m.height - len(lines)) / 3
-		if topPad < 2 {
-			topPad = 2
+	case *huhFormOverlay:
+		view := o.form.View()
+		if o.notice != "" {
+			view += "\n\n" + styleRed.Render("! "+o.notice)
 		}
-		leftPad := (m.width - m.huhFormWidth) / 2
-		if leftPad < 0 {
+		if o.helpLine != "" {
+			view += "\n\n" + styleGray.Render(o.helpLine)
+		}
+		lines := strings.Split(view, "\n")
+		lines = trimTrailingBlankLines(lines)
+		topPad := max(m.height-len(lines)-4, 1)
+		leftPad := 2
+		if m.width <= m.huhFormWidth+leftPad {
 			leftPad = 0
 		}
 		if leftPad > 0 {
@@ -504,9 +569,19 @@ func (m chatModel) renderOverlay() string {
 			}
 			return strings.Repeat("\n", topPad) + strings.Join(paddedLines, "\n")
 		}
-		return strings.Repeat("\n", topPad) + view
+		return strings.Repeat("\n", topPad) + strings.Join(lines, "\n")
 	}
 	return ""
+}
+
+func trimTrailingBlankLines(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func (m *chatModel) handleOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -545,20 +620,14 @@ func (m chatModel) renderTopSeparator() string {
 	rightLabel := strings.Join(rightParts, "") + " "
 	rightWidth := lipgloss.Width(rightLabel)
 
-	leftWidth := m.width - rightWidth
-	if leftWidth < 0 {
-		leftWidth = 0
-	}
+	leftWidth := max(m.width-rightWidth, 0)
 
 	if m.stream.showIndicator && m.stream.phrase != "" {
 		frame := m.spinner.View()
 		phrase := styleSpinTxt.Render(m.stream.phrase)
 		indicator := frame + " " + phrase
 		indicatorWidth := lipgloss.Width(indicator)
-		dashWidth := leftWidth - indicatorWidth - 2
-		if dashWidth < 0 {
-			dashWidth = 0
-		}
+		dashWidth := max(leftWidth-indicatorWidth-2, 0)
 		dashes := styleBarSep.Render(strings.Repeat("─", dashWidth))
 		return indicator + "  " + dashes + rightLabel
 	}
@@ -583,10 +652,7 @@ func (m chatModel) renderHintsLine() string {
 
 	rightStr := m.renderShortHelp()
 
-	gap := m.width - lipgloss.Width(leftStr) - lipgloss.Width(rightStr)
-	if gap < 0 {
-		gap = 0
-	}
+	gap := max(m.width-lipgloss.Width(leftStr)-lipgloss.Width(rightStr), 0)
 
 	return leftStr + strings.Repeat(" ", gap) + rightStr
 }
@@ -614,10 +680,7 @@ func (m *chatModel) calcViewportHeight() int {
 	inputH := clampInputHeight(m.input.LineCount())
 	completionsH := m.completion.height()
 
-	h := m.height - 1 - inputH - completionsH - 1 - 1
-	if h < 1 {
-		h = 1
-	}
+	h := max(m.height-1-inputH-completionsH-1-1, 1)
 	return h
 }
 
@@ -677,12 +740,12 @@ func (m *chatModel) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleReasoning()
 
 	case tea.KeyPgUp:
-		m.viewport.HalfViewUp()
+		m.viewport.HalfPageUp()
 		m.completion.visible = false
 		return m, nil
 
 	case tea.KeyPgDown:
-		m.viewport.HalfViewDown()
+		m.viewport.HalfPageDown()
 		m.completion.visible = false
 		return m, nil
 
@@ -889,10 +952,8 @@ func (m *chatModel) adjustThinkingForModel(modelThinking bool, thinkingLevels []
 		m.chatState.ThinkingLevel = ""
 		return
 	}
-	for _, l := range thinkingLevels {
-		if l == m.chatState.ThinkingLevel {
-			return
-		}
+	if slices.Contains(thinkingLevels, m.chatState.ThinkingLevel) {
+		return
 	}
 	m.chatState.Thinking = false
 	m.chatState.ThinkingLevel = ""

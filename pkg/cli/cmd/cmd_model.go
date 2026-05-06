@@ -62,7 +62,7 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 		}
 
 		items, cursor := renderModelTableRows(result.Data, modelID)
-		res, err := bridge.ShowListWithCursor("Models  "+styleGray.Render("(select chat model to switch)"), items, listHints, cursor, modelTableSubtitle())
+		res, err := bridge.ShowListWithCursorAndActions("Models  "+styleGray.Render("(select chat model to switch)"), items, listHints, cursor, validateModelListAction(result.Data), modelDeleteConfirm(result.Data), modelTableSubtitle())
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
@@ -88,25 +88,48 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 
 		case ListActionDelete:
 			target := result.Data[res.Index]
-			if target.IsPreset {
-				bridge.Warning("'%s/%s' is a preset model and cannot be deleted.", target.Provider.Name, target.Name)
-				continue
-			}
-			confirmed, err := bridge.ShowConfirm(fmt.Sprintf("Delete model '%s/%s'?", target.Provider.Name, target.Name))
-			if err != nil {
-				return CommandResult{Handled: true}, err
-			}
-			if confirmed {
-				if err := b.DeleteModel(target.ID); err != nil {
-					bridge.Error("Failed to delete model: %v", err)
-				} else {
-					bridge.Success("Model deleted: %s/%s", target.Provider.Name, target.Name)
-				}
+			if err := b.DeleteModel(target.ID); err != nil {
+				bridge.Error("Failed to delete model: %v", err)
+			} else {
+				bridge.Success("Model deleted: %s/%s", target.Provider.Name, target.Name)
 			}
 			continue
 
 		case ListActionCancel:
 			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func modelDeleteConfirm(modelList []models.ModelDto) func(idx int) string {
+	return func(idx int) string {
+		if idx < 0 || idx >= len(modelList) {
+			return ""
+		}
+		target := modelList[idx]
+		if target.IsPreset {
+			return ""
+		}
+		return fmt.Sprintf("Delete model '%s/%s'?", target.Provider.Name, target.Name)
+	}
+}
+
+func validateModelListAction(modelList []models.ModelDto) func(action ListAction, idx int) error {
+	return func(action ListAction, idx int) error {
+		if idx < 0 || idx >= len(modelList) {
+			return nil
+		}
+		target := modelList[idx]
+		if !target.IsPreset {
+			return nil
+		}
+		switch action {
+		case ListActionEdit:
+			return fmt.Errorf("'%s/%s' is a preset model and cannot be modified.", target.Provider.Name, target.Name)
+		case ListActionDelete:
+			return fmt.Errorf("'%s/%s' is a preset model and cannot be deleted.", target.Provider.Name, target.Name)
+		default:
+			return nil
 		}
 	}
 }
@@ -217,18 +240,8 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().Title("Provider").Options(providerOpts...).Value(&selectedProvider),
-		huh.NewInput().Title("Name").Value(&name).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
-		huh.NewInput().Title("Code").Value(&code).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&name),
+		huh.NewInput().Title("Code").Value(&code),
 		huh.NewSelect[string]().Title("Type").
 			Options(
 				huh.NewOption("Chat", "Chat"),
@@ -239,7 +252,15 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 			Value(&lightModel),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		if strings.TrimSpace(code) == "" {
+			return fmt.Errorf("Code is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -279,38 +300,26 @@ func doCreateModel(b backend.Backend, bridge *UIBridge) error {
 }
 
 func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) error {
-	currentTypeIdx := 0
-	if target.EmbeddingModel {
-		currentTypeIdx = 1
-	}
-
-	typeOptions := []string{"Chat", "Embedding"}
 	newName := target.Name
 	setDefault := target.DefaultModel
 	lightModel := target.Light
-	modelType := typeOptions[currentTypeIdx]
 
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Name").Value(&newName).Validate(func(s string) error {
-			if strings.TrimSpace(s) == "" {
-				return fmt.Errorf("required")
-			}
-			return nil
-		}),
+		huh.NewInput().Title("Name").Value(&newName),
 		huh.NewSelect[bool]().Title("Default model").
 			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
 			Value(&setDefault),
-		huh.NewSelect[string]().Title("Type").
-			Options(
-				huh.NewOption("Chat", "Chat"),
-				huh.NewOption("Embedding", "Embedding"),
-			).Value(&modelType),
 		huh.NewSelect[bool]().Title("Lightweight model").
 			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
 			Value(&lightModel),
 	))
 
-	submitted, err := bridge.ShowHuhForm(form)
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(newName) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -319,29 +328,20 @@ func doUpdateModel(b backend.Backend, bridge *UIBridge, target models.ModelDto) 
 	}
 
 	newName = strings.TrimSpace(newName)
-	embeddingModel := modelType == "Embedding"
 
-	if newName == target.Name && setDefault == target.DefaultModel &&
-		embeddingModel == target.EmbeddingModel && lightModel == target.Light {
+	if newName == target.Name && setDefault == target.DefaultModel && lightModel == target.Light {
 		bridge.Info("No changes detected, skipping update")
 		return nil
 	}
 
 	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{
-		Name:           &newName,
-		DefaultModel:   &setDefault,
-		EmbeddingModel: &embeddingModel,
-		Light:          &lightModel,
+		Name:         &newName,
+		DefaultModel: &setDefault,
+		Light:        &lightModel,
 	}); err != nil {
 		return err
 	}
 	bridge.Success("Model updated: %s", newName)
-
-	if embeddingModel && !target.EmbeddingModel {
-		if err := offerSetActiveEmbeddingModel(b, bridge, target.ID); err != nil {
-			return err
-		}
-	}
 
 	return nil
 }

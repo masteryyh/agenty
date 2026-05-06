@@ -17,6 +17,7 @@ limitations under the License.
 package theme
 
 import (
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -83,4 +84,17 @@ func NewHuhTheme() *huh.Theme {
 	t.FieldSeparator = lipgloss.NewStyle().SetString("\n")
 
 	return t
+}
+
+func NewHuhKeyMap() *huh.KeyMap {
+	k := huh.NewDefaultKeyMap()
+
+	k.Select.Up = key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up"))
+	k.Select.Down = key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down"))
+	k.MultiSelect.Up = key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up"))
+	k.MultiSelect.Down = key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down"))
+	k.FilePicker.Up = key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up"), key.WithDisabled())
+	k.FilePicker.Down = key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down"), key.WithDisabled())
+
+	return k
 }

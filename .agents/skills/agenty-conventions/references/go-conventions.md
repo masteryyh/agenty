@@ -43,6 +43,13 @@ n := max(a, b, c)
 
 // ❌ Do not implement manually
 func minInt(a, b int) int { if a < b { return a }; return b }
+
+// ❌ Do not use if/else
+if n < a {
+    n = a
+} else if n > b {
+    n = b
+}
 ```
 
 ## String Building
