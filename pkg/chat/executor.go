@@ -34,8 +34,7 @@ import (
 const maxToolCallIterations = 20
 
 type ChatExecutor struct {
-	registry         *tools.Registry
-	providerRegistry map[models.APIType]providers.Provider
+	registry *tools.Registry
 }
 
 var (
@@ -44,19 +43,8 @@ var (
 )
 
 func NewChatExecutor(registry *tools.Registry) *ChatExecutor {
-	providerMap := map[models.APIType]providers.Provider{
-		models.APITypeOpenAI:       providers.NewOpenAIProvider(),
-		models.APITypeOpenAILegacy: providers.NewOpenAILegacyProvider(),
-		models.APITypeAnthropic:    providers.NewAnthropicProvider(),
-		models.APITypeKimi:         providers.NewKimiProvider(),
-		models.APITypeGemini:       providers.NewGeminiProvider(),
-		models.APITypeBigModel:     providers.NewBigModelProvider(),
-		models.APITypeQwen:         providers.NewQwenProvider(),
-	}
-
 	return &ChatExecutor{
-		registry:         registry,
-		providerRegistry: providerMap,
+		registry: registry,
 	}
 }
 
@@ -128,9 +116,9 @@ func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.
 }
 
 func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResult, error) {
-	p, ok := ce.providerRegistry[params.APIType]
+	p, ok := providers.ModelProviders[params.APIType]
 	if !ok {
-		p = ce.providerRegistry[models.APITypeOpenAI]
+		p = providers.ModelProviders[models.APITypeOpenAI]
 	}
 
 	toolDefs := ce.registry.Definitions()
@@ -220,9 +208,9 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 }
 
 func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-chan providers.StreamEvent, error) {
-	p, ok := ce.providerRegistry[params.APIType]
+	p, ok := providers.ModelProviders[params.APIType]
 	if !ok {
-		p = ce.providerRegistry[models.APITypeOpenAI]
+		p = providers.ModelProviders[models.APITypeOpenAI]
 	}
 
 	toolDefs := ce.registry.Definitions()

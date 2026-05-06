@@ -34,8 +34,7 @@ import (
 type BatchEmbedFunc func(ctx context.Context, texts []string) ([][]float32, error)
 
 type EmbeddingService struct {
-	db               *gorm.DB
-	providerRegistry map[models.APIType]providers.Provider
+	db *gorm.DB
 }
 
 var (
@@ -47,12 +46,6 @@ func GetEmbeddingService() *EmbeddingService {
 	embeddingOnce.Do(func() {
 		embeddingService = &EmbeddingService{
 			db: conn.GetDB(),
-			providerRegistry: map[models.APIType]providers.Provider{
-				models.APITypeOpenAI:   providers.NewOpenAIProvider(),
-				models.APITypeGemini:   providers.NewGeminiProvider(),
-				models.APITypeBigModel: providers.NewBigModelProvider(),
-				models.APITypeQwen:     providers.NewQwenProvider(),
-			},
 		}
 	})
 	return embeddingService
@@ -98,7 +91,7 @@ func (s *EmbeddingService) NewBatchEmbedder(ctx context.Context) (BatchEmbedFunc
 		return nil, err
 	}
 
-	p, ok := s.providerRegistry[prov.Type]
+	p, ok := providers.ModelProviders[prov.Type]
 	if !ok {
 		return nil, fmt.Errorf("unsupported embedding provider type: %s", prov.Type)
 	}
