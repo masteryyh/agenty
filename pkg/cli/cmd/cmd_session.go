@@ -56,7 +56,14 @@ func handleNewCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID 
 		}
 	}
 
-	return CommandResult{Handled: true, NewSessionID: session.ID}, nil
+	result := CommandResult{Handled: true, NewSessionID: session.ID}
+	if modelID, modelName, modelErr := resolveInitialChatModel(b, currentSession.AgentID, session, false); modelErr == nil {
+		result.NewModelID = modelID
+		result.NewModelName = modelName
+		chatState := chatStateForSession(b, modelID, session, false)
+		result.NewChatState = &chatState
+	}
+	return result, nil
 }
 
 func handleStatusCmd(b backend.Backend, bridge *UIBridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {

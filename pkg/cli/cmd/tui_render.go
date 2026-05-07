@@ -295,9 +295,6 @@ func renderToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults 
 		}
 		if finalResponse.Content != "" {
 			buf.WriteString("\n")
-			buf.WriteString(contentIndent)
-			buf.WriteString(styleFinalLabel.Render("📝 final response:"))
-			buf.WriteString("\n")
 			buf.WriteString(renderContentBlock(finalResponse.Content))
 		}
 	}

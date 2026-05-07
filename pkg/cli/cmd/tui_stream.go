@@ -45,7 +45,6 @@ const (
 	streamSegmentToolLabel
 	streamSegmentToolCall
 	streamSegmentToolResult
-	streamSegmentFinalLabel
 	streamSegmentError
 )
 
@@ -59,7 +58,6 @@ type streamModel struct {
 	currentContent   int
 	headerPrinted    bool
 	hasToolSection   bool
-	hadToolCalls     bool
 	hasContent       bool
 
 	ch     chan providers.StreamEvent
@@ -107,7 +105,6 @@ func (s *streamModel) resetAttempt() {
 	s.currentContent = -1
 	s.headerPrinted = false
 	s.hasToolSection = false
-	s.hadToolCalls = false
 	s.hasContent = false
 }
 
@@ -142,9 +139,6 @@ func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 		s.finishReasoning()
 		s.ensureHeader(modelName)
 		if s.currentContent == -1 {
-			if !s.hasContent && s.hadToolCalls {
-				s.segments = append(s.segments, streamSegment{kind: streamSegmentFinalLabel})
-			}
 			s.currentContent = len(s.segments)
 			s.segments = append(s.segments, streamSegment{kind: streamSegmentContent})
 			s.hasContent = true
@@ -158,7 +152,6 @@ func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 		if !s.hasToolSection {
 			s.segments = append(s.segments, streamSegment{kind: streamSegmentToolLabel})
 			s.hasToolSection = true
-			s.hadToolCalls = true
 		}
 
 	case providers.EventToolCallDone:
@@ -285,8 +278,6 @@ func (s *streamModel) render(showReasoning bool) string {
 			if segment.toolResult != nil {
 				buf.WriteString(renderStreamToolResult(segment.toolResult))
 			}
-		case streamSegmentFinalLabel:
-			buf.WriteString(streamRenderFinalLabel())
 		case streamSegmentError:
 			buf.WriteString(styleSysErr.Render(fmt.Sprintf("  Error: %s\n", segment.text)))
 		}
@@ -364,8 +355,4 @@ var streamingPhrases = []string{
 
 func streamRenderToolLabel() string {
 	return contentIndent + styleToolLabel.Render("🔧 tool execution:") + "\n"
-}
-
-func streamRenderFinalLabel() string {
-	return "\n" + contentIndent + styleFinalLabel.Render("📝 final response:") + "\n"
 }

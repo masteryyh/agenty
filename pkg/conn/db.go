@@ -197,20 +197,28 @@ func execSQLScript(ctx context.Context, dbConn *gorm.DB, script string) error {
 }
 
 func migrateCoreSchema(ctx context.Context, dbConn *gorm.DB, dbType string) error {
-	hasRoundID, err := hasColumn(ctx, dbConn, dbType, "chat_messages", "round_id")
-	if err != nil {
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "last_used_thinking_level", "TEXT"); err != nil {
 		return err
-	}
-	if hasRoundID {
-		return nil
 	}
 
 	columnType := "UUID"
 	if dbType == config.DatabaseTypeSQLite {
 		columnType = "TEXT"
 	}
-	if err := dbConn.WithContext(ctx).Exec("ALTER TABLE chat_messages ADD COLUMN round_id " + columnType).Error; err != nil {
-		return fmt.Errorf("failed to add chat_messages.round_id: %w", err)
+	return addColumnIfMissing(ctx, dbConn, dbType, "chat_messages", "round_id", columnType)
+}
+
+func addColumnIfMissing(ctx context.Context, dbConn *gorm.DB, dbType, tableName, columnName, columnType string) error {
+	exists, err := hasColumn(ctx, dbConn, dbType, tableName, columnName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	if err := dbConn.WithContext(ctx).Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnType)).Error; err != nil {
+		return fmt.Errorf("failed to add %s.%s: %w", tableName, columnName, err)
 	}
 	return nil
 }

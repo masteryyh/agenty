@@ -135,7 +135,7 @@ type huhFormOverlay struct {
 
 const maxInputLines = 5
 
-func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, isLocal bool) chatModel {
+func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, chatState ChatState) chatModel {
 	ta := textarea.New()
 	ta.Prompt = "  "
 	ta.Placeholder = "Type a message or /help for commands..."
@@ -159,8 +159,6 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 
 	historyContent := renderMessageHistoryToString(messages, false)
 
-	defaultState := defaultChatState(b, modelID)
-	defaultState.LocalMode = isLocal
 	m := chatModel{
 		backend:      b,
 		bridge:       bridge,
@@ -169,7 +167,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		agentID:      agentID,
 		modelName:    modelName,
 		agentName:    agentName,
-		chatState:    &defaultState,
+		chatState:    &chatState,
 		input:        ta,
 		mode:         modeChat,
 		chatLog:      new(strings.Builder),
@@ -202,6 +200,27 @@ func defaultChatState(b backend.Backend, modelID uuid.UUID) ChatState {
 		}
 	}
 	return ChatState{Thinking: true, ThinkingLevel: level}
+}
+
+func chatStateForSession(b backend.Backend, modelID uuid.UUID, session *models.ChatSessionDto, restored bool) ChatState {
+	if !restored || session == nil || session.LastUsedThinkingLevel == nil {
+		return defaultChatState(b, modelID)
+	}
+	return chatStateFromThinkingLevel(b, modelID, *session.LastUsedThinkingLevel)
+}
+
+func chatStateFromThinkingLevel(b backend.Backend, modelID uuid.UUID, level string) ChatState {
+	if level == "" {
+		return ChatState{}
+	}
+	levelsPtr, err := b.GetModelThinkingLevels(modelID)
+	if err != nil || levelsPtr == nil || len(*levelsPtr) == 0 {
+		return ChatState{}
+	}
+	if slices.Contains(*levelsPtr, level) {
+		return ChatState{Thinking: true, ThinkingLevel: level}
+	}
+	return defaultChatState(b, modelID)
 }
 
 func newSpinnerModel() spinner.Model {
@@ -869,6 +888,11 @@ func (m *chatModel) handleCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		if msg.result.NewModelName != "" {
 			m.modelName = msg.result.NewModelName
 		}
+	}
+
+	if msg.result.NewChatState != nil {
+		m.chatState.Thinking = msg.result.NewChatState.Thinking
+		m.chatState.ThinkingLevel = msg.result.NewChatState.ThinkingLevel
 	}
 
 	if msg.result.NewAgentID != uuid.Nil {

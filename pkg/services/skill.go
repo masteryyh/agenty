@@ -41,9 +41,11 @@ import (
 )
 
 const (
-	agentsSkillsDir = ".agents/skills"
-	claudeSkillsDir = ".claude/skills"
-	skillMDFileName = "SKILL.md"
+	agentsSkillsDir                = ".agents/skills"
+	claudeSkillsDir                = ".claude/skills"
+	skillMDFileName                = "SKILL.md"
+	sessionSkillTableTTL           = 5 * 24 * time.Hour
+	sessionSkillTableCleanupPeriod = 24 * time.Hour
 )
 
 type SkillService struct {
@@ -52,6 +54,8 @@ type SkillService struct {
 	projectWatchers   map[uuid.UUID]*projectWatcherState
 	sessionTables     map[uuid.UUID]bool
 	mu                sync.RWMutex
+	sessionTableMu    sync.Mutex
+	cleanupCancelFn   context.CancelFunc
 	globalSkillsPath  string
 	builtinSkillsPath string
 }
@@ -101,6 +105,7 @@ func (s *SkillService) Initialize(ctx context.Context) error {
 	if err := s.startGlobalWatcher(ctx); err != nil {
 		slog.WarnContext(ctx, "failed to start global skills watcher", "error", err)
 	}
+	s.startSessionTableCleanup(ctx)
 	return nil
 }
 
@@ -111,6 +116,11 @@ func (s *SkillService) Shutdown() {
 	if s.globalWatcher != nil {
 		s.globalWatcher.Close()
 		s.globalWatcher = nil
+	}
+
+	if s.cleanupCancelFn != nil {
+		s.cleanupCancelFn()
+		s.cleanupCancelFn = nil
 	}
 
 	for sessionID, state := range s.projectWatchers {
@@ -591,14 +601,123 @@ func (s *SkillService) createSessionTableSQL(sessionID uuid.UUID) string {
 	`, tableName, indexName, tableName)
 }
 
+func (s *SkillService) markSessionTable(sessionID uuid.UUID) {
+	s.mu.Lock()
+	s.sessionTables[sessionID] = true
+	s.mu.Unlock()
+}
+
+func (s *SkillService) sessionTableExists(ctx context.Context, sessionID uuid.UUID) (bool, error) {
+	tableName := s.sessionTableName(sessionID)
+	var count int64
+	if usingSQLite() {
+		if err := s.db.WithContext(ctx).
+			Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).
+			Scan(&count).Error; err != nil {
+			return false, fmt.Errorf("failed to inspect session skills table: %w", err)
+		}
+		return count > 0, nil
+	}
+
+	if err := s.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*) FROM pg_class WHERE oid = to_regclass(?)`, tableName).
+		Scan(&count).Error; err != nil {
+		return false, fmt.Errorf("failed to inspect session skills table: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (s *SkillService) countSessionTableRows(ctx context.Context, sessionID uuid.UUID) (int64, error) {
+	tableName := s.sessionTableName(sessionID)
+	var count int64
+	if err := s.db.WithContext(ctx).Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count session skills: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SkillService) EnsureSessionTable(ctx context.Context, sessionID uuid.UUID, cwd string) error {
+	if strings.TrimSpace(cwd) == "" {
+		return nil
+	}
+
+	s.sessionTableMu.Lock()
+	defer s.sessionTableMu.Unlock()
+
+	exists, err := s.sessionTableExists(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		s.markSessionTable(sessionID)
+		count, err := s.countSessionTableRows(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return s.PopulateSessionSkills(ctx, sessionID, cwd)
+		}
+		if err := s.startProjectWatcher(ctx, sessionID, cwd); err != nil {
+			slog.WarnContext(ctx, "failed to start project watcher", "sessionId", sessionID, "cwd", cwd, "error", err)
+		}
+		return nil
+	}
+
+	if err := s.CreateSessionTable(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := s.PopulateSessionSkills(ctx, sessionID, cwd); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SkillService) ensureSessionTableForSession(ctx context.Context, sessionID uuid.UUID) error {
+	s.mu.RLock()
+	hasTable := s.sessionTables[sessionID]
+	s.mu.RUnlock()
+	if hasTable {
+		exists, err := s.sessionTableExists(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if exists {
+			count, err := s.countSessionTableRows(ctx, sessionID)
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				return nil
+			}
+		}
+		s.mu.Lock()
+		delete(s.sessionTables, sessionID)
+		s.mu.Unlock()
+	}
+
+	var session models.ChatSession
+	if err := s.db.WithContext(ctx).
+		Select("id", "cwd").
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to load chat session for skills: %w", err)
+	}
+	if session.Cwd == nil {
+		return nil
+	}
+	return s.EnsureSessionTable(ctx, sessionID, *session.Cwd)
+}
+
 func (s *SkillService) CreateSessionTable(ctx context.Context, sessionID uuid.UUID) error {
 	if err := execStatements(ctx, s.db, s.createSessionTableSQL(sessionID)); err != nil {
 		return fmt.Errorf("failed to create session skills table: %w", err)
 	}
 
-	s.mu.Lock()
-	s.sessionTables[sessionID] = true
-	s.mu.Unlock()
+	s.markSessionTable(sessionID)
 
 	return nil
 }
@@ -624,6 +743,55 @@ func (s *SkillService) DropSessionTable(ctx context.Context, sessionID uuid.UUID
 	s.stopProjectWatcher(sessionID)
 
 	return nil
+}
+
+func (s *SkillService) startSessionTableCleanup(ctx context.Context) {
+	s.mu.Lock()
+	if s.cleanupCancelFn != nil {
+		s.mu.Unlock()
+		return
+	}
+	cleanupCtx, cancel := context.WithCancel(ctx)
+	s.cleanupCancelFn = cancel
+	s.mu.Unlock()
+
+	safe.GoSafeWithCtx("session-skills-table-cleanup", cleanupCtx, func(ctx context.Context) {
+		s.runSessionTableCleanup(ctx)
+	})
+}
+
+func (s *SkillService) runSessionTableCleanup(ctx context.Context) {
+	s.cleanupOldSessionTables(ctx)
+
+	ticker := time.NewTicker(sessionSkillTableCleanupPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.cleanupOldSessionTables(ctx)
+		}
+	}
+}
+
+func (s *SkillService) cleanupOldSessionTables(ctx context.Context) {
+	cutoff := time.Now().Add(-sessionSkillTableTTL)
+	var sessions []models.ChatSession
+	if err := s.db.WithContext(ctx).
+		Select("id").
+		Where("cwd IS NOT NULL AND (deleted_at IS NOT NULL OR updated_at < ?)", cutoff).
+		Find(&sessions).Error; err != nil {
+		slog.WarnContext(ctx, "failed to list old sessions for skills table cleanup", "error", err)
+		return
+	}
+
+	for _, session := range sessions {
+		if err := s.DropSessionTable(ctx, session.ID); err != nil {
+			slog.WarnContext(ctx, "failed to drop old session skills table", "sessionId", session.ID, "error", err)
+		}
+	}
 }
 
 func (s *SkillService) PopulateSessionSkills(ctx context.Context, sessionID uuid.UUID, cwd string) error {
@@ -829,6 +997,10 @@ func (s *SkillService) SearchSkills(ctx context.Context, sessionID *uuid.UUID, q
 	var results []models.SkillSearchResult
 
 	if sessionID != nil {
+		if err := s.ensureSessionTableForSession(ctx, *sessionID); err != nil {
+			return nil, err
+		}
+
 		s.mu.RLock()
 		hasTable := s.sessionTables[*sessionID]
 		s.mu.RUnlock()
@@ -928,6 +1100,10 @@ func (s *SkillService) ListSkills(ctx context.Context, sessionID *uuid.UUID) ([]
 	var results []models.SkillDto
 
 	if sessionID != nil {
+		if err := s.ensureSessionTableForSession(ctx, *sessionID); err != nil {
+			return nil, err
+		}
+
 		s.mu.RLock()
 		hasTable := s.sessionTables[*sessionID]
 		s.mu.RUnlock()
@@ -975,6 +1151,10 @@ func (s *SkillService) GetSkillContent(ctx context.Context, name string, session
 	var skillMDPath string
 
 	if sessionID != nil {
+		if err := s.ensureSessionTableForSession(ctx, *sessionID); err != nil {
+			return "", err
+		}
+
 		s.mu.RLock()
 		hasTable := s.sessionTables[*sessionID]
 		s.mu.RUnlock()
@@ -1020,17 +1200,16 @@ func (s *SkillService) HasSessionTable(sessionID uuid.UUID) bool {
 }
 
 func (s *SkillService) CountSessionSkills(ctx context.Context, sessionID uuid.UUID) (int64, error) {
+	if err := s.ensureSessionTableForSession(ctx, sessionID); err != nil {
+		return 0, err
+	}
+
 	s.mu.RLock()
 	hasTable := s.sessionTables[sessionID]
 	s.mu.RUnlock()
 
 	if hasTable {
-		tableName := s.sessionTableName(sessionID)
-		var count int64
-		if err := s.db.WithContext(ctx).Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count).Error; err != nil {
-			return 0, fmt.Errorf("failed to count session skills: %w", err)
-		}
-		return count, nil
+		return s.countSessionTableRows(ctx, sessionID)
 	}
 
 	var count int64
@@ -1041,6 +1220,10 @@ func (s *SkillService) CountSessionSkills(ctx context.Context, sessionID uuid.UU
 }
 
 func (s *SkillService) ListSessionSkillSummaries(ctx context.Context, sessionID uuid.UUID) ([]models.SkillDto, error) {
+	if err := s.ensureSessionTableForSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
 	s.mu.RLock()
 	hasTable := s.sessionTables[sessionID]
 	s.mu.RUnlock()

@@ -23,15 +23,16 @@ import (
 )
 
 type ChatSession struct {
-	ID            uuid.UUID
-	AgentID       uuid.UUID
-	TokenConsumed int64
-	LastUsedModel uuid.UUID
-	Cwd           *string
-	AgentsMD      *string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
+	ID                    uuid.UUID
+	AgentID               uuid.UUID
+	TokenConsumed         int64
+	LastUsedModel         uuid.UUID
+	LastUsedThinkingLevel *string
+	Cwd                   *string
+	AgentsMD              *string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 func (ChatSession) TableName() string {
@@ -40,13 +41,14 @@ func (ChatSession) TableName() string {
 
 func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 	dto := &ChatSessionDto{
-		ID:            m.ID,
-		AgentID:       m.AgentID,
-		TokenConsumed: m.TokenConsumed,
-		LastUsedModel: m.LastUsedModel,
-		Cwd:           m.Cwd,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
+		ID:                    m.ID,
+		AgentID:               m.AgentID,
+		TokenConsumed:         m.TokenConsumed,
+		LastUsedModel:         m.LastUsedModel,
+		LastUsedThinkingLevel: m.LastUsedThinkingLevel,
+		Cwd:                   m.Cwd,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
 	}
 
 	if messages != nil {
@@ -62,15 +64,16 @@ type TodoItemDto struct {
 }
 
 type ChatSessionDto struct {
-	ID            uuid.UUID        `json:"id"`
-	AgentID       uuid.UUID        `json:"agentId"`
-	TokenConsumed int64            `json:"tokenConsumed"`
-	Messages      []ChatMessageDto `json:"messages"`
-	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
-	Todos         []TodoItemDto    `json:"todos,omitempty"`
-	Cwd           *string          `json:"cwd,omitempty"`
-	CreatedAt     time.Time        `json:"createdAt"`
-	UpdatedAt     time.Time        `json:"updatedAt"`
+	ID                    uuid.UUID        `json:"id"`
+	AgentID               uuid.UUID        `json:"agentId"`
+	TokenConsumed         int64            `json:"tokenConsumed"`
+	Messages              []ChatMessageDto `json:"messages"`
+	LastUsedModel         uuid.UUID        `json:"lastUsedModel"`
+	LastUsedThinkingLevel *string          `json:"lastUsedThinkingLevel,omitempty"`
+	Todos                 []TodoItemDto    `json:"todos,omitempty"`
+	Cwd                   *string          `json:"cwd,omitempty"`
+	CreatedAt             time.Time        `json:"createdAt"`
+	UpdatedAt             time.Time        `json:"updatedAt"`
 }
 
 type CreateSessionDto struct {

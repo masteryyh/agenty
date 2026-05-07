@@ -39,6 +39,7 @@ type CommandResult struct {
 	NewAgentID      uuid.UUID
 	NewModelName    string
 	NewAgentName    string
+	NewChatState    *ChatState
 	SessionMessages []models.ChatMessageDto
 	TokenConsumed   int64
 	ShouldExit      bool

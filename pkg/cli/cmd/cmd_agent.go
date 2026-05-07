@@ -137,6 +137,13 @@ func switchToAgent(b backend.Backend, bridge *UIBridge, agentName string) (Comma
 		result.NewSessionID = lastSession.ID
 		result.SessionMessages = lastSession.Messages
 		result.TokenConsumed = lastSession.TokenConsumed
+		modelID, modelName, modelErr := resolveInitialChatModel(b, targetAgentID, lastSession, true)
+		if modelErr == nil {
+			result.NewModelID = modelID
+			result.NewModelName = modelName
+			chatState := chatStateForSession(b, modelID, lastSession, true)
+			result.NewChatState = &chatState
+		}
 		sessionDesc := fmt.Sprintf("resumed · %d messages", len(lastSession.Messages))
 		bridge.Printf("  %-10s %s", styleGray.Render("Agent"), styleCyan.Render(agentName))
 		bridge.Printf("  %-10s %s  %s\n", styleGray.Render("Session"),
@@ -148,6 +155,13 @@ func switchToAgent(b backend.Backend, bridge *UIBridge, agentName string) (Comma
 			return CommandResult{Handled: true}, fmt.Errorf("failed to create session for agent: %w", err)
 		}
 		result.NewSessionID = newSession.ID
+		modelID, modelName, modelErr := resolveInitialChatModel(b, targetAgentID, newSession, false)
+		if modelErr == nil {
+			result.NewModelID = modelID
+			result.NewModelName = modelName
+			chatState := chatStateForSession(b, modelID, newSession, false)
+			result.NewChatState = &chatState
+		}
 		bridge.Printf("  %-10s %s", styleGray.Render("Agent"), styleCyan.Render(agentName))
 		bridge.Printf("  %-10s %s  %s\n", styleGray.Render("Session"),
 			styleGray.Render(newSession.ID.String()[:8]+"…"),

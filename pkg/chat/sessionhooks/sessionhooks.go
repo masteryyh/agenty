@@ -61,8 +61,10 @@ func updateSessionUsageMetadata(_ context.Context, hookCtx *chat.SessionHookCont
 
 	hookCtx.Session.TokenConsumed += hookCtx.TotalTokens
 	hookCtx.Session.LastUsedModel = hookCtx.ModelID
+	hookCtx.Session.LastUsedThinkingLevel = &hookCtx.ThinkingLevel
 	hookCtx.SessionUpdates["token_consumed"] = gorm.Expr("token_consumed + ?", hookCtx.TotalTokens)
 	hookCtx.SessionUpdates["last_used_model"] = hookCtx.ModelID
+	hookCtx.SessionUpdates["last_used_thinking_level"] = hookCtx.ThinkingLevel
 	return nil
 }
 

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	agent_id TEXT NOT NULL,
 	token_consumed INTEGER NOT NULL DEFAULT 0,
 	last_used_model TEXT,
+	last_used_thinking_level TEXT,
 	cwd TEXT,
 	agents_md TEXT,
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

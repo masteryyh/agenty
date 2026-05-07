@@ -310,12 +310,8 @@ func (s *ChatService) SetSessionCwd(ctx context.Context, sessionID uuid.UUID, cw
 	}
 
 	if cwd != nil {
-		if err := skillSvc.CreateSessionTable(ctx, sessionID); err != nil {
-			slog.WarnContext(ctx, "failed to create session skills table", "sessionId", sessionID, "error", err)
-		} else {
-			if err := skillSvc.PopulateSessionSkills(ctx, sessionID, *cwd); err != nil {
-				slog.WarnContext(ctx, "failed to populate session skills", "sessionId", sessionID, "error", err)
-			}
+		if err := skillSvc.EnsureSessionTable(ctx, sessionID, *cwd); err != nil {
+			slog.WarnContext(ctx, "failed to ensure session skills table", "sessionId", sessionID, "error", err)
 		}
 	}
 
@@ -406,7 +402,8 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, roundID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), data.ThinkingLevel))
 	}
 
-	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, result.TotalToken); err != nil {
+	thinkingLevel := sessionThinkingLevel(data, res.model)
+	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, result.TotalToken, thinkingLevel); err != nil {
 		slog.ErrorContext(ctx, "failed to save chat messages and update session", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
@@ -548,7 +545,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 				}
 
 				if evt.Type == providers.EventDone {
-					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, data.ThinkingLevel)
+					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, sessionThinkingLevel(data, candidate.model))
 					select {
 					case out <- evt:
 					case <-ctx.Done():
@@ -559,7 +556,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 				select {
 				case out <- evt:
 				case <-ctx.Done():
-					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, data.ThinkingLevel)
+					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, sessionThinkingLevel(data, candidate.model))
 					return
 				}
 			}
@@ -595,9 +592,16 @@ func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResour
 		return
 	}
 
-	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, totalTokens); err != nil {
+	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, totalTokens, thinkingLevel); err != nil {
 		slog.ErrorContext(ctx, "failed to persist stream messages", "error", err, "sessionId", res.session.ID)
 	}
+}
+
+func sessionThinkingLevel(data *models.ChatDto, model models.Model) string {
+	if data == nil || !data.Thinking || !model.Thinking {
+		return ""
+	}
+	return data.ThinkingLevel
 }
 
 func formatSkillsXML(skills []models.SkillDto) string {
@@ -1194,7 +1198,7 @@ func buildChatMessage(m providers.Message, sessionID, roundID, agentID, modelID 
 	return chatMsg
 }
 
-func (s *ChatService) saveMessages(ctx context.Context, session *models.ChatSession, modelID, roundID uuid.UUID, messages []models.ChatMessage, totalTokens int64) error {
+func (s *ChatService) saveMessages(ctx context.Context, session *models.ChatSession, modelID, roundID uuid.UUID, messages []models.ChatMessage, totalTokens int64, thinkingLevel string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&messages).Error; err != nil {
 			return fmt.Errorf("failed to save assistant messages: %w", err)
@@ -1206,6 +1210,7 @@ func (s *ChatService) saveMessages(ctx context.Context, session *models.ChatSess
 			ModelID:        modelID,
 			RoundID:        roundID,
 			TotalTokens:    totalTokens,
+			ThinkingLevel:  thinkingLevel,
 			Session:        session,
 			Messages:       messages,
 			Tx:             tx,

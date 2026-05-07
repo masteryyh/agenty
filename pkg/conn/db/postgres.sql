@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	agent_id UUID NOT NULL,
 	token_consumed BIGINT NOT NULL DEFAULT 0,
 	last_used_model UUID,
+	last_used_thinking_level TEXT,
 	cwd TEXT,
 	agents_md TEXT,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
