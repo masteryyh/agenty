@@ -29,6 +29,10 @@ func (m *ChatMessage) BeforeCreate(*gorm.DB) error {
 	return ensureUUID(&m.ID)
 }
 
+func (m *ChatRoundTokenUsage) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
 func (m *ChatSession) BeforeCreate(*gorm.DB) error {
 	return ensureUUID(&m.ID)
 }

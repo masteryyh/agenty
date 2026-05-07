@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 CREATE TABLE IF NOT EXISTS chat_messages (
 	id TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL,
+	round_id TEXT,
 	agent_id TEXT NOT NULL,
 	role TEXT NOT NULL,
 	content TEXT,
@@ -89,6 +90,16 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 	provider_specifics TEXT,
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	deleted_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS chat_round_token_usages (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	agent_id TEXT NOT NULL,
+	model_id TEXT NOT NULL,
+	round_id TEXT NOT NULL,
+	total_tokens INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS mcp_servers (
@@ -145,6 +156,8 @@ CREATE TABLE IF NOT EXISTS skills (
 CREATE INDEX IF NOT EXISTS idx_agents_deleted_at ON agents (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_agent_id ON chat_sessions (agent_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_session_id ON chat_round_token_usages (session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_round_id ON chat_round_token_usages (round_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers (name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_agent_id ON knowledge_items (agent_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_category ON knowledge_items (category);

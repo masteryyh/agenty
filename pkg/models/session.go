@@ -81,3 +81,17 @@ type SetSessionCwdDto struct {
 	Cwd      *string `json:"cwd"`
 	AgentsMD *string `json:"agentsMD"`
 }
+
+type ChatRoundTokenUsage struct {
+	ID          uuid.UUID
+	SessionID   uuid.UUID
+	AgentID     uuid.UUID
+	ModelID     uuid.UUID
+	RoundID     uuid.UUID
+	TotalTokens int64
+	CreatedAt   time.Time
+}
+
+func (ChatRoundTokenUsage) TableName() string {
+	return "chat_round_token_usages"
+}

@@ -76,8 +76,9 @@ type ChatResult struct {
 	Messages   []providers.Message
 }
 
-func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.ToolCallContext, toolCalls []models.ToolCall, onResult func(models.ToolResult)) []models.ToolResult {
+func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, params *ChatParams, iteration int, tcc tools.ToolCallContext, toolCalls []models.ToolCall, onResult func(models.ToolResult)) ([]models.ToolResult, error) {
 	results := make([]models.ToolResult, len(toolCalls))
+	errs := make([]error, len(toolCalls))
 	var wg sync.WaitGroup
 
 	for i, tc := range toolCalls {
@@ -87,6 +88,20 @@ func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.
 			defer wg.Done()
 
 			var result models.ToolResult
+			if err := RunSessionHooks(ctx, SessionHookBeforeToolExecution, &SessionHookContext{
+				SessionID: params.SessionID,
+				AgentID:   params.AgentID,
+				ModelID:   params.ModelID,
+				ModelCode: params.Model,
+				Cwd:       params.Cwd,
+				Iteration: iteration,
+				Params:    params,
+				ToolCall:  &call,
+			}); err != nil {
+				errs[idx] = err
+				return
+			}
+			toolCalls[idx] = call
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -103,6 +118,20 @@ func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.
 				result = ce.registry.Execute(ctx, tcc, call)
 				slog.InfoContext(ctx, "tool execution done", "name", call.Name, "id", call.ID, "isError", result.IsError)
 			}()
+			if err := RunSessionHooks(ctx, SessionHookAfterToolExecution, &SessionHookContext{
+				SessionID:  params.SessionID,
+				AgentID:    params.AgentID,
+				ModelID:    params.ModelID,
+				ModelCode:  params.Model,
+				Cwd:        params.Cwd,
+				Iteration:  iteration,
+				Params:     params,
+				ToolCall:   &call,
+				ToolResult: &result,
+			}); err != nil {
+				errs[idx] = err
+				return
+			}
 
 			results[idx] = result
 			if onResult != nil {
@@ -112,7 +141,12 @@ func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, tcc tools.
 	}
 
 	wg.Wait()
-	return results
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
 }
 
 func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResult, error) {
@@ -141,6 +175,19 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			ResponseFormat:            params.ResponseFormat,
 		}
 
+		if err := RunSessionHooks(ctx, SessionHookBeforeModelCall, &SessionHookContext{
+			SessionID: params.SessionID,
+			AgentID:   params.AgentID,
+			ModelID:   params.ModelID,
+			ModelCode: params.Model,
+			Cwd:       params.Cwd,
+			Iteration: i + 1,
+			Params:    params,
+			Request:   req,
+		}); err != nil {
+			return nil, err
+		}
+
 		resp, err := p.Chat(ctx, req)
 		if err != nil {
 			return nil, err
@@ -153,6 +200,19 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			ToolCalls:        resp.ToolCalls,
 			ReasoningContent: resp.ReasoningContent,
 			ReasoningBlocks:  resp.ReasoningBlocks,
+		}
+
+		if err := RunSessionHooks(ctx, SessionHookAfterModelResponse, &SessionHookContext{
+			SessionID: params.SessionID,
+			AgentID:   params.AgentID,
+			ModelID:   params.ModelID,
+			ModelCode: params.Model,
+			Cwd:       params.Cwd,
+			Iteration: i + 1,
+			Params:    params,
+			Message:   &assistantMsg,
+		}); err != nil {
+			return nil, err
 		}
 
 		messages = append(messages, assistantMsg)
@@ -171,7 +231,10 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			Cwd:       params.Cwd,
 		}
 
-		results := ce.executeToolCallsParallel(ctx, tcc, resp.ToolCalls, nil)
+		results, err := ce.executeToolCallsParallel(ctx, params, i+1, tcc, assistantMsg.ToolCalls, nil)
+		if err != nil {
+			return nil, err
+		}
 		for i := range results {
 			toolMsg := providers.Message{
 				Role:       models.RoleTool,
@@ -230,6 +293,20 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				ResponseFormat:            params.ResponseFormat,
 			}
 
+			if err := RunSessionHooks(ctx, SessionHookBeforeModelCall, &SessionHookContext{
+				SessionID: params.SessionID,
+				AgentID:   params.AgentID,
+				ModelID:   params.ModelID,
+				ModelCode: params.Model,
+				Cwd:       params.Cwd,
+				Iteration: i + 1,
+				Params:    params,
+				Request:   req,
+			}); err != nil {
+				out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
+				return
+			}
+
 			providerCh, err := p.StreamChat(ctx, req)
 			if err != nil {
 				out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
@@ -264,6 +341,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 					if assistantMsg != nil && reasoningDuration > 0 {
 						assistantMsg.ReasoningDurationMillis = reasoningDuration.Milliseconds()
 					}
+					continue
 				case providers.EventUsage:
 					if evt.Usage != nil {
 						totalTokens += evt.Usage.TotalTokens
@@ -284,6 +362,26 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 
 			if assistantMsg.ReasoningContent == "" && len(assistantMsg.ReasoningBlocks) > 0 {
 				providers.HydrateMessageReasoning(assistantMsg)
+			}
+
+			if err := RunSessionHooks(ctx, SessionHookAfterModelResponse, &SessionHookContext{
+				SessionID: params.SessionID,
+				AgentID:   params.AgentID,
+				ModelID:   params.ModelID,
+				ModelCode: params.Model,
+				Cwd:       params.Cwd,
+				Iteration: i + 1,
+				Params:    params,
+				Message:   assistantMsg,
+			}); err != nil {
+				out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
+				return
+			}
+
+			select {
+			case out <- providers.StreamEvent{Type: providers.EventMessageDone, Message: assistantMsg}:
+			case <-ctx.Done():
+				return
 			}
 
 			messages = append(messages, *assistantMsg)
@@ -313,7 +411,11 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				}
 			}
 
-			results := ce.executeToolCallsParallel(ctx, tcc, assistantMsg.ToolCalls, onResult)
+			results, err := ce.executeToolCallsParallel(ctx, params, i+1, tcc, assistantMsg.ToolCalls, onResult)
+			if err != nil {
+				out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
+				return
+			}
 			for i := range results {
 				toolMsg := providers.Message{
 					Role:       models.RoleTool,

@@ -22,6 +22,7 @@ import (
 	"os"
 
 	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/chat/sessionhooks"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
@@ -97,6 +98,7 @@ func startLocalMode() error {
 	slog.InfoContext(baseCtx, "registering built-in tools...")
 	registry := tools.GetRegistry()
 	builtin.RegisterAll(registry)
+	sessionhooks.RegisterAll()
 
 	slog.InfoContext(baseCtx, "initializing MCP manager...")
 	mcpManager := mcppkg.InitManager(baseCtx, registry)
