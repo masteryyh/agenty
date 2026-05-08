@@ -118,7 +118,9 @@ type chatModel struct {
 
 	pendingHistory bool
 
-	huhFormWidth int
+	huhFormWidth         int
+	mouseSelection       mouseSelection
+	clipboardNoticeUntil time.Time
 
 	width  int
 	height int
@@ -372,6 +374,19 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenConsumed = msg.count
 		return m, nil
 
+	case clipboardCopiedMsg:
+		if msg.err == nil {
+			m.clipboardNoticeUntil = time.Now().Add(clipboardCopyNoticeDuration)
+			return m, clipboardCopyNoticeExpiredCmd(m.clipboardNoticeUntil)
+		}
+		return m, nil
+
+	case clipboardCopyNoticeExpiredMsg:
+		if !msg.until.Before(m.clipboardNoticeUntil) {
+			m.clipboardNoticeUntil = time.Time{}
+		}
+		return m, nil
+
 	case refreshSessionMsg:
 		m.tokenConsumed = msg.tokenConsumed
 		m.lastMessages = msg.messages
@@ -440,6 +455,12 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case modeChat:
+			if cmd, handled := m.handleMouseSelection(msg); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			if vpCmd != nil {
@@ -541,9 +562,9 @@ func (m chatModel) View() string {
 		return strings.Join(lines, "\n")
 	}
 
-	vpView := m.viewport.View()
+	vpView := m.renderSelectableView(m.viewport.View(), selectableRegionHistory)
 	topSep := m.renderTopSeparator()
-	inputView := m.input.View()
+	inputView := m.renderSelectableView(m.input.View(), selectableRegionInput)
 	botSep := m.renderBottomSeparator()
 	hintsLine := m.renderHintsLine()
 
@@ -661,7 +682,11 @@ func (m chatModel) renderBottomSeparator() string {
 
 func (m chatModel) renderHintsLine() string {
 	var leftItems []string
-	leftItems = append(leftItems, styleGray.Render(fmt.Sprintf("tokens: %d", m.tokenConsumed)))
+	if time.Now().Before(m.clipboardNoticeUntil) {
+		leftItems = append(leftItems, styleClipboard.Render("copied to clipboard"))
+	} else {
+		leftItems = append(leftItems, styleGray.Render(fmt.Sprintf("tokens: %d", m.tokenConsumed)))
+	}
 	if m.stream.showIndicator {
 		leftItems = append(leftItems, styleStreaming.Render("streaming..."))
 	}

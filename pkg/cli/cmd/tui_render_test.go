@@ -19,6 +19,7 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -80,6 +81,62 @@ func TestHistoryRenderOmitsFinalResponseLabelAfterToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(got, "done") {
 		t.Fatalf("history render missing assistant content: %q", got)
+	}
+}
+
+func TestRenderHintsLineShowsClipboardNoticeTemporarily(t *testing.T) {
+	m := chatModel{
+		width:                80,
+		help:                 newHelpModel(),
+		tokenConsumed:        42,
+		clipboardNoticeUntil: time.Now().Add(time.Second),
+	}
+
+	got := xansi.Strip(m.renderHintsLine())
+	if !strings.Contains(got, "copied to clipboard") {
+		t.Fatalf("hints line missing clipboard notice: %q", got)
+	}
+
+	m.clipboardNoticeUntil = time.Now().Add(-time.Second)
+	got = xansi.Strip(m.renderHintsLine())
+	if strings.Contains(got, "copied to clipboard") {
+		t.Fatalf("expired clipboard notice is still visible: %q", got)
+	}
+}
+
+func TestSelectedTextFromHistoryLines(t *testing.T) {
+	lines := []string{
+		"  hello world   ",
+		"  second line   ",
+	}
+	selection := mouseSelection{
+		region: selectableRegionHistory,
+		start:  selectionPoint{line: 0, col: 2},
+		end:    selectionPoint{line: 1, col: 7},
+	}
+
+	got := selectedTextFromLines(lines, selection, 0)
+	want := "hello world\n  second"
+	if got != want {
+		t.Fatalf("selected text mismatch:\nwant %q\ngot  %q", want, got)
+	}
+}
+
+func TestSelectedTextFromInputLinesSkipsPrompt(t *testing.T) {
+	lines := []string{
+		"  prompt text   ",
+		"  next line     ",
+	}
+	selection := mouseSelection{
+		region: selectableRegionInput,
+		start:  selectionPoint{line: 0, col: 0},
+		end:    selectionPoint{line: 1, col: 6},
+	}
+
+	got := selectedTextFromLines(lines, selection, 2)
+	want := "prompt text\nnext"
+	if got != want {
+		t.Fatalf("selected input text mismatch:\nwant %q\ngot  %q", want, got)
 	}
 }
 

@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.37.0
+	github.com/atotto/clipboard v0.1.4
 	github.com/avast/retry-go/v5 v5.0.0
 	github.com/bytedance/sonic v1.15.1
 	github.com/charmbracelet/bubbles v1.0.0
@@ -39,7 +40,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect

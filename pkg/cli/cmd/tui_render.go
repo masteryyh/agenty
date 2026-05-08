@@ -84,8 +84,9 @@ var (
 	styleHintMuted = theme.HintMuted
 	styleStreaming = theme.Streaming
 
-	styleSpinner = theme.Spinner
-	styleSpinTxt = theme.SpinnerTxt
+	styleSpinner    = theme.Spinner
+	styleSpinTxt    = theme.SpinnerTxt
+	styleClipboard  = lipgloss.NewStyle().Foreground(theme.Colors.Highlight).Bold(true)
 )
 
 func renderMarkdown(text string) string {
@@ -571,6 +572,7 @@ func refreshRenderStyles() {
 
 	styleSpinner = theme.Spinner
 	styleSpinTxt = theme.SpinnerTxt
+	styleClipboard = lipgloss.NewStyle().Foreground(theme.Colors.Highlight).Bold(true)
 
 	markdownRendererMu.Lock()
 	markdownRendererInst = nil
