@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	json "github.com/bytedance/sonic"
 	"github.com/gofrs/flock"
 	"github.com/masteryyh/agenty/pkg/consts"
 )
@@ -60,7 +61,28 @@ func releaseFileLock(fileLock *flock.Flock) error {
 	if fileLock == nil {
 		return nil
 	}
-	return fileLock.Unlock()
+	path := fileLock.Path()
+	if err := fileLock.Unlock(); err != nil {
+		return err
+	}
+	return removeUnlockedFileLock(path)
+}
+
+func removeUnlockedFileLock(path string) error {
+	cleanupLock := flock.New(path)
+	locked, err := cleanupLock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return nil
+	}
+	defer func() { _ = cleanupLock.Unlock() }()
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func validatePath(path string) error {
@@ -99,4 +121,12 @@ func validateExistingFile(path string) error {
 			return nil
 		}
 	}
+}
+
+func marshalToolResult(v any) (string, error) {
+	out, err := json.MarshalString(v)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize tool result: %w", err)
+	}
+	return out, nil
 }

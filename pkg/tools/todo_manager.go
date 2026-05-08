@@ -113,16 +113,27 @@ func (m *TodoManager) getStore(sessionID uuid.UUID, create bool) *sessionTodoSto
 }
 
 func (m *TodoManager) Add(sessionID uuid.UUID, items []string) (string, error) {
+	addedItems, err := m.AddItems(sessionID, items)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for _, item := range addedItems {
+		fmt.Fprintf(&sb, "  [%d] %s\n", item.ID, item.Content)
+	}
+	return fmt.Sprintf("Added %d todo item(s):\n%s", len(addedItems), sb.String()), nil
+}
+
+func (m *TodoManager) AddItems(sessionID uuid.UUID, items []string) ([]models.TodoItemDto, error) {
 	if len(items) == 0 {
-		return "", fmt.Errorf("items cannot be empty for action 'add'")
+		return nil, fmt.Errorf("items cannot be empty for action 'add'")
 	}
 
 	store := m.getStore(sessionID, true)
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	var sb strings.Builder
-	added := 0
+	var addedItems []models.TodoItemDto
 	for _, content := range items {
 		content = strings.TrimSpace(content)
 		if content == "" {
@@ -135,23 +146,30 @@ func (m *TodoManager) Add(sessionID uuid.UUID, items []string) (string, error) {
 		}
 		store.items = append(store.items, item)
 		store.nextID++
-		fmt.Fprintf(&sb, "  [%d] %s\n", item.ID, item.Content)
-		added++
+		addedItems = append(addedItems, *item)
 	}
-	if added == 0 {
-		return "", fmt.Errorf("all items were empty")
+	if len(addedItems) == 0 {
+		return nil, fmt.Errorf("all items were empty")
 	}
-	return fmt.Sprintf("Added %d todo item(s):\n%s", added, sb.String()), nil
+	return addedItems, nil
 }
 
 func (m *TodoManager) Update(sessionID uuid.UUID, id int, status string) (string, error) {
+	item, err := m.UpdateStatus(sessionID, id, status)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Todo [%d] %q → %s", item.ID, item.Content, status), nil
+}
+
+func (m *TodoManager) UpdateStatus(sessionID uuid.UUID, id int, status string) (models.TodoItemDto, error) {
 	if status != "pending" && status != "in_progress" && status != "done" {
-		return "", fmt.Errorf("invalid status %q: must be 'pending', 'in_progress', or 'done'", status)
+		return models.TodoItemDto{}, fmt.Errorf("invalid status %q: must be 'pending', 'in_progress', or 'done'", status)
 	}
 
 	store := m.getStore(sessionID, false)
 	if store == nil {
-		return "", fmt.Errorf("todo item with ID %d not found", id)
+		return models.TodoItemDto{}, fmt.Errorf("todo item with ID %d not found", id)
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -159,10 +177,10 @@ func (m *TodoManager) Update(sessionID uuid.UUID, id int, status string) (string
 	for _, item := range store.items {
 		if item.ID == id {
 			item.Status = status
-			return fmt.Sprintf("Todo [%d] %q → %s", item.ID, item.Content, status), nil
+			return *item, nil
 		}
 	}
-	return "", fmt.Errorf("todo item with ID %d not found", id)
+	return models.TodoItemDto{}, fmt.Errorf("todo item with ID %d not found", id)
 }
 
 func (m *TodoManager) List(sessionID uuid.UUID) []models.TodoItemDto {

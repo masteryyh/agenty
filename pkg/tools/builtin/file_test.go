@@ -42,8 +42,14 @@ func TestReadFileTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "hello world" {
-		t.Fatalf("expected 'hello world', got '%s'", result)
+	var decoded struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if decoded.Content != "1: hello world" {
+		t.Fatalf("expected '1: hello world', got '%s'", decoded.Content)
 	}
 }
 
@@ -69,8 +75,15 @@ func TestWriteFileTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "successfully wrote") {
-		t.Fatalf("expected success message, got '%s'", result)
+	var decoded struct {
+		Path         string `json:"path"`
+		BytesWritten int    `json:"bytesWritten"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if decoded.Path != path || decoded.BytesWritten != len("test content") {
+		t.Fatalf("unexpected result: %#v", decoded)
 	}
 
 	data, err := os.ReadFile(path)
@@ -106,6 +119,65 @@ func TestWriteFileToolWaitsForFileLock(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Fatalf("expected context deadline error, got %v", err)
+	}
+}
+
+func TestReleaseFileLockRemovesLockFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "locked.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	fileLock, err := acquireFileLock(context.Background(), path, true)
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	lockPath := fileLockPath(path)
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("expected lock file to exist: %v", err)
+	}
+
+	if err := releaseFileLock(fileLock); err != nil {
+		t.Fatalf("failed to release lock: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file to be removed, got %v", err)
+	}
+}
+
+func TestReleaseFileLockKeepsLockFileWhenSharedLockRemains(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shared.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	firstLock, err := acquireFileLock(context.Background(), path, false)
+	if err != nil {
+		t.Fatalf("failed to acquire first lock: %v", err)
+	}
+	secondLock, err := acquireFileLock(context.Background(), path, false)
+	if err != nil {
+		_ = releaseFileLock(firstLock)
+		t.Fatalf("failed to acquire second lock: %v", err)
+	}
+
+	lockPath := fileLockPath(path)
+	if err := releaseFileLock(firstLock); err != nil {
+		_ = releaseFileLock(secondLock)
+		t.Fatalf("failed to release first lock: %v", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		_ = releaseFileLock(secondLock)
+		t.Fatalf("expected lock file to remain: %v", err)
+	}
+
+	if err := releaseFileLock(secondLock); err != nil {
+		t.Fatalf("failed to release second lock: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file to be removed, got %v", err)
 	}
 }
 
@@ -163,11 +235,24 @@ func TestListDirectoryTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "[file] file1.txt") {
-		t.Fatalf("expected file entry, got '%s'", result)
+	var decoded struct {
+		Entries []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		} `json:"entries"`
 	}
-	if !strings.Contains(result, "[dir] subdir") {
-		t.Fatalf("expected dir entry, got '%s'", result)
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	entries := map[string]string{}
+	for _, entry := range decoded.Entries {
+		entries[entry.Name] = entry.Type
+	}
+	if entries["file1.txt"] != "file" {
+		t.Fatalf("expected file entry, got %#v", decoded.Entries)
+	}
+	if entries["subdir"] != "dir" {
+		t.Fatalf("expected dir entry, got %#v", decoded.Entries)
 	}
 }
 
@@ -202,8 +287,14 @@ func TestReadFileToolLineRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "line2\nline3\nline4" {
-		t.Fatalf("expected 'line2\\nline3\\nline4', got '%s'", result)
+	var decoded struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if decoded.Content != "2: line2\n3: line3\n4: line4" {
+		t.Fatalf("expected '2: line2\\n3: line3\\n4: line4', got '%s'", decoded.Content)
 	}
 
 	args, _ = json.Marshal(map[string]any{"path": path, "startLine": 10, "endLine": 12})
@@ -229,13 +320,19 @@ func TestReadFileToolLineNumbers(t *testing.T) {
 
 	tool := &ReadFileTool{}
 
-	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 3, "withLineNumbers": true})
+	args, _ := json.Marshal(map[string]any{"path": path, "startLine": 2, "endLine": 3})
 	result, err := tool.Execute(context.Background(), tools.ToolCallContext{}, string(args))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "2: line2\n3: line3" {
-		t.Fatalf("expected numbered lines, got '%s'", result)
+	var decoded struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if decoded.Content != "2: line2\n3: line3" {
+		t.Fatalf("expected numbered lines, got '%s'", decoded.Content)
 	}
 }
 
@@ -258,8 +355,17 @@ func TestReplaceInFileTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "successfully replaced") {
-		t.Fatalf("expected success message, got '%s'", result)
+	var decoded struct {
+		Path              string `json:"path"`
+		StartLine         int    `json:"startLine"`
+		EndLine           int    `json:"endLine"`
+		ReplacedLineCount int    `json:"replacedLineCount"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("result is not JSON: %v", err)
+	}
+	if decoded.Path == "" || decoded.StartLine != 2 || decoded.EndLine != 3 || decoded.ReplacedLineCount != 2 {
+		t.Fatalf("unexpected result: %#v", decoded)
 	}
 
 	data, err := os.ReadFile(path)

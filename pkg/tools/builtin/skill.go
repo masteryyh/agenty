@@ -23,6 +23,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/consts"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/tools"
 )
@@ -65,32 +66,13 @@ func (t *FindSkillTool) Execute(ctx context.Context, tcc tools.ToolCallContext, 
 	if err != nil {
 		return "", fmt.Errorf("failed to search skills: %w", err)
 	}
-
-	if len(results) == 0 {
-		return "No matching skills found for the given query.", nil
+	if results == nil {
+		results = []models.SkillSearchResult{}
 	}
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Found %d skill(s):\n\n", len(results))
-
-	for i, skill := range results {
-		fmt.Fprintf(&sb, "%d. **%s**\n", i+1, skill.Name)
-		fmt.Fprintf(&sb, "   Description: %s\n", truncateDescription(skill.Description, 200))
-		if skill.Scope != "" {
-			fmt.Fprintf(&sb, "   Scope: %s\n", skill.Scope)
-		}
-		fmt.Fprintf(&sb, "   Path: %s\n", skill.SkillMDPath)
-		if skill.Score > 0 {
-			fmt.Fprintf(&sb, "   Relevance: %.2f\n", skill.Score)
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String(), nil
-}
-
-func truncateDescription(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
+	return marshalToolResult(map[string]any{
+		"query":   args.Query,
+		"count":   len(results),
+		"results": results,
+	})
 }

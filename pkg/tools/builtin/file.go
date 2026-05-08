@@ -35,7 +35,7 @@ type ReadFileTool struct{}
 func (t *ReadFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "read_file",
-		Description: "Read the contents of a file at the given path. For code tasks, prefer reading targeted ranges with withLineNumbers=true so later edits can reference exact lines.",
+		Description: "Read the contents of a file at the given path. Returns JSON with numbered content. For code tasks, prefer targeted ranges so later edits can reference exact lines.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -51,10 +51,6 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 					Type:        "integer",
 					Description: "The line number to stop reading at (1-based index). Optional, defaults to the end of the file.",
 				},
-				"withLineNumbers": {
-					Type:        "boolean",
-					Description: "Optional. When true, prefixes each returned line with its 1-based line number. Useful before replace_in_file.",
-				},
 			},
 			Required: []string{"path"},
 		},
@@ -63,10 +59,9 @@ func (t *ReadFileTool) Definition() tools.ToolDefinition {
 
 func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
-		Path            string `json:"path"`
-		StartLine       int    `json:"startLine,omitempty"`
-		EndLine         int    `json:"endLine,omitempty"`
-		WithLineNumbers bool   `json:"withLineNumbers,omitempty"`
+		Path      string `json:"path"`
+		StartLine int    `json:"startLine,omitempty"`
+		EndLine   int    `json:"endLine,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -114,10 +109,14 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 		if err != nil {
 			return "", fmt.Errorf("failed to read file: %w", err)
 		}
-		if args.WithLineNumbers {
-			return addLineNum(string(data), 1), nil
-		}
-		return string(data), nil
+		content, lineCount := addLineNum(string(data), 1)
+		return marshalToolResult(map[string]any{
+			"path":      abs,
+			"content":   content,
+			"startLine": 1,
+			"endLine":   lineCount,
+			"lineCount": lineCount,
+		})
 	}
 
 	start := 1
@@ -138,6 +137,8 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 	var sb strings.Builder
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
+	includedLines := 0
+	lastIncludedLine := 0
 	for scanner.Scan() {
 		lineNum++
 		if args.EndLine > 0 && lineNum > args.EndLine {
@@ -149,11 +150,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
-		if args.WithLineNumbers {
-			fmt.Fprintf(&sb, "%d: %s", lineNum, scanner.Text())
-		} else {
-			sb.WriteString(scanner.Text())
-		}
+		fmt.Fprintf(&sb, "%d: %s", lineNum, scanner.Text())
+		includedLines++
+		lastIncludedLine = lineNum
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
@@ -163,10 +162,16 @@ func (t *ReadFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, a
 		return "", fmt.Errorf("startLine %d exceeds file length %d", start, lineNum)
 	}
 
-	return sb.String(), nil
+	return marshalToolResult(map[string]any{
+		"path":      abs,
+		"content":   sb.String(),
+		"startLine": start,
+		"endLine":   lastIncludedLine,
+		"lineCount": includedLines,
+	})
 }
 
-func addLineNum(content string, startLine int) string {
+func addLineNum(content string, startLine int) (string, int) {
 	lines := strings.Split(content, "\n")
 	var sb strings.Builder
 	for i, line := range lines {
@@ -175,7 +180,7 @@ func addLineNum(content string, startLine int) string {
 		}
 		fmt.Fprintf(&sb, "%d: %s", startLine+i, line)
 	}
-	return sb.String()
+	return sb.String(), len(lines)
 }
 
 type WriteFileTool struct{}
@@ -183,7 +188,7 @@ type WriteFileTool struct{}
 func (t *WriteFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "write_file",
-		Description: "Write content to a file at the given path. Creates the file if it does not exist, or overwrites it if it does.",
+		Description: "Write content to a file at the given path and return JSON. Creates the file if it does not exist, or overwrites it if it does.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -257,7 +262,10 @@ func (t *WriteFileTool) Execute(ctx context.Context, tcc tools.ToolCallContext, 
 	if err := os.WriteFile(cleanPath, []byte(args.Content), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
-	return fmt.Sprintf("successfully wrote %d bytes to %s", len(args.Content), cleanPath), nil
+	return marshalToolResult(map[string]any{
+		"path":         cleanPath,
+		"bytesWritten": len([]byte(args.Content)),
+	})
 }
 
 type ReplaceInFileTool struct{}
@@ -265,7 +273,7 @@ type ReplaceInFileTool struct{}
 func (t *ReplaceInFileTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "replace_in_file",
-		Description: "Replace a range of lines in a file with new content. Lines from startLine to endLine (inclusive, 1-based) are replaced.",
+		Description: "Replace a range of lines in a file with new content and return JSON. Lines from startLine to endLine (inclusive, 1-based) are replaced.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -371,7 +379,14 @@ func (t *ReplaceInFileTool) Execute(ctx context.Context, tcc tools.ToolCallConte
 	if err := os.WriteFile(cleanPath, []byte(strings.Join(result, "\n")), fileInfo.Mode()); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
-	return fmt.Sprintf("successfully replaced lines %d-%d in %s", args.StartLine, args.EndLine, cleanPath), nil
+	return marshalToolResult(map[string]any{
+		"path":                 cleanPath,
+		"startLine":            args.StartLine,
+		"endLine":              args.EndLine,
+		"replacedLineCount":    args.EndLine - args.StartLine + 1,
+		"replacementLineCount": len(newLines),
+		"bytesWritten":         len([]byte(strings.Join(result, "\n"))),
+	})
 }
 
 type ListDirectoryTool struct{}
@@ -379,7 +394,7 @@ type ListDirectoryTool struct{}
 func (t *ListDirectoryTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "list_directory",
-		Description: "List the contents of a directory. Returns file and directory names with their types.",
+		Description: "List the contents of a directory. Returns JSON containing file and directory names with their types.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -414,13 +429,19 @@ func (t *ListDirectoryTool) Execute(_ context.Context, tcc tools.ToolCallContext
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	var sb strings.Builder
+	result := make([]map[string]string, 0, len(entries))
 	for _, entry := range entries {
 		entryType := "file"
 		if entry.IsDir() {
 			entryType = "dir"
 		}
-		fmt.Fprintf(&sb, "[%s] %s\n", entryType, entry.Name())
+		result = append(result, map[string]string{
+			"name": entry.Name(),
+			"type": entryType,
+		})
 	}
-	return sb.String(), nil
+	return marshalToolResult(map[string]any{
+		"path":    cleanPath,
+		"entries": result,
+	})
 }

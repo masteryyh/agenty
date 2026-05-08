@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
@@ -140,8 +141,14 @@ func TestRegistryExecuteToolNotFound(t *testing.T) {
 	if !result.IsError {
 		t.Fatal("expected error for nonexistent tool")
 	}
-	if result.Content != "tool not found: nonexistent" {
-		t.Fatalf("unexpected error message: %s", result.Content)
+	var decoded struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &decoded); err != nil {
+		t.Fatalf("error content is not JSON: %v", err)
+	}
+	if decoded.Error != "tool not found: nonexistent" {
+		t.Fatalf("unexpected error message: %s", decoded.Error)
 	}
 }
 
@@ -157,6 +164,15 @@ func TestRegistryExecuteToolError(t *testing.T) {
 
 	if !result.IsError {
 		t.Fatal("expected error")
+	}
+	var decoded struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &decoded); err != nil {
+		t.Fatalf("error content is not JSON: %v", err)
+	}
+	if decoded.Error != "tool execution failed" {
+		t.Fatalf("unexpected error message: %s", decoded.Error)
 	}
 }
 

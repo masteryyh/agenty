@@ -34,7 +34,7 @@ type RunShellCommandTool struct{}
 func (t *RunShellCommandTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "run_shell_command",
-		Description: "Execute a shell command on the local machine and return stdout, stderr, and exit code. Commands run in the current session cwd when set. For code tasks, prefer fast inspection and verification commands such as rg, git diff/status, gofmt, go test, go vet, go build, npm test, cargo test, or language-specific linters. Increase timeout for builds or test suites.",
+		Description: "Execute a shell command on the local machine and return JSON containing stdout, stderr, and exitCode. Commands run in the current session cwd when set. For code tasks, prefer fast inspection and verification commands such as rg, git diff/status, gofmt, go test, go vet, go build, npm test, cargo test, or language-specific linters. Increase timeout for builds or test suites.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -101,19 +101,9 @@ func (t *RunShellCommandTool) Execute(ctx context.Context, tcc tools.ToolCallCon
 		}
 	}
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Exit Code: %d\n", exitCode)
-	if stdout.Len() > 0 {
-		sb.WriteString("Stdout:\n")
-		sb.WriteString(stdout.String())
-	}
-	if stderr.Len() > 0 {
-		sb.WriteString("Stderr:\n")
-		sb.WriteString(stderr.String())
-	}
-	if stdout.Len() == 0 && stderr.Len() == 0 {
-		sb.WriteString("(no output)")
-	}
-
-	return sb.String(), nil
+	return marshalToolResult(map[string]any{
+		"exitCode": exitCode,
+		"stdout":   stdout.String(),
+		"stderr":   stderr.String(),
+	})
 }

@@ -247,14 +247,41 @@ func isLineBasedTool(name string) bool {
 // maxLines controls how many lines are returned; returns (lines, moreCount).
 func renderBuiltinToolResultLines(name, content string, maxLines int) ([]string, int) {
 	content = strings.TrimRight(stripCR(content), "\n")
+	if errMsg, ok := parseToolErrorContent(content); ok {
+		return renderGenericResultLines(errMsg, maxLines)
+	}
 	switch name {
 	case "search":
 		return renderSearchResultLines(content, maxLines)
 	case "run_shell_command":
 		return renderShellResultLines(content, maxLines)
+	case "read_file":
+		return renderJSONContentResultLines(content, maxLines)
+	case "list_directory":
+		return renderListDirectoryResultLines(content, maxLines)
+	case "write_file":
+		return renderWriteFileResultLines(content, maxLines)
+	case "replace_in_file":
+		return renderReplaceInFileResultLines(content, maxLines)
+	case "todo":
+		return renderTodoResultLines(content, maxLines)
+	case "find_skill":
+		return renderFindSkillResultLines(content, maxLines)
+	case "save_memory", "update_soul":
+		return renderStatusResultLines(content, maxLines)
 	default:
 		return renderGenericResultLines(content, maxLines)
 	}
+}
+
+func parseToolErrorContent(content string) (string, bool) {
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil || resp.Error == "" {
+		return "", false
+	}
+	return resp.Error, true
 }
 
 func renderSearchResultLines(content string, maxLines int) ([]string, int) {
@@ -358,6 +385,32 @@ func renderSearchResultLines(content string, maxLines int) ([]string, int) {
 }
 
 func renderShellResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		ExitCode int    `json:"exitCode"`
+		Stdout   string `json:"stdout"`
+		Stderr   string `json:"stderr"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err == nil {
+		stdoutLines := splitNonEmptyTrailingLines(resp.Stdout)
+		stderrLines := splitNonEmptyTrailingLines(resp.Stderr)
+
+		var displayLines []string
+		if resp.ExitCode == 0 && len(stdoutLines) > 0 {
+			displayLines = stdoutLines
+		} else if resp.ExitCode != 0 && len(stderrLines) > 0 {
+			displayLines = stderrLines
+		} else if resp.ExitCode != 0 && len(stdoutLines) > 0 {
+			displayLines = stdoutLines
+		} else {
+			return []string{styleGray.Render(fmt.Sprintf("command exited with code %d", resp.ExitCode))}, 0
+		}
+
+		if len(displayLines) <= maxLines {
+			return displayLines, 0
+		}
+		return displayLines[:maxLines], len(displayLines) - maxLines
+	}
+
 	const (
 		sectionNone = iota
 		sectionStdout
@@ -414,6 +467,166 @@ func renderShellResultLines(content string, maxLines int) ([]string, int) {
 		return displayLines, 0
 	}
 	return displayLines[:maxLines], len(displayLines) - maxLines
+}
+
+func splitNonEmptyTrailingLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func renderJSONContentResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+	return renderGenericResultLines(resp.Content, maxLines)
+}
+
+func renderListDirectoryResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Entries []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+
+	lines := make([]string, 0, min(len(resp.Entries), maxLines))
+	for _, entry := range resp.Entries {
+		if len(lines) >= maxLines {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("[%s] %s", entry.Type, entry.Name))
+	}
+	return lines, max(len(resp.Entries)-len(lines), 0)
+}
+
+func renderWriteFileResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Path         string `json:"path"`
+		BytesWritten int    `json:"bytesWritten"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+	return renderGenericResultLines(fmt.Sprintf("wrote %d bytes to %s", resp.BytesWritten, resp.Path), maxLines)
+}
+
+func renderReplaceInFileResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Path              string `json:"path"`
+		StartLine         int    `json:"startLine"`
+		EndLine           int    `json:"endLine"`
+		BytesWritten      int    `json:"bytesWritten"`
+		ReplacedLineCount int    `json:"replacedLineCount"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+	return renderGenericResultLines(fmt.Sprintf("replaced lines %d-%d in %s (%d bytes)", resp.StartLine, resp.EndLine, resp.Path, resp.BytesWritten), maxLines)
+}
+
+func renderTodoResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Action     string `json:"action"`
+		Total      int    `json:"total"`
+		Pending    int    `json:"pending"`
+		InProgress int    `json:"inProgress"`
+		Done       int    `json:"done"`
+		Items      []struct {
+			ID      int    `json:"id"`
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"items"`
+		Item *struct {
+			ID      int    `json:"id"`
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+
+	var lines []string
+	switch resp.Action {
+	case "add":
+		lines = append(lines, fmt.Sprintf("added %d todo item(s)", len(resp.Items)))
+	case "update":
+		if resp.Item != nil {
+			lines = append(lines, fmt.Sprintf("[%d] %s -> %s", resp.Item.ID, resp.Item.Content, resp.Item.Status))
+		}
+	case "list":
+		lines = append(lines, fmt.Sprintf("%d total, %d pending, %d in_progress, %d done", resp.Total, resp.Pending, resp.InProgress, resp.Done))
+	}
+	for _, item := range resp.Items {
+		if len(lines) >= maxLines {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("[%d] %s %s", item.ID, item.Status, item.Content))
+	}
+	if len(lines) == 0 {
+		return renderGenericResultLines(content, maxLines)
+	}
+	total := len(resp.Items)
+	if resp.Action == "list" {
+		total++
+	}
+	return lines, max(total-len(lines), 0)
+}
+
+func renderFindSkillResultLines(content string, maxLines int) ([]string, int) {
+	var resp struct {
+		Count   int `json:"count"`
+		Results []struct {
+			Name        string  `json:"name"`
+			SkillMDPath string  `json:"skillMdPath"`
+			Score       float64 `json:"score,omitempty"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+
+	lines := make([]string, 0, min(resp.Count, maxLines))
+	for _, result := range resp.Results {
+		if len(lines) >= maxLines {
+			break
+		}
+		label := result.Name
+		if result.SkillMDPath != "" {
+			label = fmt.Sprintf("%s  %s", label, result.SkillMDPath)
+		}
+		lines = append(lines, label)
+	}
+	if len(lines) == 0 {
+		return []string{"no matching skills"}, 0
+	}
+	return lines, max(resp.Count-len(lines), 0)
+}
+
+func renderStatusResultLines(content string, maxLines int) ([]string, int) {
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(content), &resp); err != nil {
+		return renderGenericResultLines(content, maxLines)
+	}
+	if errMsg, ok := resp["error"].(string); ok {
+		return renderGenericResultLines(errMsg, maxLines)
+	}
+	if id, ok := resp["id"].(string); ok {
+		return renderGenericResultLines("ok: "+id, maxLines)
+	}
+	return renderGenericResultLines("ok", maxLines)
 }
 
 func renderGenericResultLines(content string, maxLines int) ([]string, int) {

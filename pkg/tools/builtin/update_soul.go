@@ -35,7 +35,7 @@ type UpdateSoulTool struct {
 func (t *UpdateSoulTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "update_soul",
-		Description: "Update the agent's own soul (personality and character). Call this when the user explicitly requests changes to the agent's personality, character traits, tone, or behavioral style.",
+		Description: "Update the agent's own soul (personality and character) and return JSON. Call this when the user explicitly requests changes to the agent's personality, character traits, tone, or behavioral style.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -69,5 +69,7 @@ func (t *UpdateSoulTool) Execute(ctx context.Context, tcc tools.ToolCallContext,
 		return "", fmt.Errorf("failed to update soul: %w", err)
 	}
 
-	return "Soul updated successfully.", nil
+	return marshalToolResult(map[string]any{
+		"updated": true,
+	})
 }

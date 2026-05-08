@@ -351,6 +351,13 @@ var streamingPhrases = []string{
 	"Crafting a response...",
 	"Pondering...",
 	"Working on it...",
+	"Discombobulating...",
+	"Firing synapses...",
+	"Cooking up something good...",
+	"Deciphering...",
+	"Seasoning...",
+	"Precolating...",
+	"Flibbertigibbeting...",
 }
 
 func streamRenderToolLabel() string {

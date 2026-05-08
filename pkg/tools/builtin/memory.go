@@ -34,7 +34,7 @@ type SaveMemoryTool struct {
 func (t *SaveMemoryTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:        "save_memory",
-		Description: "Save a piece of information to long-term memory for future reference. Use this to remember important facts, user preferences, or key information from conversations.",
+		Description: "Save a piece of information to long-term memory for future reference and return JSON with the saved item id. Use this to remember important facts, user preferences, or key information from conversations.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -69,7 +69,11 @@ func (t *SaveMemoryTool) Execute(ctx context.Context, tcc tools.ToolCallContext,
 		return "", fmt.Errorf("failed to save memory: %w", err)
 	}
 
-	return fmt.Sprintf("Memory saved successfully with ID: %s", result.ID), nil
+	return marshalToolResult(map[string]any{
+		"id":       result.ID,
+		"saved":    true,
+		"category": models.KnowledgeCategoryLLMMemory,
+	})
 }
 
 func truncateForTitle(s string) string {
