@@ -38,6 +38,10 @@ func RegisterAll(registry *tools.Registry) {
 		searchService: services.GetSearchService(),
 	})
 
+	registry.Register(&FetchTool{
+		webFetchService: services.GetWebFetchService(),
+	})
+
 	registry.Register(&FindSkillTool{
 		skillService: services.GetSkillService(),
 	})

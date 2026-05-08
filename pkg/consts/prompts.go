@@ -144,6 +144,12 @@ Recommended workflow:
 
 Results are returned as a JSON object grouped by channel plus rankedResults. rankedResults contains globally fused and optionally light-model-reranked candidates across all channels. Each channel section includes results, the queries used, a quality rating (high/medium/low/no_results/error), and an improvement suggestion message.`
 
+	FetchToolDescription = `Fetch the content of a single HTTP or HTTPS URL.
+
+Use this when you need to inspect a specific web page, read documentation at a known URL, or retrieve the source content behind a search result. Pass the exact page URL in the url field.
+
+The result is a JSON object with url, contentType, title, content, statusCode, and truncated fields. The content field contains the best available page text or raw page content for the requested URL.`
+
 	FindSkillToolDescription = `Search for available skills based on user message, conversation context and project background using a piece of search query. This tool returns a JSON object containing relevant skills with their names, descriptions and paths. You need to pick the most relevant skill and use read_file tool to read the SKILL.md file to actually load the skill.
 
 Write queries just like using search engines: combine the core action, domain, and technology keywords from the user message and project context. Separate keywords with spaces.

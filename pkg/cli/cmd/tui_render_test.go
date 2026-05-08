@@ -20,8 +20,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/providers"
+	"github.com/muesli/termenv"
 )
 
 func TestStreamRenderOmitsFinalResponseLabelAfterToolCalls(t *testing.T) {
@@ -77,5 +80,61 @@ func TestHistoryRenderOmitsFinalResponseLabelAfterToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(got, "done") {
 		t.Fatalf("history render missing assistant content: %q", got)
+	}
+}
+
+func TestRenderReasoningAndContentStylesDiffer(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+
+	reasoning := renderReasoningContent("thinking text")
+	if !containsSGRParam(reasoning, "3") {
+		t.Fatalf("reasoning render is not italic: %q", reasoning)
+	}
+
+	plainContent := renderContentBlock("answer text")
+	if containsSGRParam(plainContent, "3") {
+		t.Fatalf("plain assistant content render is italic: %q", plainContent)
+	}
+	if !strings.Contains(xansi.Strip(plainContent), "answer text") {
+		t.Fatalf("plain assistant content missing text: %q", plainContent)
+	}
+	if !containsSGRParam(plainContent, "38") {
+		t.Fatalf("plain assistant content render missing foreground color: %q", plainContent)
+	}
+	if strings.Contains(plainContent, "38;5;244") {
+		t.Fatalf("plain assistant content uses reasoning color: %q", plainContent)
+	}
+
+	italicContent := renderContentBlock("*answer text*")
+	if !containsSGRParam(italicContent, "3") {
+		t.Fatalf("markdown italic was not preserved: %q", italicContent)
+	}
+	if strings.Contains(italicContent, "38;5;244") {
+		t.Fatalf("italic assistant content uses reasoning color: %q", italicContent)
+	}
+
+	boldContent := renderContentBlock("**answer text**")
+	if !containsSGRParam(boldContent, "1") {
+		t.Fatalf("markdown bold was not preserved: %q", boldContent)
+	}
+}
+
+func containsSGRParam(s, param string) bool {
+	for {
+		start := strings.Index(s, "\x1b[")
+		if start == -1 {
+			return false
+		}
+		s = s[start+2:]
+		end := strings.IndexByte(s, 'm')
+		if end == -1 {
+			return false
+		}
+		for part := range strings.SplitSeq(s[:end], ";") {
+			if part == param {
+				return true
+			}
+		}
+		s = s[end+1:]
 	}
 }
