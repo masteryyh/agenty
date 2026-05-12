@@ -118,7 +118,9 @@ type chatModel struct {
 
 	pendingHistory bool
 
-	huhFormWidth int
+	huhFormWidth         int
+	mouseSelection       mouseSelection
+	clipboardNoticeUntil time.Time
 
 	width  int
 	height int
@@ -135,7 +137,7 @@ type huhFormOverlay struct {
 
 const maxInputLines = 5
 
-func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, isLocal bool) chatModel {
+func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, modelName, agentName string, messages []models.ChatMessageDto, chatState ChatState) chatModel {
 	ta := textarea.New()
 	ta.Prompt = "  "
 	ta.Placeholder = "Type a message or /help for commands..."
@@ -159,8 +161,6 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 
 	historyContent := renderMessageHistoryToString(messages, false)
 
-	defaultState := defaultChatState(b, modelID)
-	defaultState.LocalMode = isLocal
 	m := chatModel{
 		backend:      b,
 		bridge:       bridge,
@@ -169,7 +169,7 @@ func newChatModel(b backend.Backend, bridge *UIBridge, sessionID uuid.UUID, mode
 		agentID:      agentID,
 		modelName:    modelName,
 		agentName:    agentName,
-		chatState:    &defaultState,
+		chatState:    &chatState,
 		input:        ta,
 		mode:         modeChat,
 		chatLog:      new(strings.Builder),
@@ -202,6 +202,27 @@ func defaultChatState(b backend.Backend, modelID uuid.UUID) ChatState {
 		}
 	}
 	return ChatState{Thinking: true, ThinkingLevel: level}
+}
+
+func chatStateForSession(b backend.Backend, modelID uuid.UUID, session *models.ChatSessionDto, restored bool) ChatState {
+	if !restored || session == nil || session.LastUsedThinkingLevel == nil {
+		return defaultChatState(b, modelID)
+	}
+	return chatStateFromThinkingLevel(b, modelID, *session.LastUsedThinkingLevel)
+}
+
+func chatStateFromThinkingLevel(b backend.Backend, modelID uuid.UUID, level string) ChatState {
+	if level == "" {
+		return ChatState{}
+	}
+	levelsPtr, err := b.GetModelThinkingLevels(modelID)
+	if err != nil || levelsPtr == nil || len(*levelsPtr) == 0 {
+		return ChatState{}
+	}
+	if slices.Contains(*levelsPtr, level) {
+		return ChatState{Thinking: true, ThinkingLevel: level}
+	}
+	return defaultChatState(b, modelID)
 }
 
 func newSpinnerModel() spinner.Model {
@@ -353,6 +374,19 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenConsumed = msg.count
 		return m, nil
 
+	case clipboardCopiedMsg:
+		if msg.err == nil {
+			m.clipboardNoticeUntil = time.Now().Add(clipboardCopyNoticeDuration)
+			return m, clipboardCopyNoticeExpiredCmd(m.clipboardNoticeUntil)
+		}
+		return m, nil
+
+	case clipboardCopyNoticeExpiredMsg:
+		if !msg.until.Before(m.clipboardNoticeUntil) {
+			m.clipboardNoticeUntil = time.Time{}
+		}
+		return m, nil
+
 	case refreshSessionMsg:
 		m.tokenConsumed = msg.tokenConsumed
 		m.lastMessages = msg.messages
@@ -421,6 +455,12 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case modeChat:
+			if cmd, handled := m.handleMouseSelection(msg); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			if vpCmd != nil {
@@ -522,9 +562,9 @@ func (m chatModel) View() string {
 		return strings.Join(lines, "\n")
 	}
 
-	vpView := m.viewport.View()
+	vpView := m.renderSelectableView(m.viewport.View(), selectableRegionHistory)
 	topSep := m.renderTopSeparator()
-	inputView := m.input.View()
+	inputView := m.renderSelectableView(m.input.View(), selectableRegionInput)
 	botSep := m.renderBottomSeparator()
 	hintsLine := m.renderHintsLine()
 
@@ -642,7 +682,11 @@ func (m chatModel) renderBottomSeparator() string {
 
 func (m chatModel) renderHintsLine() string {
 	var leftItems []string
-	leftItems = append(leftItems, styleGray.Render(fmt.Sprintf("tokens: %d", m.tokenConsumed)))
+	if time.Now().Before(m.clipboardNoticeUntil) {
+		leftItems = append(leftItems, styleClipboard.Render("copied to clipboard"))
+	} else {
+		leftItems = append(leftItems, styleGray.Render(fmt.Sprintf("tokens: %d", m.tokenConsumed)))
+	}
 	if m.stream.showIndicator {
 		leftItems = append(leftItems, styleStreaming.Render("streaming..."))
 	}
@@ -869,6 +913,11 @@ func (m *chatModel) handleCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		if msg.result.NewModelName != "" {
 			m.modelName = msg.result.NewModelName
 		}
+	}
+
+	if msg.result.NewChatState != nil {
+		m.chatState.Thinking = msg.result.NewChatState.Thinking
+		m.chatState.ThinkingLevel = msg.result.NewChatState.ThinkingLevel
 	}
 
 	if msg.result.NewAgentID != uuid.Nil {

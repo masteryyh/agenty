@@ -23,56 +23,50 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/consts"
-	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/tools"
 )
 
-type FindSkillTool struct {
-	skillService *services.SkillService
+type FetchTool struct {
+	webFetchService *services.WebFetchService
 }
 
-func (t *FindSkillTool) Definition() tools.ToolDefinition {
+func (t *FetchTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
-		Name:        "find_skill",
-		Description: consts.FindSkillToolDescription,
+		Name:        "fetch",
+		Description: consts.FetchToolDescription,
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
-				"query": {
+				"url": {
 					Type:        "string",
-					Description: "Search query to find matching skills. Can be a skill name, keyword, or description fragment.",
+					Description: "HTTP or HTTPS URL to fetch.",
 				},
 			},
-			Required: []string{"query"},
+			Required: []string{"url"},
 		},
 	}
 }
 
-func (t *FindSkillTool) Execute(ctx context.Context, tcc tools.ToolCallContext, arguments string) (string, error) {
+func (t *FetchTool) Execute(ctx context.Context, _ tools.ToolCallContext, arguments string) (string, error) {
 	var args struct {
-		Query string `json:"query"`
+		URL string `json:"url"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-
-	if strings.TrimSpace(args.Query) == "" {
-		return "", fmt.Errorf("query cannot be empty")
+	args.URL = strings.TrimSpace(args.URL)
+	if args.URL == "" {
+		return "", fmt.Errorf("url cannot be empty")
 	}
 
-	sessionID := tcc.SessionID
-	results, err := t.skillService.SearchSkills(ctx, &sessionID, args.Query, 20)
+	webFetchService := t.webFetchService
+	if webFetchService == nil {
+		webFetchService = services.GetWebFetchService()
+	}
+	resp, err := webFetchService.Fetch(ctx, args.URL)
 	if err != nil {
-		return "", fmt.Errorf("failed to search skills: %w", err)
+		return "", err
 	}
-	if results == nil {
-		results = []models.SkillSearchResult{}
-	}
-
-	return marshalToolResult(map[string]any{
-		"query":   args.Query,
-		"count":   len(results),
-		"results": results,
-	})
+	return marshalToolResult(resp)
 }

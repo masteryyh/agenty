@@ -22,6 +22,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/tools"
 )
 
@@ -33,7 +34,7 @@ func (t *TodoTool) Definition() tools.ToolDefinition {
 		Description: "Manage a per-session task planning list. Actions: " +
 			"'add' — append items (requires items[]); " +
 			"'update' — change status of one item by id (requires id, status: pending|in_progress|done); " +
-			"'list' — show all items with status summary.",
+			"'list' — show all items with status summary. Returns JSON.",
 		Parameters: tools.ToolParameters{
 			Type: "object",
 			Properties: map[string]tools.ParameterProperty{
@@ -78,11 +79,48 @@ func (t *TodoTool) Execute(_ context.Context, tcc tools.ToolCallContext, argumen
 	mgr := tools.GetTodoManager()
 	switch args.Action {
 	case "add":
-		return mgr.Add(tcc.SessionID, args.Items)
+		items, err := mgr.AddItems(tcc.SessionID, args.Items)
+		if err != nil {
+			return "", err
+		}
+		return marshalToolResult(map[string]any{
+			"action": "add",
+			"count":  len(items),
+			"items":  items,
+		})
 	case "update":
-		return mgr.Update(tcc.SessionID, args.ID, args.Status)
+		item, err := mgr.UpdateStatus(tcc.SessionID, args.ID, args.Status)
+		if err != nil {
+			return "", err
+		}
+		return marshalToolResult(map[string]any{
+			"action": "update",
+			"item":   item,
+		})
 	case "list":
-		return mgr.FormatList(tcc.SessionID), nil
+		items := mgr.List(tcc.SessionID)
+		if items == nil {
+			items = []models.TodoItemDto{}
+		}
+		pending, inProgress, done := 0, 0, 0
+		for _, item := range items {
+			switch item.Status {
+			case "pending":
+				pending++
+			case "in_progress":
+				inProgress++
+			case "done":
+				done++
+			}
+		}
+		return marshalToolResult(map[string]any{
+			"action":     "list",
+			"items":      items,
+			"total":      len(items),
+			"pending":    pending,
+			"inProgress": inProgress,
+			"done":       done,
+		})
 	default:
 		return "", fmt.Errorf("unknown action %q: must be 'add', 'update', or 'list'", args.Action)
 	}

@@ -75,6 +75,10 @@ func InitDB(ctx context.Context, cfg *config.DatabaseConfig, debug bool) error {
 			err = fmt.Errorf("failed to initialize database schema: %w", schemaErr)
 			return
 		}
+		if migrationErr := migrateCoreSchema(timeoutCtx, dbConn, cfg.Type); migrationErr != nil {
+			err = fmt.Errorf("failed to migrate database schema: %w", migrationErr)
+			return
+		}
 
 		if cfg.Type == config.DatabaseTypeSQLite {
 			if initErr := initSQLiteVector(timeoutCtx, dbConn); initErr != nil {
@@ -190,6 +194,60 @@ func execSQLScript(ctx context.Context, dbConn *gorm.DB, script string) error {
 		}
 	}
 	return nil
+}
+
+func migrateCoreSchema(ctx context.Context, dbConn *gorm.DB, dbType string) error {
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "last_used_thinking_level", "TEXT"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "context_tokens", "BIGINT NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+
+	columnType := "UUID"
+	if dbType == config.DatabaseTypeSQLite {
+		columnType = "TEXT"
+	}
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "active_compaction_id", columnType); err != nil {
+		return err
+	}
+	return addColumnIfMissing(ctx, dbConn, dbType, "chat_messages", "round_id", columnType)
+}
+
+func addColumnIfMissing(ctx context.Context, dbConn *gorm.DB, dbType, tableName, columnName, columnType string) error {
+	exists, err := hasColumn(ctx, dbConn, dbType, tableName, columnName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	if err := dbConn.WithContext(ctx).Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, columnType)).Error; err != nil {
+		return fmt.Errorf("failed to add %s.%s: %w", tableName, columnName, err)
+	}
+	return nil
+}
+
+func hasColumn(ctx context.Context, dbConn *gorm.DB, dbType, tableName, columnName string) (bool, error) {
+	var count int64
+	switch dbType {
+	case config.DatabaseTypeSQLite:
+		if err := dbConn.WithContext(ctx).
+			Raw("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", tableName, columnName).
+			Scan(&count).Error; err != nil {
+			return false, fmt.Errorf("failed to inspect sqlite column %s.%s: %w", tableName, columnName, err)
+		}
+	case config.DatabaseTypePostgres:
+		if err := dbConn.WithContext(ctx).
+			Raw("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?", tableName, columnName).
+			Scan(&count).Error; err != nil {
+			return false, fmt.Errorf("failed to inspect postgres column %s.%s: %w", tableName, columnName, err)
+		}
+	default:
+		return false, fmt.Errorf("unsupported database type: %s", dbType)
+	}
+	return count > 0, nil
 }
 
 func splitSQLScript(script string) []string {

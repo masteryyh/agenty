@@ -18,11 +18,13 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/masteryyh/agenty/pkg/cli/theme"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/utils/termwrap"
@@ -82,8 +84,9 @@ var (
 	styleHintMuted = theme.HintMuted
 	styleStreaming = theme.Streaming
 
-	styleSpinner = theme.Spinner
-	styleSpinTxt = theme.SpinnerTxt
+	styleSpinner    = theme.Spinner
+	styleSpinTxt    = theme.SpinnerTxt
+	styleClipboard  = lipgloss.NewStyle().Foreground(theme.Colors.Highlight).Bold(true)
 )
 
 func renderMarkdown(text string) string {
@@ -194,12 +197,121 @@ func renderReasoningBlock(reasoning string, duration time.Duration, show bool) s
 
 func renderContentBlock(content string) string {
 	content = stripCR(content)
-	rendered := renderMarkdown(content)
+	rendered := normalizeContentMarkdownANSI(renderMarkdown(content), styleContent)
 	return renderWrappedLines(rendered, wrapOptions{
 		Width:                    renderWidth - len(contentIndent),
 		Indent:                   contentIndent,
+		Style:                    styleContent,
 		TrimLeadingVisibleSpaces: 2,
 	})
+}
+
+func normalizeContentMarkdownANSI(text string, baseStyle lipgloss.Style) string {
+	baseSeq := styleOpenSequence(baseStyle)
+	if !strings.Contains(text, "\x1b[") {
+		return text
+	}
+
+	var buf strings.Builder
+	for len(text) > 0 {
+		start := strings.Index(text, "\x1b[")
+		if start == -1 {
+			buf.WriteString(text)
+			break
+		}
+		buf.WriteString(text[:start])
+		text = text[start:]
+
+		end := strings.IndexByte(text, 'm')
+		if end == -1 {
+			buf.WriteString(text)
+			break
+		}
+
+		params := text[2:end]
+		if replacement, ok := normalizeContentSGR(params, baseSeq); ok {
+			buf.WriteString(replacement)
+		} else {
+			buf.WriteString(text[:end+1])
+		}
+		text = text[end+1:]
+	}
+	return buf.String()
+}
+
+func styleOpenSequence(style lipgloss.Style) string {
+	const marker = "x"
+	rendered := style.Render(marker)
+	idx := strings.Index(rendered, marker)
+	if idx == -1 {
+		return ""
+	}
+	return rendered[:idx]
+}
+
+func normalizeContentSGR(params, baseSeq string) (string, bool) {
+	if params == "" {
+		return "\x1b[0m" + baseSeq, true
+	}
+
+	parts := strings.Split(params, ";")
+	kept := make([]string, 0, len(parts))
+	reset := false
+	for i := 0; i < len(parts); i++ {
+		code, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return "", false
+		}
+		switch {
+		case code == 0:
+			reset = true
+		case isANSIColorCode(code):
+			continue
+		case code == 38 || code == 48:
+			i = skipExtendedColorParams(parts, i)
+		default:
+			kept = append(kept, parts[i])
+		}
+	}
+
+	var buf strings.Builder
+	if reset {
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(baseSeq)
+	}
+	if len(kept) > 0 {
+		buf.WriteString("\x1b[")
+		buf.WriteString(strings.Join(kept, ";"))
+		buf.WriteString("m")
+	}
+	return buf.String(), true
+}
+
+func isANSIColorCode(code int) bool {
+	return (code >= 30 && code <= 37) ||
+		code == 39 ||
+		(code >= 40 && code <= 47) ||
+		code == 49 ||
+		(code >= 90 && code <= 97) ||
+		(code >= 100 && code <= 107)
+}
+
+func skipExtendedColorParams(parts []string, i int) int {
+	if i+1 >= len(parts) {
+		return i
+	}
+	mode, err := strconv.Atoi(parts[i+1])
+	if err != nil {
+		return i
+	}
+	switch mode {
+	case 5:
+		return min(i+2, len(parts)-1)
+	case 2:
+		return min(i+4, len(parts)-1)
+	default:
+		return i + 1
+	}
 }
 
 func renderUserPlainBlock(content string) string {
@@ -294,9 +406,6 @@ func renderToolCallingSequence(assistantMsg *models.ChatMessageDto, toolResults 
 			buf.WriteString(renderReasoningBlock(finalResponse.ReasoningContent, time.Duration(finalResponse.ReasoningDurationMillis)*time.Millisecond, showReasoning))
 		}
 		if finalResponse.Content != "" {
-			buf.WriteString("\n")
-			buf.WriteString(contentIndent)
-			buf.WriteString(styleFinalLabel.Render("📝 final response:"))
 			buf.WriteString("\n")
 			buf.WriteString(renderContentBlock(finalResponse.Content))
 		}
@@ -463,6 +572,7 @@ func refreshRenderStyles() {
 
 	styleSpinner = theme.Spinner
 	styleSpinTxt = theme.SpinnerTxt
+	styleClipboard = lipgloss.NewStyle().Foreground(theme.Colors.Highlight).Bold(true)
 
 	markdownRendererMu.Lock()
 	markdownRendererInst = nil

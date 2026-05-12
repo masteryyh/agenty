@@ -104,6 +104,10 @@ func (r *RemoteBackend) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD
 	return r.client.SetSessionCwd(sessionID, cwd, agentsMD)
 }
 
+func (r *RemoteBackend) CompactSessionForModel(sessionID uuid.UUID, modelID uuid.UUID, force bool) (bool, error) {
+	return r.client.CompactSessionForModel(sessionID, modelID, force)
+}
+
 func (r *RemoteBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return r.client.Chat(sessionID, dto)
 }

@@ -236,7 +236,8 @@ func (p *BigModelProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRes
 	}
 
 	result := &ChatResponse{
-		TotalToken: apiResp.Usage.TotalTokens,
+		TotalToken:   apiResp.Usage.TotalTokens,
+		ContextToken: apiResp.Usage.TotalTokens,
 	}
 
 	if len(apiResp.Choices) > 0 {
@@ -367,7 +368,7 @@ func (p *BigModelProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-
 		if totalTokens > 0 {
 			ch <- StreamEvent{
 				Type:  EventUsage,
-				Usage: &StreamUsage{TotalTokens: totalTokens},
+				Usage: &StreamUsage{TotalTokens: totalTokens, ContextTokens: totalTokens},
 			}
 		}
 

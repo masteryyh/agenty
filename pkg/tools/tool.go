@@ -21,6 +21,7 @@ import (
 	"sort"
 	"sync"
 
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/samber/lo"
@@ -158,7 +159,7 @@ func (r *Registry) Execute(ctx context.Context, tcc ToolCallContext, call models
 		return models.ToolResult{
 			CallID:  call.ID,
 			Name:    call.Name,
-			Content: "tool not found: " + call.Name,
+			Content: marshalToolError("tool not found: " + call.Name),
 			IsError: true,
 		}
 	}
@@ -168,7 +169,7 @@ func (r *Registry) Execute(ctx context.Context, tcc ToolCallContext, call models
 		return models.ToolResult{
 			CallID:  call.ID,
 			Name:    call.Name,
-			Content: "error: " + err.Error(),
+			Content: marshalToolError(err.Error()),
 			IsError: true,
 		}
 	}
@@ -178,4 +179,14 @@ func (r *Registry) Execute(ctx context.Context, tcc ToolCallContext, call models
 		Name:    call.Name,
 		Content: content,
 	}
+}
+
+func marshalToolError(message string) string {
+	out, err := json.MarshalString(map[string]any{
+		"error": message,
+	})
+	if err != nil {
+		return `{"error":"failed to serialize tool error"}`
+	}
+	return out
 }

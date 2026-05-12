@@ -84,11 +84,13 @@ func startChat(b backend.Backend, isLocal bool) error {
 
 	var sessionID uuid.UUID
 	var session *models.ChatSessionDto
+	sessionRestored := false
 
 	lastSession, err := b.GetLastSessionByAgent(agentID)
 	if err == nil && lastSession != nil {
 		sessionID = lastSession.ID
 		session = lastSession
+		sessionRestored = true
 	} else {
 		session, err = b.CreateSession(agentID)
 		if err != nil {
@@ -114,49 +116,12 @@ func startChat(b backend.Backend, isLocal bool) error {
 		}
 	}
 
-	var modelID uuid.UUID
-	var modelInfo string
-
-	agent, agentErr := b.GetAgent(agentID)
-	if agentErr == nil && agent != nil && len(agent.Models) > 0 {
-		if session.LastUsedModel != uuid.Nil {
-			for _, m := range agent.Models {
-				if m.ID == session.LastUsedModel && m.Provider != nil && m.Provider.APIKeyCensored != "<not set>" {
-					modelID = m.ID
-					modelInfo = modelDisplayName(m)
-					break
-				}
-			}
-		}
-		if modelID == uuid.Nil {
-			for _, m := range agent.Models {
-				if m.Provider != nil && m.Provider.APIKeyCensored != "<not set>" {
-					modelID = m.ID
-					modelInfo = modelDisplayName(m)
-					break
-				}
-			}
-		}
+	modelID, modelInfo, err := resolveInitialChatModel(b, agentID, session, sessionRestored)
+	if err != nil {
+		return err
 	}
-
-	if modelID == uuid.Nil {
-		defaultModel, err := b.GetDefaultModel()
-		if err == nil && defaultModel != nil {
-			modelID = defaultModel.ID
-			modelInfo = modelDisplayName(*defaultModel)
-		} else {
-			modelsList, err := b.ListModels(1, 1)
-			if err != nil {
-				return fmt.Errorf("failed to list models: %w", err)
-			}
-			if len(modelsList.Data) > 0 {
-				modelID = modelsList.Data[0].ID
-				modelInfo = modelDisplayName(modelsList.Data[0])
-			} else {
-				return fmt.Errorf("no models available, use /model to create one")
-			}
-		}
-	}
+	chatState := chatStateForSession(b, modelID, session, sessionRestored)
+	chatState.LocalMode = isLocal
 
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		SetRenderWidth(w)
@@ -166,7 +131,7 @@ func startChat(b backend.Backend, isLocal bool) error {
 	refreshRenderStyles()
 
 	bridge := newUIBridge()
-	model := newChatModel(b, bridge, sessionID, modelID, agentID, modelInfo, agentName, session.Messages, isLocal)
+	model := newChatModel(b, bridge, sessionID, modelID, agentID, modelInfo, agentName, session.Messages, chatState)
 
 	p := tea.NewProgram(
 		model,
@@ -181,4 +146,59 @@ func startChat(b backend.Backend, isLocal bool) error {
 	theme.RestoreTerminal()
 
 	return err
+}
+
+func resolveInitialChatModel(b backend.Backend, agentID uuid.UUID, session *models.ChatSessionDto, restored bool) (uuid.UUID, string, error) {
+	if restored && session != nil && session.LastUsedModel != uuid.Nil {
+		if model, ok := configuredModelByID(b, session.LastUsedModel); ok {
+			return model.ID, modelDisplayName(model), nil
+		}
+	}
+
+	if agent, err := b.GetAgent(agentID); err == nil && agent != nil && len(agent.Models) > 0 {
+		if session != nil && session.LastUsedModel != uuid.Nil {
+			for _, m := range agent.Models {
+				if m.ID == session.LastUsedModel && modelConfigured(m) {
+					return m.ID, modelDisplayName(m), nil
+				}
+			}
+		}
+		for _, m := range agent.Models {
+			if modelConfigured(m) {
+				return m.ID, modelDisplayName(m), nil
+			}
+		}
+	}
+
+	if defaultModel, err := b.GetDefaultModel(); err == nil && defaultModel != nil && modelConfigured(*defaultModel) {
+		return defaultModel.ID, modelDisplayName(*defaultModel), nil
+	}
+
+	modelsList, err := b.ListModels(1, 100)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("failed to list models: %w", err)
+	}
+	for _, m := range modelsList.Data {
+		if modelConfigured(m) {
+			return m.ID, modelDisplayName(m), nil
+		}
+	}
+	return uuid.Nil, "", fmt.Errorf("no models available, use /model to create one")
+}
+
+func configuredModelByID(b backend.Backend, modelID uuid.UUID) (models.ModelDto, bool) {
+	modelsList, err := b.ListModels(1, 100)
+	if err != nil {
+		return models.ModelDto{}, false
+	}
+	for _, m := range modelsList.Data {
+		if m.ID == modelID && modelConfigured(m) {
+			return m, true
+		}
+	}
+	return models.ModelDto{}, false
+}
+
+func modelConfigured(model models.ModelDto) bool {
+	return model.Provider != nil && model.Provider.APIKeyCensored != "<not set>"
 }

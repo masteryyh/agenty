@@ -28,6 +28,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 8. JSON field names and JSON tags must use lowerCamelCase for API/tool request and response payloads
 9. Do not use GORM `AutoMigrate`; table definitions live in embedded SQL under `pkg/conn/db`
 10. Persistent GORM model structs should avoid database-specific `gorm` tags; keep schema details in SQL files
+11. Do not add unit tests unless the user explicitly asks for them
 
 ## Detailed Coding Patterns
 
@@ -80,3 +81,4 @@ Verify each item when adding new functionality:
 - [ ] All blocking operations take `context.Context` as the first parameter
 - [ ] Background goroutines use `safe.GoSafe` or `safe.GoSafeWithCtx`
 - [ ] New Backend interface methods are implemented in both `local.go` and `remote.go`
+- [ ] New unit tests are added only when the user explicitly requests them

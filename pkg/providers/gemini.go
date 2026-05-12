@@ -59,6 +59,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	result := &ChatResponse{}
 	if resp.UsageMetadata != nil {
 		result.TotalToken = int64(resp.UsageMetadata.TotalTokenCount)
+		result.ContextToken = int64(resp.UsageMetadata.TotalTokenCount)
 	}
 
 	var reasoningBuilder strings.Builder
@@ -358,7 +359,7 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 
 		ch <- StreamEvent{
 			Type:  EventUsage,
-			Usage: &StreamUsage{TotalTokens: totalTokens},
+			Usage: &StreamUsage{TotalTokens: totalTokens, ContextTokens: totalTokens},
 		}
 
 		msg := &Message{

@@ -38,6 +38,7 @@ const (
 type ChatMessage struct {
 	ID                uuid.UUID
 	SessionID         uuid.UUID
+	RoundID           uuid.UUID
 	AgentID           uuid.UUID
 	Role              MessageRole
 	Content           string
@@ -84,6 +85,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 
 	dto := &ChatMessageDto{
 		ID:                m.ID,
+		RoundID:           m.RoundID,
 		AgentID:           m.AgentID,
 		Role:              m.Role,
 		Content:           m.Content,
@@ -105,6 +107,7 @@ func (m *ChatMessage) ToDto(model *ModelDto) *ChatMessageDto {
 
 type ChatMessageDto struct {
 	ID                      uuid.UUID             `json:"id"`
+	RoundID                 uuid.UUID             `json:"roundId"`
 	AgentID                 uuid.UUID             `json:"agentId"`
 	Role                    MessageRole           `json:"role"`
 	Content                 string                `json:"content"`

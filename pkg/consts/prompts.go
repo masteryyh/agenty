@@ -35,7 +35,7 @@ var (
 <coding-agent-workflow>
 - For non-trivial coding tasks, act as a coding agent: inspect the repository before deciding, make a concrete plan, execute it, review your changes, and verify with appropriate commands.
 - Use the "todo" tool for complex or multi-step work. Keep exactly one item in_progress, update items as work advances, and do not give a final answer while relevant todo items remain pending unless you are blocked and explain the blocker.
-- Prefer targeted project exploration before editing: use "search" with workspace_files, "run_shell_command" with tools like rg/git/go/npm/cargo as appropriate, and "read_file" with targeted ranges and withLineNumbers=true for exact code context.
+- Prefer targeted project exploration before editing: use "search" with workspace_files, "run_shell_command" with tools like rg/git/go/npm/cargo as appropriate, and "read_file" with targeted ranges for exact numbered code context.
 - For code edits, preserve project conventions, keep changes scoped, and verify behavior with formatting, build, vet, tests, or the closest available command before final response.
 - If a command or test fails, inspect the error, adjust the implementation when appropriate, and rerun the relevant verification instead of stopping after the first failure.
 - Save durable user preferences, project-specific corrections, or reusable implementation lessons with "save_memory" when they are likely to matter in future sessions.
@@ -144,7 +144,13 @@ Recommended workflow:
 
 Results are returned as a JSON object grouped by channel plus rankedResults. rankedResults contains globally fused and optionally light-model-reranked candidates across all channels. Each channel section includes results, the queries used, a quality rating (high/medium/low/no_results/error), and an improvement suggestion message.`
 
-	FindSkillToolDescription = `Search for available skills based on user message, conversation context and project background using a piece of search query. This tool will return a list of relevant skills with their names, descriptions and paths. You need to pick the most relevant skill and use read_file tool to read the SKILL.md file to actually load the skill.
+	FetchToolDescription = `Fetch the content of a single HTTP or HTTPS URL.
+
+Use this when you need to inspect a specific web page, read documentation at a known URL, or retrieve the source content behind a search result. Pass the exact page URL in the url field.
+
+The result is a JSON object with url, contentType, title, content, statusCode, and truncated fields. The content field contains the best available page text or raw page content for the requested URL.`
+
+	FindSkillToolDescription = `Search for available skills based on user message, conversation context and project background using a piece of search query. This tool returns a JSON object containing relevant skills with their names, descriptions and paths. You need to pick the most relevant skill and use read_file tool to read the SKILL.md file to actually load the skill.
 
 Write queries just like using search engines: combine the core action, domain, and technology keywords from the user message and project context. Separate keywords with spaces.
 
@@ -188,4 +194,18 @@ Example output:
 react typescript component frontend
 kubernetes deploy container
 testing unit test golang`
+
+	CompactPrompt = `Your job is to study a saved conversation transcript in the current working directory and produce a dense, accurate summary for future model calls.
+
+Rules:
+- Use tools to inspect the transcript instead of relying on a single full-file read when the file is large.
+- Summarize olderPrefix. Use recentTail only to avoid repeating context that will remain available as raw messages.
+- Preserve important details from messages, tool calls, tool results, visible reasoning, file paths, commands, errors, tests, and decisions.
+- Detect the user's language from the transcript and write the full summary in that language.
+- Organize the summary into exactly three sections: completed task goals; key methods used and key decisions made; unfinished task goals.
+- Each section must use markdown unordered list items only, with no prose outside the lists.
+- Include files inspected or changed, major operations, unresolved tasks, constraints, and user preferences in the most relevant section.
+- Do not modify files, memories, todos, settings, providers, models, agents, MCP servers, or other persistent state while compacting.
+- Do not include temporary-file implementation details.
+- Output only the summary text.`
 )

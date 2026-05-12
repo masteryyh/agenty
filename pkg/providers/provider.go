@@ -27,17 +27,19 @@ import (
 type StreamEventType string
 
 const (
-	EventReasoningDelta StreamEventType = "reasoning_delta"
-	EventContentDelta   StreamEventType = "content_delta"
-	EventToolCallStart  StreamEventType = "tool_call_start"
-	EventToolCallDelta  StreamEventType = "tool_call_delta"
-	EventToolCallDone   StreamEventType = "tool_call_done"
-	EventToolResult     StreamEventType = "tool_result"
-	EventMessageDone    StreamEventType = "message_done"
-	EventUsage          StreamEventType = "usage"
-	EventError          StreamEventType = "error"
-	EventDone           StreamEventType = "done"
-	EventModelSwitch    StreamEventType = "model_switch"
+	EventReasoningDelta  StreamEventType = "reasoning_delta"
+	EventContentDelta    StreamEventType = "content_delta"
+	EventToolCallStart   StreamEventType = "tool_call_start"
+	EventToolCallDelta   StreamEventType = "tool_call_delta"
+	EventToolCallDone    StreamEventType = "tool_call_done"
+	EventToolResult      StreamEventType = "tool_result"
+	EventMessageDone     StreamEventType = "message_done"
+	EventUsage           StreamEventType = "usage"
+	EventError           StreamEventType = "error"
+	EventDone            StreamEventType = "done"
+	EventModelSwitch     StreamEventType = "model_switch"
+	EventCompactionStart StreamEventType = "compaction_start"
+	EventCompactionDone  StreamEventType = "compaction_done"
 )
 
 type StreamEvent struct {
@@ -56,7 +58,8 @@ type StreamEvent struct {
 }
 
 type StreamUsage struct {
-	TotalTokens int64 `json:"totalTokens"`
+	TotalTokens   int64 `json:"totalTokens"`
+	ContextTokens int64 `json:"contextTokens,omitempty"`
 }
 
 type ReasoningBlock struct {
@@ -108,6 +111,7 @@ type ChatResponse struct {
 	ReasoningBlocks  []ReasoningBlock
 	ToolCalls        []models.ToolCall
 	TotalToken       int64
+	ContextToken     int64
 }
 
 func reasoningContentFromBlocks(blocks []ReasoningBlock) string {

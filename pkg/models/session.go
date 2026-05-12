@@ -20,18 +20,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 )
 
 type ChatSession struct {
-	ID            uuid.UUID
-	AgentID       uuid.UUID
-	TokenConsumed int64
-	LastUsedModel uuid.UUID
-	Cwd           *string
-	AgentsMD      *string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
+	ID                    uuid.UUID
+	AgentID               uuid.UUID
+	TokenConsumed         int64
+	ContextTokens         int64
+	LastUsedModel         uuid.UUID
+	LastUsedThinkingLevel *string
+	ActiveCompactionID    *uuid.UUID
+	Cwd                   *string
+	AgentsMD              *string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 func (ChatSession) TableName() string {
@@ -40,13 +44,16 @@ func (ChatSession) TableName() string {
 
 func (m *ChatSession) ToDto(messages []ChatMessageDto) *ChatSessionDto {
 	dto := &ChatSessionDto{
-		ID:            m.ID,
-		AgentID:       m.AgentID,
-		TokenConsumed: m.TokenConsumed,
-		LastUsedModel: m.LastUsedModel,
-		Cwd:           m.Cwd,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
+		ID:                    m.ID,
+		AgentID:               m.AgentID,
+		TokenConsumed:         m.TokenConsumed,
+		ContextTokens:         m.ContextTokens,
+		LastUsedModel:         m.LastUsedModel,
+		LastUsedThinkingLevel: m.LastUsedThinkingLevel,
+		ActiveCompactionID:    m.ActiveCompactionID,
+		Cwd:                   m.Cwd,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
 	}
 
 	if messages != nil {
@@ -62,15 +69,18 @@ type TodoItemDto struct {
 }
 
 type ChatSessionDto struct {
-	ID            uuid.UUID        `json:"id"`
-	AgentID       uuid.UUID        `json:"agentId"`
-	TokenConsumed int64            `json:"tokenConsumed"`
-	Messages      []ChatMessageDto `json:"messages"`
-	LastUsedModel uuid.UUID        `json:"lastUsedModel"`
-	Todos         []TodoItemDto    `json:"todos,omitempty"`
-	Cwd           *string          `json:"cwd,omitempty"`
-	CreatedAt     time.Time        `json:"createdAt"`
-	UpdatedAt     time.Time        `json:"updatedAt"`
+	ID                    uuid.UUID        `json:"id"`
+	AgentID               uuid.UUID        `json:"agentId"`
+	TokenConsumed         int64            `json:"tokenConsumed"`
+	ContextTokens         int64            `json:"contextTokens"`
+	Messages              []ChatMessageDto `json:"messages"`
+	LastUsedModel         uuid.UUID        `json:"lastUsedModel"`
+	LastUsedThinkingLevel *string          `json:"lastUsedThinkingLevel,omitempty"`
+	ActiveCompactionID    *uuid.UUID       `json:"activeCompactionId,omitempty"`
+	Todos                 []TodoItemDto    `json:"todos,omitempty"`
+	Cwd                   *string          `json:"cwd,omitempty"`
+	CreatedAt             time.Time        `json:"createdAt"`
+	UpdatedAt             time.Time        `json:"updatedAt"`
 }
 
 type CreateSessionDto struct {
@@ -80,4 +90,47 @@ type CreateSessionDto struct {
 type SetSessionCwdDto struct {
 	Cwd      *string `json:"cwd"`
 	AgentsMD *string `json:"agentsMD"`
+}
+
+type CompactSessionForModelDto struct {
+	ModelID uuid.UUID `json:"modelId" binding:"required"`
+	Force   bool      `json:"force"`
+}
+
+type CompactSessionResultDto struct {
+	Compacted bool `json:"compacted"`
+}
+
+type ChatRoundTokenUsage struct {
+	ID          uuid.UUID
+	SessionID   uuid.UUID
+	AgentID     uuid.UUID
+	ModelID     uuid.UUID
+	RoundID     uuid.UUID
+	TotalTokens int64
+	CreatedAt   time.Time
+}
+
+func (ChatRoundTokenUsage) TableName() string {
+	return "chat_round_token_usages"
+}
+
+type ChatCompaction struct {
+	ID                      uuid.UUID
+	SessionID               uuid.UUID
+	AgentID                 uuid.UUID
+	ModelID                 uuid.UUID
+	Type                    string
+	CompactedUntilRoundID   *uuid.UUID
+	CompactedUntilMessageID *uuid.UUID
+	Summary                 string
+	CompactedMessages       datatypes.JSON
+	SourceTokenEstimate     int64
+	CompactedTokenEstimate  int64
+	ThresholdTokens         int64
+	CreatedAt               time.Time
+}
+
+func (ChatCompaction) TableName() string {
+	return "chat_compactions"
 }

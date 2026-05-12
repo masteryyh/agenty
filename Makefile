@@ -4,7 +4,7 @@ all: build
 
 build:
 	@echo "Building agenty..."
-	go build -o bin/agenty cmd/main.go
+	go build -tags=fts5 -o bin/agenty cmd/main.go
 
 install: build
 	@echo "Installing agenty to /usr/local/bin..."

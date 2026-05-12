@@ -134,7 +134,8 @@ func (p *KimiProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespons
 	}
 
 	result := &ChatResponse{
-		TotalToken: apiResp.Usage.TotalTokens,
+		TotalToken:   apiResp.Usage.TotalTokens,
+		ContextToken: apiResp.Usage.TotalTokens,
 	}
 
 	if len(apiResp.Choices) > 0 {
@@ -376,7 +377,7 @@ func (p *KimiProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan
 		if totalTokens > 0 {
 			ch <- StreamEvent{
 				Type:  EventUsage,
-				Usage: &StreamUsage{TotalTokens: totalTokens},
+				Usage: &StreamUsage{TotalTokens: totalTokens, ContextTokens: totalTokens},
 			}
 		}
 

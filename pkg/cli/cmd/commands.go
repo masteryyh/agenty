@@ -39,6 +39,7 @@ type CommandResult struct {
 	NewAgentID      uuid.UUID
 	NewModelName    string
 	NewAgentName    string
+	NewChatState    *ChatState
 	SessionMessages []models.ChatMessageDto
 	TokenConsumed   int64
 	ShouldExit      bool
@@ -126,6 +127,8 @@ func commandHandler(name string) CommandHandler {
 		return handleHistoryCmd
 	case "/model":
 		return handleModelCmd
+	case "/compact":
+		return handleCompactCmd
 	case "/think":
 		return handleThinkCmd
 	case "/help":

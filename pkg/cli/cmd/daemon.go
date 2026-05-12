@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/masteryyh/agenty/pkg/chat/sessionhooks"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
@@ -53,6 +54,7 @@ func startDaemon() error {
 	slog.InfoContext(baseCtx, "registering built-in tools...")
 	registry := tools.GetRegistry()
 	builtin.RegisterAll(registry)
+	sessionhooks.RegisterAll()
 	slog.InfoContext(baseCtx, "built-in tools registered", "count", len(registry.All()))
 
 	slog.InfoContext(baseCtx, "initializing MCP manager...")

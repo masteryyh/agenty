@@ -97,7 +97,7 @@ func initStyles() {
 	AssistantHeader = lipgloss.NewStyle().Foreground(Colors.Primary).Bold(true)
 	UserHeader = lipgloss.NewStyle().Foreground(Colors.Secondary).Bold(true)
 	Timestamp = lipgloss.NewStyle().Foreground(Colors.TextMuted)
-	Content = lipgloss.NewStyle().Foreground(Colors.Text)
+	Content = lipgloss.NewStyle().Foreground(Colors.Text).Italic(false)
 	Reasoning = lipgloss.NewStyle().Foreground(Colors.TextFaint).Italic(true)
 	ReasoningLabel = lipgloss.NewStyle().Foreground(Colors.Special).Bold(true)
 	ToolLabel = lipgloss.NewStyle().Foreground(Colors.Accent).Bold(true)

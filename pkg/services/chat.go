@@ -45,9 +45,13 @@ import (
 
 type ChatService struct {
 	chatExecutor *chat.ChatExecutor
+	compactor    *ConversationCompactor
 	db           *gorm.DB
 	todosManager *tools.TodoManager
 }
+
+const skillCountThreshold = 30
+const relevantMemoryLimit = 6
 
 var (
 	chatService *ChatService
@@ -58,6 +62,7 @@ func GetChatService() *ChatService {
 	chatOnce.Do(func() {
 		chatService = &ChatService{
 			chatExecutor: chat.GetChatExecutor(),
+			compactor:    GetConversationCompactor(),
 			db:           conn.GetDB(),
 			todosManager: tools.GetTodoManager(),
 		}
@@ -137,9 +142,13 @@ func (s *ChatService) CreateSession(ctx context.Context, dto *models.CreateSessi
 		return nil, err
 	}
 
-	safe.GoOnce("save-last-session-memory-"+dto.AgentID.String(), func() {
-		s.saveLastSessionAsMemory(dto.AgentID)
-	})
+	if err := chat.RunSessionHooks(ctx, chat.SessionHookAfterSessionCreated, &chat.SessionHookContext{
+		SessionID: session.ID,
+		AgentID:   session.AgentID,
+		Session:   session,
+	}); err != nil {
+		return nil, err
+	}
 
 	return session.ToDto(nil), nil
 }
@@ -303,19 +312,109 @@ func (s *ChatService) SetSessionCwd(ctx context.Context, sessionID uuid.UUID, cw
 	}
 
 	if cwd != nil {
-		if err := skillSvc.CreateSessionTable(ctx, sessionID); err != nil {
-			slog.WarnContext(ctx, "failed to create session skills table", "sessionId", sessionID, "error", err)
-		} else {
-			if err := skillSvc.PopulateSessionSkills(ctx, sessionID, *cwd); err != nil {
-				slog.WarnContext(ctx, "failed to populate session skills", "sessionId", sessionID, "error", err)
-			}
+		if err := skillSvc.EnsureSessionTable(ctx, sessionID, *cwd); err != nil {
+			slog.WarnContext(ctx, "failed to ensure session skills table", "sessionId", sessionID, "error", err)
 		}
 	}
 
 	return nil
 }
 
+func (s *ChatService) CompactSessionForModel(ctx context.Context, sessionID, modelID uuid.UUID, force bool) (bool, error) {
+	res, err := s.loadExactChatResources(ctx, sessionID, modelID)
+	if err != nil {
+		return false, err
+	}
+	if res.model.ContextWindow <= 0 {
+		return false, nil
+	}
+
+	messages, err := s.loadHistoryMessages(ctx, res.session.ID, res.model.ID, res.model.Thinking)
+	if err != nil {
+		return false, err
+	}
+
+	skillsXML := s.resolveSkillsXML(ctx, &res.session, "", messages)
+	todosXML := s.resolveTodosXML(res.session.ID)
+	systemPrompt, err := buildSystemPrompt(&res.agent, &res.session, skillsXML, "", todosXML)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build system prompt for model switch compaction", "error", err)
+		return false, err
+	}
+
+	messages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
+	req := &providers.ChatRequest{
+		Model:                     res.model.Code,
+		Thinking:                  res.model.Thinking,
+		AnthropicAdaptiveThinking: res.model.AnthropicAdaptiveThinking,
+		Messages:                  messages,
+		Tools:                     tools.GetRegistry().Definitions(),
+		BaseURL:                   res.chatProvider.BaseURL,
+		APIType:                   res.chatProvider.Type,
+		APIKey:                    res.chatProvider.APIKey,
+	}
+	params := &chat.ChatParams{
+		Model:                     res.model.Code,
+		Messages:                  messages,
+		AgentID:                   res.session.AgentID,
+		SessionID:                 res.session.ID,
+		ModelID:                   res.model.ID,
+		Thinking:                  res.model.Thinking,
+		AnthropicAdaptiveThinking: res.model.AnthropicAdaptiveThinking,
+		BaseURL:                   res.chatProvider.BaseURL,
+		APIType:                   res.chatProvider.Type,
+		APIKey:                    res.chatProvider.APIKey,
+		ContextTokens:             res.session.ContextTokens,
+		NewMessageStart:           len(messages),
+	}
+
+	return s.compactor.AgentCompactIfNeeded(ctx, params, req, &res.model, force)
+}
+
+func (s *ChatService) loadChatSession(ctx context.Context, sessionID uuid.UUID) (models.ChatSession, error) {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.ChatSession{}, customerrors.ErrSessionNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
+		return models.ChatSession{}, err
+	}
+	return session, nil
+}
+
+func sessionCwd(session models.ChatSession) string {
+	if session.Cwd == nil {
+		return ""
+	}
+	return *session.Cwd
+}
+
+func streamError(err error) <-chan providers.StreamEvent {
+	out := make(chan providers.StreamEvent, 1)
+	out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
+	close(out)
+	return out
+}
+
 func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) ([]*models.ChatMessageDto, error) {
+	session, err := s.loadChatSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := chat.RunSessionHooks(ctx, chat.SessionHookAfterUserInput, &chat.SessionHookContext{
+		SessionID: session.ID,
+		AgentID:   session.AgentID,
+		ModelID:   data.ModelID,
+		Cwd:       sessionCwd(session),
+		Input:     data,
+	}); err != nil {
+		return nil, err
+	}
+
 	res, err := s.loadChatResources(ctx, sessionID, data.ModelID)
 	if err != nil {
 		return nil, err
@@ -339,11 +438,12 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	messages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, messages...)
 	messages = append(messages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
-	if err := s.saveUserMessage(ctx, &res.session, data.Message); err != nil {
+	roundID, err := s.saveUserMessage(ctx, &res.session, data.Message)
+	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.chatExecutor.Chat(ctx, buildChatParams(res, messages, data))
+	result, err := s.chatExecutor.Chat(ctx, s.buildChatParams(res, messages, data))
 	if err != nil {
 		slog.ErrorContext(ctx, "chat completion failed", "error", err, "sessionId", sessionID)
 		return nil, err
@@ -352,10 +452,11 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 	baseTime := time.Now()
 	newMessages := make([]models.ChatMessage, 0, len(result.Messages))
 	for i, m := range result.Messages {
-		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), data.ThinkingLevel))
+		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, roundID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), data.ThinkingLevel))
 	}
 
-	if err := s.saveMessagesAndUpdateSession(ctx, &res.session, res.model.ID, newMessages, result.TotalToken); err != nil {
+	thinkingLevel := sessionThinkingLevel(data, res.model)
+	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, result.TotalToken, result.ContextToken, thinkingLevel); err != nil {
 		slog.ErrorContext(ctx, "failed to save chat messages and update session", "error", err, "sessionId", sessionID)
 		return nil, err
 	}
@@ -367,15 +468,19 @@ func (s *ChatService) Chat(ctx context.Context, sessionID uuid.UUID, data *model
 }
 
 func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data *models.ChatDto) (<-chan providers.StreamEvent, error) {
-	session, err := gorm.G[models.ChatSession](s.db).
-		Where("id = ? AND deleted_at IS NULL", sessionID).
-		First(ctx)
+	session, err := s.loadChatSession(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, customerrors.ErrSessionNotFound
-		}
-		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
 		return nil, err
+	}
+
+	if err := chat.RunSessionHooks(ctx, chat.SessionHookAfterUserInput, &chat.SessionHookContext{
+		SessionID: session.ID,
+		AgentID:   session.AgentID,
+		ModelID:   data.ModelID,
+		Cwd:       sessionCwd(session),
+		Input:     data,
+	}); err != nil {
+		return streamError(err), nil
 	}
 
 	candidates, err := s.resolveModelList(ctx, session.AgentID, data.ModelID)
@@ -414,7 +519,8 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 	baseMessages = append([]providers.Message{{Role: models.RoleSystem, Content: systemPrompt}}, baseMessages...)
 	baseMessages = append(baseMessages, providers.Message{Role: models.RoleUser, Content: data.Message})
 
-	if err := s.saveUserMessage(ctx, &session, data.Message); err != nil {
+	roundID, err := s.saveUserMessage(ctx, &session, data.Message)
+	if err != nil {
 		return nil, err
 	}
 
@@ -425,6 +531,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 
 		var collectedMessages []providers.Message
 		var totalTokens int64
+		var contextTokens int64
 
 		for candidateIdx, candidate := range candidates {
 			isFallback := candidateIdx > 0 || (data.ModelID != uuid.Nil && candidate.model.ID != data.ModelID)
@@ -459,7 +566,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 				agent:        agent,
 			}
 
-			executorCh, err := s.chatExecutor.StreamChat(ctx, buildChatParams(res, msgs, data))
+			executorCh, err := s.chatExecutor.StreamChat(ctx, s.buildChatParams(res, msgs, data))
 			if err != nil {
 				slog.WarnContext(ctx, "model unavailable, trying next", "model", candidate.model.Name, "error", err)
 				continue
@@ -489,10 +596,14 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 				}
 				if evt.Type == providers.EventUsage && evt.Usage != nil {
 					totalTokens = evt.Usage.TotalTokens
+					contextTokens = evt.Usage.ContextTokens
+					if contextTokens == 0 {
+						contextTokens = evt.Usage.TotalTokens
+					}
 				}
 
 				if evt.Type == providers.EventDone {
-					s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, contextTokens, sessionThinkingLevel(data, candidate.model))
 					select {
 					case out <- evt:
 					case <-ctx.Done():
@@ -503,7 +614,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 				select {
 				case out <- evt:
 				case <-ctx.Done():
-					s.persistStreamMessages(signal.GetBaseContext(), res, collectedMessages, totalTokens, data.ThinkingLevel)
+					s.persistStreamMessages(signal.GetBaseContext(), res, roundID, collectedMessages, totalTokens, contextTokens, sessionThinkingLevel(data, candidate.model))
 					return
 				}
 			}
@@ -514,6 +625,7 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 
 			collectedMessages = nil
 			totalTokens = 0
+			contextTokens = 0
 		}
 
 		select {
@@ -528,24 +640,28 @@ func (s *ChatService) StreamChat(ctx context.Context, sessionID uuid.UUID, data 
 	return out, nil
 }
 
-func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResources, collectedMessages []providers.Message, totalTokens int64, thinkingLevel string) {
+func (s *ChatService) persistStreamMessages(ctx context.Context, res *chatResources, roundID uuid.UUID, collectedMessages []providers.Message, totalTokens, contextTokens int64, thinkingLevel string) {
 	baseTime := time.Now()
 	newMessages := make([]models.ChatMessage, 0, len(collectedMessages))
 	for i, m := range collectedMessages {
-		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), thinkingLevel))
+		newMessages = append(newMessages, buildChatMessage(m, res.session.ID, roundID, res.session.AgentID, res.model.ID, res.chatProvider.Type, baseTime.Add(time.Duration(i)*time.Millisecond), thinkingLevel))
 	}
 
 	if len(newMessages) == 0 {
 		return
 	}
 
-	if err := s.saveMessagesAndUpdateSession(ctx, &res.session, res.model.ID, newMessages, totalTokens); err != nil {
+	if err := s.saveMessages(ctx, &res.session, res.model.ID, roundID, newMessages, totalTokens, contextTokens, thinkingLevel); err != nil {
 		slog.ErrorContext(ctx, "failed to persist stream messages", "error", err, "sessionId", res.session.ID)
 	}
 }
 
-const skillCountThreshold = 30
-const relevantMemoryLimit = 6
+func sessionThinkingLevel(data *models.ChatDto, model models.Model) string {
+	if data == nil || !data.Thinking || !model.Thinking {
+		return ""
+	}
+	return data.ThinkingLevel
+}
 
 func formatSkillsXML(skills []models.SkillDto) string {
 	if len(skills) == 0 {
@@ -943,6 +1059,62 @@ func (s *ChatService) loadChatResources(ctx context.Context, sessionID, modelID 
 	return res, nil
 }
 
+func (s *ChatService) loadExactChatResources(ctx context.Context, sessionID, modelID uuid.UUID) (*chatResources, error) {
+	session, err := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrSessionNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find chat session", "error", err, "sessionId", sessionID)
+		return nil, err
+	}
+
+	model, err := gorm.G[models.Model](s.db).
+		Where("id = ? AND embedding_model = ? AND deleted_at IS NULL", modelID, false).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrModelNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find target model for compaction", "error", err, "modelId", modelID)
+		return nil, err
+	}
+
+	chatProvider, err := gorm.G[models.ModelProvider](s.db).
+		Where("id = ? AND deleted_at IS NULL", model.ProviderID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrProviderNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find target model provider for compaction", "error", err, "providerId", model.ProviderID)
+		return nil, err
+	}
+	if chatProvider.APIKey == "" {
+		return nil, customerrors.ErrProviderNotConfigured
+	}
+
+	agent, err := gorm.G[models.Agent](s.db).
+		Where("id = ? AND deleted_at IS NULL", session.AgentID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customerrors.ErrAgentNotFound
+		}
+		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", session.AgentID)
+		return nil, err
+	}
+
+	return &chatResources{
+		session:      session,
+		model:        model,
+		chatProvider: chatProvider,
+		agent:        agent,
+	}, nil
+}
+
 func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsXML, memoriesXML, todosXML string) (string, error) {
 	var sb strings.Builder
 	data := map[string]any{
@@ -973,6 +1145,22 @@ func buildSystemPrompt(agent *models.Agent, session *models.ChatSession, skillsX
 }
 
 func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelID uuid.UUID, thinking bool) ([]providers.Message, error) {
+	session, sessionErr := gorm.G[models.ChatSession](s.db).
+		Where("id = ? AND deleted_at IS NULL", sessionID).
+		First(ctx)
+	if sessionErr == nil && session.ActiveCompactionID != nil {
+		messages, ok, err := s.loadCompactedHistoryMessages(ctx, &session, modelID, thinking)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return messages, nil
+		}
+	} else if sessionErr != nil && !errors.Is(sessionErr, gorm.ErrRecordNotFound) {
+		slog.ErrorContext(ctx, "failed to inspect chat session compaction", "error", sessionErr, "sessionId", sessionID)
+		return nil, sessionErr
+	}
+
 	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
 		Where("session_id = ? AND deleted_at IS NULL", sessionID).
 		Order("created_at ASC").
@@ -982,7 +1170,71 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 		return nil, err
 	}
 
-	messages := lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) providers.Message {
+	return chatMessagesToProviderMessages(ctx, sessionID, modelID, thinking, chatMessages), nil
+}
+
+func (s *ChatService) loadCompactedHistoryMessages(ctx context.Context, session *models.ChatSession, modelID uuid.UUID, thinking bool) ([]providers.Message, bool, error) {
+	compaction, err := gorm.G[models.ChatCompaction](s.db).
+		Where("id = ? AND session_id = ?", *session.ActiveCompactionID, session.ID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		slog.ErrorContext(ctx, "failed to load active compaction", "error", err, "sessionId", session.ID, "compactionId", *session.ActiveCompactionID)
+		return nil, false, err
+	}
+	if len(compaction.CompactedMessages) == 0 {
+		return nil, false, nil
+	}
+
+	var messages []providers.Message
+	if err := json.Unmarshal(compaction.CompactedMessages, &messages); err != nil {
+		slog.ErrorContext(ctx, "failed to unmarshal compacted messages", "error", err, "sessionId", session.ID, "compactionId", compaction.ID)
+		return nil, false, err
+	}
+	messages = reusableCompactedMessages(messages)
+
+	if compaction.CompactedUntilMessageID == nil {
+		return messages, true, nil
+	}
+
+	boundary, err := gorm.G[models.ChatMessage](s.db).
+		Where("id = ? AND session_id = ? AND deleted_at IS NULL", *compaction.CompactedUntilMessageID, session.ID).
+		First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return messages, true, nil
+		}
+		return nil, false, err
+	}
+
+	chatMessages, err := gorm.G[*models.ChatMessage](s.db).
+		Where("session_id = ? AND deleted_at IS NULL AND (created_at > ? OR (created_at = ? AND id > ?))", session.ID, boundary.CreatedAt, boundary.CreatedAt, boundary.ID).
+		Order("created_at ASC").
+		Find(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to load messages after compaction boundary", "error", err, "sessionId", session.ID, "compactionId", compaction.ID)
+		return nil, false, err
+	}
+
+	messages = append(messages, chatMessagesToProviderMessages(ctx, session.ID, modelID, thinking, chatMessages)...)
+	return messages, true, nil
+}
+
+func reusableCompactedMessages(messages []providers.Message) []providers.Message {
+	result := make([]providers.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == models.RoleSystem && !strings.Contains(msg.Content, "<conversation-summary>") {
+			continue
+		}
+		result = append(result, msg)
+	}
+	return result
+}
+
+func chatMessagesToProviderMessages(ctx context.Context, sessionID, modelID uuid.UUID, thinking bool, chatMessages []*models.ChatMessage) []providers.Message {
+	return lo.Map(chatMessages, func(cm *models.ChatMessage, _ int) providers.Message {
 		var toolCalls []models.ToolCall
 		if len(cm.ToolCalls) > 0 {
 			if err := json.Unmarshal(cm.ToolCalls, &toolCalls); err != nil {
@@ -1035,27 +1287,36 @@ func (s *ChatService) loadHistoryMessages(ctx context.Context, sessionID, modelI
 
 		return msg
 	})
-	return messages, nil
 }
 
-func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatSession, content string) error {
+func (s *ChatService) saveUserMessage(ctx context.Context, session *models.ChatSession, content string) (uuid.UUID, error) {
+	roundID, err := uuid.NewV7()
+	if err != nil {
+		return uuid.Nil, err
+	}
 	msg := models.ChatMessage{
+		ID:        roundID,
 		SessionID: session.ID,
+		RoundID:   roundID,
 		AgentID:   session.AgentID,
 		Role:      models.RoleUser,
 		Content:   content,
 	}
 	if err := gorm.G[models.ChatMessage](s.db).Create(ctx, &msg); err != nil {
 		slog.ErrorContext(ctx, "failed to save user message", "error", err, "sessionId", session.ID)
-		return err
+		return uuid.Nil, err
 	}
-	return nil
+	return roundID, nil
 }
 
-func buildChatParams(res *chatResources, messages []providers.Message, data *models.ChatDto) *chat.ChatParams {
+func (s *ChatService) buildChatParams(res *chatResources, messages []providers.Message, data *models.ChatDto) *chat.ChatParams {
 	var cwd string
 	if res.session.Cwd != nil {
 		cwd = *res.session.Cwd
+	}
+	newMessageStart := len(messages)
+	if newMessageStart > 0 {
+		newMessageStart--
 	}
 	return &chat.ChatParams{
 		BaseURL:                   res.chatProvider.BaseURL,
@@ -1070,10 +1331,13 @@ func buildChatParams(res *chatResources, messages []providers.Message, data *mod
 		Thinking:                  data.Thinking && res.model.Thinking,
 		ThinkingLevel:             data.ThinkingLevel,
 		AnthropicAdaptiveThinking: res.model.AnthropicAdaptiveThinking,
+		ContextTokens:             res.session.ContextTokens,
+		NewMessageStart:           newMessageStart,
+		BeforeModelCall:           s.compactor.CompactBeforeModelCall,
 	}
 }
 
-func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID, providerType models.APIType, timestamp time.Time, thinkingLevel string) models.ChatMessage {
+func buildChatMessage(m providers.Message, sessionID, roundID, agentID, modelID uuid.UUID, providerType models.APIType, timestamp time.Time, thinkingLevel string) models.ChatMessage {
 	var rawCalls []byte
 	if len(m.ToolCalls) > 0 {
 		if d, err := json.Marshal(m.ToolCalls); err != nil {
@@ -1094,6 +1358,7 @@ func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID
 
 	chatMsg := models.ChatMessage{
 		SessionID:        sessionID,
+		RoundID:          roundID,
 		AgentID:          agentID,
 		Role:             models.MessageRole(m.Role),
 		Content:          m.Content,
@@ -1134,89 +1399,38 @@ func buildChatMessage(m providers.Message, sessionID, agentID, modelID uuid.UUID
 	return chatMsg
 }
 
-func (s *ChatService) saveMessagesAndUpdateSession(ctx context.Context, session *models.ChatSession, modelID uuid.UUID, messages []models.ChatMessage, totalTokens int64) error {
+func (s *ChatService) saveMessages(ctx context.Context, session *models.ChatSession, modelID, roundID uuid.UUID, messages []models.ChatMessage, totalTokens, contextTokens int64, thinkingLevel string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&messages).Error; err != nil {
 			return fmt.Errorf("failed to save assistant messages: %w", err)
 		}
 
-		session.TokenConsumed += totalTokens
-		session.LastUsedModel = modelID
-		if err := tx.Model(&models.ChatSession{}).
-			Where("id = ?", session.ID).
-			Updates(map[string]any{
-				"token_consumed":  session.TokenConsumed,
-				"last_used_model": session.LastUsedModel,
-			}).Error; err != nil {
-			return fmt.Errorf("failed to update chat session: %w", err)
+		hookCtx := &chat.SessionHookContext{
+			SessionID:      session.ID,
+			AgentID:        session.AgentID,
+			ModelID:        modelID,
+			RoundID:        roundID,
+			TotalTokens:    totalTokens,
+			ContextTokens:  contextTokens,
+			ThinkingLevel:  thinkingLevel,
+			Session:        session,
+			Messages:       messages,
+			Tx:             tx,
+			SessionUpdates: make(map[string]any),
+		}
+		if err := chat.RunSessionHooks(ctx, chat.SessionHookAfterMessagesSaved, hookCtx); err != nil {
+			return err
+		}
+		if len(hookCtx.SessionUpdates) > 0 {
+			if err := tx.Model(&models.ChatSession{}).
+				Where("id = ?", session.ID).
+				Updates(hookCtx.SessionUpdates).Error; err != nil {
+				return fmt.Errorf("failed to update chat session: %w", err)
+			}
+		}
+		if err := chat.RunSessionHooks(ctx, chat.SessionHookAfterRoundCompleted, hookCtx); err != nil {
+			return err
 		}
 		return nil
 	})
-}
-
-func (s *ChatService) saveLastSessionAsMemory(agentID uuid.UUID) {
-	ctx := signal.GetBaseContext()
-
-	prevSession, err := gorm.G[models.ChatSession](s.db).
-		Where("agent_id = ? AND deleted_at IS NULL", agentID).
-		Order("created_at DESC").
-		Offset(1).
-		First(ctx)
-	if err != nil {
-		return
-	}
-
-	_, err = gorm.G[models.KnowledgeItem](s.db).
-		Where("source_session_id = ? AND deleted_at IS NULL", prevSession.ID).
-		First(ctx)
-	if err == nil {
-		return
-	}
-
-	messages, err := gorm.G[*models.ChatMessage](s.db).
-		Where("session_id = ? AND deleted_at IS NULL", prevSession.ID).
-		Order("created_at ASC").
-		Find(ctx)
-	if err != nil || len(messages) == 0 {
-		return
-	}
-
-	var sb strings.Builder
-	for _, msg := range messages {
-		if msg.Role == models.RoleTool || msg.Role == models.RoleSystem {
-			continue
-		}
-		content := msg.Content
-		if content == "" {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", msg.Role, content))
-	}
-
-	sessionText := sb.String()
-	if strings.TrimSpace(sessionText) == "" {
-		return
-	}
-
-	title := fmt.Sprintf("Session %s", prevSession.ID.String()[:8])
-	if firstUserMsg := findFirstUserMessage(messages); firstUserMsg != "" {
-		if len(firstUserMsg) > 100 {
-			firstUserMsg = firstUserMsg[:97] + "..."
-		}
-		title = firstUserMsg
-	}
-
-	_, err = GetKnowledgeService().CreateSessionMemory(ctx, agentID, prevSession.ID, title, sessionText)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to save session as memory", "sessionId", prevSession.ID, "error", err)
-	}
-}
-
-func findFirstUserMessage(messages []*models.ChatMessage) string {
-	for _, msg := range messages {
-		if msg.Role == models.RoleUser && strings.TrimSpace(msg.Content) != "" {
-			return msg.Content
-		}
-	}
-	return ""
 }
