@@ -1,0 +1,153 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+
+jobs:
+  precheck:
+    name: Resolve release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      beta: ${{ steps.meta.outputs.beta }}
+      exists: ${{ steps.existing.outputs.exists }}
+    steps:
+      - name: Determine release metadata
+        id: meta
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" == *b ]]; then
+            echo "beta=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "beta=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check whether release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Cross-compile release packages
+    needs: precheck
+    if: needs.precheck.outputs.exists != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.1
+
+      - name: Build release packages
+        shell: bash
+        run: |
+          mkdir -p dist package
+          tag="${GITHUB_REF_NAME}"
+          targets=(
+            "linux|amd64|linux||x86_64-linux-gnu"
+            "linux|arm64|linux||aarch64-linux-gnu"
+            "darwin|amd64|macos||x86_64-macos"
+            "darwin|arm64|macos||aarch64-macos"
+            "windows|amd64|windows|.exe|x86_64-windows-gnu"
+            "windows|arm64|windows|.exe|aarch64-windows-gnu"
+          )
+
+          for target in "${targets[@]}"; do
+            IFS="|" read -r goos goarch asset_os binary_ext zig_target <<< "$target"
+            package_dir="package/${asset_os}_${goarch}"
+            bin_name="agenty${binary_ext}"
+            asset_name="agenty_${tag}_${asset_os}_${goarch}.tar.gz"
+
+            echo "Building ${goos}/${goarch} with zig target ${zig_target}"
+            if [[ "$goos" == "windows" && "$goarch" == "arm64" ]]; then
+              echo "::warning::windows/arm64 binary can be cross-compiled, but sqlite-vector currently does not publish windows arm64 assets; local sqlite mode will still fail at runtime."
+            fi
+
+            mkdir -p "$package_dir"
+            CGO_ENABLED=1 \
+            GOOS="$goos" \
+            GOARCH="$goarch" \
+            CC="zig cc -target ${zig_target}" \
+            CXX="zig c++ -target ${zig_target}" \
+              go build -tags=fts5 -o "${package_dir}/${bin_name}" ./cmd/main.go
+
+            tar -C "$package_dir" -czf "dist/${asset_name}" "${bin_name}"
+          done
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    permissions:
+      contents: write
+    name: Publish GitHub release
+    needs:
+      - precheck
+      - build
+    if: needs.precheck.outputs.exists != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v5
+        with:
+          name: release-packages
+          path: dist
+
+      - name: Create GitHub release with generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find dist -type f | sort)
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          args=(
+            release create "${GITHUB_REF_NAME}"
+            --verify-tag
+            --generate-notes
+          )
+
+          if [[ "${{ needs.precheck.outputs.beta }}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          args+=("${assets[@]}")
+          gh "${args[@]}"
+
+  skip-existing-release:
+    name: Skip existing release
+    needs: precheck
+    if: needs.precheck.outputs.exists == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Skip release creation
+        run: echo "Release for ${GITHUB_REF_NAME} already exists, skipping build and publish."

@@ -1,160 +1,189 @@
 # Agenty
 
-A self-hosted AI agent framework with ReAct-pattern agentic looping, multi-provider LLM support, tool calling, and long-term memory.
+[简体中文](./README.zh-CN.md)
 
-This project is still under construction, expect frequent updates and breaking changes.
+Agenty is an AI agent application that supports both local mode and self-hosted mode, with skills, MCP and memory support.
+
+It supports chat models from providers such as OpenAI, Anthropic, Gemini, Qwen, DeepSeek, Kimi, and BigModel.
+
+[Quick Start](#quick-start) · [Run Modes](#run-modes) · [Configuration](#configuration) · [Database](#database) · [License](#license)
 
 ## Quick Start
 
-### Prerequisites
+1. Open the [latest GitHub Release](https://github.com/masteryyh/agenty/releases/latest).
+2. Download the asset that matches your operating system and CPU architecture.
+3. Extract the downloaded release archive.
+4. Follow the install steps for your platform.
 
-- Go 1.26+
-- SQLite with FTS5 enabled, or PostgreSQL 18 with `pgvector` and `pg_search`
-- At least one LLM provider API key
-
-### Building
-
-```bash
-git clone https://github.com/masteryyh/agenty.git
-cd agenty
-make build
-```
-
-This produces a single binary:
-- `bin/agenty` — the unified binary (backend server + interactive CLI)
-
-### Configuration
-
-Copy and edit the example configuration:
+### Linux
 
 ```bash
-cp agenty.yaml my-config.yaml
+chmod +x agenty
+sudo install -m 755 agenty /usr/local/bin/agenty
 ```
+
+### macOS
+
+```bash
+chmod +x agenty
+sudo install -m 755 agenty /usr/local/bin/agenty
+```
+
+To use a specific configuration file:
+
+```bash
+agenty --config agenty.yaml
+```
+
+On first run, Agenty initializes its database, seeds preset providers and models, creates the default agent, and opens a setup wizard for API keys and system settings.
+
+## Run Modes
+
+Agenty can run as a single local app, a self-hosted daemon, or a remote client connected to that daemon.
+
+| Mode | Command | Use case |
+| --- | --- | --- |
+| Local interactive mode | `agenty` | Run the TUI and backend logic in one local process. |
+| Local interactive mode with config | `agenty --config agenty.yaml` | Use an explicit config file. |
+| Daemon mode | `agenty --daemon --config agenty.yaml` | Run the HTTP backend service for remote clients. |
+| Remote interactive mode | `agenty --config agenty-client.yaml` | Connect the TUI to a daemon through `server.url`. |
+
+Common slash commands inside the TUI:
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show available commands. |
+| `/provider` | Configure model provider API keys. |
+| `/model` | Manage and switch chat models. |
+| `/agent` | Manage and switch agents. |
+| `/settings` | Edit system settings such as web search provider and embedding model. |
+| `/mcp` | Manage MCP servers. |
+| `/skill` | View available skills. |
+| `/memory` | View agent long-term memories. |
+| `/compact` | Compact the current conversation. |
+| `/cwd` | Set or show the working directory in local mode. |
+| `/think` | Set the current model thinking level. |
+| `/exit` | Quit the TUI. |
+
+## Configuration
+
+By default, Agenty looks for `agenty.yaml` in the current directory, `./config`, `./configs`, `/etc/agenty`, and `$HOME/.agenty`. You can always pass a file explicitly with `--config`.
+
+Minimal local configuration:
 
 ```yaml
-# my-config.yaml
+port: 8080
+debug: false
+
+db:
+  type: sqlite
+```
+
+Daemon configuration with HTTP Basic Auth:
+
+```yaml
 port: 8080
 debug: false
 
 db:
   type: sqlite
 
-# Optional PostgreSQL configuration:
-# db:
-#   type: postgres
-#   host: 127.0.0.1
-#   port: 5432
-#   username: postgres
-#   password: your_password
-#   database: agenty
-
-# Optional: HTTP Basic Auth (for daemon mode)
 auth:
-  enabled: false
+  enabled: true
   username: admin
-  password: secret
-
-# Optional: Connect to a remote backend instead of running locally
-# server:
-#   url: http://your-server:8080
-#   username: admin   # if auth is enabled on the remote server
-#   password: secret
+  password: change-me
 ```
 
-### Running Modes
+Remote client configuration:
 
-Agenty ships as a single binary with three operating modes:
-
-**Daemon mode** — run the backend HTTP API server:
-
-```bash
-./bin/agenty --daemon --config my-config.yaml
+```yaml
+server:
+  url: http://localhost:8080
+  username: admin
+  password: change-me
 ```
 
-On first start, Agenty auto-provisions preset providers and models and creates a default agent.
+PostgreSQL configuration:
 
-**Local mode** — interactive CLI that connects directly to a local database (no separate server process needed):
-
-```bash
-./bin/agenty --config my-config.yaml
+```yaml
+db:
+  type: postgres
+  host: 127.0.0.1
+  port: 5432
+  username: postgres
+  password: change-me
+  database: agenty
 ```
 
-**Remote mode** — interactive CLI that connects to a remote backend server. Configure `server.url` in your config file:
-
-```bash
-./bin/agenty --config my-config.yaml
-```
-
-## Supported LLM Providers
-
-Agenty ships with pre-seeded configurations for these providers. Simply add your API key via `agenty provider update`.
-
-| Provider | API Type | Notable Models |
-|----------|----------|----------------|
-| **OpenAI** | `openai` | `gpt-5.2`, `gpt-5.3-codex`, `gpt-4o` |
-| **Anthropic** | `anthropic` | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5` |
-| **Google Gemini** | `gemini` | `gemini-3.1-pro-preview`, `gemini-3-flash-preview` |
-| **Kimi** | `kimi` | `kimi-k2.5` (default model) |
-| **BigModel** | `bigmodel` | GLM family models |
-| **Qwen** | `qwen` | `qwen3.6-plus`, `qwen3-max` |
-| **DeepSeek** | `deepseek` | `deepseek-v4-flash`, `deepseek-v4-pro` |
-| **OpenAI-Completions** | `openai-legacy` | Any OpenAI /v1/chat/completions endpoint |
-
-All providers support **extended thinking** configuration with per-model thinking levels (e.g., `low`, `medium`, `high`, `max`).
-
----
-
-## Configuration Reference
+Supported configuration keys:
 
 | Key | Default | Description |
-|-----|---------|-------------|
-| `port` | `8080` | HTTP server listen port (daemon mode only) |
-| `debug` | `false` | Enable debug mode and the debug tool |
-| `db.type` | `sqlite` | Database backend: `sqlite` or `postgres` |
-| `db.host` | `127.0.0.1` | PostgreSQL host |
-| `db.port` | `5432` | PostgreSQL port |
-| `db.username` | `postgres` | PostgreSQL user |
-| `db.password` | *(required for PostgreSQL)* | PostgreSQL password |
-| `db.database` | `agenty` | PostgreSQL database name |
-| `db.sqliteVectorExtensionPath` | `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` | sqlite-vector extension path; missing files are downloaded automatically |
-| `auth.enabled` | `false` | Enable HTTP Basic Auth (daemon mode only) |
-| `auth.username` | — | Basic auth username |
-| `auth.password` | — | Basic auth password |
-| `server.url` | — | Remote backend URL (enables remote mode) |
-| `server.username` | — | Remote backend Basic Auth username |
-| `server.password` | — | Remote backend Basic Auth password |
+| --- | --- | --- |
+| `port` | `8080` | HTTP listen port in daemon mode. |
+| `debug` | `false` | Enables verbose logging and debug behavior. |
+| `db.type` | `sqlite` | Database backend: `sqlite` or `postgres`. |
+| `db.host` | `localhost` | PostgreSQL host. |
+| `db.port` | `5432` | PostgreSQL port. |
+| `db.username` | `postgres` | PostgreSQL username. |
+| `db.password` | empty | PostgreSQL password. Required when `db.type` is `postgres`. |
+| `db.database` | `agenty` | PostgreSQL database name. |
+| `db.sqliteVectorExtensionPath` | user config dir | Optional sqlite-vector native extension path. |
+| `auth.enabled` | `false` | Enables HTTP Basic Auth in daemon mode. |
+| `auth.username` | empty | Basic Auth username. |
+| `auth.password` | empty | Basic Auth password. |
+| `mcp.healthCheckInterval` | `30` | MCP health-check interval in seconds. |
+| `mcp.connectTimeout` | `15` | MCP connection timeout in seconds. |
+| `server.url` | empty | Remote backend URL. If set outside daemon mode, Agenty runs as a remote client. |
+| `server.username` | empty | Remote backend Basic Auth username. |
+| `server.password` | empty | Remote backend Basic Auth password. |
 
-All settings can be overridden with environment variables using the `AGENTY_` prefix (e.g., `AGENTY_DB_PASSWORD=secret`, `AGENTY_SERVER_URL=http://remote:8080`).
+Several configuration values can be overridden with `AGENTY_` environment variables, for example:
 
-## Database Setup
+```bash
+AGENTY_DB_PASSWORD=secret agenty --config agenty.yaml
+AGENTY_SERVER_URL=http://localhost:8080 agenty
+```
 
-SQLite is the default local backend. The database file is stored under `os.UserConfigDir()/agenty/agenty.db`, so it survives binary updates and reinstalls.
+If the main config file is found, Agenty also merges sibling fragments named like `agenty.local.yaml` or `agenty.private.yml`. The `include` key can point to additional YAML, JSON, or TOML fragments.
 
-SQLite startup requires:
+## Database
 
-- FTS5 support in the SQLite driver. When building from source with `go-sqlite3`, use the `sqlite_fts5` build tag if your build does not enable it by default.
-- The sqlite-vector native extension. Agenty checks `db.sqliteVectorExtensionPath` or `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` first; if the file is missing, it fetches the latest sqlite-vector GitHub release, selects the current OS/CPU asset, downloads it, and installs the extracted library at that path.
+SQLite is the default database. Agenty stores the SQLite database at `os.UserConfigDir()/agenty/agenty.db`, which maps to the platform user configuration directory such as:
 
-PostgreSQL remains supported for daemon deployments:
+| Platform | Typical path |
+| --- | --- |
+| macOS | `$HOME/Library/Application Support/agenty/agenty.db` |
+| Linux | `$XDG_CONFIG_HOME/agenty/agenty.db` or `$HOME/.config/agenty/agenty.db` |
+| Windows | `%AppData%\agenty\agenty.db` |
+
+SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. If `db.sqliteVectorExtensionPath` is not configured, Agenty uses `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` and downloads the matching sqlite-vector release asset when the extension is missing.
+
+PostgreSQL is intended for daemon deployments. Before pointing Agenty at PostgreSQL, create the database:
+
+```sql
+CREATE DATABASE agenty;
+```
+
+Then connect to that database and enable the required extensions:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_search;
-
-CREATE DATABASE agenty;
 ```
 
-Agenty initializes tables from embedded SQL schema files at startup.
+Agenty initializes and migrates its own tables from embedded SQL schema files at startup.
 
 ## License
 
-Copyright © 2026 masteryyh
+This project is licensed under the Apache License 2.0. For more details, see the LICENSE file in the repository.
+
+Copyright (c) 2026 masteryyh
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+[https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
