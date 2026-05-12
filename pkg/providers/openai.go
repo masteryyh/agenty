@@ -52,7 +52,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	}
 
 	result := &ChatResponse{
-		TotalToken: resp.Usage.TotalTokens,
+		TotalToken:   resp.Usage.TotalTokens,
+		ContextToken: resp.Usage.TotalTokens,
 	}
 
 	for _, item := range resp.Output {
@@ -322,7 +323,8 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-ch
 				ch <- StreamEvent{
 					Type: EventUsage,
 					Usage: &StreamUsage{
-						TotalTokens: completed.Response.Usage.TotalTokens,
+						TotalTokens:   completed.Response.Usage.TotalTokens,
+						ContextTokens: completed.Response.Usage.TotalTokens,
 					},
 				}
 			}

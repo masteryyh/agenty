@@ -52,7 +52,8 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRe
 	}
 
 	result := &ChatResponse{
-		TotalToken: resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		TotalToken:   resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		ContextToken: resp.Usage.InputTokens + resp.Usage.OutputTokens,
 	}
 
 	var textParts []string
@@ -324,7 +325,7 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest) (<
 
 		ch <- StreamEvent{
 			Type:  EventUsage,
-			Usage: &StreamUsage{TotalTokens: totalTokens},
+			Usage: &StreamUsage{TotalTokens: totalTokens, ContextTokens: totalTokens},
 		}
 
 		var content string

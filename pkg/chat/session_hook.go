@@ -57,6 +57,7 @@ type SessionHookContext struct {
 	Cwd            string
 	Iteration      int
 	TotalTokens    int64
+	ContextTokens  int64
 	ThinkingLevel  string
 	Session        *models.ChatSession
 	Input          *models.ChatDto

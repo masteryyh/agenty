@@ -62,6 +62,7 @@ var commands = []Command{
 			},
 		}},
 	},
+	{Name: "/compact", Description: "Compact current conversation", Usage: "/compact"},
 	{Name: "/provider", Description: "Manage model providers", Usage: "/provider"},
 	{Name: "/mcp", Description: "Manage MCP servers", Usage: "/mcp"},
 	{

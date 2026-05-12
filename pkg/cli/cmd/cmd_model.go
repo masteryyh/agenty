@@ -35,8 +35,7 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 		if err != nil {
 			return CommandResult{Handled: true}, err
 		}
-		bridge.Success("Switched to model: %s", displayName)
-		return CommandResult{Handled: true, NewModelID: resolvedID, NewModelName: displayName}, nil
+		return switchModelWithCompaction(b, bridge, sessionID, resolvedID, displayName)
 	}
 
 	for {
@@ -71,8 +70,7 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 		case ListActionSelect:
 			target := result.Data[res.Index]
 			displayName := modelDisplayName(target)
-			bridge.Success("Switched to model: %s", displayName)
-			return CommandResult{Handled: true, NewModelID: target.ID, NewModelName: displayName}, nil
+			return switchModelWithCompaction(b, bridge, sessionID, target.ID, displayName)
 
 		case ListActionAdd:
 			if err := doCreateModel(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
@@ -99,6 +97,18 @@ func handleModelCmd(b backend.Backend, bridge *UIBridge, args []string, sessionI
 			return CommandResult{Handled: true}, nil
 		}
 	}
+}
+
+func switchModelWithCompaction(b backend.Backend, bridge *UIBridge, sessionID, modelID uuid.UUID, displayName string) (CommandResult, error) {
+	compacted, err := b.CompactSessionForModel(sessionID, modelID, false)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to compact conversation for model switch: %w", err)
+	}
+	if compacted {
+		bridge.Success("Compacted conversation for model: %s", displayName)
+	}
+	bridge.Success("Switched to model: %s", displayName)
+	return CommandResult{Handled: true, NewModelID: modelID, NewModelName: displayName}, nil
 }
 
 func modelDeleteConfirm(modelList []models.ModelDto) func(idx int) string {

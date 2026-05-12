@@ -95,7 +95,8 @@ func (p *OpenAILegacyProvider) Chat(ctx context.Context, req *ChatRequest) (*Cha
 	}
 
 	result := &ChatResponse{
-		TotalToken: resp.Usage.TotalTokens,
+		TotalToken:   resp.Usage.TotalTokens,
+		ContextToken: resp.Usage.TotalTokens,
 	}
 
 	if len(resp.Choices) > 0 {
@@ -251,7 +252,7 @@ func (p *OpenAILegacyProvider) StreamChat(ctx context.Context, req *ChatRequest)
 		if totalTokens > 0 {
 			ch <- StreamEvent{
 				Type:  EventUsage,
-				Usage: &StreamUsage{TotalTokens: totalTokens},
+				Usage: &StreamUsage{TotalTokens: totalTokens, ContextTokens: totalTokens},
 			}
 		}
 

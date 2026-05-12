@@ -178,6 +178,16 @@ func (s *streamModel) handleEvent(evt providers.StreamEvent, modelName string) {
 		s.hasToolSection = false
 		s.hasContent = false
 
+	case providers.EventCompactionStart:
+		s.finishReasoning()
+		s.finishContent()
+		s.showIndicator = true
+		s.phrase = "Compacting conversation..."
+
+	case providers.EventCompactionDone:
+		s.showIndicator = true
+		s.phrase = s.streamingPhrase()
+
 	case providers.EventError:
 		s.state = streamFailed
 		s.showIndicator = false
@@ -240,6 +250,13 @@ func (s *streamModel) rememberToolCall(tc models.ToolCall) {
 		return
 	}
 	s.toolCalls[tc.ID] = streamToolCall{name: tc.Name}
+}
+
+func (s *streamModel) streamingPhrase() string {
+	if s.phrase == "" || s.phrase == "Compacting conversation..." {
+		return streamingPhrases[rand.IntN(len(streamingPhrases))]
+	}
+	return s.phrase
 }
 
 func (s *streamModel) finalize(showReasoning bool) string {

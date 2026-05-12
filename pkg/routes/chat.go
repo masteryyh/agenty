@@ -58,6 +58,7 @@ func (r *ChatRoutes) RegisterRoutes(router *gin.RouterGroup) {
 		chatGroup.GET("/session/last/:agentId", r.GetLastSessionByAgent)
 		chatGroup.GET("/session/:sessionId", r.GetSession)
 		chatGroup.PATCH("/session/:sessionId/cwd", r.SetSessionCwd)
+		chatGroup.POST("/session/:sessionId/compact", r.CompactSessionForModel)
 		chatGroup.POST("/chat", r.Chat)
 		chatGroup.POST("/stream", r.StreamChat)
 	}
@@ -169,6 +170,33 @@ func (r *ChatRoutes) SetSessionCwd(c *gin.Context) {
 		return
 	}
 	response.OK[any](c, nil)
+}
+
+func (r *ChatRoutes) CompactSessionForModel(c *gin.Context) {
+	sessionIDRaw := c.Param("sessionId")
+	if sessionIDRaw == "" {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	sessionID, err := uuid.Parse(sessionIDRaw)
+	if err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	var dto models.CompactSessionForModelDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		response.Failed(c, customerrors.ErrInvalidParams)
+		return
+	}
+
+	compacted, err := r.service.CompactSessionForModel(c, sessionID, dto.ModelID, dto.Force)
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, models.CompactSessionResultDto{Compacted: compacted})
 }
 
 func (r *ChatRoutes) Chat(c *gin.Context) {

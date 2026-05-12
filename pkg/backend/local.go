@@ -119,6 +119,10 @@ func (l *LocalBackend) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD 
 	return l.chatSvc.SetSessionCwd(signal.GetBaseContext(), sessionID, cwd, agentsMD)
 }
 
+func (l *LocalBackend) CompactSessionForModel(sessionID uuid.UUID, modelID uuid.UUID, force bool) (bool, error) {
+	return l.chatSvc.CompactSessionForModel(signal.GetBaseContext(), sessionID, modelID, force)
+}
+
 func (l *LocalBackend) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	result, err := l.chatSvc.Chat(signal.GetBaseContext(), sessionID, dto)
 	if err != nil {

@@ -127,6 +127,8 @@ func commandHandler(name string) CommandHandler {
 		return handleHistoryCmd
 	case "/model":
 		return handleModelCmd
+	case "/compact":
+		return handleCompactCmd
 	case "/think":
 		return handleThinkCmd
 	case "/help":

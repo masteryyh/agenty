@@ -200,10 +200,16 @@ func migrateCoreSchema(ctx context.Context, dbConn *gorm.DB, dbType string) erro
 	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "last_used_thinking_level", "TEXT"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "context_tokens", "BIGINT NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 
 	columnType := "UUID"
 	if dbType == config.DatabaseTypeSQLite {
 		columnType = "TEXT"
+	}
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "active_compaction_id", columnType); err != nil {
+		return err
 	}
 	return addColumnIfMissing(ctx, dbConn, dbType, "chat_messages", "round_id", columnType)
 }

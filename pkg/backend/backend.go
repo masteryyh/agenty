@@ -44,6 +44,7 @@ type Backend interface {
 	GetLastSession() (*models.ChatSessionDto, error)
 	GetLastSessionByAgent(agentID uuid.UUID) (*models.ChatSessionDto, error)
 	SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *string) error
+	CompactSessionForModel(sessionID uuid.UUID, modelID uuid.UUID, force bool) (bool, error)
 
 	Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error)
 	StreamChat(ctx context.Context, sessionID uuid.UUID, dto *models.ChatDto, handler func(event providers.StreamEvent) error) error

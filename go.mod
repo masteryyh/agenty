@@ -22,6 +22,8 @@ require (
 	github.com/muesli/reflow v0.3.0
 	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.35.0
+	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/pkoukk/tiktoken-go-loader v0.0.2
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0

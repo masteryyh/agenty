@@ -70,8 +70,10 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	id UUID PRIMARY KEY,
 	agent_id UUID NOT NULL,
 	token_consumed BIGINT NOT NULL DEFAULT 0,
+	context_tokens BIGINT NOT NULL DEFAULT 0,
 	last_used_model UUID,
 	last_used_thinking_level TEXT,
+	active_compaction_id UUID,
 	cwd TEXT,
 	agents_md TEXT,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -102,6 +104,22 @@ CREATE TABLE IF NOT EXISTS chat_round_token_usages (
 	model_id UUID NOT NULL,
 	round_id UUID NOT NULL,
 	total_tokens BIGINT NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_compactions (
+	id UUID PRIMARY KEY,
+	session_id UUID NOT NULL,
+	agent_id UUID NOT NULL,
+	model_id UUID NOT NULL,
+	type TEXT NOT NULL,
+	compacted_until_round_id UUID,
+	compacted_until_message_id UUID,
+	summary TEXT NOT NULL DEFAULT '',
+	compacted_messages JSONB,
+	source_token_estimate BIGINT NOT NULL DEFAULT 0,
+	compacted_token_estimate BIGINT NOT NULL DEFAULT 0,
+	threshold_tokens BIGINT NOT NULL DEFAULT 0,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -161,6 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_agent_id ON chat_sessions (agent_id
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_session_id ON chat_round_token_usages (session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_round_id ON chat_round_token_usages (round_id);
+CREATE INDEX IF NOT EXISTS idx_chat_compactions_session_id ON chat_compactions (session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers (name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_agent_id ON knowledge_items (agent_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_category ON knowledge_items (category);

@@ -104,7 +104,7 @@ func handleStatusCmd(b backend.Backend, bridge *UIBridge, args []string, session
 	sb.WriteString(renderKV("Session", styleCyan.Render(session.ID.String()), 16))
 	sb.WriteString(renderKV("Model", styleMagenta.Render(currentModelInfo), 16))
 	sb.WriteString(renderKV("Thinking", thinkStatus, 16))
-	sb.WriteString(renderKV("Tokens used", styleYellow.Render(fmt.Sprint(session.TokenConsumed)), 16))
+	sb.WriteString(renderKV("Session tokens", styleYellow.Render(fmt.Sprint(session.TokenConsumed)), 16))
 	sb.WriteString(renderKV("Messages", styleGreen.Render(fmt.Sprint(len(session.Messages))), 16))
 	if session.Cwd != nil {
 		sb.WriteString(renderKV("Working dir", styleGray.Render(*session.Cwd), 16))

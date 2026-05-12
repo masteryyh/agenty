@@ -69,11 +69,15 @@ type ChatParams struct {
 	APIKey                    string
 	APIType                   models.APIType
 	ResponseFormat            *providers.ResponseFormat
+	ContextTokens             int64
+	NewMessageStart           int
+	BeforeModelCall           func(context.Context, *ChatParams, *providers.ChatRequest, int, func(providers.StreamEvent)) error
 }
 
 type ChatResult struct {
-	TotalToken int64
-	Messages   []providers.Message
+	TotalToken   int64
+	ContextToken int64
+	Messages     []providers.Message
 }
 
 func (ce *ChatExecutor) executeToolCallsParallel(ctx context.Context, params *ChatParams, iteration int, tcc tools.ToolCallContext, toolCalls []models.ToolCall, onResult func(models.ToolResult)) ([]models.ToolResult, error) {
@@ -158,8 +162,10 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 	toolDefs := ce.registry.Definitions()
 	messages := make([]providers.Message, len(params.Messages))
 	copy(messages, params.Messages)
+	generatedMessages := make([]providers.Message, 0)
 
 	var totalTokens int64
+	var contextTokens int64
 	for i := range maxToolCallIterations {
 		req := &providers.ChatRequest{
 			Model:                     params.Model,
@@ -173,6 +179,12 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			APIType:                   params.APIType,
 			APIKey:                    params.APIKey,
 			ResponseFormat:            params.ResponseFormat,
+		}
+		if params.BeforeModelCall != nil {
+			if err := params.BeforeModelCall(ctx, params, req, i+1, nil); err != nil {
+				return nil, err
+			}
+			messages = req.Messages
 		}
 
 		if err := RunSessionHooks(ctx, SessionHookBeforeModelCall, &SessionHookContext{
@@ -193,6 +205,11 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 			return nil, err
 		}
 		totalTokens += resp.TotalToken
+		if resp.TotalToken > 0 {
+			contextTokens = resp.TotalToken
+		} else {
+			contextTokens = resp.ContextToken
+		}
 
 		assistantMsg := providers.Message{
 			Role:             models.RoleAssistant,
@@ -216,6 +233,7 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 		}
 
 		messages = append(messages, assistantMsg)
+		generatedMessages = append(generatedMessages, assistantMsg)
 
 		if len(resp.ToolCalls) == 0 {
 			break
@@ -242,10 +260,11 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 				ToolResult: &results[i],
 			}
 			messages = append(messages, toolMsg)
+			generatedMessages = append(generatedMessages, toolMsg)
 		}
 	}
 
-	finalMessages := lo.Map(messages[len(params.Messages):], func(msg providers.Message, _ int) providers.Message {
+	finalMessages := lo.Map(generatedMessages, func(msg providers.Message, _ int) providers.Message {
 		if msg.Role == models.RoleAssistant {
 			providers.HydrateMessageReasoning(&msg)
 		} else {
@@ -256,8 +275,9 @@ func (ce *ChatExecutor) Chat(ctx context.Context, params *ChatParams) (*ChatResu
 	})
 
 	return &ChatResult{
-		TotalToken: totalTokens,
-		Messages:   finalMessages,
+		TotalToken:   totalTokens,
+		ContextToken: contextTokens,
+		Messages:     finalMessages,
 	}, nil
 }
 
@@ -277,6 +297,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 		defer close(out)
 
 		var totalTokens int64
+		var contextTokens int64
 
 		for i := range maxToolCallIterations {
 			req := &providers.ChatRequest{
@@ -291,6 +312,18 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				APIType:                   params.APIType,
 				APIKey:                    params.APIKey,
 				ResponseFormat:            params.ResponseFormat,
+			}
+			if params.BeforeModelCall != nil {
+				if err := params.BeforeModelCall(ctx, params, req, i+1, func(evt providers.StreamEvent) {
+					select {
+					case out <- evt:
+					case <-ctx.Done():
+					}
+				}); err != nil {
+					out <- providers.StreamEvent{Type: providers.EventError, Error: err.Error()}
+					return
+				}
+				messages = req.Messages
 			}
 
 			if err := RunSessionHooks(ctx, SessionHookBeforeModelCall, &SessionHookContext{
@@ -345,6 +378,11 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 				case providers.EventUsage:
 					if evt.Usage != nil {
 						totalTokens += evt.Usage.TotalTokens
+						if evt.Usage.TotalTokens > 0 {
+							contextTokens = evt.Usage.TotalTokens
+						} else {
+							contextTokens = evt.Usage.ContextTokens
+						}
 					}
 				}
 
@@ -428,7 +466,7 @@ func (ce *ChatExecutor) StreamChat(ctx context.Context, params *ChatParams) (<-c
 
 		out <- providers.StreamEvent{
 			Type:  providers.EventUsage,
-			Usage: &providers.StreamUsage{TotalTokens: totalTokens},
+			Usage: &providers.StreamUsage{TotalTokens: totalTokens, ContextTokens: contextTokens},
 		}
 
 		out <- providers.StreamEvent{Type: providers.EventDone}

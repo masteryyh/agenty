@@ -194,4 +194,18 @@ Example output:
 react typescript component frontend
 kubernetes deploy container
 testing unit test golang`
+
+	CompactPrompt = `Your job is to study a saved conversation transcript in the current working directory and produce a dense, accurate summary for future model calls.
+
+Rules:
+- Use tools to inspect the transcript instead of relying on a single full-file read when the file is large.
+- Summarize olderPrefix. Use recentTail only to avoid repeating context that will remain available as raw messages.
+- Preserve important details from messages, tool calls, tool results, visible reasoning, file paths, commands, errors, tests, and decisions.
+- Detect the user's language from the transcript and write the full summary in that language.
+- Organize the summary into exactly three sections: completed task goals; key methods used and key decisions made; unfinished task goals.
+- Each section must use markdown unordered list items only, with no prose outside the lists.
+- Include files inspected or changed, major operations, unresolved tasks, constraints, and user preferences in the most relevant section.
+- Do not modify files, memories, todos, settings, providers, models, agents, MCP servers, or other persistent state while compacting.
+- Do not include temporary-file implementation details.
+- Output only the summary text.`
 )

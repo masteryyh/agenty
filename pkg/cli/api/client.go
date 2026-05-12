@@ -174,6 +174,17 @@ func (c *Client) SetSessionCwd(sessionID uuid.UUID, cwd *string, agentsMD *strin
 	return err
 }
 
+func (c *Client) CompactSessionForModel(sessionID uuid.UUID, modelID uuid.UUID, force bool) (bool, error) {
+	result, err := doRequest[models.CompactSessionResultDto](c, "POST", fmt.Sprintf("/api/v1/chats/session/%s/compact", sessionID), &models.CompactSessionForModelDto{ModelID: modelID, Force: force})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, nil
+	}
+	return result.Compacted, nil
+}
+
 func (c *Client) Chat(sessionID uuid.UUID, dto *models.ChatDto) (*[]*models.ChatMessageDto, error) {
 	return doRequest[[]*models.ChatMessageDto](c, "POST", fmt.Sprintf("/api/v1/chats/chat?sessionId=%s", sessionID), dto)
 }
