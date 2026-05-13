@@ -27,6 +27,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/version"
 	"gorm.io/gorm"
 )
 
@@ -89,6 +90,10 @@ func (s *SystemService) GetSettings(ctx context.Context) (*models.SystemSettings
 		return nil, err
 	}
 	return settings.ToDto(), nil
+}
+
+func (s *SystemService) GetVersion(ctx context.Context) (*models.VersionDto, error) {
+	return &models.VersionDto{Version: version.Current()}, nil
 }
 
 func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {

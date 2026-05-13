@@ -39,6 +39,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
+	"github.com/masteryyh/agenty/pkg/version"
 )
 
 type appMode int
@@ -1153,7 +1154,7 @@ func renderBannerCard() string {
 	artLines := strings.Split(art, "\n")
 	infoLines := []string{
 		styleAssistantHeader.Render("yet another ai agent"),
-		styleGray.Render("v0.0.1"),
+		styleGray.Render(version.Current()),
 		styleGray.Render(cwd),
 	}
 

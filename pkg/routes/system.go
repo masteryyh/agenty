@@ -46,9 +46,19 @@ func GetSystemRoutes() *SystemRoutes {
 func (r *SystemRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	systemGroup := router.Group("/system")
 	{
+		systemGroup.GET("/version", r.GetVersion)
 		systemGroup.GET("/settings", r.GetSettings)
 		systemGroup.PUT("/settings", r.UpdateSettings)
 	}
+}
+
+func (r *SystemRoutes) GetVersion(c *gin.Context) {
+	dto, err := r.service.GetVersion(c.Request.Context())
+	if err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK(c, dto)
 }
 
 func (r *SystemRoutes) GetSettings(c *gin.Context) {

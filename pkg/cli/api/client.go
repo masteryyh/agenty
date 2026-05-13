@@ -309,6 +309,10 @@ func (c *Client) GetSystemSettings() (*models.SystemSettingsDto, error) {
 	return doRequest[models.SystemSettingsDto](c, "GET", "/api/v1/system/settings", nil)
 }
 
+func (c *Client) GetSystemVersion() (*models.VersionDto, error) {
+	return doRequest[models.VersionDto](c, "GET", "/api/v1/system/version", nil)
+}
+
 func (c *Client) SetSystemInitialized() error {
 	initialized := true
 	_, err := doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", &models.UpdateSystemSettingsDto{Initialized: &initialized})

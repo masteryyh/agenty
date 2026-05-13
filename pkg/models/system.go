@@ -149,3 +149,7 @@ type UpdateSystemSettingsDto struct {
 	FirecrawlAPIKey           *string            `json:"firecrawlApiKey" binding:"omitempty"`
 	FirecrawlBaseURL          *string            `json:"firecrawlBaseUrl" binding:"omitempty"`
 }
+
+type VersionDto struct {
+	Version string `json:"version"`
+}
