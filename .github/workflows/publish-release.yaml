@@ -157,6 +157,11 @@ jobs:
     if: needs.precheck.outputs.exists != 'true'
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Download release packages
         uses: actions/download-artifact@v5
         with:
@@ -165,6 +170,7 @@ jobs:
       - name: Create GitHub release with generated notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           mapfile -t assets < <(find dist -type f | sort)
