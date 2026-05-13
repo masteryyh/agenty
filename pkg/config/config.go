@@ -28,10 +28,17 @@ import (
 	"github.com/spf13/viper"
 )
 
+const defaultConfigContents = `debug: false
+
+db:
+  type: sqlite
+`
+
 type ConfigManager struct {
 	cfg           *AppConfig
 	vipers        *viper.Viper
 	configFileSet bool
+	configFile    string
 }
 
 func NewConfigManager() *ConfigManager {
@@ -74,7 +81,8 @@ func (cm *ConfigManager) BindEnvVariables() {
 }
 
 func (cm *ConfigManager) SetDefaults() {
-	cm.vipers.SetDefault("port", 8080)
+	cm.vipers.SetDefault("debug", false)
+	cm.vipers.SetDefault("port", DefaultDaemonPort)
 	cm.vipers.SetDefault("db.type", DatabaseTypeSQLite)
 	cm.vipers.SetDefault("db.host", "localhost")
 	cm.vipers.SetDefault("db.port", 5432)
@@ -85,34 +93,32 @@ func (cm *ConfigManager) SetDefaults() {
 func (cm *ConfigManager) SetConfigFile(path string) {
 	cm.vipers.SetConfigFile(path)
 	cm.configFileSet = true
+	cm.configFile = path
 }
 
 func (cm *ConfigManager) LoadConfig() error {
 	cm.SetDefaults()
 
-	if !cm.configFileSet {
-		cm.vipers.SetConfigName("agenty")
-		cm.vipers.SetConfigType("yaml")
-
-		defaultPaths := []string{
-			".",
-			"./config",
-			"./configs",
-			"/etc/agenty",
-			"$HOME/.agenty",
+	if cm.configFileSet {
+		if _, err := os.Stat(cm.configFile); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("config file not found: %s", cm.configFile)
+			}
+			return fmt.Errorf("failed to access config file %s: %w", cm.configFile, err)
 		}
-
-		for _, path := range defaultPaths {
-			cm.vipers.AddConfigPath(path)
+	} else {
+		configPath, created, err := ensureDefaultConfigFile()
+		if err != nil {
+			return err
 		}
+		if created {
+			fmt.Printf("created default config file: %s\n", configPath)
+		}
+		cm.vipers.SetConfigFile(configPath)
 	}
 
 	if err := cm.vipers.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Println("warning: no config file found, using defaults")
-		} else {
-			return fmt.Errorf("error reading config file: %w", err)
-		}
+		return fmt.Errorf("error reading config file: %w", err)
 	} else {
 		fmt.Printf("using config file: %s\n", cm.vipers.ConfigFileUsed())
 	}
@@ -125,6 +131,39 @@ func (cm *ConfigManager) LoadConfig() error {
 		return fmt.Errorf("unable to decode config into struct: %w", err)
 	}
 	return nil
+}
+
+func ensureDefaultConfigFile() (string, bool, error) {
+	configPath, err := defaultConfigFilePath()
+	if err != nil {
+		return "", false, err
+	}
+
+	if info, err := os.Stat(configPath); err == nil {
+		if info.IsDir() {
+			return "", false, fmt.Errorf("default config path is a directory: %s", configPath)
+		}
+		return configPath, false, nil
+	} else if !os.IsNotExist(err) {
+		return "", false, fmt.Errorf("failed to inspect default config file %s: %w", configPath, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return "", false, fmt.Errorf("failed to create config directory for %s: %w", configPath, err)
+	}
+	if err := os.WriteFile(configPath, []byte(defaultConfigContents), 0o644); err != nil {
+		return "", false, fmt.Errorf("failed to write default config file %s: %w", configPath, err)
+	}
+
+	return configPath, true, nil
+}
+
+func defaultConfigFilePath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine user home directory: %w", err)
+	}
+	return filepath.Join(homeDir, ".agenty", "config.yaml"), nil
 }
 
 func (cm *ConfigManager) mergeAdditionalConfigs() error {

@@ -32,17 +32,18 @@ const (
 )
 
 type SystemSettings struct {
-	ID                        uuid.UUID
-	Initialized               bool
-	EmbeddingModelID          *uuid.UUID
-	ContextCompressionModelID *uuid.UUID
-	WebSearchProvider         WebSearchProvider
-	BraveAPIKey               string
-	TavilyAPIKey              string
-	FirecrawlAPIKey           string
-	FirecrawlBaseURL          string
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
+	ID                              uuid.UUID
+	Initialized                     bool
+	EmbeddingModelID                *uuid.UUID
+	ContextCompressionModelID       *uuid.UUID
+	WebSearchProvider               WebSearchProvider
+	LastConfiguredWebSearchProvider WebSearchProvider
+	BraveAPIKey                     string
+	TavilyAPIKey                    string
+	FirecrawlAPIKey                 string
+	FirecrawlBaseURL                string
+	CreatedAt                       time.Time
+	UpdatedAt                       time.Time
 }
 
 func (SystemSettings) TableName() string {
@@ -51,15 +52,71 @@ func (SystemSettings) TableName() string {
 
 func (s *SystemSettings) ToDto() *SystemSettingsDto {
 	return &SystemSettingsDto{
-		Initialized:               s.Initialized,
-		EmbeddingModelID:          s.EmbeddingModelID,
-		ContextCompressionModelID: s.ContextCompressionModelID,
-		WebSearchProvider:         s.WebSearchProvider,
-		BraveAPIKey:               censorAPIKey(s.BraveAPIKey),
-		TavilyAPIKey:              censorAPIKey(s.TavilyAPIKey),
-		FirecrawlAPIKey:           censorAPIKey(s.FirecrawlAPIKey),
-		FirecrawlBaseURL:          s.FirecrawlBaseURL,
+		Initialized:                     s.Initialized,
+		EmbeddingModelID:                s.EmbeddingModelID,
+		ContextCompressionModelID:       s.ContextCompressionModelID,
+		WebSearchProvider:               s.ResolveWebSearchProvider(),
+		ConfiguredWebSearchProviders:    s.ConfiguredWebSearchProviders(),
+		LastConfiguredWebSearchProvider: s.LastConfiguredWebSearchProvider,
+		BraveAPIKey:                     censorAPIKey(s.BraveAPIKey),
+		TavilyAPIKey:                    censorAPIKey(s.TavilyAPIKey),
+		FirecrawlAPIKey:                 censorAPIKey(s.FirecrawlAPIKey),
+		FirecrawlBaseURL:                s.FirecrawlBaseURL,
 	}
+}
+
+func (s *SystemSettings) ConfiguredWebSearchProviders() []WebSearchProvider {
+	if s == nil {
+		return nil
+	}
+
+	providers := make([]WebSearchProvider, 0, 3)
+	for _, provider := range []WebSearchProvider{
+		WebSearchProviderTavily,
+		WebSearchProviderBrave,
+		WebSearchProviderFirecrawl,
+	} {
+		if s.IsWebSearchProviderConfigured(provider) {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
+
+func (s *SystemSettings) IsWebSearchProviderConfigured(provider WebSearchProvider) bool {
+	if s == nil {
+		return false
+	}
+
+	switch provider {
+	case WebSearchProviderTavily:
+		return s.TavilyAPIKey != ""
+	case WebSearchProviderBrave:
+		return s.BraveAPIKey != ""
+	case WebSearchProviderFirecrawl:
+		return s.FirecrawlAPIKey != ""
+	default:
+		return false
+	}
+}
+
+func (s *SystemSettings) ResolveWebSearchProvider() WebSearchProvider {
+	if s == nil {
+		return WebSearchProviderDisabled
+	}
+
+	if s.IsWebSearchProviderConfigured(s.WebSearchProvider) {
+		return s.WebSearchProvider
+	}
+	if s.IsWebSearchProviderConfigured(s.LastConfiguredWebSearchProvider) {
+		return s.LastConfiguredWebSearchProvider
+	}
+
+	configured := s.ConfiguredWebSearchProviders()
+	if len(configured) == 0 {
+		return WebSearchProviderDisabled
+	}
+	return configured[0]
 }
 
 func censorAPIKey(key string) string {
@@ -70,14 +127,16 @@ func censorAPIKey(key string) string {
 }
 
 type SystemSettingsDto struct {
-	Initialized               bool              `json:"initialized"`
-	EmbeddingModelID          *uuid.UUID        `json:"embeddingModelId,omitempty"`
-	ContextCompressionModelID *uuid.UUID        `json:"contextCompressionModelId,omitempty"`
-	WebSearchProvider         WebSearchProvider `json:"webSearchProvider"`
-	BraveAPIKey               string            `json:"braveApiKey,omitempty"`
-	TavilyAPIKey              string            `json:"tavilyApiKey,omitempty"`
-	FirecrawlAPIKey           string            `json:"firecrawlApiKey,omitempty"`
-	FirecrawlBaseURL          string            `json:"firecrawlBaseUrl,omitempty"`
+	Initialized                     bool                `json:"initialized"`
+	EmbeddingModelID                *uuid.UUID          `json:"embeddingModelId,omitempty"`
+	ContextCompressionModelID       *uuid.UUID          `json:"contextCompressionModelId,omitempty"`
+	WebSearchProvider               WebSearchProvider   `json:"webSearchProvider"`
+	ConfiguredWebSearchProviders    []WebSearchProvider `json:"configuredWebSearchProviders,omitempty"`
+	LastConfiguredWebSearchProvider WebSearchProvider   `json:"lastConfiguredWebSearchProvider,omitempty"`
+	BraveAPIKey                     string              `json:"braveApiKey,omitempty"`
+	TavilyAPIKey                    string              `json:"tavilyApiKey,omitempty"`
+	FirecrawlAPIKey                 string              `json:"firecrawlApiKey,omitempty"`
+	FirecrawlBaseURL                string              `json:"firecrawlBaseUrl,omitempty"`
 }
 
 type UpdateSystemSettingsDto struct {
@@ -89,4 +148,8 @@ type UpdateSystemSettingsDto struct {
 	TavilyAPIKey              *string            `json:"tavilyApiKey" binding:"omitempty"`
 	FirecrawlAPIKey           *string            `json:"firecrawlApiKey" binding:"omitempty"`
 	FirecrawlBaseURL          *string            `json:"firecrawlBaseUrl" binding:"omitempty"`
+}
+
+type VersionDto struct {
+	Version string `json:"version"`
 }

@@ -88,7 +88,7 @@ jobs:
             GOARCH="$goarch" \
             CC="zig cc -target ${zig_target}" \
             CXX="zig c++ -target ${zig_target}" \
-              go build -tags=fts5 -o "${package_dir}/${bin_name}" ./cmd/main.go
+              go build -tags=fts5 -ldflags "-X github.com/masteryyh/agenty/pkg/version.Version=${tag}" -o "${package_dir}/${bin_name}" ./cmd/main.go
 
             tar -C "$package_dir" -czf "dist/${asset_name}" "${bin_name}"
           done
@@ -136,7 +136,7 @@ jobs:
           CGO_ENABLED=1 \
           GOOS=darwin \
           GOARCH=${{ matrix.goarch }} \
-            go build -tags=fts5 -o "${package_dir}/agenty" ./cmd/main.go
+            go build -tags=fts5 -ldflags "-X github.com/masteryyh/agenty/pkg/version.Version=${tag}" -o "${package_dir}/agenty" ./cmd/main.go
 
           tar -C "$package_dir" -czf "dist/${asset_name}" agenty
 

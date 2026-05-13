@@ -32,19 +32,25 @@ import (
 	"github.com/masteryyh/agenty/pkg/tools/builtin"
 	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"github.com/masteryyh/agenty/pkg/utils/signal"
+	"github.com/masteryyh/agenty/pkg/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 var (
-	cfgFile    string
-	daemonMode bool
-	rootCmd    = &cobra.Command{
+	cfgFile     string
+	daemonMode  bool
+	showVersion bool
+	rootCmd     = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				fmt.Fprintln(cmd.OutOrStdout(), version.Current())
+				return nil
+			}
 			if err := config.Init(cfgFile); err != nil {
 				return fmt.Errorf("failed to load configuration: %w", err)
 			}
@@ -70,7 +76,10 @@ agentic looping and skills usage capabilities.`,
 			if cfg.IsRemoteMode() {
 				_, cancel := signal.SetupContext()
 				defer cancel()
-				b := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
+				b, err := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
+				if err != nil {
+					return err
+				}
 				return startChat(b, false)
 			}
 
@@ -80,8 +89,9 @@ agentic looping and skills usage capabilities.`,
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./agenty.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default ~/.agenty/config.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
+	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show version")
 }
 
 func startLocalMode() error {

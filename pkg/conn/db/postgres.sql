@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
 	embedding_model_id UUID,
 	context_compression_model_id UUID,
 	web_search_provider VARCHAR(50) NOT NULL DEFAULT 'disabled',
+	last_configured_web_search_provider VARCHAR(50) NOT NULL DEFAULT '',
 	brave_api_key VARCHAR(255) NOT NULL DEFAULT '',
 	tavily_api_key VARCHAR(255) NOT NULL DEFAULT '',
 	firecrawl_api_key VARCHAR(255) NOT NULL DEFAULT '',

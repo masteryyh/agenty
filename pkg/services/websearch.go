@@ -52,7 +52,7 @@ func (s *WebSearchService) Search(ctx context.Context, query string, limit int) 
 		return nil, fmt.Errorf("failed to get system settings: %w", err)
 	}
 
-	switch settings.WebSearchProvider {
+	switch settings.ResolveWebSearchProvider() {
 	case models.WebSearchProviderTavily:
 		return s.searchTavily(ctx, settings.TavilyAPIKey, query, limit)
 	case models.WebSearchProviderBrave:
@@ -71,7 +71,7 @@ func (s *WebSearchService) IsEnabled(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	return settings.WebSearchProvider != models.WebSearchProviderDisabled && settings.WebSearchProvider != ""
+	return settings.ResolveWebSearchProvider() != models.WebSearchProviderDisabled
 }
 
 type tavilyResult struct {

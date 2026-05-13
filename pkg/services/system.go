@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/masteryyh/agenty/pkg/conn"
 	"github.com/masteryyh/agenty/pkg/consts"
 	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/version"
 	"gorm.io/gorm"
 )
 
@@ -90,6 +92,10 @@ func (s *SystemService) GetSettings(ctx context.Context) (*models.SystemSettings
 	return settings.ToDto(), nil
 }
 
+func (s *SystemService) GetVersion(ctx context.Context) (*models.VersionDto, error) {
+	return &models.VersionDto{Version: version.Current()}, nil
+}
+
 func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
 	settings, err := s.getOrCreate(ctx)
 	if err != nil {
@@ -97,9 +103,11 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 	}
 
 	updates := make(map[string]any)
+	next := *settings
 
 	if dto.Initialized != nil {
 		updates["initialized"] = *dto.Initialized
+		next.Initialized = *dto.Initialized
 	}
 
 	if dto.EmbeddingModelID != nil {
@@ -114,6 +122,7 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 			return nil, err
 		}
 		updates["embedding_model_id"] = model.ID
+		next.EmbeddingModelID = &model.ID
 	}
 
 	if dto.ContextCompressionModelID != nil {
@@ -128,6 +137,7 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 			return nil, err
 		}
 		updates["context_compression_model_id"] = model.ID
+		next.ContextCompressionModelID = &model.ID
 	}
 
 	if dto.WebSearchProvider != nil {
@@ -135,6 +145,7 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 		switch provider {
 		case models.WebSearchProviderDisabled, models.WebSearchProviderTavily, models.WebSearchProviderBrave, models.WebSearchProviderFirecrawl:
 			updates["web_search_provider"] = provider
+			next.WebSearchProvider = provider
 		default:
 			return nil, customerrors.NewBusinessError(400, "invalid web search provider: "+string(provider))
 		}
@@ -142,15 +153,29 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 
 	if dto.BraveAPIKey != nil {
 		updates["brave_api_key"] = *dto.BraveAPIKey
+		next.BraveAPIKey = *dto.BraveAPIKey
 	}
 	if dto.TavilyAPIKey != nil {
 		updates["tavily_api_key"] = *dto.TavilyAPIKey
+		next.TavilyAPIKey = *dto.TavilyAPIKey
 	}
 	if dto.FirecrawlAPIKey != nil {
 		updates["firecrawl_api_key"] = *dto.FirecrawlAPIKey
+		next.FirecrawlAPIKey = *dto.FirecrawlAPIKey
 	}
 	if dto.FirecrawlBaseURL != nil {
 		updates["firecrawl_base_url"] = *dto.FirecrawlBaseURL
+		next.FirecrawlBaseURL = *dto.FirecrawlBaseURL
+	}
+
+	if provider := lastConfiguredWebSearchProviderFromUpdate(dto); provider != "" {
+		updates["last_configured_web_search_provider"] = provider
+		next.LastConfiguredWebSearchProvider = provider
+	}
+
+	if dto.WebSearchProvider != nil && next.WebSearchProvider != models.WebSearchProviderDisabled &&
+		!next.IsWebSearchProviderConfigured(next.WebSearchProvider) {
+		return nil, customerrors.NewBusinessError(400, "web search provider is not configured: "+string(next.WebSearchProvider))
 	}
 
 	if err := s.db.WithContext(ctx).
@@ -166,4 +191,22 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 		return nil, err
 	}
 	return updated.ToDto(), nil
+}
+
+func lastConfiguredWebSearchProviderFromUpdate(dto *models.UpdateSystemSettingsDto) models.WebSearchProvider {
+	if dto == nil {
+		return ""
+	}
+
+	provider := models.WebSearchProvider("")
+	if dto.BraveAPIKey != nil && strings.TrimSpace(*dto.BraveAPIKey) != "" {
+		provider = models.WebSearchProviderBrave
+	}
+	if dto.TavilyAPIKey != nil && strings.TrimSpace(*dto.TavilyAPIKey) != "" {
+		provider = models.WebSearchProviderTavily
+	}
+	if dto.FirecrawlAPIKey != nil && strings.TrimSpace(*dto.FirecrawlAPIKey) != "" {
+		provider = models.WebSearchProviderFirecrawl
+	}
+	return provider
 }

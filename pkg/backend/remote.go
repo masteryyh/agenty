@@ -18,26 +18,40 @@ package backend
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/cli/api"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/masteryyh/agenty/pkg/utils/pagination"
+	"github.com/masteryyh/agenty/pkg/version"
 )
 
 type RemoteBackend struct {
 	client *api.Client
 }
 
-func NewRemoteBackend(url, username, password string) *RemoteBackend {
+func NewRemoteBackend(url, username, password string) (*RemoteBackend, error) {
 	var c *api.Client
 	if username != "" && password != "" {
 		c = api.NewClientWithAuth(url, username, password)
 	} else {
 		c = api.NewClient(url)
 	}
-	return &RemoteBackend{client: c}
+	serverVersion, err := c.GetSystemVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get server version: %w", err)
+	}
+	clientVersion := version.Current()
+	if serverVersion == nil || serverVersion.Version != clientVersion {
+		serverValue := ""
+		if serverVersion != nil {
+			serverValue = serverVersion.Version
+		}
+		return nil, fmt.Errorf("client/server version mismatch: client=%s server=%s", clientVersion, serverValue)
+	}
+	return &RemoteBackend{client: c}, nil
 }
 
 func (r *RemoteBackend) ListProviders(page, pageSize int) (*pagination.PagedResponse[models.ModelProviderDto], error) {
