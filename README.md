@@ -32,7 +32,7 @@ sudo install -m 755 agenty /usr/local/bin/agenty
 To use a specific configuration file:
 
 ```bash
-agenty --config agenty.yaml
+agenty --config /path/to/config.yaml
 ```
 
 On first run, Agenty initializes its database, seeds preset providers and models, creates the default agent, and opens a setup wizard for API keys and system settings.
@@ -44,8 +44,8 @@ Agenty can run as a single local app, a self-hosted daemon, or a remote client c
 | Mode | Command | Use case |
 | --- | --- | --- |
 | Local interactive mode | `agenty` | Run the TUI and backend logic in one local process. |
-| Local interactive mode with config | `agenty --config agenty.yaml` | Use an explicit config file. |
-| Daemon mode | `agenty --daemon --config agenty.yaml` | Run the HTTP backend service for remote clients. |
+| Local interactive mode with config | `agenty --config /path/to/config.yaml` | Use an explicit config file. |
+| Daemon mode | `agenty --daemon --config /path/to/config.yaml` | Run the HTTP backend service for remote clients. |
 | Remote interactive mode | `agenty --config agenty-client.yaml` | Connect the TUI to a daemon through `server.url`. |
 
 Common slash commands inside the TUI:
@@ -67,12 +67,11 @@ Common slash commands inside the TUI:
 
 ## Configuration
 
-By default, Agenty looks for `agenty.yaml` in the current directory, `./config`, `./configs`, `/etc/agenty`, and `$HOME/.agenty`. You can always pass a file explicitly with `--config`.
+If you do not pass `--config`, Agenty uses `$HOME/.agenty/config.yaml`. On first run, if that file does not exist, Agenty creates it automatically with a local-mode default configuration (`debug: false` and `db.type: sqlite`). If you pass `--config`, that exact file must exist or startup fails.
 
 Minimal local configuration:
 
 ```yaml
-port: 8080
 debug: false
 
 db:
@@ -82,8 +81,8 @@ db:
 Daemon configuration with HTTP Basic Auth:
 
 ```yaml
-port: 8080
 debug: false
+port: 8080
 
 db:
   type: sqlite
@@ -94,7 +93,7 @@ auth:
   password: change-me
 ```
 
-Remote client configuration:
+Client configuration:
 
 ```yaml
 server:
@@ -119,7 +118,7 @@ Supported configuration keys:
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `port` | `8080` | HTTP listen port in daemon mode. |
+| `port` | `8080` | HTTP listen port in daemon mode. Optional in config; Agenty falls back to `8080` when omitted. |
 | `debug` | `false` | Enables verbose logging and debug behavior. |
 | `db.type` | `sqlite` | Database backend: `sqlite` or `postgres`. |
 | `db.host` | `localhost` | PostgreSQL host. |
@@ -140,7 +139,7 @@ Supported configuration keys:
 Several configuration values can be overridden with `AGENTY_` environment variables, for example:
 
 ```bash
-AGENTY_DB_PASSWORD=secret agenty --config agenty.yaml
+AGENTY_DB_PASSWORD=secret agenty --config /path/to/config.yaml
 AGENTY_SERVER_URL=http://localhost:8080 agenty
 ```
 
@@ -157,6 +156,8 @@ SQLite is the default database. Agenty stores the SQLite database at `os.UserCon
 | Windows | `%AppData%\agenty\agenty.db` |
 
 SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. If `db.sqliteVectorExtensionPath` is not configured, Agenty uses `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` and downloads the matching sqlite-vector release asset when the extension is missing.
+
+Windows `arm64` cannot use the default SQLite mode because `sqlite-vector` does not provide that platform. On Windows `arm64`, configure an external PostgreSQL database before starting Agenty in local or daemon mode.
 
 PostgreSQL is intended for daemon deployments. Before pointing Agenty at PostgreSQL, create the database:
 

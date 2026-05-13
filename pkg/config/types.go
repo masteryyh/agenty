@@ -18,11 +18,13 @@ package config
 
 import (
 	"fmt"
+	"runtime"
 )
 
 const (
 	DatabaseTypePostgres = "postgres"
 	DatabaseTypeSQLite   = "sqlite"
+	DefaultDaemonPort    = 8080
 )
 
 // MCPConfig holds runtime parameters for MCP client connections
@@ -124,6 +126,9 @@ func (c *DatabaseConfig) Validate() error {
 	}
 	switch c.Type {
 	case DatabaseTypeSQLite:
+		if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+			return fmt.Errorf("external database is required on Windows ARM64 due to lack of SQLite vector support")
+		}
 		return nil
 	case DatabaseTypePostgres:
 	default:
@@ -162,7 +167,10 @@ func (c *AuthConfig) Validate() error {
 
 func (c *AppConfig) Validate() error {
 	if c.Daemon {
-		if c.Port <= 0 || c.Port > 65535 {
+		if c.Port <= 0 {
+			c.Port = DefaultDaemonPort
+		}
+		if c.Port > 65535 {
 			return fmt.Errorf("invalid port number: %d", c.Port)
 		}
 		if c.DB == nil {

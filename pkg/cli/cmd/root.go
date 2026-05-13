@@ -80,7 +80,7 @@ agentic looping and skills usage capabilities.`,
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./agenty.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default ~/.agenty/config.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
 }
 
