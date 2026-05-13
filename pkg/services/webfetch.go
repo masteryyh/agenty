@@ -107,18 +107,9 @@ func (s *WebFetchService) fetchWithSettings(ctx context.Context, settings *model
 
 func (s *WebFetchService) selectProvider(settings *models.SystemSettings) models.WebSearchProvider {
 	if settings == nil {
-		return ""
+		return models.WebSearchProviderDisabled
 	}
-	switch settings.WebSearchProvider {
-	case models.WebSearchProviderTavily:
-		return models.WebSearchProviderTavily
-	case models.WebSearchProviderFirecrawl:
-		return models.WebSearchProviderFirecrawl
-	case models.WebSearchProviderBrave:
-		return models.WebSearchProviderBrave
-	default:
-		return ""
-	}
+	return settings.ResolveWebSearchProvider()
 }
 
 type tavilyExtractResponse struct {

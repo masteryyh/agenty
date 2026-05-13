@@ -197,6 +197,9 @@ func execSQLScript(ctx context.Context, dbConn *gorm.DB, script string) error {
 }
 
 func migrateCoreSchema(ctx context.Context, dbConn *gorm.DB, dbType string) error {
+	if err := addColumnIfMissing(ctx, dbConn, dbType, "system_settings", "last_configured_web_search_provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(ctx, dbConn, dbType, "chat_sessions", "last_used_thinking_level", "TEXT"); err != nil {
 		return err
 	}

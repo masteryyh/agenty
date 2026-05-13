@@ -23,6 +23,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/models"
 )
 
 var ErrCancelled = errors.New("user cancelled")
@@ -48,6 +50,7 @@ const (
 	overlayKindList overlayKind = iota
 	overlayKindMultiSelect
 	overlayKindHuhForm
+	overlayKindSettingsEditor
 	overlayKindLogViewer
 )
 
@@ -64,6 +67,8 @@ type overlayRequest struct {
 	defaultIndices    []int
 	huhForm           *huh.Form
 	formValidate      func() error
+	backend           backend.Backend
+	settings          *models.SystemSettingsDto
 	responseCh        chan overlayResponse
 }
 
@@ -159,6 +164,24 @@ func (b *UIBridge) ShowValidatedHuhForm(form *huh.Form, validate func() error) (
 		return resp.formSubmitted, resp.err
 	case <-b.done:
 		return false, nil
+	}
+}
+
+func (b *UIBridge) ShowSettingsEditor(backend backend.Backend, settings *models.SystemSettingsDto) error {
+	respCh := make(chan overlayResponse, 1)
+	b.program.Send(overlayRequestMsg{
+		request: overlayRequest{
+			kind:       overlayKindSettingsEditor,
+			backend:    backend,
+			settings:   settings,
+			responseCh: respCh,
+		},
+	})
+	select {
+	case resp := <-respCh:
+		return resp.err
+	case <-b.done:
+		return nil
 	}
 }
 

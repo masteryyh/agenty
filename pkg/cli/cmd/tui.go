@@ -367,6 +367,9 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m2, cmd, routed := m.updateHuhOverlay(msg); routed {
 				return m2, cmd
 			}
+			if m2, cmd, routed := m.updateSettingsOverlay(msg); routed {
+				return m2, cmd
+			}
 		}
 		return m, nil
 
@@ -422,8 +425,20 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.overlayRespCh = req.responseCh
 			return m, form.Init()
+		case overlayKindSettingsEditor:
+			overlay := newSettingsEditorOverlay(req.backend, req.settings, req.responseCh)
+			m.overlay = overlay
+			return m, overlay.init()
 		case overlayKindLogViewer:
 			m.overlay = newLogViewerOverlay(m.width, m.height, req.responseCh)
+		}
+		return m, nil
+
+	case settingsEditorSaveMsg:
+		if m.mode == modeOverlay {
+			if m2, cmd, routed := m.updateSettingsOverlay(msg); routed {
+				return m2, cmd
+			}
 		}
 		return m, nil
 
@@ -440,6 +455,9 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.mode == modeOverlay {
 			if m2, cmd, routed := m.updateHuhOverlay(msg); routed {
+				return m2, cmd
+			}
+			if m2, cmd, routed := m.updateSettingsOverlay(msg); routed {
 				return m2, cmd
 			}
 			return m.handleOverlayKey(msg)
@@ -533,6 +551,9 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m2, cmd, routed := m.updateHuhOverlay(msg); routed {
 				return m2, cmd
 			}
+			if m2, cmd, routed := m.updateSettingsOverlay(msg); routed {
+				return m2, cmd
+			}
 		} else {
 			var taCmd tea.Cmd
 			m.input, taCmd = m.input.Update(msg)
@@ -610,6 +631,8 @@ func (m chatModel) renderOverlay() string {
 			return strings.Repeat("\n", topPad) + strings.Join(paddedLines, "\n")
 		}
 		return strings.Repeat("\n", topPad) + strings.Join(lines, "\n")
+	case *settingsEditorOverlay:
+		return o.render(m.width, m.height)
 	}
 	return ""
 }
@@ -640,6 +663,24 @@ func (m *chatModel) handleOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.overlay = nil
 	}
 	return m, cmd
+}
+
+func (m chatModel) updateSettingsOverlay(msg tea.Msg) (chatModel, tea.Cmd, bool) {
+	if m.mode != modeOverlay {
+		return m, nil, false
+	}
+	overlay, ok := m.overlay.(*settingsEditorOverlay)
+	if !ok {
+		return m, nil, false
+	}
+	done, cmd := overlay.update(msg)
+	if done {
+		m.mode = modeChat
+		m.overlay = nil
+		return m, cmd, true
+	}
+	m.overlay = overlay
+	return m, cmd, true
 }
 
 func (m chatModel) renderTopSeparator() string {
