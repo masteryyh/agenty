@@ -6,7 +6,7 @@ on:
       - "*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   precheck:
@@ -39,8 +39,8 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
-    name: Cross-compile release packages
+  build-cross:
+    name: Cross-compile linux/windows release packages
     needs: precheck
     if: needs.precheck.outputs.exists != 'true'
     runs-on: ubuntu-24.04
@@ -59,7 +59,7 @@ jobs:
         with:
           version: 0.15.1
 
-      - name: Build release packages
+      - name: Build linux/windows release packages
         shell: bash
         run: |
           mkdir -p dist package
@@ -67,8 +67,6 @@ jobs:
           targets=(
             "linux|amd64|linux||x86_64-linux-gnu"
             "linux|arm64|linux||aarch64-linux-gnu"
-            "darwin|amd64|macos||x86_64-macos"
-            "darwin|arm64|macos||aarch64-macos"
             "windows|amd64|windows|.exe|x86_64-windows-gnu"
             "windows|arm64|windows|.exe|aarch64-windows-gnu"
           )
@@ -95,28 +93,73 @@ jobs:
             tar -C "$package_dir" -czf "dist/${asset_name}" "${bin_name}"
           done
 
-      - name: Upload release package
+      - name: Upload linux/windows release packages
         uses: actions/upload-artifact@v4
         with:
-          name: release-packages
+          name: release-cross
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  build-macos:
+    name: Build macos/${{ matrix.goarch }}
+    needs: precheck
+    if: needs.precheck.outputs.exists != 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            goarch: amd64
+          - runner: macos-15
+            goarch: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build macOS release package
+        shell: bash
+        run: |
+          mkdir -p dist package
+          tag="${GITHUB_REF_NAME}"
+          package_dir="package/macos_${{ matrix.goarch }}"
+          asset_name="agenty_${tag}_macos_${{ matrix.goarch }}.tar.gz"
+
+          mkdir -p "$package_dir"
+          CGO_ENABLED=1 \
+          GOOS=darwin \
+          GOARCH=${{ matrix.goarch }} \
+            go build -tags=fts5 -o "${package_dir}/agenty" ./cmd/main.go
+
+          tar -C "$package_dir" -czf "dist/${asset_name}" agenty
+
+      - name: Upload macOS release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.goarch }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   publish:
-    permissions:
-      contents: write
     name: Publish GitHub release
     needs:
       - precheck
-      - build
+      - build-cross
+      - build-macos
     if: needs.precheck.outputs.exists != 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download release packages
         uses: actions/download-artifact@v5
         with:
-          name: release-packages
           path: dist
 
       - name: Create GitHub release with generated notes
