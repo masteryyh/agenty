@@ -212,3 +212,7 @@ func (r *RemoteBackend) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, erro
 func (r *RemoteBackend) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
 	return r.client.GetSkillContent(name, sessionID)
 }
+
+func (r *RemoteBackend) RescanGlobalSkills() error {
+	return r.client.RescanGlobalSkills()
+}

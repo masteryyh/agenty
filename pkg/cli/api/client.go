@@ -363,3 +363,8 @@ func (c *Client) GetSkillContent(name string, sessionID *uuid.UUID) (string, err
 	}
 	return result.Content, nil
 }
+
+func (c *Client) RescanGlobalSkills() error {
+	_, err := doRequest[any](c, "POST", "/api/v1/skills/rescan", nil)
+	return err
+}

@@ -29,6 +29,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 9. Do not use GORM `AutoMigrate`; table definitions live in embedded SQL under `pkg/conn/db`
 10. Persistent GORM model structs should avoid database-specific `gorm` tags; keep schema details in SQL files
 11. Do not add unit tests unless the user explicitly asks for them
+12. User-facing command labels, prompts, log messages, status text, and error messages in repository code must be written in English unless the user explicitly asks for localized in-app copy
 
 ## Detailed Coding Patterns
 
@@ -78,6 +79,7 @@ Verify each item when adding new functionality:
 - [ ] New routes are singletons implementing `RegisterRoutes(*gin.RouterGroup)`
 - [ ] Route responses use `response.OK` / `response.Failed`
 - [ ] Errors use business error types from `customerrors`
+- [ ] User-facing command/prompt/log/error text is English unless the task explicitly requires localization
 - [ ] All blocking operations take `context.Context` as the first parameter
 - [ ] Background goroutines use `safe.GoSafe` or `safe.GoSafeWithCtx`
 - [ ] New Backend interface methods are implemented in both `local.go` and `remote.go`

@@ -168,7 +168,24 @@ func (l *LocalBackend) DeleteAgent(agentID uuid.UUID) error {
 }
 
 func (l *LocalBackend) ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error) {
-	return l.mcpSvc.ListMCPServers(signal.GetBaseContext(), pageReq(page, pageSize))
+	result, err := l.mcpSvc.ListMCPServers(signal.GetBaseContext(), pageReq(page, pageSize))
+	if err != nil {
+		return nil, err
+	}
+
+	mgr := mcppkg.GetManager()
+	if mgr != nil {
+		statuses := mgr.GetAllStatuses()
+		for i := range result.Data {
+			if statusDto, ok := statuses[result.Data[i].ID]; ok {
+				result.Data[i].Status = statusDto.Status
+				result.Data[i].Tools = statusDto.Tools
+				result.Data[i].Error = statusDto.Error
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (l *LocalBackend) CreateMCPServer(dto *models.CreateMCPServerDto) (*models.MCPServerDto, error) {
@@ -226,4 +243,8 @@ func (l *LocalBackend) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error
 
 func (l *LocalBackend) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
 	return services.GetSkillService().GetSkillContent(signal.GetBaseContext(), name, sessionID)
+}
+
+func (l *LocalBackend) RescanGlobalSkills() error {
+	return services.GetSkillService().RescanGlobalSkills(signal.GetBaseContext())
 }

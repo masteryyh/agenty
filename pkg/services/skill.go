@@ -109,6 +109,16 @@ func (s *SkillService) Initialize(ctx context.Context) error {
 	return nil
 }
 
+func (s *SkillService) RescanGlobalSkills(ctx context.Context) error {
+	if err := s.ensureBuiltinSkills(ctx); err != nil {
+		return fmt.Errorf("failed to ensure builtin skills: %w", err)
+	}
+	if err := s.scanGlobalSkills(ctx); err != nil {
+		return fmt.Errorf("failed to scan global skills: %w", err)
+	}
+	return nil
+}
+
 func (s *SkillService) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

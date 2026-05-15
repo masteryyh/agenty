@@ -496,7 +496,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.modelName = msg.event.ModelName
 			m.adjustThinkingForModel(msg.event.ModelThinking, msg.event.ModelThinkingLevels)
-			m.appendToChatLog(renderStatusMessage("⚠", "模型已自动切换至 "+msg.event.ModelName))
+			m.appendToChatLog(renderStatusMessage("⚠", "Model auto-switched to "+msg.event.ModelName))
 			m.refreshViewport()
 			return m, m.stream.waitForEvent()
 		}

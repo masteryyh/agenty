@@ -69,6 +69,7 @@ type Backend interface {
 
 	ListSkills(sessionID uuid.UUID) ([]models.SkillDto, error)
 	GetSkillContent(name string, sessionID *uuid.UUID) (string, error)
+	RescanGlobalSkills() error
 
 	IsInitialized() (bool, error)
 	SetInitialized() error

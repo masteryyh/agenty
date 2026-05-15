@@ -112,7 +112,7 @@ func (cm *ConfigManager) LoadConfig() error {
 			return err
 		}
 		if created {
-			fmt.Printf("created default config file: %s\n", configPath)
+			fmt.Fprintf(os.Stderr, "created default config file: %s\n", configPath)
 		}
 		cm.vipers.SetConfigFile(configPath)
 	}
@@ -120,7 +120,7 @@ func (cm *ConfigManager) LoadConfig() error {
 	if err := cm.vipers.ReadInConfig(); err != nil {
 		return fmt.Errorf("error reading config file: %w", err)
 	} else {
-		fmt.Printf("using config file: %s\n", cm.vipers.ConfigFileUsed())
+		fmt.Fprintf(os.Stderr, "using config file: %s\n", cm.vipers.ConfigFileUsed())
 	}
 
 	if err := cm.mergeAdditionalConfigs(); err != nil {
@@ -208,7 +208,7 @@ func (cm *ConfigManager) mergeAdditionalConfigs() error {
 		if err := cm.mergeConfigFile(fragment); err != nil {
 			return err
 		}
-		fmt.Printf("merged config fragment: %s\n", fragment)
+		fmt.Fprintf(os.Stderr, "merged config fragment: %s\n", fragment)
 	}
 
 	return nil
