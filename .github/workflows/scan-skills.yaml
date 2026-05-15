@@ -1,0 +1,143 @@
+name: Scan skills
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  detect-skill-changes:
+    name: Detect skill changes
+    runs-on: ubuntu-24.04
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+      is_fork_pr: ${{ steps.changed.outputs.is_fork_pr }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed skill files
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork || false }}
+        shell: bash
+        run: |
+          ZERO="0000000000000000000000000000000000000000"
+          EMPTY_TREE=$(git hash-object -t tree /dev/null)
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            BASE="$PR_BASE_SHA"
+            HEAD="$PR_HEAD_SHA"
+          else
+            HEAD="$PUSH_HEAD_SHA"
+            if [[ "$PUSH_BEFORE_SHA" == "$ZERO" || -z "$PUSH_BEFORE_SHA" ]]; then
+              BASE="$EMPTY_TREE"
+            else
+              BASE="$PUSH_BEFORE_SHA"
+            fi
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- .agents/skills/)
+          if [[ -n "$CHANGED" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$IS_FORK_PR" == "true" ]]; then
+            echo "is_fork_pr=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_fork_pr=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  scan-skills:
+    name: Skill scanner
+    needs: detect-skill-changes
+    if: needs.detect-skill-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Skip fork pull request
+        if: needs.detect-skill-changes.outputs.is_fork_pr == 'true'
+        run: echo "::notice::Skipping skill scan for fork pull request because LLM and VirusTotal secrets are not exposed to untrusted PR code."
+
+      - name: Checkout repository
+        if: needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        if: needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install skill scanner
+        if: needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        run: pip install "cisco-ai-skill-scanner[all]==2.0.11"
+
+      - name: Run skill scanner
+        if: needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        id: scan
+        env:
+          SKILL_SCANNER_LLM_API_KEY: ${{ secrets.SKILL_SCANNER_LLM_API_KEY }}
+          SKILL_SCANNER_LLM_MODEL: ${{ secrets.SKILL_SCANNER_LLM_MODEL }}
+          SKILL_SCANNER_LLM_BASE_URL: ${{ secrets.SKILL_SCANNER_LLM_BASE_URL }}
+          ANTHROPIC_BASE_URL: ${{ secrets.SKILL_SCANNER_LLM_BASE_URL }}
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        shell: bash
+        run: |
+          set +e
+          skill-scanner scan-all .agents/skills \
+            --recursive \
+            --check-overlap \
+            --use-behavioral \
+            --use-llm \
+            --llm-provider anthropic \
+            --use-virustotal \
+            --vt-upload-files \
+            --policy balanced \
+            --format sarif \
+            --output skill-scanner-results.sarif \
+            --fail-on-severity high
+          status=$?
+          set -e
+
+          if [[ ! -f skill-scanner-results.sarif ]]; then
+            cat <<'EOF' > skill-scanner-results.sarif
+          {
+            "version": "2.1.0",
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "runs": []
+          }
+          EOF
+          fi
+
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF results
+        if: always() && needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: skill-scanner-results.sarif
+          category: skill-scanner
+
+      - name: Fail on scanner findings
+        if: always() && needs.detect-skill-changes.outputs.is_fork_pr != 'true'
+        shell: bash
+        run: exit "${{ steps.scan.outputs.exit_code }}"

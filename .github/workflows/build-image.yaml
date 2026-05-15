@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   detect-changes:
-    name: Detect changes in images/prag
+    name: Detect changes in images
     runs-on: ubuntu-24.04
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}
@@ -35,7 +35,7 @@ jobs:
             BASE=$(git merge-base "$BEFORE" "$HEAD" 2>/dev/null || echo "$BEFORE")
           fi
 
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- images/prag/ .github/workflows/)
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- images/ .github/workflows/build-image.yaml)
           if [ -n "$CHANGED" ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
