@@ -1,0 +1,392 @@
+/*
+Copyright © 2026 masteryyh <yyh991013@163.com>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package command
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
+	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/muesli/reflow/truncate"
+)
+
+func handleModelCmd(b backend.Backend, bridge Bridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	if len(args) > 0 {
+		resolvedID, displayName, err := ResolveModel(b, args[0])
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+		return switchModelWithCompaction(b, bridge, sessionID, resolvedID, displayName)
+	}
+
+	for {
+		result, err := b.ListModels(1, 100)
+		if err != nil {
+			return CommandResult{Handled: true}, fmt.Errorf("failed to list models: %w", err)
+		}
+		result.Data = filterSwitchableModels(result.Data)
+
+		if len(result.Data) == 0 {
+			bridge.Warning("No configured chat models found")
+			res, err := bridge.ShowList("Models", []string{"(no configured chat models)"}, "a add  ·  Esc back")
+			if err != nil {
+				return CommandResult{Handled: true}, err
+			}
+			if res.Action == ListActionAdd {
+				if err := doCreateModel(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+					bridge.Error("Failed to create model: %v", err)
+				}
+				continue
+			}
+			return CommandResult{Handled: true}, nil
+		}
+
+		items, cursor := renderModelTableRows(result.Data, modelID)
+		res, err := bridge.ShowListWithCursorAndActions("Models  "+styleGray.Render("(select chat model to switch)"), items, ListHints, cursor, validateModelListAction(result.Data), modelDeleteConfirm(result.Data), modelTableSubtitle())
+		if err != nil {
+			return CommandResult{Handled: true}, err
+		}
+
+		switch res.Action {
+		case ListActionSelect:
+			target := result.Data[res.Index]
+			displayName := modelDisplayName(target)
+			return switchModelWithCompaction(b, bridge, sessionID, target.ID, displayName)
+
+		case ListActionAdd:
+			if err := doCreateModel(b, bridge); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to create model: %v", err)
+			}
+			continue
+
+		case ListActionEdit:
+			if err := doUpdateModel(b, bridge, result.Data[res.Index]); err != nil && !errors.Is(err, ErrCancelled) {
+				bridge.Error("Failed to update model: %v", err)
+			}
+			continue
+
+		case ListActionDelete:
+			target := result.Data[res.Index]
+			if err := b.DeleteModel(target.ID); err != nil {
+				bridge.Error("Failed to delete model: %v", err)
+			} else {
+				bridge.Success("Model deleted: %s/%s", target.Provider.Name, target.Name)
+			}
+			continue
+
+		case ListActionCancel:
+			return CommandResult{Handled: true}, nil
+		}
+	}
+}
+
+func switchModelWithCompaction(b backend.Backend, bridge Bridge, sessionID, modelID uuid.UUID, displayName string) (CommandResult, error) {
+	compacted, err := b.CompactSessionForModel(sessionID, modelID, false)
+	if err != nil {
+		return CommandResult{Handled: true}, fmt.Errorf("failed to compact conversation for model switch: %w", err)
+	}
+	if compacted {
+		bridge.Success("Compacted conversation for model: %s", displayName)
+	}
+	bridge.Success("Switched to model: %s", displayName)
+	return CommandResult{Handled: true, NewModelID: modelID, NewModelName: displayName}, nil
+}
+
+func modelDeleteConfirm(modelList []models.ModelDto) func(idx int) string {
+	return func(idx int) string {
+		if idx < 0 || idx >= len(modelList) {
+			return ""
+		}
+		target := modelList[idx]
+		if target.IsPreset {
+			return ""
+		}
+		return fmt.Sprintf("Delete model '%s/%s'?", target.Provider.Name, target.Name)
+	}
+}
+
+func validateModelListAction(modelList []models.ModelDto) func(action ListAction, idx int) error {
+	return func(action ListAction, idx int) error {
+		if idx < 0 || idx >= len(modelList) {
+			return nil
+		}
+		target := modelList[idx]
+		if !target.IsPreset {
+			return nil
+		}
+		switch action {
+		case ListActionEdit:
+			return fmt.Errorf("'%s/%s' is a preset model and cannot be modified.", target.Provider.Name, target.Name)
+		case ListActionDelete:
+			return fmt.Errorf("'%s/%s' is a preset model and cannot be deleted.", target.Provider.Name, target.Name)
+		default:
+			return nil
+		}
+	}
+}
+
+func filterSwitchableModels(modelList []models.ModelDto) []models.ModelDto {
+	result := make([]models.ModelDto, 0, len(modelList))
+	for _, m := range modelList {
+		if modelSwitchable(m) {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+func renderModelTableRows(models []models.ModelDto, currentModelID uuid.UUID) ([]string, int) {
+	rows := make([]string, len(models))
+	cursor := -1
+	for i, m := range models {
+		rows[i] = modelTableRow(m, m.ID == currentModelID)
+		if cursor == -1 && m.ID == currentModelID && modelSwitchable(m) {
+			cursor = i
+		}
+	}
+	if cursor == -1 {
+		for i, m := range models {
+			if modelSwitchable(m) {
+				cursor = i
+				break
+			}
+		}
+	}
+	if cursor == -1 {
+		cursor = 0
+	}
+	return rows, cursor
+}
+
+func modelTableSubtitle() string {
+	header := modelTableFormat("Provider", "Model", "Code")
+	return "  " + header + "\n  " + strings.Repeat("─", lipgloss.Width(header))
+}
+
+func modelTableRow(m models.ModelDto, current bool) string {
+	providerName := ""
+	if m.Provider != nil {
+		providerName = m.Provider.Name
+	}
+
+	if current {
+		providerName = "* " + providerName
+	} else {
+		providerName = "  " + providerName
+	}
+	return modelTableFormat(providerName, m.Name, m.Code)
+}
+
+func modelTableFormat(provider, name, code string) string {
+	return fmt.Sprintf("%s  %s  %s",
+		modelTableCell(provider, 18),
+		modelTableCell(name, 28),
+		modelTableCell(code, 24),
+	)
+}
+
+func modelTableCell(s string, width int) string {
+	if s == "" {
+		return "-"
+	}
+	value := truncate.StringWithTail(s, uint(width), "...")
+	if padding := width - lipgloss.Width(value); padding > 0 {
+		return value + strings.Repeat(" ", padding)
+	}
+	return value
+}
+
+func modelSwitchable(m models.ModelDto) bool {
+	return !m.EmbeddingModel && modelProviderConfigured(m)
+}
+
+func modelProviderConfigured(m models.ModelDto) bool {
+	return m.Provider != nil && m.Provider.APIKeyCensored != "<not set>"
+}
+
+func doCreateModel(b backend.Backend, bridge Bridge) error {
+	providers, err := b.ListProviders(1, 100)
+	if err != nil {
+		return fmt.Errorf("failed to list providers: %w", err)
+	}
+	if len(providers.Data) == 0 {
+		bridge.Warning("No providers available. Use /provider to create one first.")
+		return nil
+	}
+
+	providerOptions := make([]string, len(providers.Data))
+	for i, p := range providers.Data {
+		providerOptions[i] = providerLabel(p)
+	}
+
+	selectedProvider := providerOptions[0]
+	var name, code string
+	modelType := "Chat"
+	lightModel := false
+
+	providerOpts := make([]huh.Option[string], len(providerOptions))
+	for i, p := range providerOptions {
+		providerOpts[i] = huh.NewOption(p, p)
+	}
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Provider").Options(providerOpts...).Value(&selectedProvider),
+		huh.NewInput().Title("Name").Value(&name),
+		huh.NewInput().Title("Code").Value(&code),
+		huh.NewSelect[string]().Title("Type").
+			Options(
+				huh.NewOption("Chat", "Chat"),
+				huh.NewOption("Embedding", "Embedding"),
+			).Value(&modelType),
+		huh.NewSelect[bool]().Title("Lightweight model").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&lightModel),
+	))
+
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		if strings.TrimSpace(code) == "" {
+			return fmt.Errorf("Code is required.")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !submitted {
+		return ErrCancelled
+	}
+
+	var targetProvider models.ModelProviderDto
+	for i, opt := range providerOptions {
+		if opt == selectedProvider {
+			targetProvider = providers.Data[i]
+			break
+		}
+	}
+
+	embeddingModel := modelType == "Embedding"
+
+	model, err := b.CreateModel(&models.CreateModelDto{
+		Name:           name,
+		Code:           code,
+		ProviderID:     targetProvider.ID,
+		EmbeddingModel: embeddingModel,
+		Light:          lightModel,
+	})
+	if err != nil {
+		return err
+	}
+	bridge.Success("Model created: %s (%s) under %s", model.Name, model.Code, targetProvider.Name)
+
+	if embeddingModel {
+		if err := offerSetActiveEmbeddingModel(b, bridge, model.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func doUpdateModel(b backend.Backend, bridge Bridge, target models.ModelDto) error {
+	newName := target.Name
+	setDefault := target.DefaultModel
+	lightModel := target.Light
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Name").Value(&newName),
+		huh.NewSelect[bool]().Title("Default model").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&setDefault),
+		huh.NewSelect[bool]().Title("Lightweight model").
+			Options(huh.NewOption("Yes", true), huh.NewOption("No", false)).
+			Value(&lightModel),
+	))
+
+	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
+		if strings.TrimSpace(newName) == "" {
+			return fmt.Errorf("Name is required.")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !submitted {
+		return ErrCancelled
+	}
+
+	newName = strings.TrimSpace(newName)
+
+	if newName == target.Name && setDefault == target.DefaultModel && lightModel == target.Light {
+		bridge.Info("No changes detected, skipping update")
+		return nil
+	}
+
+	if err := b.UpdateModel(target.ID, &models.UpdateModelDto{
+		Name:         &newName,
+		DefaultModel: &setDefault,
+		Light:        &lightModel,
+	}); err != nil {
+		return err
+	}
+	bridge.Success("Model updated: %s", newName)
+
+	return nil
+}
+
+func offerSetActiveEmbeddingModel(b backend.Backend, bridge Bridge, modelID uuid.UUID) error {
+	setActive, err := bridge.ShowConfirm("Set as active embedding model in system settings?")
+	if err != nil {
+		return err
+	}
+	if !setActive {
+		return nil
+	}
+
+	settings, err := b.GetSystemSettings()
+	if err != nil {
+		bridge.Warning("Failed to get system settings: %v", err)
+		return nil
+	}
+
+	if settings.EmbeddingModelID != nil && *settings.EmbeddingModelID != modelID {
+		bridge.Warning("Switching the embedding model will trigger re-generation of ALL existing embedding data in the background. This may take time and incur API costs.")
+		confirmed, err := bridge.ShowConfirm("Proceed with switching the active embedding model?")
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &modelID}); err != nil {
+		bridge.Warning("Failed to set active embedding model: %v", err)
+		return nil
+	}
+	bridge.Success("Active embedding model updated.")
+	bridge.Info("Re-embedding in progress in background.")
+	return nil
+}

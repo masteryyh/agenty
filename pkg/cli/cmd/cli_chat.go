@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/masteryyh/agenty/pkg/backend"
+	"github.com/masteryyh/agenty/pkg/cli/chatstate"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/providers"
 	"github.com/spf13/cobra"
@@ -283,7 +284,7 @@ func resolveChatModel(b backend.Backend, agentID uuid.UUID, session *models.Chat
 		}
 		return model.ID, modelDisplayName(*model), nil
 	}
-	return resolveInitialChatModel(b, agentID, session, session != nil)
+	return chatstate.ResolveInitialChatModel(b, agentID, session, session != nil)
 }
 
 func loadCompletedSession(b backend.Backend, sessionID uuid.UUID) (*models.ChatSessionDto, error) {

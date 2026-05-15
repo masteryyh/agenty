@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/masteryyh/agenty/pkg/models"
+	clitui "github.com/masteryyh/agenty/pkg/cli/tui"
 	"github.com/masteryyh/agenty/pkg/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -71,7 +71,7 @@ agentic looping and skills usage capabilities.`,
 				return err
 			}
 			defer runtime.Close()
-			return startChat(runtime.Backend, runtime.Local)
+			return clitui.StartChat(runtime.Backend, runtime.Local)
 		},
 	}
 )
@@ -99,11 +99,4 @@ func init() {
 
 func Execute() error {
 	return rootCmd.Execute()
-}
-
-func modelDisplayName(m models.ModelDto) string {
-	if m.Provider != nil {
-		return m.Provider.Name + "/" + m.Name
-	}
-	return m.Name
 }
