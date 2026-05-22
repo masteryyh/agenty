@@ -42,13 +42,14 @@ func (AgentModel) TableName() string {
 }
 
 type AgentDto struct {
-	ID        uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	Soul      string     `json:"soul"`
-	IsDefault bool       `json:"isDefault"`
-	Models    []ModelDto `json:"models,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	ID              uuid.UUID                `json:"id"`
+	Name            string                   `json:"name"`
+	Soul            string                   `json:"soul"`
+	IsDefault       bool                     `json:"isDefault"`
+	Models          []ModelDto               `json:"models,omitempty"`
+	GatewayBindings []AgentGatewayBindingDto `json:"gatewayBindings,omitempty"`
+	CreatedAt       time.Time                `json:"createdAt"`
+	UpdatedAt       time.Time                `json:"updatedAt"`
 }
 
 type CreateAgentDto struct {

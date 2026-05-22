@@ -98,7 +98,14 @@ func (s *AgentService) CreateAgent(ctx context.Context, dto *models.CreateAgentD
 		slog.ErrorContext(ctx, "failed to create agent", "error", err)
 		return nil, err
 	}
-	return s.loadAgentModels(ctx, agent.ToDto())
+	loaded, err := s.loadAgentModels(ctx, agent.ToDto())
+	if err != nil {
+		return nil, err
+	}
+	if err := GetGatewayService().HydrateAgentBindings(ctx, []*models.AgentDto{loaded}); err != nil {
+		return nil, err
+	}
+	return loaded, nil
 }
 
 func (s *AgentService) GetAgent(ctx context.Context, agentID uuid.UUID) (*models.AgentDto, error) {
@@ -112,7 +119,14 @@ func (s *AgentService) GetAgent(ctx context.Context, agentID uuid.UUID) (*models
 		slog.ErrorContext(ctx, "failed to find agent", "error", err, "agentId", agentID)
 		return nil, err
 	}
-	return s.loadAgentModels(ctx, agent.ToDto())
+	loaded, err := s.loadAgentModels(ctx, agent.ToDto())
+	if err != nil {
+		return nil, err
+	}
+	if err := GetGatewayService().HydrateAgentBindings(ctx, []*models.AgentDto{loaded}); err != nil {
+		return nil, err
+	}
+	return loaded, nil
 }
 
 func (s *AgentService) loadAgentModels(ctx context.Context, dto *models.AgentDto) (*models.AgentDto, error) {
@@ -222,6 +236,11 @@ func (s *AgentService) ListAgents(ctx context.Context, request *pagination.PageR
 				}
 			}
 		}
+	}
+	if err := GetGatewayService().HydrateAgentBindings(ctx, lo.Map(dtos, func(dto models.AgentDto, i int) *models.AgentDto {
+		return &dtos[i]
+	})); err != nil {
+		return nil, err
 	}
 
 	return &pagination.PagedResponse[models.AgentDto]{
@@ -352,6 +371,15 @@ func (s *AgentService) DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 		}
 
 		if err := tx.Where("agent_id = ?", agentID).Delete(&models.AgentModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ? OR binding_id IN (SELECT id FROM agent_gateway_bindings WHERE agent_id = ?)", agentID, agentID).Delete(&models.GatewayMessageDelivery{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ? OR binding_id IN (SELECT id FROM agent_gateway_bindings WHERE agent_id = ?)", agentID, agentID).Delete(&models.GatewayConversation{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agentID).Delete(&models.AgentGatewayBinding{}).Error; err != nil {
 			return err
 		}
 

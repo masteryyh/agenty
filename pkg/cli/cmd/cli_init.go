@@ -462,12 +462,12 @@ func listAllPages[T any](fetch func(page, pageSize int) (*pagination.PagedRespon
 }
 
 func ensureDefaultAgent(b backend.Backend, modelIDs []uuid.UUID) (string, error) {
-	agents, err := b.ListAgents(1, 100)
+	agents, err := listAgentsAll(b)
 	if err != nil {
 		return "", err
 	}
 
-	if agent := findDefaultAgent(agents.Data); agent != nil {
+	if agent := findDefaultAgent(agents); agent != nil {
 		isDefault := true
 		if err := b.UpdateAgent(agent.ID, &models.UpdateAgentDto{
 			IsDefault: &isDefault,

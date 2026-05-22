@@ -1,6 +1,6 @@
 ---
 name: agenty
-description: Use when operating agenty itself, including sessions, tools, skills, project context, and local or daemon mode workflows.
+description: Use when operating agenty itself, including sessions, tools, skills, project context, and local or server mode workflows.
 license: Apache-2.0
 metadata:
   id: 019decb1-850b-7efb-8261-966c19224492
@@ -10,7 +10,7 @@ metadata:
 
 # agenty
 
-Use this skill when the user asks about agenty behavior, project context, available skills, tool usage, or differences between local mode and daemon mode.
+Use this skill when the user asks about agenty behavior, project context, available skills, tool usage, or differences between local mode and server mode.
 
 ## Operating Principles
 

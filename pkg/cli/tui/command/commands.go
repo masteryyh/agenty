@@ -26,6 +26,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/backend"
 	"github.com/masteryyh/agenty/pkg/cli/chatstate"
 	"github.com/masteryyh/agenty/pkg/models"
+	"github.com/masteryyh/agenty/pkg/utils/pagination"
 )
 
 type ChatState = chatstate.ChatState
@@ -119,13 +120,15 @@ func ResolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 	providerName := strings.TrimSpace(parts[0])
 	modelName := strings.TrimSpace(parts[1])
 
-	providers, err := b.ListProviders(1, 100)
+	providers, err := listAllPages(func(page, pageSize int) (*pagination.PagedResponse[models.ModelProviderDto], error) {
+		return b.ListProviders(page, pageSize)
+	})
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to list providers: %w", err)
 	}
 
 	var providerID uuid.UUID
-	for _, p := range providers.Data {
+	for _, p := range providers {
 		if strings.EqualFold(p.Name, providerName) {
 			providerID = p.ID
 			break
@@ -135,12 +138,14 @@ func ResolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 		return uuid.Nil, "", fmt.Errorf("provider '%s' not found", providerName)
 	}
 
-	modelsList, err := b.ListModels(1, 100)
+	modelsList, err := listAllPages(func(page, pageSize int) (*pagination.PagedResponse[models.ModelDto], error) {
+		return b.ListModels(page, pageSize)
+	})
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to list models: %w", err)
 	}
 
-	for _, m := range modelsList.Data {
+	for _, m := range modelsList {
 		if m.Provider != nil && m.Provider.ID == providerID && strings.EqualFold(m.Name, modelName) {
 			if !chatstate.ModelSwitchable(m) {
 				return uuid.Nil, "", fmt.Errorf("model '%s/%s' is not a configured chat model", m.Provider.Name, m.Name)
@@ -150,6 +155,25 @@ func ResolveModel(b backend.Backend, modelSpec string) (uuid.UUID, string, error
 	}
 
 	return uuid.Nil, "", fmt.Errorf("model '%s' not found in provider '%s'", modelName, providerName)
+}
+
+func listAllPages[T any](fetch func(page, pageSize int) (*pagination.PagedResponse[T], error)) ([]T, error) {
+	page := 1
+	items := make([]T, 0)
+	for {
+		result, err := fetch(page, 100)
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return items, nil
+		}
+		items = append(items, result.Data...)
+		if len(result.Data) == 0 || int64(len(items)) >= result.Total {
+			return items, nil
+		}
+		page++
+	}
 }
 
 const ListHints = "↑/↓ navigate  ·  Enter select  ·  a add  ·  e edit  ·  Ctrl+D delete  ·  Esc back"
@@ -176,6 +200,8 @@ func Handler(name string) CommandHandler {
 		return handleAgentCmd
 	case "/provider":
 		return handleProviderCmd
+	case "/gateway":
+		return handleGatewayCmd
 	case "/mcp":
 		return handleMCPCmd
 	case "/settings":

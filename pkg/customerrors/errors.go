@@ -52,6 +52,15 @@ var (
 
 	ErrSkillNotFound = NewBusinessError(http.StatusNotFound, "skill not found")
 
+	ErrGatewayBindingNotFound      = NewBusinessError(http.StatusNotFound, "gateway binding not found")
+	ErrGatewayBindingAlreadyExists = NewBusinessError(http.StatusConflict, "gateway binding already exists")
+	ErrGatewayChannelNotFound      = NewBusinessError(http.StatusNotFound, "gateway channel not found")
+	ErrGatewayChannelAlreadyExists = NewBusinessError(http.StatusConflict, "gateway channel already exists")
+	ErrGatewayChannelConflict      = NewBusinessError(http.StatusConflict, "gateway channel is already bound by another agent")
+	ErrGatewayChannelMismatch      = NewBusinessError(http.StatusBadRequest, "gateway channel metadata does not match the configured channel")
+	ErrGatewayBindingModelInvalid  = NewBusinessError(http.StatusBadRequest, "gateway default model is not available for the agent")
+	ErrNoChangesSpecified          = NewBusinessError(http.StatusBadRequest, "no changes specified")
+
 	ErrEmbeddingNotSupported = errors.New("embedding is not supported by this provider")
 )
 

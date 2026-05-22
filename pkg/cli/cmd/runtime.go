@@ -40,19 +40,19 @@ type Runtime struct {
 	Close   func()
 }
 
-func initCommandEnvironment(isDaemon bool) (*config.AppConfig, func(), error) {
+func initCommandEnvironment(serverMode bool) (*config.AppConfig, func(), error) {
 	if err := config.Init(cfgFile); err != nil {
 		return nil, nil, withExitCode(fmt.Errorf("failed to load configuration: %w", err), 3)
 	}
 
 	cfg := config.GetConfigManager().GetConfig()
-	cfg.Daemon = isDaemon
+	cfg.ServerMode = serverMode
 
 	if err := config.GetConfigManager().Validate(); err != nil {
 		return nil, nil, withExitCode(fmt.Errorf("invalid configuration: %w", err), 3)
 	}
 
-	if err := logger.Init(cfg.Daemon, cfg.Debug, ""); err != nil {
+	if err := logger.Init(cfg.ServerMode, cfg.Debug, ""); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
@@ -67,20 +67,26 @@ func initRuntime(_ context.Context, needsMCP bool, needsSkills bool) (*Runtime, 
 		return nil, err
 	}
 
+	baseCtx, cancel := signal.SetupContext()
+
 	if cfg.IsRemoteMode() {
 		b, err := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
 		if err != nil {
+			cancel()
 			closeLogger()
 			return nil, withExitCode(err, 4)
 		}
 		return &Runtime{
 			Backend: b,
 			Local:   false,
-			Close:   closeLogger,
+			Close: func() {
+				cancel()
+				closeLogger()
+			},
 		}, nil
 	}
 
-	return initLocalRuntimeFromConfig(cfg, closeLogger, needsMCP, needsSkills)
+	return initLocalRuntimeFromConfig(baseCtx, cancel, cfg, closeLogger, needsMCP, needsSkills)
 }
 
 func initLocalRuntime(_ context.Context, needsMCP bool, needsSkills bool) (*Runtime, *config.AppConfig, error) {
@@ -92,16 +98,15 @@ func initLocalRuntime(_ context.Context, needsMCP bool, needsSkills bool) (*Runt
 		closeLogger()
 		return nil, nil, withExitCode(fmt.Errorf("init only supports local mode; remove server.url or use a local config"), 3)
 	}
-	runtime, err := initLocalRuntimeFromConfig(cfg, closeLogger, needsMCP, needsSkills)
+	baseCtx, cancel := signal.SetupContext()
+	runtime, err := initLocalRuntimeFromConfig(baseCtx, cancel, cfg, closeLogger, needsMCP, needsSkills)
 	if err != nil {
 		return nil, nil, err
 	}
 	return runtime, cfg, nil
 }
 
-func initLocalRuntimeFromConfig(cfg *config.AppConfig, closeLogger func(), needsMCP bool, needsSkills bool) (*Runtime, error) {
-	baseCtx, cancel := signal.SetupContext()
-
+func initLocalRuntimeFromConfig(baseCtx context.Context, cancel context.CancelFunc, cfg *config.AppConfig, closeLogger func(), needsMCP bool, needsSkills bool) (*Runtime, error) {
 	if err := conn.InitDB(baseCtx, cfg.DB, cfg.Debug); err != nil {
 		cancel()
 		closeLogger()

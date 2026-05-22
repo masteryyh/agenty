@@ -91,11 +91,11 @@ func ResolveInitialChatModel(b backend.Backend, agentID uuid.UUID, session *mode
 		return defaultModel.ID, ModelDisplayName(*defaultModel), nil
 	}
 
-	modelsList, err := b.ListModels(1, 100)
+	modelsList, err := listAllModels(b)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range modelsList.Data {
+	for _, model := range modelsList {
 		if ModelConfigured(model) {
 			return model.ID, ModelDisplayName(model), nil
 		}
@@ -141,14 +141,33 @@ func ChatStateFromThinkingLevel(b backend.Backend, modelID uuid.UUID, level stri
 }
 
 func configuredModelByID(b backend.Backend, modelID uuid.UUID) (models.ModelDto, bool) {
-	modelsList, err := b.ListModels(1, 100)
+	modelsList, err := listAllModels(b)
 	if err != nil {
 		return models.ModelDto{}, false
 	}
-	for _, model := range modelsList.Data {
+	for _, model := range modelsList {
 		if model.ID == modelID && ModelConfigured(model) {
 			return model, true
 		}
 	}
 	return models.ModelDto{}, false
+}
+
+func listAllModels(b backend.Backend) ([]models.ModelDto, error) {
+	page := 1
+	modelsList := make([]models.ModelDto, 0)
+	for {
+		result, err := b.ListModels(page, 100)
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return modelsList, nil
+		}
+		modelsList = append(modelsList, result.Data...)
+		if len(result.Data) == 0 || int64(len(modelsList)) >= result.Total {
+			return modelsList, nil
+		}
+		page++
+	}
 }

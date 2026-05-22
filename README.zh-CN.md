@@ -39,14 +39,14 @@ agenty --config /path/to/config.yaml
 
 ## 运行模式
 
-Agenty 可以作为单机本地应用运行，也可以作为自托管服务运行，或者作为连接到 daemon 的远程客户端运行。
+Agenty 可以作为单机本地应用运行，也可以作为自托管服务运行，或者作为连接到 server 的远程客户端运行。
 
 | 模式 | 命令 | 使用场景 |
 | --- | --- | --- |
 | 本地交互模式 | `agenty` | 在一个本地进程中运行 TUI 和后端逻辑。 |
 | 指定配置的本地交互模式 | `agenty --config /path/to/config.yaml` | 使用明确指定的配置文件。 |
-| Daemon 模式 | `agenty --daemon --config /path/to/config.yaml` | 运行 HTTP 后端服务，供远程客户端连接。 |
-| 远程交互模式 | `agenty --config agenty-client.yaml` | 通过 `server.url` 连接 daemon 后端。 |
+| Server 模式 | `agenty --server --config /path/to/config.yaml` | 运行 HTTP 后端服务，供远程客户端连接。 |
+| 远程交互模式 | `agenty --config agenty-client.yaml` | 通过 `server.url` 连接 server 后端。 |
 
 TUI 中常用的 slash commands：
 
@@ -78,7 +78,7 @@ db:
   type: sqlite
 ```
 
-启用 HTTP Basic Auth 的 daemon 配置：
+启用 HTTP Basic Auth 的 server 配置：
 
 ```yaml
 debug: false
@@ -118,7 +118,7 @@ db:
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `port` | `8080` | daemon 模式中的 HTTP 监听端口。配置里可省略，省略时会自动回落到 `8080`。 |
+| `port` | `8080` | server 模式中的 HTTP 监听端口。配置里可省略，省略时会自动回落到 `8080`。 |
 | `debug` | `false` | 启用更详细的日志和调试行为。 |
 | `db.type` | `sqlite` | 数据库后端：`sqlite` 或 `postgres`。 |
 | `db.host` | `localhost` | PostgreSQL host。 |
@@ -127,12 +127,12 @@ db:
 | `db.password` | 空 | PostgreSQL 密码。`db.type` 为 `postgres` 时必填。 |
 | `db.database` | `agenty` | PostgreSQL 数据库名。 |
 | `db.sqliteVectorExtensionPath` | 用户配置目录 | 可选的 sqlite-vector 原生扩展路径。 |
-| `auth.enabled` | `false` | 在 daemon 模式中启用 HTTP Basic Auth。 |
+| `auth.enabled` | `false` | 在 server 模式中启用 HTTP Basic Auth。 |
 | `auth.username` | 空 | Basic Auth 用户名。 |
 | `auth.password` | 空 | Basic Auth 密码。 |
 | `mcp.healthCheckInterval` | `30` | MCP 健康检查间隔，单位为秒。 |
 | `mcp.connectTimeout` | `15` | MCP 连接超时时间，单位为秒。 |
-| `server.url` | 空 | 远程后端 URL。非 daemon 模式下设置后，Agenty 会作为远程客户端运行。 |
+| `server.url` | 空 | 远程后端 URL。非 server 模式下设置后，Agenty 会作为远程客户端运行。 |
 | `server.username` | 空 | 远程后端 Basic Auth 用户名。 |
 | `server.password` | 空 | 远程后端 Basic Auth 密码。 |
 
@@ -157,9 +157,9 @@ SQLite 是默认数据库。Agenty 会把 SQLite 数据库保存在 `os.UserConf
 
 SQLite 启动需要 FTS5 和 sqlite-vector。release 二进制应包含 FTS5 支持。如果没有配置 `db.sqliteVectorExtensionPath`，Agenty 会使用 `os.UserConfigDir()/agenty/vector.{so,dylib,dll}`；当扩展文件不存在时，会下载匹配当前平台的 sqlite-vector release asset。
 
-Windows `arm64` 无法使用默认 SQLite 模式，因为 `sqlite-vector` 当前没有该平台产物。若运行在 Windows `arm64` 上，请在启动 Agenty 的本地模式或 daemon 模式前先配置外部 PostgreSQL 数据库。
+Windows `arm64` 无法使用默认 SQLite 模式，因为 `sqlite-vector` 当前没有该平台产物。若运行在 Windows `arm64` 上，请在启动 Agenty 的本地模式或 server 模式前先配置外部 PostgreSQL 数据库。
 
-PostgreSQL 适合 daemon 部署。将 Agenty 指向 PostgreSQL 前，需要先创建数据库：
+PostgreSQL 适合 server 部署。将 Agenty 指向 PostgreSQL 前，需要先创建数据库：
 
 ```sql
 CREATE DATABASE agenty;

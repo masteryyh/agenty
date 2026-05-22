@@ -64,6 +64,7 @@ var commands = []Command{
 	},
 	{Name: "/compact", Description: "Compact current conversation", Usage: "/compact"},
 	{Name: "/provider", Description: "Manage model providers", Usage: "/provider"},
+	{Name: "/gateway", Description: "Manage gateway channels", Usage: "/gateway"},
 	{Name: "/mcp", Description: "Manage MCP servers", Usage: "/mcp"},
 	{
 		Name:        "/agent",

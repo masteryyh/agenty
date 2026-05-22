@@ -63,6 +63,7 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 	envs := map[string]string{
 		"port":                         "AGENTY_PORT",
+		"debug":                        "AGENTY_DEBUG",
 		"db.type":                      "AGENTY_DB_TYPE",
 		"db.host":                      "AGENTY_DB_HOST",
 		"db.port":                      "AGENTY_DB_PORT",
@@ -82,7 +83,7 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 func (cm *ConfigManager) SetDefaults() {
 	cm.vipers.SetDefault("debug", false)
-	cm.vipers.SetDefault("port", DefaultDaemonPort)
+	cm.vipers.SetDefault("port", DefaultServerPort)
 	cm.vipers.SetDefault("db.type", DatabaseTypeSQLite)
 	cm.vipers.SetDefault("db.host", "localhost")
 	cm.vipers.SetDefault("db.port", 5432)

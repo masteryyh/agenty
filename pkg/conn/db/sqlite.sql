@@ -65,6 +65,32 @@ CREATE TABLE IF NOT EXISTS agent_models (
 	PRIMARY KEY (agent_id, model_id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_gateway_bindings (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL,
+	channel_id TEXT NOT NULL,
+	channel_type TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	default_model_id TEXT,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS gateway_channels (
+	id TEXT PRIMARY KEY,
+	type TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	required INTEGER NOT NULL DEFAULT 0,
+	send_reasoning INTEGER NOT NULL DEFAULT 0,
+	send_tool_events INTEGER NOT NULL DEFAULT 0,
+	require_mention INTEGER NOT NULL DEFAULT 0,
+	config TEXT,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS chat_sessions (
 	id TEXT PRIMARY KEY,
 	agent_id TEXT NOT NULL,
@@ -78,6 +104,35 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	deleted_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS gateway_conversations (
+	id TEXT PRIMARY KEY,
+	binding_id TEXT,
+	channel_id TEXT NOT NULL,
+	channel_type TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	conversation_id TEXT NOT NULL,
+	sender_id TEXT NOT NULL,
+	agent_id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS gateway_message_deliveries (
+	id TEXT PRIMARY KEY,
+	binding_id TEXT,
+	channel_id TEXT NOT NULL,
+	account_id TEXT NOT NULL,
+	external_message_id TEXT NOT NULL,
+	conversation_id TEXT NOT NULL,
+	agent_id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	error TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -174,11 +229,17 @@ CREATE TABLE IF NOT EXISTS skills (
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_deleted_at ON agents (deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_gateway_bindings_agent_channel_account ON agent_gateway_bindings (agent_id, channel_id, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_gateway_bindings_channel_account_enabled ON agent_gateway_bindings (channel_id, account_id) WHERE enabled = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_channels_type_account_enabled ON gateway_channels (type, account_id) WHERE enabled = TRUE;
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_agent_id ON chat_sessions (agent_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_session_id ON chat_round_token_usages (session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_round_token_usages_round_id ON chat_round_token_usages (round_id);
 CREATE INDEX IF NOT EXISTS idx_chat_compactions_session_id ON chat_compactions (session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_conversations_route ON gateway_conversations (channel_id, account_id, conversation_id, sender_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_gateway_conversations_session_id ON gateway_conversations (session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_message_deliveries_external ON gateway_message_deliveries (channel_id, account_id, external_message_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers (name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_agent_id ON knowledge_items (agent_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_category ON knowledge_items (category);

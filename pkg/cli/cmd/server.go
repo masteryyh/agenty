@@ -23,11 +23,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/masteryyh/agenty/pkg/chat/sessionhooks"
 	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/conn"
+	"github.com/masteryyh/agenty/pkg/gateway"
 	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
 	"github.com/masteryyh/agenty/pkg/middleware"
 	"github.com/masteryyh/agenty/pkg/routes"
@@ -38,10 +40,10 @@ import (
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
-func startDaemon() error {
+func startServer() error {
 	cfg := config.GetConfigManager().GetConfig()
 
-	slog.Info("starting agenty daemon...")
+	slog.Info("starting agenty server...")
 
 	baseCtx, cancel := signal.SetupContext()
 	defer cancel()
@@ -64,15 +66,46 @@ func startDaemon() error {
 
 	slog.InfoContext(baseCtx, "initializing skill service...")
 	skillSvc := services.GetSkillService()
+	var gatewayManager *gateway.Manager
+	var httpServer *http.Server
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if httpServer != nil {
+			if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.WarnContext(shutdownCtx, "failed to shutdown http server", "error", err)
+			}
+		}
+		if gatewayManager != nil {
+			gatewayManager.Stop(shutdownCtx)
+		}
+		skillSvc.Shutdown()
+		mcpManager.Close()
+	}()
+
 	if err := skillSvc.Initialize(baseCtx); err != nil {
 		slog.WarnContext(baseCtx, "skill service initialization failed", "error", err)
 	}
 
-	if !cfg.Debug {
+	slog.InfoContext(baseCtx, "initializing gateway manager...")
+	gatewayManager = gateway.NewManager()
+	if err := gatewayManager.Start(baseCtx); err != nil {
+		return fmt.Errorf("failed to start gateway manager: %w", err)
+	}
+
+	if cfg.Debug {
+		gin.SetMode(gin.DebugMode)
+		gin.DebugPrintRouteFunc = func(httpMethod string, absolutePath string, handlerName string, handlers int) {
+			slog.DebugContext(baseCtx, "registered http route", "method", httpMethod, "path", absolutePath, "handler", handlerName, "handlers", handlers)
+		}
+	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	engine := gin.New()
+	if cfg.Debug {
+		engine.Use(middleware.RequestLoggerMiddleware())
+	}
 	engine.Use(middleware.RecoveryMiddleware())
 	engine.Use(middleware.CORSMiddleware())
 
@@ -87,17 +120,24 @@ func startDaemon() error {
 		return fmt.Errorf("failed to register routes: %w", err)
 	}
 
-	safe.GoSafeWithCtx("http-server", baseCtx, func(ctx context.Context) {
-		port := cfg.Port
-		slog.InfoContext(ctx, "starting http server", "port", port)
-		if err := engine.Run(":" + strconv.Itoa(port)); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.ErrorContext(ctx, "failed to start http server", "error", err)
+	port := cfg.Port
+	httpServer = &http.Server{
+		Addr:    ":" + strconv.Itoa(port),
+		Handler: engine,
+	}
+	serverErr := make(chan error, 1)
+	safe.GoOnce("http-server", func() {
+		slog.InfoContext(baseCtx, "starting http server", "port", port)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
 	})
 
-	<-baseCtx.Done()
-	slog.InfoContext(baseCtx, "shutting down server")
-	skillSvc.Shutdown()
-	mcpManager.Close()
-	return nil
+	select {
+	case <-baseCtx.Done():
+		slog.InfoContext(baseCtx, "shutting down server")
+		return nil
+	case err := <-serverErr:
+		return fmt.Errorf("failed to start http server: %w", err)
+	}
 }

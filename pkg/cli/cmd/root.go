@@ -28,7 +28,7 @@ import (
 
 var (
 	cfgFile       string
-	daemonMode    bool
+	serverMode    bool
 	showVersion   bool
 	outputJSON    bool
 	quietOutput   bool
@@ -42,8 +42,8 @@ var (
 agentic looping and skills usage capabilities.`,
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if daemonMode && cmd.Parent() != nil {
-				return withExitCode(fmt.Errorf("--daemon can only be used without subcommands"), 2)
+			if serverMode && cmd.Parent() != nil {
+				return withExitCode(fmt.Errorf("server mode can only be started without subcommands"), 2)
 			}
 			return nil
 		},
@@ -53,13 +53,13 @@ agentic looping and skills usage capabilities.`,
 				return nil
 			}
 
-			if daemonMode {
+			if serverMode {
 				_, closeLogger, err := initCommandEnvironment(true)
 				if err != nil {
 					return err
 				}
 				defer closeLogger()
-				return startDaemon()
+				return startServer()
 			}
 
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -78,7 +78,7 @@ agentic looping and skills usage capabilities.`,
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default ~/.agenty/config.yaml)")
-	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
+	rootCmd.PersistentFlags().BoolVar(&serverMode, "server", false, "run in server mode")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show version")
 	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "output JSON")
 	rootCmd.PersistentFlags().BoolVar(&quietOutput, "quiet", false, "suppress non-essential output")
@@ -95,6 +95,7 @@ func init() {
 	rootCmd.AddCommand(newSkillCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newMCPCmd())
+	rootCmd.AddCommand(newGatewayCmd())
 }
 
 func Execute() error {

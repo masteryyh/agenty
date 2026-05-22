@@ -29,7 +29,7 @@ import (
 func handleCwdCmd(b backend.Backend, bridge Bridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
 	if !state.LocalMode {
 		if len(args) > 0 {
-			bridge.Error("/cwd is only available in local mode. Remote sessions run tools on the daemon host, so client paths cannot be applied safely.")
+			bridge.Error("/cwd is only available in local mode. Remote sessions run tools on the server host, so client paths cannot be applied safely.")
 			return CommandResult{Handled: true}, nil
 		}
 		session, err := b.GetSession(sessionID)

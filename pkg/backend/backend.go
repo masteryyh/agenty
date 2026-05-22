@@ -55,6 +55,16 @@ type Backend interface {
 	UpdateAgent(agentID uuid.UUID, dto *models.UpdateAgentDto) error
 	DeleteAgent(agentID uuid.UUID) error
 
+	ListChannels(page, pageSize int) (*pagination.PagedResponse[models.GatewayChannelDto], error)
+	GetChannel(channelID string) (*models.GatewayChannelDto, error)
+	CreateChannel(dto *models.CreateGatewayChannelDto) (*models.GatewayChannelDto, error)
+	UpdateChannel(channelID string, dto *models.UpdateGatewayChannelDto) (*models.GatewayChannelDto, error)
+	DeleteChannel(channelID string) error
+	ListGatewayBindings(agentID *uuid.UUID) ([]models.AgentGatewayBindingDto, error)
+	CreateGatewayBinding(agentID uuid.UUID, dto *models.CreateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error)
+	UpdateGatewayBinding(agentID, bindingID uuid.UUID, dto *models.UpdateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error)
+	DeleteGatewayBinding(agentID, bindingID uuid.UUID) error
+
 	ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error)
 	CreateMCPServer(dto *models.CreateMCPServerDto) (*models.MCPServerDto, error)
 	UpdateMCPServer(serverID uuid.UUID, dto *models.UpdateMCPServerDto) (*models.MCPServerDto, error)

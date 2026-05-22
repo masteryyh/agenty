@@ -32,6 +32,7 @@ import (
 type LocalBackend struct {
 	chatSvc     *services.ChatService
 	agentSvc    *services.AgentService
+	gatewaySvc  *services.GatewayService
 	modelSvc    *services.ModelService
 	providerSvc *services.ProviderService
 	mcpSvc      *services.MCPServerService
@@ -41,6 +42,7 @@ func NewLocalBackend() *LocalBackend {
 	return &LocalBackend{
 		chatSvc:     services.GetChatService(),
 		agentSvc:    services.GetAgentService(),
+		gatewaySvc:  services.GetGatewayService(),
 		modelSvc:    services.GetModelService(),
 		providerSvc: services.GetProviderService(),
 		mcpSvc:      services.GetMCPServerService(),
@@ -165,6 +167,42 @@ func (l *LocalBackend) UpdateAgent(agentID uuid.UUID, dto *models.UpdateAgentDto
 
 func (l *LocalBackend) DeleteAgent(agentID uuid.UUID) error {
 	return l.agentSvc.DeleteAgent(signal.GetBaseContext(), agentID)
+}
+
+func (l *LocalBackend) ListChannels(page, pageSize int) (*pagination.PagedResponse[models.GatewayChannelDto], error) {
+	return l.gatewaySvc.ListChannels(signal.GetBaseContext(), pageReq(page, pageSize))
+}
+
+func (l *LocalBackend) GetChannel(channelID string) (*models.GatewayChannelDto, error) {
+	return l.gatewaySvc.GetChannel(signal.GetBaseContext(), channelID)
+}
+
+func (l *LocalBackend) CreateChannel(dto *models.CreateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return l.gatewaySvc.CreateChannel(signal.GetBaseContext(), dto)
+}
+
+func (l *LocalBackend) UpdateChannel(channelID string, dto *models.UpdateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return l.gatewaySvc.UpdateChannel(signal.GetBaseContext(), channelID, dto)
+}
+
+func (l *LocalBackend) DeleteChannel(channelID string) error {
+	return l.gatewaySvc.DeleteChannel(signal.GetBaseContext(), channelID)
+}
+
+func (l *LocalBackend) ListGatewayBindings(agentID *uuid.UUID) ([]models.AgentGatewayBindingDto, error) {
+	return l.gatewaySvc.ListBindings(signal.GetBaseContext(), agentID)
+}
+
+func (l *LocalBackend) CreateGatewayBinding(agentID uuid.UUID, dto *models.CreateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return l.gatewaySvc.CreateBinding(signal.GetBaseContext(), agentID, dto)
+}
+
+func (l *LocalBackend) UpdateGatewayBinding(agentID, bindingID uuid.UUID, dto *models.UpdateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return l.gatewaySvc.UpdateBinding(signal.GetBaseContext(), agentID, bindingID, dto)
+}
+
+func (l *LocalBackend) DeleteGatewayBinding(agentID, bindingID uuid.UUID) error {
+	return l.gatewaySvc.DeleteBinding(signal.GetBaseContext(), agentID, bindingID)
 }
 
 func (l *LocalBackend) ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error) {

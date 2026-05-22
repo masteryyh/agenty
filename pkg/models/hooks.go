@@ -25,6 +25,10 @@ func (m *Agent) BeforeCreate(*gorm.DB) error {
 	return ensureUUID(&m.ID)
 }
 
+func (m *AgentGatewayBinding) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
 func (m *ChatMessage) BeforeCreate(*gorm.DB) error {
 	return ensureUUID(&m.ID)
 }
@@ -38,6 +42,14 @@ func (m *ChatCompaction) BeforeCreate(*gorm.DB) error {
 }
 
 func (m *ChatSession) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *GatewayConversation) BeforeCreate(*gorm.DB) error {
+	return ensureUUID(&m.ID)
+}
+
+func (m *GatewayMessageDelivery) BeforeCreate(*gorm.DB) error {
 	return ensureUUID(&m.ID)
 }
 
