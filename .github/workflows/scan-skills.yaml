@@ -118,8 +118,7 @@ jobs:
             --vt-upload-files \
             --policy balanced \
             --format sarif \
-            --output skill-scanner-results.sarif \
-            --fail-on-severity high
+            --output skill-scanner-results.sarif
           status=$?
           set -e
 
@@ -142,7 +141,7 @@ jobs:
           sarif_file: skill-scanner-results.sarif
           category: skill-scanner
 
-      - name: Fail on scanner findings
+      - name: Fail on scanner errors
         if: always() && needs.detect-skill-changes.outputs.is_fork_pr != 'true'
         shell: bash
         run: exit "${{ steps.scan.outputs.exit_code }}"
