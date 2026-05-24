@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.37.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/avast/retry-go/v5 v5.0.0
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/bytedance/sonic v1.15.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10

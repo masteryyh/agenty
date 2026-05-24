@@ -63,6 +63,7 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 	envs := map[string]string{
 		"port":                         "AGENTY_PORT",
+		"debug":                        "AGENTY_DEBUG",
 		"db.type":                      "AGENTY_DB_TYPE",
 		"db.host":                      "AGENTY_DB_HOST",
 		"db.port":                      "AGENTY_DB_PORT",
@@ -82,7 +83,7 @@ func (cm *ConfigManager) BindEnvVariables() {
 
 func (cm *ConfigManager) SetDefaults() {
 	cm.vipers.SetDefault("debug", false)
-	cm.vipers.SetDefault("port", DefaultDaemonPort)
+	cm.vipers.SetDefault("port", DefaultServerPort)
 	cm.vipers.SetDefault("db.type", DatabaseTypeSQLite)
 	cm.vipers.SetDefault("db.host", "localhost")
 	cm.vipers.SetDefault("db.port", 5432)
@@ -112,7 +113,7 @@ func (cm *ConfigManager) LoadConfig() error {
 			return err
 		}
 		if created {
-			fmt.Printf("created default config file: %s\n", configPath)
+			fmt.Fprintf(os.Stderr, "created default config file: %s\n", configPath)
 		}
 		cm.vipers.SetConfigFile(configPath)
 	}
@@ -120,7 +121,7 @@ func (cm *ConfigManager) LoadConfig() error {
 	if err := cm.vipers.ReadInConfig(); err != nil {
 		return fmt.Errorf("error reading config file: %w", err)
 	} else {
-		fmt.Printf("using config file: %s\n", cm.vipers.ConfigFileUsed())
+		fmt.Fprintf(os.Stderr, "using config file: %s\n", cm.vipers.ConfigFileUsed())
 	}
 
 	if err := cm.mergeAdditionalConfigs(); err != nil {
@@ -208,7 +209,7 @@ func (cm *ConfigManager) mergeAdditionalConfigs() error {
 		if err := cm.mergeConfigFile(fragment); err != nil {
 			return err
 		}
-		fmt.Printf("merged config fragment: %s\n", fragment)
+		fmt.Fprintf(os.Stderr, "merged config fragment: %s\n", fragment)
 	}
 
 	return nil

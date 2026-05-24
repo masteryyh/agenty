@@ -24,7 +24,7 @@ import (
 const (
 	DatabaseTypePostgres = "postgres"
 	DatabaseTypeSQLite   = "sqlite"
-	DefaultDaemonPort    = 8080
+	DefaultServerPort    = 8080
 )
 
 // MCPConfig holds runtime parameters for MCP client connections
@@ -46,7 +46,7 @@ func (c *MCPConfig) Validate() error {
 	return nil
 }
 
-// ServerConfig holds configuration for connecting to a remote agenty server in non-daemon mode
+// ServerConfig holds configuration for connecting to a remote agenty server outside server mode
 type ServerConfig struct {
 	// URL of the remote server (e.g. http://localhost:8080)
 	URL string `mapstructure:"url"`
@@ -60,8 +60,8 @@ type ServerConfig struct {
 
 // AppConfig is the config definition for this app
 type AppConfig struct {
-	// Daemon indicates whether to run in daemon mode
-	Daemon bool `mapstructure:"-"`
+	// ServerMode indicates whether to run as the HTTP server
+	ServerMode bool `mapstructure:"-"`
 
 	// Debug mode enables more verbose logging and other debug features
 	Debug bool `mapstructure:"debug"`
@@ -83,7 +83,7 @@ type AppConfig struct {
 }
 
 func (c *AppConfig) IsRemoteMode() bool {
-	return !c.Daemon && c.Server != nil && c.Server.URL != ""
+	return !c.ServerMode && c.Server != nil && c.Server.URL != ""
 }
 
 // AuthConfig is the config definition for HTTP Basic Auth
@@ -166,15 +166,15 @@ func (c *AuthConfig) Validate() error {
 }
 
 func (c *AppConfig) Validate() error {
-	if c.Daemon {
+	if c.ServerMode {
 		if c.Port <= 0 {
-			c.Port = DefaultDaemonPort
+			c.Port = DefaultServerPort
 		}
 		if c.Port > 65535 {
 			return fmt.Errorf("invalid port number: %d", c.Port)
 		}
 		if c.DB == nil {
-			return fmt.Errorf("database configuration is required in daemon mode")
+			return fmt.Errorf("database configuration is required in server mode")
 		}
 		if err := c.DB.Validate(); err != nil {
 			return fmt.Errorf("invalid db config: %w", err)

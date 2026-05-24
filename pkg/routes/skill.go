@@ -50,6 +50,7 @@ func (r *SkillRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	{
 		skillGroup.GET("", r.ListSkills)
 		skillGroup.POST("/content", r.GetSkillContent)
+		skillGroup.POST("/rescan", r.RescanGlobalSkills)
 	}
 }
 
@@ -100,4 +101,12 @@ func (r *SkillRoutes) GetSkillContent(c *gin.Context) {
 		return
 	}
 	response.OK(c, &models.SkillContentResult{Content: content})
+}
+
+func (r *SkillRoutes) RescanGlobalSkills(c *gin.Context) {
+	if err := r.service.RescanGlobalSkills(c.Request.Context()); err != nil {
+		response.Failed(c, err)
+		return
+	}
+	response.OK[any](c, nil)
 }

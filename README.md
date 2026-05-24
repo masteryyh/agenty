@@ -39,14 +39,14 @@ On first run, Agenty initializes its database, seeds preset providers and models
 
 ## Run Modes
 
-Agenty can run as a single local app, a self-hosted daemon, or a remote client connected to that daemon.
+Agenty can run as a single local app, a self-hosted server, or a remote client connected to that server.
 
 | Mode | Command | Use case |
 | --- | --- | --- |
 | Local interactive mode | `agenty` | Run the TUI and backend logic in one local process. |
 | Local interactive mode with config | `agenty --config /path/to/config.yaml` | Use an explicit config file. |
-| Daemon mode | `agenty --daemon --config /path/to/config.yaml` | Run the HTTP backend service for remote clients. |
-| Remote interactive mode | `agenty --config agenty-client.yaml` | Connect the TUI to a daemon through `server.url`. |
+| Server mode | `agenty --server --config /path/to/config.yaml` | Run the HTTP backend service for remote clients. |
+| Remote interactive mode | `agenty --config agenty-client.yaml` | Connect the TUI to a server through `server.url`. |
 
 Common slash commands inside the TUI:
 
@@ -78,7 +78,7 @@ db:
   type: sqlite
 ```
 
-Daemon configuration with HTTP Basic Auth:
+Server configuration with HTTP Basic Auth:
 
 ```yaml
 debug: false
@@ -118,7 +118,7 @@ Supported configuration keys:
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `port` | `8080` | HTTP listen port in daemon mode. Optional in config; Agenty falls back to `8080` when omitted. |
+| `port` | `8080` | HTTP listen port in server mode. Optional in config; Agenty falls back to `8080` when omitted. |
 | `debug` | `false` | Enables verbose logging and debug behavior. |
 | `db.type` | `sqlite` | Database backend: `sqlite` or `postgres`. |
 | `db.host` | `localhost` | PostgreSQL host. |
@@ -127,12 +127,12 @@ Supported configuration keys:
 | `db.password` | empty | PostgreSQL password. Required when `db.type` is `postgres`. |
 | `db.database` | `agenty` | PostgreSQL database name. |
 | `db.sqliteVectorExtensionPath` | user config dir | Optional sqlite-vector native extension path. |
-| `auth.enabled` | `false` | Enables HTTP Basic Auth in daemon mode. |
+| `auth.enabled` | `false` | Enables HTTP Basic Auth in server mode. |
 | `auth.username` | empty | Basic Auth username. |
 | `auth.password` | empty | Basic Auth password. |
 | `mcp.healthCheckInterval` | `30` | MCP health-check interval in seconds. |
 | `mcp.connectTimeout` | `15` | MCP connection timeout in seconds. |
-| `server.url` | empty | Remote backend URL. If set outside daemon mode, Agenty runs as a remote client. |
+| `server.url` | empty | Remote backend URL. If set outside server mode, Agenty runs as a remote client. |
 | `server.username` | empty | Remote backend Basic Auth username. |
 | `server.password` | empty | Remote backend Basic Auth password. |
 
@@ -157,9 +157,9 @@ SQLite is the default database. Agenty stores the SQLite database at `os.UserCon
 
 SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. If `db.sqliteVectorExtensionPath` is not configured, Agenty uses `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` and downloads the matching sqlite-vector release asset when the extension is missing.
 
-Windows `arm64` cannot use the default SQLite mode because `sqlite-vector` does not provide that platform. On Windows `arm64`, configure an external PostgreSQL database before starting Agenty in local or daemon mode.
+Windows `arm64` cannot use the default SQLite mode because `sqlite-vector` does not provide that platform. On Windows `arm64`, configure an external PostgreSQL database before starting Agenty in local or server mode.
 
-PostgreSQL is intended for daemon deployments. Before pointing Agenty at PostgreSQL, create the database:
+PostgreSQL is intended for server deployments. Before pointing Agenty at PostgreSQL, create the database:
 
 ```sql
 CREATE DATABASE agenty;

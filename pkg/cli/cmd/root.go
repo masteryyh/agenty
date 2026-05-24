@@ -18,121 +18,86 @@ package cmd
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 
-	"github.com/masteryyh/agenty/pkg/backend"
-	"github.com/masteryyh/agenty/pkg/chat/sessionhooks"
-	"github.com/masteryyh/agenty/pkg/config"
-	"github.com/masteryyh/agenty/pkg/conn"
-	mcppkg "github.com/masteryyh/agenty/pkg/mcp"
-	"github.com/masteryyh/agenty/pkg/models"
-	"github.com/masteryyh/agenty/pkg/services"
-	"github.com/masteryyh/agenty/pkg/tools"
-	"github.com/masteryyh/agenty/pkg/tools/builtin"
-	"github.com/masteryyh/agenty/pkg/utils/logger"
-	"github.com/masteryyh/agenty/pkg/utils/signal"
+	clitui "github.com/masteryyh/agenty/pkg/cli/tui"
 	"github.com/masteryyh/agenty/pkg/version"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 var (
-	cfgFile     string
-	daemonMode  bool
-	showVersion bool
-	rootCmd     = &cobra.Command{
+	cfgFile       string
+	serverMode    bool
+	showVersion   bool
+	outputJSON    bool
+	quietOutput   bool
+	noColorOutput bool
+	page          int
+	pageSize      int
+	rootCmd       = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
+		SilenceUsage: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if serverMode && cmd.Parent() != nil {
+				return withExitCode(fmt.Errorf("server mode can only be started without subcommands"), 2)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version.Current())
 				return nil
 			}
-			if err := config.Init(cfgFile); err != nil {
-				return fmt.Errorf("failed to load configuration: %w", err)
-			}
-			cfg := config.GetConfigManager().GetConfig()
-			cfg.Daemon = daemonMode
-			if err := config.GetConfigManager().Validate(); err != nil {
-				return fmt.Errorf("invalid configuration: %w", err)
-			}
 
-			if err := logger.Init(cfg.Daemon, cfg.Debug, ""); err != nil {
-				return fmt.Errorf("failed to initialize logger: %w", err)
-			}
-			defer logger.Close()
-
-			if daemonMode {
-				return startDaemon()
-			}
-
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("must be run in an interactive terminal")
-			}
-
-			if cfg.IsRemoteMode() {
-				_, cancel := signal.SetupContext()
-				defer cancel()
-				b, err := backend.NewRemoteBackend(cfg.Server.URL, cfg.Server.Username, cfg.Server.Password)
+			if serverMode {
+				_, closeLogger, err := initCommandEnvironment(true)
 				if err != nil {
 					return err
 				}
-				return startChat(b, false)
+				defer closeLogger()
+				return startServer()
 			}
 
-			return startLocalMode()
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return withExitCode(fmt.Errorf("must be run in an interactive terminal"), 2)
+			}
+
+			runtime, err := initRuntime(cmd.Context(), true, true)
+			if err != nil {
+				return err
+			}
+			defer runtime.Close()
+			return clitui.StartChat(runtime.Backend, runtime.Local)
 		},
 	}
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default ~/.agenty/config.yaml)")
-	rootCmd.PersistentFlags().BoolVar(&daemonMode, "daemon", false, "run as backend HTTP service")
+	rootCmd.PersistentFlags().BoolVar(&serverMode, "server", false, "run in server mode")
 	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show version")
-}
-
-func startLocalMode() error {
-	cfg := config.GetConfigManager().GetConfig()
-
-	baseCtx, cancel := signal.SetupContext()
-	defer cancel()
-
-	slog.InfoContext(baseCtx, "initializing database connection...")
-	if err := conn.InitDB(baseCtx, cfg.DB, cfg.Debug); err != nil {
-		return fmt.Errorf("failed to initialize database connection: %w", err)
-	}
-
-	slog.InfoContext(baseCtx, "registering built-in tools...")
-	registry := tools.GetRegistry()
-	builtin.RegisterAll(registry)
-	sessionhooks.RegisterAll()
-
-	slog.InfoContext(baseCtx, "initializing MCP manager...")
-	mcpManager := mcppkg.InitManager(baseCtx, registry)
-	mcpManager.Start()
-	defer mcpManager.Close()
-
-	slog.InfoContext(baseCtx, "initializing skill service...")
-	skillSvc := services.GetSkillService()
-	if err := skillSvc.Initialize(baseCtx); err != nil {
-		slog.WarnContext(baseCtx, "skill service initialization failed", "error", err)
-	}
-	defer skillSvc.Shutdown()
-
-	b := backend.NewLocalBackend()
-	return startChat(b, true)
+	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "output JSON")
+	rootCmd.PersistentFlags().BoolVar(&quietOutput, "quiet", false, "suppress non-essential output")
+	rootCmd.PersistentFlags().BoolVar(&noColorOutput, "no-color", false, "disable color output")
+	rootCmd.PersistentFlags().IntVar(&page, "page", 1, "page number for list commands")
+	rootCmd.PersistentFlags().IntVar(&pageSize, "page-size", 50, "page size for list commands")
+	rootCmd.AddCommand(newChatCmd())
+	rootCmd.AddCommand(newAgentCmd())
+	rootCmd.AddCommand(newProviderCmd())
+	rootCmd.AddCommand(newModelCmd())
+	rootCmd.AddCommand(newSettingsCmd())
+	rootCmd.AddCommand(newSessionCmd())
+	rootCmd.AddCommand(newMemoryCmd())
+	rootCmd.AddCommand(newSkillCmd())
+	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newMCPCmd())
+	rootCmd.AddCommand(newGatewayCmd())
 }
 
 func Execute() error {
 	return rootCmd.Execute()
-}
-
-func modelDisplayName(m models.ModelDto) string {
-	if m.Provider != nil {
-		return m.Provider.Name + "/" + m.Name
-	}
-	return m.Name
 }

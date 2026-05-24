@@ -2,14 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch agenty in daemon mode",
+            "name": "Launch agenty in server mode",
             "type": "go",
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "args": ["--daemon"],
+            "args": ["--server", "--config", "agenty.yaml"],
             "buildFlags": ["-tags=fts5"]
         },
         {
@@ -20,6 +20,7 @@
             "program": "${workspaceFolder}/cmd",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
+            "args": ["--config", "agenty.yaml"],
             "buildFlags": ["-tags=fts5"]
         },
         {

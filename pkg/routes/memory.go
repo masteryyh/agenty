@@ -20,8 +20,6 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/masteryyh/agenty/pkg/customerrors"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/utils/response"
@@ -46,13 +44,12 @@ func GetMemoryRoutes() *MemoryRoutes {
 }
 
 func (r *MemoryRoutes) RegisterRoutes(router *gin.RouterGroup) {
-	router.GET("/agents/:agentId/memories", r.ListMemories)
+	router.GET("/agents/:id/memories", r.ListMemories)
 }
 
 func (r *MemoryRoutes) ListMemories(c *gin.Context) {
-	agentID, err := uuid.Parse(c.Param("agentId"))
-	if err != nil {
-		response.Failed(c, customerrors.ErrInvalidParams)
+	agentID, ok := parseUUIDParam(c, "id")
+	if !ok {
 		return
 	}
 

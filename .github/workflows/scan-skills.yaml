@@ -98,17 +98,22 @@ jobs:
           SKILL_SCANNER_LLM_API_KEY: ${{ secrets.SKILL_SCANNER_LLM_API_KEY }}
           SKILL_SCANNER_LLM_MODEL: ${{ secrets.SKILL_SCANNER_LLM_MODEL }}
           SKILL_SCANNER_LLM_BASE_URL: ${{ secrets.SKILL_SCANNER_LLM_BASE_URL }}
-          ANTHROPIC_BASE_URL: ${{ secrets.SKILL_SCANNER_LLM_BASE_URL }}
+          SKILL_SCANNER_LLM_PROVIDER: openai-compatible
           VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
         shell: bash
         run: |
+          if [[ -n "${SKILL_SCANNER_LLM_MODEL:-}" && "${SKILL_SCANNER_LLM_MODEL}" != openai/* ]]; then
+            export SKILL_SCANNER_LLM_MODEL="openai/${SKILL_SCANNER_LLM_MODEL#deepseek/}"
+          fi
+          export SKILL_SCANNER_LLM_FORCE_JSON_OBJECT=true
+
           set +e
           skill-scanner scan-all .agents/skills \
             --recursive \
             --check-overlap \
             --use-behavioral \
             --use-llm \
-            --llm-provider anthropic \
+            --llm-provider openai-compatible \
             --use-virustotal \
             --vt-upload-files \
             --policy balanced \

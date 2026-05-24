@@ -278,6 +278,52 @@ func (c *Client) DeleteAgent(agentID uuid.UUID) error {
 	return err
 }
 
+func (c *Client) ListChannels(page, pageSize int) (*pagination.PagedResponse[models.GatewayChannelDto], error) {
+	return doRequest[pagination.PagedResponse[models.GatewayChannelDto]](c, "GET", fmt.Sprintf("/api/v1/gateway/channels?page=%d&pageSize=%d", page, pageSize), nil)
+}
+
+func (c *Client) GetChannel(channelID string) (*models.GatewayChannelDto, error) {
+	return doRequest[models.GatewayChannelDto](c, "GET", fmt.Sprintf("/api/v1/gateway/channels/%s", channelID), nil)
+}
+
+func (c *Client) CreateChannel(dto *models.CreateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return doRequest[models.GatewayChannelDto](c, "POST", "/api/v1/gateway/channels", dto)
+}
+
+func (c *Client) UpdateChannel(channelID string, dto *models.UpdateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return doRequest[models.GatewayChannelDto](c, "PUT", fmt.Sprintf("/api/v1/gateway/channels/%s", channelID), dto)
+}
+
+func (c *Client) DeleteChannel(channelID string) error {
+	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/gateway/channels/%s", channelID), nil)
+	return err
+}
+
+func (c *Client) ListGatewayBindings(agentID *uuid.UUID) ([]models.AgentGatewayBindingDto, error) {
+	path := "/api/v1/gateway/bindings"
+	if agentID != nil {
+		path = fmt.Sprintf("%s?agentId=%s", path, agentID.String())
+	}
+	bindings, err := doRequest[[]models.AgentGatewayBindingDto](c, "GET", path, nil)
+	if err != nil || bindings == nil {
+		return nil, err
+	}
+	return *bindings, nil
+}
+
+func (c *Client) CreateGatewayBinding(agentID uuid.UUID, dto *models.CreateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return doRequest[models.AgentGatewayBindingDto](c, "POST", fmt.Sprintf("/api/v1/agents/%s/gateway-bindings", agentID), dto)
+}
+
+func (c *Client) UpdateGatewayBinding(agentID, bindingID uuid.UUID, dto *models.UpdateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return doRequest[models.AgentGatewayBindingDto](c, "PUT", fmt.Sprintf("/api/v1/agents/%s/gateway-bindings/%s", agentID, bindingID), dto)
+}
+
+func (c *Client) DeleteGatewayBinding(agentID, bindingID uuid.UUID) error {
+	_, err := doRequest[any](c, "DELETE", fmt.Sprintf("/api/v1/agents/%s/gateway-bindings/%s", agentID, bindingID), nil)
+	return err
+}
+
 func (c *Client) ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error) {
 	return doRequest[pagination.PagedResponse[models.MCPServerDto]](c, "GET", fmt.Sprintf("/api/v1/mcp/servers?page=%d&pageSize=%d", page, pageSize), nil)
 }
@@ -362,4 +408,9 @@ func (c *Client) GetSkillContent(name string, sessionID *uuid.UUID) (string, err
 		return "", nil
 	}
 	return result.Content, nil
+}
+
+func (c *Client) RescanGlobalSkills() error {
+	_, err := doRequest[any](c, "POST", "/api/v1/skills/rescan", nil)
+	return err
 }

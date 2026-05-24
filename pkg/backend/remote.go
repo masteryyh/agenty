@@ -150,6 +150,42 @@ func (r *RemoteBackend) DeleteAgent(agentID uuid.UUID) error {
 	return r.client.DeleteAgent(agentID)
 }
 
+func (r *RemoteBackend) ListChannels(page, pageSize int) (*pagination.PagedResponse[models.GatewayChannelDto], error) {
+	return r.client.ListChannels(page, pageSize)
+}
+
+func (r *RemoteBackend) GetChannel(channelID string) (*models.GatewayChannelDto, error) {
+	return r.client.GetChannel(channelID)
+}
+
+func (r *RemoteBackend) CreateChannel(dto *models.CreateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return r.client.CreateChannel(dto)
+}
+
+func (r *RemoteBackend) UpdateChannel(channelID string, dto *models.UpdateGatewayChannelDto) (*models.GatewayChannelDto, error) {
+	return r.client.UpdateChannel(channelID, dto)
+}
+
+func (r *RemoteBackend) DeleteChannel(channelID string) error {
+	return r.client.DeleteChannel(channelID)
+}
+
+func (r *RemoteBackend) ListGatewayBindings(agentID *uuid.UUID) ([]models.AgentGatewayBindingDto, error) {
+	return r.client.ListGatewayBindings(agentID)
+}
+
+func (r *RemoteBackend) CreateGatewayBinding(agentID uuid.UUID, dto *models.CreateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return r.client.CreateGatewayBinding(agentID, dto)
+}
+
+func (r *RemoteBackend) UpdateGatewayBinding(agentID, bindingID uuid.UUID, dto *models.UpdateAgentGatewayBindingDto) (*models.AgentGatewayBindingDto, error) {
+	return r.client.UpdateGatewayBinding(agentID, bindingID, dto)
+}
+
+func (r *RemoteBackend) DeleteGatewayBinding(agentID, bindingID uuid.UUID) error {
+	return r.client.DeleteGatewayBinding(agentID, bindingID)
+}
+
 func (r *RemoteBackend) ListMCPServers(page, pageSize int) (*pagination.PagedResponse[models.MCPServerDto], error) {
 	return r.client.ListMCPServers(page, pageSize)
 }
@@ -211,4 +247,8 @@ func (r *RemoteBackend) ListSkills(sessionID uuid.UUID) ([]models.SkillDto, erro
 
 func (r *RemoteBackend) GetSkillContent(name string, sessionID *uuid.UUID) (string, error) {
 	return r.client.GetSkillContent(name, sessionID)
+}
+
+func (r *RemoteBackend) RescanGlobalSkills() error {
+	return r.client.RescanGlobalSkills()
 }

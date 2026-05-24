@@ -20,7 +20,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 
 1. **All new Go source files must include the Apache 2.0 license header** (see `references/go-conventions.md`)
 2. **No redundant comments** unless explicitly requested by the user
-3. **No summary documents or planning documents**
+3. **No summary documents or planning documents** except the required `HANDOFF.md` maintenance described below
 4. **Always reply to the user in Simplified Chinese**
 5. Use `any` instead of `interface{}`
 6. Use `fmt.Fprintf` instead of `strings.Builder.WriteString()`
@@ -29,12 +29,19 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 9. Do not use GORM `AutoMigrate`; table definitions live in embedded SQL under `pkg/conn/db`
 10. Persistent GORM model structs should avoid database-specific `gorm` tags; keep schema details in SQL files
 11. Do not add unit tests unless the user explicitly asks for them
+12. User-facing command labels, prompts, log messages, status text, and error messages in repository code must be written in English unless the user explicitly asks for localized in-app copy
 
 ## Detailed Coding Patterns
 
 1. **Avoid String Concatenation in `WriteString`**: When using `strings.Builder`, do not use string concatenation (`+`) inside `WriteString`. Instead, split them into multiple sequential `WriteString` calls (e.g., `buf.WriteString(A); buf.WriteString(B)` instead of `buf.WriteString(A + B)`).
 2. **Use Built-in `min`/`max`**: Use Go's built-in `min()` and `max()` functions instead of manual `if` statements for clamping or comparing values.
 3. **Use `strings.SplitSeq`**: When iterating over split strings, use `strings.SplitSeq` instead of `strings.Split` to prevent unnecessary slice allocations.
+
+## HANDOFF.md Maintenance
+
+`HANDOFF.md` is the required short-lived handoff bridge for future agents. It is the only routine exception to the "no summary documents or planning documents" rule.
+
+When any project file changes, load and follow `references/handoff-maintenance.md` before finishing the turn.
 
 ## Package Structure Quick Reference
 
@@ -63,6 +70,7 @@ agenty is an AI Agent application written in Go 1.26. It consists of a backend s
 | Route patterns | `references/route-patterns.md` | Adding/modifying `pkg/routes/` |
 | Tool patterns | `references/tool-patterns.md` | Adding a new built-in tool |
 | Database patterns | `references/database-patterns.md` | Working with GORM, schema SQL, BM25, FTS5, sqlite-vector, or ParadeDB |
+| Handoff maintenance | `references/handoff-maintenance.md` | Any turn that creates, modifies, deletes, renames, generates, or materially reformats project files |
 
 ## Implementation Checklist
 
@@ -78,7 +86,9 @@ Verify each item when adding new functionality:
 - [ ] New routes are singletons implementing `RegisterRoutes(*gin.RouterGroup)`
 - [ ] Route responses use `response.OK` / `response.Failed`
 - [ ] Errors use business error types from `customerrors`
+- [ ] User-facing command/prompt/log/error text is English unless the task explicitly requires localization
 - [ ] All blocking operations take `context.Context` as the first parameter
 - [ ] Background goroutines use `safe.GoSafe` or `safe.GoSafeWithCtx`
 - [ ] New Backend interface methods are implemented in both `local.go` and `remote.go`
 - [ ] New unit tests are added only when the user explicitly requests them
+- [ ] If any project file changed, `HANDOFF.md` was created or updated in Simplified Chinese using the table structure required by `references/handoff-maintenance.md`
