@@ -220,30 +220,37 @@ func doCreateProvider(b backend.Backend, bridge Bridge) error {
 }
 
 func doUpdateProvider(b backend.Backend, bridge Bridge, target models.ModelProviderDto) error {
-	defaultTypeIdx := 0
-	for i, opt := range providerTypeOptions {
-		if opt == string(target.Type) {
-			defaultTypeIdx = i
-			break
-		}
-	}
-
-	typeOpts := make([]huh.Option[string], len(providerTypeOptions))
-	for i, t := range providerTypeOptions {
-		typeOpts[i] = huh.NewOption(t, t)
-	}
-
 	newName := target.Name
-	selectedType := providerTypeOptions[defaultTypeIdx]
+	selectedType := string(target.Type)
 	newBaseURL := target.BaseURL
 	var newAPIKey string
 
-	form := huh.NewForm(huh.NewGroup(
+	fields := []huh.Field{
 		huh.NewInput().Title("Name").Value(&newName),
-		huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType),
+	}
+
+	if !target.IsPreset {
+		defaultTypeIdx := 0
+		for i, opt := range providerTypeOptions {
+			if opt == string(target.Type) {
+				defaultTypeIdx = i
+				break
+			}
+		}
+		typeOpts := make([]huh.Option[string], len(providerTypeOptions))
+		for i, t := range providerTypeOptions {
+			typeOpts[i] = huh.NewOption(t, t)
+		}
+		selectedType = providerTypeOptions[defaultTypeIdx]
+		fields = append(fields, huh.NewSelect[string]().Title("Type").Options(typeOpts...).Value(&selectedType))
+	}
+
+	fields = append(fields,
 		huh.NewInput().Title("Base URL").Value(&newBaseURL),
 		huh.NewInput().Title("API key").Placeholder("leave blank to keep").Value(&newAPIKey),
-	))
+	)
+
+	form := huh.NewForm(huh.NewGroup(fields...))
 
 	submitted, err := bridge.ShowValidatedHuhForm(form, func() error {
 		if strings.TrimSpace(newName) == "" {

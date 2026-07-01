@@ -158,6 +158,9 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, providerID uuid.UU
 	}
 
 	if dto.Type != "" {
+		if provider.IsPreset && dto.Type != provider.Type {
+			return nil, customerrors.ErrPresetProviderTypeFixed
+		}
 		updates["type"] = dto.Type
 	}
 
