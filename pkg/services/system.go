@@ -31,79 +31,79 @@ import (
 	"gorm.io/gorm"
 )
 
-type SystemService struct {
+type ConfigService struct {
 	db *gorm.DB
 }
 
 var (
-	systemService *SystemService
+	systemService *ConfigService
 	systemOnce    sync.Once
 )
 
-func GetSystemService() *SystemService {
+func GetConfigService() *ConfigService {
 	systemOnce.Do(func() {
-		systemService = &SystemService{db: conn.GetDB()}
+		systemService = &ConfigService{db: conn.GetDB()}
 	})
 	return systemService
 }
 
-func (s *SystemService) getOrCreate(ctx context.Context) (*models.SystemSettings, error) {
-	settings, err := gorm.G[models.SystemSettings](s.db).
-		Where("id = ?", consts.DefaultSystemSettingsID).
+func (s *ConfigService) getOrCreate(ctx context.Context) (*models.SystemConfig, error) {
+	config, err := gorm.G[models.SystemConfig](s.db).
+		Where("id = ?", consts.DefaultSystemConfigID).
 		First(ctx)
 	if err == nil {
-		return &settings, nil
+		return &config, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	settings = models.SystemSettings{ID: consts.DefaultSystemSettingsID, Initialized: false}
-	if err := gorm.G[models.SystemSettings](s.db).Create(ctx, &settings); err != nil {
+	config = models.SystemConfig{ID: consts.DefaultSystemConfigID, Initialized: false}
+	if err := gorm.G[models.SystemConfig](s.db).Create(ctx, &config); err != nil {
 		return nil, err
 	}
-	return &settings, nil
+	return &config, nil
 }
 
-func (s *SystemService) IsInitialized(ctx context.Context) (bool, error) {
-	settings, err := s.getOrCreate(ctx)
+func (s *ConfigService) IsInitialized(ctx context.Context) (bool, error) {
+	config, err := s.getOrCreate(ctx)
 	if err != nil {
 		return false, err
 	}
-	return settings.Initialized, nil
+	return config.Initialized, nil
 }
 
-func (s *SystemService) SetInitialized(ctx context.Context) error {
-	settings, err := s.getOrCreate(ctx)
+func (s *ConfigService) SetInitialized(ctx context.Context) error {
+	config, err := s.getOrCreate(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = gorm.G[models.SystemSettings](s.db).
-		Where("id = ?", settings.ID).
+	_, err = gorm.G[models.SystemConfig](s.db).
+		Where("id = ?", config.ID).
 		Update(ctx, "initialized", true)
 	return err
 }
 
-func (s *SystemService) GetSettings(ctx context.Context) (*models.SystemSettingsDto, error) {
-	settings, err := s.getOrCreate(ctx)
+func (s *ConfigService) GetConfig(ctx context.Context) (*models.SystemConfigDto, error) {
+	config, err := s.getOrCreate(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return settings.ToDto(), nil
+	return config.ToDto(), nil
 }
 
-func (s *SystemService) GetVersion(ctx context.Context) (*models.VersionDto, error) {
+func (s *ConfigService) GetVersion(ctx context.Context) (*models.VersionDto, error) {
 	return &models.VersionDto{Version: version.Current()}, nil
 }
 
-func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
-	settings, err := s.getOrCreate(ctx)
+func (s *ConfigService) UpdateConfig(ctx context.Context, dto *models.UpdateSystemConfigDto) (*models.SystemConfigDto, error) {
+	config, err := s.getOrCreate(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	updates := make(map[string]any)
-	next := *settings
+	next := *config
 
 	if dto.Initialized != nil {
 		updates["initialized"] = *dto.Initialized
@@ -179,10 +179,10 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 	}
 
 	if err := s.db.WithContext(ctx).
-		Model(&models.SystemSettings{}).
-		Where("id = ?", settings.ID).
+		Model(&models.SystemConfig{}).
+		Where("id = ?", config.ID).
 		Updates(updates).Error; err != nil {
-		slog.ErrorContext(ctx, "failed to update system settings", "error", err)
+		slog.ErrorContext(ctx, "failed to update system config", "error", err)
 		return nil, err
 	}
 
@@ -193,7 +193,7 @@ func (s *SystemService) UpdateSettings(ctx context.Context, dto *models.UpdateSy
 	return updated.ToDto(), nil
 }
 
-func lastConfiguredWebSearchProviderFromUpdate(dto *models.UpdateSystemSettingsDto) models.WebSearchProvider {
+func lastConfiguredWebSearchProviderFromUpdate(dto *models.UpdateSystemConfigDto) models.WebSearchProvider {
 	if dto == nil {
 		return ""
 	}

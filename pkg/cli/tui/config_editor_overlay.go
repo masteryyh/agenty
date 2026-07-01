@@ -26,16 +26,16 @@ import (
 	"github.com/masteryyh/agenty/pkg/models"
 )
 
-type settingsEditorMode uint8
+type configEditorMode uint8
 
 const (
-	settingsEditorModeSelect settingsEditorMode = iota
-	settingsEditorModeAPIKeyInput
-	settingsEditorModeFirecrawlURLInput
-	settingsEditorModeAgentModelsSelect
-	settingsEditorModeEmbeddingModelSelect
-	settingsEditorModeEmbeddingConfirm
-	settingsEditorModeSaving
+	configEditorModeSelect configEditorMode = iota
+	configEditorModeAPIKeyInput
+	configEditorModeFirecrawlURLInput
+	configEditorModeAgentModelsSelect
+	configEditorModeEmbeddingModelSelect
+	configEditorModeEmbeddingConfirm
+	configEditorModeSaving
 )
 
 var webSearchProviders = []models.WebSearchProvider{
@@ -45,16 +45,16 @@ var webSearchProviders = []models.WebSearchProvider{
 }
 
 const (
-	settingsWebSearchProviderCount = 3
-	settingsRowProviderStart       = 0
-	settingsRowAgentModels         = settingsWebSearchProviderCount
-	settingsRowEmbedding           = settingsWebSearchProviderCount + 1
+	configWebSearchProviderCount = 3
+	configRowProviderStart       = 0
+	configRowAgentModels         = configWebSearchProviderCount
+	configRowEmbedding           = configWebSearchProviderCount + 1
 )
 
-type settingsEditorSaveMsg struct {
-	settings *models.SystemSettingsDto
-	err      error
-	message  string
+type configEditorSaveMsg struct {
+	config  *models.SystemConfigDto
+	err     error
+	message string
 }
 
 func webSearchProviderDisplayName(provider models.WebSearchProvider) string {
@@ -70,22 +70,22 @@ func webSearchProviderDisplayName(provider models.WebSearchProvider) string {
 	}
 }
 
-type settingsEditorModelDataMsg struct {
+type configEditorModelDataMsg struct {
 	chatModels           []models.ModelDto
 	embeddingModels      []models.ModelDto
 	currentAgentModelIDs []uuid.UUID
 	err                  error
 }
 
-type settingsEditorAgentModelsSavedMsg struct {
+type configEditorAgentModelsSavedMsg struct {
 	modelIDs []uuid.UUID
 	err      error
 }
 
-type settingsEditorOverlay struct {
+type configEditorOverlay struct {
 	backend               backend.Backend
-	settings              *models.SystemSettingsDto
-	mode                  settingsEditorMode
+	config                *models.SystemConfigDto
+	mode                  configEditorMode
 	selection             selectionModel
 	agentSelection        selectionModel
 	embeddingSelection    selectionModel
@@ -102,33 +102,33 @@ type settingsEditorOverlay struct {
 	modelDataLoaded       bool
 }
 
-func newSettingsEditorOverlay(backend backend.Backend, settings *models.SystemSettingsDto, responseCh chan overlayResponse) *settingsEditorOverlay {
-	overlay := &settingsEditorOverlay{
+func newConfigEditorOverlay(backend backend.Backend, config *models.SystemConfigDto, responseCh chan overlayResponse) *configEditorOverlay {
+	overlay := &configEditorOverlay{
 		backend:         backend,
-		settings:        settings,
-		mode:            settingsEditorModeSelect,
-		selection:       newSelectionModel(settingsRowEmbedding),
+		config:          config,
+		mode:            configEditorModeSelect,
+		selection:       newSelectionModel(configRowEmbedding),
 		responseCh:      responseCh,
-		savingLabel:     "Loading model settings…",
+		savingLabel:     "Loading model config…",
 		modelDataLoaded: false,
 	}
 	overlay.syncSelection()
 	return overlay
 }
 
-func (o *settingsEditorOverlay) init() tea.Cmd {
+func (o *configEditorOverlay) init() tea.Cmd {
 	return o.loadModelData()
 }
 
-func (o *settingsEditorOverlay) update(msg tea.Msg) (bool, tea.Cmd) {
+func (o *configEditorOverlay) update(msg tea.Msg) (bool, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return o.handleKey(msg)
-	case settingsEditorModelDataMsg:
+	case configEditorModelDataMsg:
 		if msg.err != nil {
-			o.feedback = o.feedback.setErr("Failed to load model settings: " + msg.err.Error())
+			o.feedback = o.feedback.setErr("Failed to load model config: " + msg.err.Error())
 			o.modelDataLoaded = false
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			return false, nil
 		}
 		o.chatModels = msg.chatModels
@@ -136,39 +136,39 @@ func (o *settingsEditorOverlay) update(msg tea.Msg) (bool, tea.Cmd) {
 		o.currentAgentModelIDs = msg.currentAgentModelIDs
 		o.modelDataLoaded = true
 		o.syncModelSelections()
-		if o.mode == settingsEditorModeSaving {
-			o.mode = settingsEditorModeSelect
+		if o.mode == configEditorModeSaving {
+			o.mode = configEditorModeSelect
 		}
 		return false, nil
-	case settingsEditorAgentModelsSavedMsg:
+	case configEditorAgentModelsSavedMsg:
 		if msg.err != nil {
 			o.feedback = o.feedback.setErr("Failed to update agent models: " + msg.err.Error())
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			return false, nil
 		}
 		o.currentAgentModelIDs = append([]uuid.UUID(nil), msg.modelIDs...)
 		o.feedback = o.feedback.setOK("Agent models updated successfully")
-		o.mode = settingsEditorModeSelect
+		o.mode = configEditorModeSelect
 		o.syncModelSelections()
 		return false, nil
-	case settingsEditorSaveMsg:
+	case configEditorSaveMsg:
 		if msg.err != nil {
-			o.feedback = o.feedback.setErr("Failed to update settings: " + msg.err.Error())
-			o.mode = settingsEditorModeSelect
+			o.feedback = o.feedback.setErr("Failed to update config: " + msg.err.Error())
+			o.mode = configEditorModeSelect
 			return false, nil
 		}
-		o.settings = msg.settings
+		o.config = msg.config
 		if msg.message != "" {
 			o.feedback = o.feedback.setOK(msg.message)
 		} else {
-			o.feedback = o.feedback.setOK("Settings updated successfully")
+			o.feedback = o.feedback.setOK("Config updated successfully")
 		}
-		o.mode = settingsEditorModeSelect
+		o.mode = configEditorModeSelect
 		o.syncSelection()
 		o.syncModelSelections()
 		return false, nil
 	default:
-		if o.mode == settingsEditorModeAPIKeyInput || o.mode == settingsEditorModeFirecrawlURLInput {
+		if o.mode == configEditorModeAPIKeyInput || o.mode == configEditorModeFirecrawlURLInput {
 			var cmd tea.Cmd
 			o.input, cmd = o.input.Update(msg)
 			return false, cmd
@@ -177,9 +177,9 @@ func (o *settingsEditorOverlay) update(msg tea.Msg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (o *configEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch o.mode {
-	case settingsEditorModeSelect:
+	case configEditorModeSelect:
 		if selection, ok := o.selection.HandleNavKey(msg); ok {
 			o.selection = selection
 			o.feedback = o.feedback.clear()
@@ -192,16 +192,16 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			}
 			return true, nil
 		case tea.KeySpace:
-			if o.selection.pos < settingsRowAgentModels {
+			if o.selection.pos < configRowAgentModels {
 				return false, o.savePrimaryProvider()
 			}
 		case tea.KeyRunes:
-			if string(msg.Runes) == " " && o.selection.pos < settingsRowAgentModels {
+			if string(msg.Runes) == " " && o.selection.pos < configRowAgentModels {
 				return false, o.savePrimaryProvider()
 			}
 		case tea.KeyEnter:
 			switch o.selection.pos {
-			case settingsRowAgentModels:
+			case configRowAgentModels:
 				if !o.modelDataLoaded {
 					o.feedback = o.feedback.setWarn("Model data is still loading")
 					return false, nil
@@ -210,10 +210,10 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 					o.feedback = o.feedback.setWarn("No chat models from configured providers found")
 					return false, nil
 				}
-				o.mode = settingsEditorModeAgentModelsSelect
+				o.mode = configEditorModeAgentModelsSelect
 				o.feedback = o.feedback.clear()
 				return false, nil
-			case settingsRowEmbedding:
+			case configRowEmbedding:
 				if !o.modelDataLoaded {
 					o.feedback = o.feedback.setWarn("Model data is still loading")
 					return false, nil
@@ -222,17 +222,17 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 					o.feedback = o.feedback.setWarn("No embedding models from configured providers found")
 					return false, nil
 				}
-				o.mode = settingsEditorModeEmbeddingModelSelect
+				o.mode = configEditorModeEmbeddingModelSelect
 				o.feedback = o.feedback.clear()
 				return false, nil
 			default:
 				return false, o.beginProviderConfig()
 			}
 		}
-	case settingsEditorModeAPIKeyInput:
+	case configEditorModeAPIKeyInput:
 		switch msg.Type {
 		case tea.KeyEsc:
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			o.feedback = o.feedback.clear()
 			return false, nil
 		case tea.KeyEnter:
@@ -244,31 +244,31 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			o.pendingAPIKey = key
 			if o.editingProvider == models.WebSearchProviderFirecrawl {
 				input, cmd := o.input.Reset("Base URL", false)
-				input.model.SetValue(firstNonEmptyString(o.settings.FirecrawlBaseURL, "https://api.firecrawl.dev"))
+				input.model.SetValue(firstNonEmptyString(o.config.FirecrawlBaseURL, "https://api.firecrawl.dev"))
 				o.input = input
-				o.mode = settingsEditorModeFirecrawlURLInput
+				o.mode = configEditorModeFirecrawlURLInput
 				o.feedback = o.feedback.clear()
 				return false, cmd
 			}
 			return false, o.saveProviderConfig(o.editingProvider, key, "")
 		}
-	case settingsEditorModeFirecrawlURLInput:
+	case configEditorModeFirecrawlURLInput:
 		switch msg.Type {
 		case tea.KeyEsc:
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			o.feedback = o.feedback.clear()
 			return false, nil
 		case tea.KeyEnter:
 			return false, o.saveProviderConfig(models.WebSearchProviderFirecrawl, o.pendingAPIKey, o.input.Value())
 		}
-	case settingsEditorModeAgentModelsSelect:
+	case configEditorModeAgentModelsSelect:
 		if selection, ok := o.agentSelection.HandleNavKey(msg); ok {
 			o.agentSelection = selection
 			return false, nil
 		}
 		switch msg.Type {
 		case tea.KeyEsc:
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			o.feedback = o.feedback.clear()
 			return false, nil
 		case tea.KeySpace:
@@ -286,41 +286,41 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			}
 			return false, o.saveAgentModels()
 		}
-	case settingsEditorModeEmbeddingModelSelect:
+	case configEditorModeEmbeddingModelSelect:
 		if selection, ok := o.embeddingSelection.HandleNavKey(msg); ok {
 			o.embeddingSelection = selection
 			return false, nil
 		}
 		switch msg.Type {
 		case tea.KeyEsc:
-			o.mode = settingsEditorModeSelect
+			o.mode = configEditorModeSelect
 			o.feedback = o.feedback.clear()
 			return false, nil
 		case tea.KeyEnter:
 			chosen := o.embeddingModels[o.embeddingSelection.pos]
-			if o.settings.EmbeddingModelID != nil && *o.settings.EmbeddingModelID != chosen.ID {
+			if o.config.EmbeddingModelID != nil && *o.config.EmbeddingModelID != chosen.ID {
 				o.pendingEmbeddingModel = &chosen
-				o.mode = settingsEditorModeEmbeddingConfirm
+				o.mode = configEditorModeEmbeddingConfirm
 				return false, nil
 			}
 			return false, o.saveEmbeddingModel(chosen.ID)
 		}
-	case settingsEditorModeEmbeddingConfirm:
+	case configEditorModeEmbeddingConfirm:
 		switch msg.Type {
 		case tea.KeyEsc:
 			o.pendingEmbeddingModel = nil
-			o.mode = settingsEditorModeEmbeddingModelSelect
+			o.mode = configEditorModeEmbeddingModelSelect
 			return false, nil
 		case tea.KeyEnter:
 			if o.pendingEmbeddingModel == nil {
-				o.mode = settingsEditorModeEmbeddingModelSelect
+				o.mode = configEditorModeEmbeddingModelSelect
 				return false, nil
 			}
 			modelID := o.pendingEmbeddingModel.ID
 			o.pendingEmbeddingModel = nil
 			return false, o.saveEmbeddingModel(modelID)
 		}
-	case settingsEditorModeSaving:
+	case configEditorModeSaving:
 		if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
 			return false, nil
 		}
@@ -328,35 +328,35 @@ func (o *settingsEditorOverlay) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (o *settingsEditorOverlay) beginProviderConfig() tea.Cmd {
+func (o *configEditorOverlay) beginProviderConfig() tea.Cmd {
 	o.editingProvider = webSearchProviders[o.selection.pos]
 	input, cmd := o.input.Reset("API Key", false)
 	o.input = input
 	o.feedback = o.feedback.clear()
-	o.mode = settingsEditorModeAPIKeyInput
+	o.mode = configEditorModeAPIKeyInput
 	return cmd
 }
 
-func (o *settingsEditorOverlay) savePrimaryProvider() tea.Cmd {
+func (o *configEditorOverlay) savePrimaryProvider() tea.Cmd {
 	provider := webSearchProviders[o.selection.pos]
 	if !o.providerConfigured(provider) {
 		o.feedback = o.feedback.setWarn("Configure this provider before setting it as primary")
 		return nil
 	}
 
-	o.mode = settingsEditorModeSaving
+	o.mode = configEditorModeSaving
 	o.savingLabel = "Saving primary provider…"
 	backend := o.backend
 	return func() tea.Msg {
-		updated, err := backend.UpdateSystemSettings(&models.UpdateSystemSettingsDto{
+		updated, err := backend.UpdateSystemConfig(&models.UpdateSystemConfigDto{
 			WebSearchProvider: &provider,
 		})
-		return settingsEditorSaveMsg{settings: updated, err: err, message: "Primary web search provider updated"}
+		return configEditorSaveMsg{config: updated, err: err, message: "Primary web search provider updated"}
 	}
 }
 
-func (o *settingsEditorOverlay) saveProviderConfig(provider models.WebSearchProvider, apiKey, baseURL string) tea.Cmd {
-	dto := &models.UpdateSystemSettingsDto{}
+func (o *configEditorOverlay) saveProviderConfig(provider models.WebSearchProvider, apiKey, baseURL string) tea.Cmd {
+	dto := &models.UpdateSystemConfigDto{}
 	switch provider {
 	case models.WebSearchProviderTavily:
 		dto.TavilyAPIKey = &apiKey
@@ -367,28 +367,28 @@ func (o *settingsEditorOverlay) saveProviderConfig(provider models.WebSearchProv
 		dto.FirecrawlBaseURL = &baseURL
 	}
 
-	o.mode = settingsEditorModeSaving
+	o.mode = configEditorModeSaving
 	o.savingLabel = "Saving provider config…"
 	backend := o.backend
 	return func() tea.Msg {
-		updated, err := backend.UpdateSystemSettings(dto)
-		return settingsEditorSaveMsg{settings: updated, err: err, message: "Web search provider config updated"}
+		updated, err := backend.UpdateSystemConfig(dto)
+		return configEditorSaveMsg{config: updated, err: err, message: "Web search provider config updated"}
 	}
 }
 
-func (o *settingsEditorOverlay) saveAgentModels() tea.Cmd {
+func (o *configEditorOverlay) saveAgentModels() tea.Cmd {
 	modelIDs := make([]uuid.UUID, len(o.agentSelection.selected))
 	for i, idx := range o.agentSelection.selected {
 		modelIDs[i] = o.chatModels[idx].ID
 	}
 
-	o.mode = settingsEditorModeSaving
+	o.mode = configEditorModeSaving
 	o.savingLabel = "Saving agent models…"
 	backend := o.backend
 	return func() tea.Msg {
 		agents, err := backend.ListAgents(1, 100)
 		if err != nil {
-			return settingsEditorAgentModelsSavedMsg{err: err}
+			return configEditorAgentModelsSavedMsg{err: err}
 		}
 		if agent := findDefaultAgent(agents.Data); agent != nil {
 			err = backend.UpdateAgent(agent.ID, &models.UpdateAgentDto{ModelIDs: &modelIDs})
@@ -401,30 +401,30 @@ func (o *settingsEditorOverlay) saveAgentModels() tea.Cmd {
 				ModelIDs:  modelIDs,
 			})
 		}
-		return settingsEditorAgentModelsSavedMsg{modelIDs: modelIDs, err: err}
+		return configEditorAgentModelsSavedMsg{modelIDs: modelIDs, err: err}
 	}
 }
 
-func (o *settingsEditorOverlay) saveEmbeddingModel(modelID uuid.UUID) tea.Cmd {
-	o.mode = settingsEditorModeSaving
+func (o *configEditorOverlay) saveEmbeddingModel(modelID uuid.UUID) tea.Cmd {
+	o.mode = configEditorModeSaving
 	o.savingLabel = "Saving embedding model…"
 	backend := o.backend
 	return func() tea.Msg {
-		updated, err := backend.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &modelID})
-		return settingsEditorSaveMsg{settings: updated, err: err, message: "Active embedding model updated"}
+		updated, err := backend.UpdateSystemConfig(&models.UpdateSystemConfigDto{EmbeddingModelID: &modelID})
+		return configEditorSaveMsg{config: updated, err: err, message: "Active embedding model updated"}
 	}
 }
 
-func (o *settingsEditorOverlay) loadModelData() tea.Cmd {
+func (o *configEditorOverlay) loadModelData() tea.Cmd {
 	backend := o.backend
 	return func() tea.Msg {
 		modelResult, err := backend.ListModels(1, 500)
 		if err != nil {
-			return settingsEditorModelDataMsg{err: fmt.Errorf("failed to list models: %w", err)}
+			return configEditorModelDataMsg{err: fmt.Errorf("failed to list models: %w", err)}
 		}
 		agentResult, err := backend.ListAgents(1, 100)
 		if err != nil {
-			return settingsEditorModelDataMsg{err: fmt.Errorf("failed to list agents: %w", err)}
+			return configEditorModelDataMsg{err: fmt.Errorf("failed to list agents: %w", err)}
 		}
 
 		var chatModels []models.ModelDto
@@ -448,7 +448,7 @@ func (o *settingsEditorOverlay) loadModelData() tea.Cmd {
 			}
 		}
 
-		return settingsEditorModelDataMsg{
+		return configEditorModelDataMsg{
 			chatModels:           chatModels,
 			embeddingModels:      embeddingModels,
 			currentAgentModelIDs: currentAgentModelIDs,
@@ -456,11 +456,11 @@ func (o *settingsEditorOverlay) loadModelData() tea.Cmd {
 	}
 }
 
-func (o *settingsEditorOverlay) providerConfigured(provider models.WebSearchProvider) bool {
-	if o.settings == nil {
+func (o *configEditorOverlay) providerConfigured(provider models.WebSearchProvider) bool {
+	if o.config == nil {
 		return false
 	}
-	for _, configured := range o.settings.ConfiguredWebSearchProviders {
+	for _, configured := range o.config.ConfiguredWebSearchProviders {
 		if configured == provider {
 			return true
 		}
@@ -468,13 +468,13 @@ func (o *settingsEditorOverlay) providerConfigured(provider models.WebSearchProv
 	return false
 }
 
-func (o *settingsEditorOverlay) syncSelection() {
-	if o.settings == nil {
+func (o *configEditorOverlay) syncSelection() {
+	if o.config == nil {
 		return
 	}
 	cursor := 0
 	for i, provider := range webSearchProviders {
-		if provider == o.settings.WebSearchProvider {
+		if provider == o.config.WebSearchProvider {
 			cursor = i
 			break
 		}
@@ -482,7 +482,7 @@ func (o *settingsEditorOverlay) syncSelection() {
 	o.selection = o.selection.withCursor(cursor)
 }
 
-func (o *settingsEditorOverlay) syncModelSelections() {
+func (o *configEditorOverlay) syncModelSelections() {
 	defaultAgentIndices := make([]int, 0, len(o.currentAgentModelIDs))
 	idToIdx := make(map[uuid.UUID]int, len(o.chatModels))
 	for i, model := range o.chatModels {
@@ -496,9 +496,9 @@ func (o *settingsEditorOverlay) syncModelSelections() {
 	o.agentSelection = newSelectionModel(max(0, len(o.chatModels)-1)).withMultiSelect(defaultAgentIndices, wizMaxModels)
 
 	embedCursor := 0
-	if o.settings != nil && o.settings.EmbeddingModelID != nil {
+	if o.config != nil && o.config.EmbeddingModelID != nil {
 		for i, model := range o.embeddingModels {
-			if model.ID == *o.settings.EmbeddingModelID {
+			if model.ID == *o.config.EmbeddingModelID {
 				embedCursor = i
 				break
 			}
@@ -507,24 +507,24 @@ func (o *settingsEditorOverlay) syncModelSelections() {
 	o.embeddingSelection = newSelectionModel(max(0, len(o.embeddingModels)-1)).withCursor(embedCursor)
 }
 
-func (o *settingsEditorOverlay) render(width, _ int) string {
+func (o *configEditorOverlay) render(width, _ int) string {
 	var buf strings.Builder
 	sep := max(min(56, width-4), 10)
-	fmt.Fprintf(&buf, "\n  %s\n", styleBold.Render("System Settings"))
+	fmt.Fprintf(&buf, "\n  %s\n", styleBold.Render("System Config"))
 	fmt.Fprintf(&buf, "  %s\n\n", styleGray.Render(strings.Repeat("─", sep)))
 
 	o.renderSelectBlocks(&buf)
 
 	switch o.mode {
-	case settingsEditorModeAPIKeyInput, settingsEditorModeFirecrawlURLInput:
+	case configEditorModeAPIKeyInput, configEditorModeFirecrawlURLInput:
 		fmt.Fprintf(&buf, "\n%s\n", o.input.Render())
-	case settingsEditorModeAgentModelsSelect:
+	case configEditorModeAgentModelsSelect:
 		o.renderAgentModelEditor(&buf)
-	case settingsEditorModeEmbeddingModelSelect:
+	case configEditorModeEmbeddingModelSelect:
 		o.renderEmbeddingModelEditor(&buf)
-	case settingsEditorModeEmbeddingConfirm:
+	case configEditorModeEmbeddingConfirm:
 		o.renderEmbeddingConfirm(&buf)
-	case settingsEditorModeSaving:
+	case configEditorModeSaving:
 		fmt.Fprintf(&buf, "\n  %s\n", styleGray.Render(o.savingLabel))
 	}
 
@@ -536,18 +536,18 @@ func (o *settingsEditorOverlay) render(width, _ int) string {
 	return buf.String()
 }
 
-func (o *settingsEditorOverlay) renderSelectBlocks(buf *strings.Builder) {
+func (o *configEditorOverlay) renderSelectBlocks(buf *strings.Builder) {
 	fmt.Fprintf(buf, "  %s\n", styleBold.Render("Web Search"))
 	fmt.Fprintf(buf, "  %s\n\n", styleGray.Render("Space sets the primary provider. Enter configures the current provider."))
 
 	for i, provider := range webSearchProviders {
 		cursor := "  "
-		if i == o.selection.pos && o.mode == settingsEditorModeSelect {
+		if i == o.selection.pos && o.mode == configEditorModeSelect {
 			cursor = styleCyan.Render("❯") + " "
 		}
 
 		status := styleGray.Render("○")
-		if provider == o.settings.WebSearchProvider && o.providerConfigured(provider) {
+		if provider == o.config.WebSearchProvider && o.providerConfigured(provider) {
 			status = styleYellow.Render("★")
 		} else if o.providerConfigured(provider) {
 			status = styleGreen.Render("✓")
@@ -563,19 +563,19 @@ func (o *settingsEditorOverlay) renderSelectBlocks(buf *strings.Builder) {
 		detail := styleGray.Render("not configured")
 		switch provider {
 		case models.WebSearchProviderTavily:
-			if o.settings != nil && o.settings.TavilyAPIKey != "" {
-				detail = styleGreen.Render(o.settings.TavilyAPIKey)
+			if o.config != nil && o.config.TavilyAPIKey != "" {
+				detail = styleGreen.Render(o.config.TavilyAPIKey)
 			}
 		case models.WebSearchProviderBrave:
-			if o.settings != nil && o.settings.BraveAPIKey != "" {
-				detail = styleGreen.Render(o.settings.BraveAPIKey)
+			if o.config != nil && o.config.BraveAPIKey != "" {
+				detail = styleGreen.Render(o.config.BraveAPIKey)
 			}
 		case models.WebSearchProviderFirecrawl:
-			if o.settings != nil && o.settings.FirecrawlAPIKey != "" {
-				if o.settings.FirecrawlBaseURL != "" {
-					detail = styleGreen.Render(o.settings.FirecrawlAPIKey) + styleGray.Render("  "+o.settings.FirecrawlBaseURL)
+			if o.config != nil && o.config.FirecrawlAPIKey != "" {
+				if o.config.FirecrawlBaseURL != "" {
+					detail = styleGreen.Render(o.config.FirecrawlAPIKey) + styleGray.Render("  "+o.config.FirecrawlBaseURL)
 				} else {
-					detail = styleGreen.Render(o.settings.FirecrawlAPIKey)
+					detail = styleGreen.Render(o.config.FirecrawlAPIKey)
 				}
 			}
 		}
@@ -584,13 +584,13 @@ func (o *settingsEditorOverlay) renderSelectBlocks(buf *strings.Builder) {
 	}
 
 	fmt.Fprintf(buf, "\n  %s\n", styleBold.Render("Agent Models"))
-	fmt.Fprintf(buf, "  %s%s\n", o.blockCursor(settingsRowAgentModels), o.agentModelsSummary())
+	fmt.Fprintf(buf, "  %s%s\n", o.blockCursor(configRowAgentModels), o.agentModelsSummary())
 
 	fmt.Fprintf(buf, "\n  %s\n", styleBold.Render("Embedding Model"))
-	fmt.Fprintf(buf, "  %s%s\n", o.blockCursor(settingsRowEmbedding), o.embeddingModelSummary())
+	fmt.Fprintf(buf, "  %s%s\n", o.blockCursor(configRowEmbedding), o.embeddingModelSummary())
 }
 
-func (o *settingsEditorOverlay) renderAgentModelEditor(buf *strings.Builder) {
+func (o *configEditorOverlay) renderAgentModelEditor(buf *strings.Builder) {
 	fmt.Fprintf(buf, "\n  %s\n", styleBold.Render("Select Agent Models"))
 	for i, model := range o.chatModels {
 		cursor := "  "
@@ -614,7 +614,7 @@ func (o *settingsEditorOverlay) renderAgentModelEditor(buf *strings.Builder) {
 	}
 }
 
-func (o *settingsEditorOverlay) renderEmbeddingModelEditor(buf *strings.Builder) {
+func (o *configEditorOverlay) renderEmbeddingModelEditor(buf *strings.Builder) {
 	fmt.Fprintf(buf, "\n  %s\n", styleBold.Render("Select Embedding Model"))
 	for i, model := range o.embeddingModels {
 		cursor := "  "
@@ -622,7 +622,7 @@ func (o *settingsEditorOverlay) renderEmbeddingModelEditor(buf *strings.Builder)
 			cursor = styleCyan.Render("❯") + " "
 		}
 		status := styleGray.Render("○")
-		if o.settings.EmbeddingModelID != nil && model.ID == *o.settings.EmbeddingModelID {
+		if o.config.EmbeddingModelID != nil && model.ID == *o.config.EmbeddingModelID {
 			status = styleGreen.Render("✓")
 		}
 		name := modelDisplayName(model)
@@ -635,7 +635,7 @@ func (o *settingsEditorOverlay) renderEmbeddingModelEditor(buf *strings.Builder)
 	}
 }
 
-func (o *settingsEditorOverlay) renderEmbeddingConfirm(buf *strings.Builder) {
+func (o *configEditorOverlay) renderEmbeddingConfirm(buf *strings.Builder) {
 	if o.pendingEmbeddingModel == nil {
 		return
 	}
@@ -644,14 +644,14 @@ func (o *settingsEditorOverlay) renderEmbeddingConfirm(buf *strings.Builder) {
 	fmt.Fprintf(buf, "  %s %s\n", styleYellow.Render("?"), styleWhite.Render("Confirm switch to "+modelDisplayName(*o.pendingEmbeddingModel)+"?"))
 }
 
-func (o *settingsEditorOverlay) blockCursor(row int) string {
-	if o.mode == settingsEditorModeSelect && o.selection.pos == row {
+func (o *configEditorOverlay) blockCursor(row int) string {
+	if o.mode == configEditorModeSelect && o.selection.pos == row {
 		return styleCyan.Render("❯") + " "
 	}
 	return "  "
 }
 
-func (o *settingsEditorOverlay) agentModelsSummary() string {
+func (o *configEditorOverlay) agentModelsSummary() string {
 	if !o.modelDataLoaded {
 		return styleGray.Render("loading...")
 	}
@@ -681,46 +681,46 @@ func (o *settingsEditorOverlay) agentModelsSummary() string {
 	return styleYellow.Render("★ ") + styleWhite.Render(labels[0]) + styleGray.Render(fmt.Sprintf("  + %d fallback(s)", len(labels)-1))
 }
 
-func (o *settingsEditorOverlay) embeddingModelSummary() string {
+func (o *configEditorOverlay) embeddingModelSummary() string {
 	if !o.modelDataLoaded {
 		return styleGray.Render("loading...")
 	}
 	if len(o.embeddingModels) == 0 {
 		return styleGray.Render("no configured embedding models")
 	}
-	if o.settings == nil || o.settings.EmbeddingModelID == nil {
+	if o.config == nil || o.config.EmbeddingModelID == nil {
 		return styleGray.Render("not set")
 	}
 	for _, model := range o.embeddingModels {
-		if model.ID == *o.settings.EmbeddingModelID {
+		if model.ID == *o.config.EmbeddingModelID {
 			return styleGreen.Render(modelDisplayName(model))
 		}
 	}
 	return styleGray.Render("not set")
 }
 
-func (o *settingsEditorOverlay) helpLine() string {
+func (o *configEditorOverlay) helpLine() string {
 	switch o.mode {
-	case settingsEditorModeSelect:
+	case configEditorModeSelect:
 		switch o.selection.pos {
-		case settingsRowAgentModels:
+		case configRowAgentModels:
 			return "↑/↓ navigate  ·  Enter edit agent models  ·  Esc close"
-		case settingsRowEmbedding:
+		case configRowEmbedding:
 			return "↑/↓ navigate  ·  Enter edit embedding model  ·  Esc close"
 		default:
 			return "↑/↓ navigate  ·  Space set primary  ·  Enter configure  ·  Esc close"
 		}
-	case settingsEditorModeAPIKeyInput:
+	case configEditorModeAPIKeyInput:
 		return "Enter save API key  ·  Esc cancel"
-	case settingsEditorModeFirecrawlURLInput:
+	case configEditorModeFirecrawlURLInput:
 		return "Enter save Firecrawl config  ·  Esc cancel"
-	case settingsEditorModeAgentModelsSelect:
+	case configEditorModeAgentModelsSelect:
 		return "↑/↓ navigate  ·  Space select  ·  Enter save  ·  Esc cancel"
-	case settingsEditorModeEmbeddingModelSelect:
+	case configEditorModeEmbeddingModelSelect:
 		return "↑/↓ navigate  ·  Enter save  ·  Esc cancel"
-	case settingsEditorModeEmbeddingConfirm:
+	case configEditorModeEmbeddingConfirm:
 		return "Enter confirm switch  ·  Esc cancel"
-	case settingsEditorModeSaving:
+	case configEditorModeSaving:
 		return "Saving..."
 	default:
 		return ""

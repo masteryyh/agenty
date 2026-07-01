@@ -19,9 +19,9 @@ const (
 )
 
 var (
-	DefaultSystemSettingsID = uuid.MustParse("019cf9b7-a1f4-78f8-9110-15bbe177e7bc")
-	Float64Epsilon          = math.Nextafter(1.0, 2.0) - 1.0
-	BlockingPaths           = map[string]struct{}{
+	DefaultSystemConfigID = uuid.MustParse("019cf9b7-a1f4-78f8-9110-15bbe177e7bc")
+	Float64Epsilon        = math.Nextafter(1.0, 2.0) - 1.0
+	BlockingPaths         = map[string]struct{}{
 		"/dev/zero":       {},
 		"/dev/random":     {},
 		"/dev/urandom":    {},

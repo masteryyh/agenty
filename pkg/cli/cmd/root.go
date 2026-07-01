@@ -89,7 +89,7 @@ func init() {
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newProviderCmd())
 	rootCmd.AddCommand(newModelCmd())
-	rootCmd.AddCommand(newSettingsCmd())
+	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newSessionCmd())
 	rootCmd.AddCommand(newMemoryCmd())
 	rootCmd.AddCommand(newSkillCmd())

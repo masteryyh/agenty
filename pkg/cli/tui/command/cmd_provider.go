@@ -127,17 +127,10 @@ func validateProviderListAction(providerList []models.ModelProviderDto) func(act
 			return nil
 		}
 		target := providerList[idx]
-		if !target.IsPreset {
-			return nil
-		}
-		switch action {
-		case ListActionSelect, ListActionEdit:
-			return fmt.Errorf("'%s' is a preset provider and cannot be modified.", target.Name)
-		case ListActionDelete:
+		if target.IsPreset && action == ListActionDelete {
 			return fmt.Errorf("'%s' is a preset provider and cannot be deleted.", target.Name)
-		default:
-			return nil
 		}
+		return nil
 	}
 }
 

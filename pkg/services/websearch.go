@@ -47,31 +47,31 @@ func GetWebSearchService() *WebSearchService {
 }
 
 func (s *WebSearchService) Search(ctx context.Context, query string, limit int) ([]WebSearchResult, error) {
-	settings, err := GetSystemService().getOrCreate(ctx)
+	config, err := GetConfigService().getOrCreate(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get system settings: %w", err)
+		return nil, fmt.Errorf("failed to get system config: %w", err)
 	}
 
-	switch settings.ResolveWebSearchProvider() {
+	switch config.ResolveWebSearchProvider() {
 	case models.WebSearchProviderTavily:
-		return s.searchTavily(ctx, settings.TavilyAPIKey, query, limit)
+		return s.searchTavily(ctx, config.TavilyAPIKey, query, limit)
 	case models.WebSearchProviderBrave:
-		return s.searchBrave(ctx, settings.BraveAPIKey, query, limit)
+		return s.searchBrave(ctx, config.BraveAPIKey, query, limit)
 	case models.WebSearchProviderFirecrawl:
-		return s.searchFirecrawl(ctx, settings.FirecrawlAPIKey, settings.FirecrawlBaseURL, query, limit)
+		return s.searchFirecrawl(ctx, config.FirecrawlAPIKey, config.FirecrawlBaseURL, query, limit)
 	case models.WebSearchProviderDisabled, "":
 		return nil, fmt.Errorf("web search is disabled")
 	default:
-		return nil, fmt.Errorf("unsupported web search provider: %s", settings.WebSearchProvider)
+		return nil, fmt.Errorf("unsupported web search provider: %s", config.WebSearchProvider)
 	}
 }
 
 func (s *WebSearchService) IsEnabled(ctx context.Context) bool {
-	settings, err := GetSystemService().getOrCreate(ctx)
+	config, err := GetConfigService().getOrCreate(ctx)
 	if err != nil {
 		return false
 	}
-	return settings.ResolveWebSearchProvider() != models.WebSearchProviderDisabled
+	return config.ResolveWebSearchProvider() != models.WebSearchProviderDisabled
 }
 
 type tavilyResult struct {

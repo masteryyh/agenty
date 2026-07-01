@@ -32,7 +32,7 @@ const (
 	overlayKindList overlayKind = iota
 	overlayKindMultiSelect
 	overlayKindHuhForm
-	overlayKindSettingsEditor
+	overlayKindConfigEditor
 	overlayKindLogViewer
 )
 
@@ -50,7 +50,7 @@ type overlayRequest struct {
 	huhForm           *huh.Form
 	formValidate      func() error
 	backend           backend.Backend
-	settings          *models.SystemSettingsDto
+	config            *models.SystemConfigDto
 	responseCh        chan overlayResponse
 }
 
@@ -149,13 +149,13 @@ func (b *UIBridge) ShowValidatedHuhForm(form *huh.Form, validate func() error) (
 	}
 }
 
-func (b *UIBridge) ShowSettingsEditor(backend backend.Backend, settings *models.SystemSettingsDto) error {
+func (b *UIBridge) ShowConfigEditor(backend backend.Backend, config *models.SystemConfigDto) error {
 	respCh := make(chan overlayResponse, 1)
 	b.program.Send(overlayRequestMsg{
 		request: overlayRequest{
-			kind:       overlayKindSettingsEditor,
+			kind:       overlayKindConfigEditor,
 			backend:    backend,
-			settings:   settings,
+			config:     config,
 			responseCh: respCh,
 		},
 	})

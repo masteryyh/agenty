@@ -72,8 +72,8 @@ type Backend interface {
 	ConnectMCPServer(serverID uuid.UUID) error
 	DisconnectMCPServer(serverID uuid.UUID) error
 
-	GetSystemSettings() (*models.SystemSettingsDto, error)
-	UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error)
+	GetSystemConfig() (*models.SystemConfigDto, error)
+	UpdateSystemConfig(dto *models.UpdateSystemConfigDto) (*models.SystemConfigDto, error)
 
 	ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error)
 

@@ -191,7 +191,7 @@ func (s *SearchService) executeWebSpecs(ctx context.Context, specs []models.Sear
 			Results:     []models.WebSearchChannelResult{},
 			QueriesUsed: map[string]string{},
 			Quality:     "error",
-			Message:     "Web search is not configured. Please add a web search API key in system settings.",
+			Message:     "Web search is not configured. Please add a web search API key in system config.",
 		}, nil
 	}
 

@@ -195,7 +195,7 @@ func runInit(cmd *cobra.Command, opts initOptions) error {
 		if !modelConfigured(*embeddingModel) {
 			return withExitCode(fmt.Errorf("embedding model %q is not configured because its provider API key is missing", modelDisplayName(*embeddingModel)), 2)
 		}
-		if _, err := runtime.Backend.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &embeddingModel.ID}); err != nil {
+		if _, err := runtime.Backend.UpdateSystemConfig(&models.UpdateSystemConfigDto{EmbeddingModelID: &embeddingModel.ID}); err != nil {
 			return err
 		}
 		embeddingDisplayName = modelDisplayName(*embeddingModel)
@@ -506,30 +506,30 @@ func configureInitWebSearch(b backend.Backend, opts initOptions, resolvedKey str
 		return "", withExitCode(fmt.Errorf("unsupported web search provider: %s", opts.webSearchProvider), 2)
 	}
 
-	settings, err := b.GetSystemSettings()
+	config, err := b.GetSystemConfig()
 	if err != nil {
 		return "", err
 	}
 
-	dto := &models.UpdateSystemSettingsDto{WebSearchProvider: &provider}
+	dto := &models.UpdateSystemConfigDto{WebSearchProvider: &provider}
 	switch provider {
 	case models.WebSearchProviderDisabled:
 	case models.WebSearchProviderTavily:
-		if resolvedKey == "" && !webSearchProviderConfigured(settings, provider) {
+		if resolvedKey == "" && !webSearchProviderConfigured(config, provider) {
 			return "", withExitCode(fmt.Errorf("web search provider %s requires --web-search-api-key or --web-search-api-key-env", provider), 2)
 		}
 		if resolvedKey != "" {
 			dto.TavilyAPIKey = &resolvedKey
 		}
 	case models.WebSearchProviderBrave:
-		if resolvedKey == "" && !webSearchProviderConfigured(settings, provider) {
+		if resolvedKey == "" && !webSearchProviderConfigured(config, provider) {
 			return "", withExitCode(fmt.Errorf("web search provider %s requires --web-search-api-key or --web-search-api-key-env", provider), 2)
 		}
 		if resolvedKey != "" {
 			dto.BraveAPIKey = &resolvedKey
 		}
 	case models.WebSearchProviderFirecrawl:
-		if resolvedKey == "" && !webSearchProviderConfigured(settings, provider) {
+		if resolvedKey == "" && !webSearchProviderConfigured(config, provider) {
 			return "", withExitCode(fmt.Errorf("web search provider %s requires --web-search-api-key or --web-search-api-key-env", provider), 2)
 		}
 		if resolvedKey != "" {
@@ -540,23 +540,23 @@ func configureInitWebSearch(b backend.Backend, opts initOptions, resolvedKey str
 		}
 	}
 
-	if _, err := b.UpdateSystemSettings(dto); err != nil {
+	if _, err := b.UpdateSystemConfig(dto); err != nil {
 		return "", err
 	}
 	return string(provider), nil
 }
 
-func webSearchProviderConfigured(settings *models.SystemSettingsDto, provider models.WebSearchProvider) bool {
-	if settings == nil {
+func webSearchProviderConfigured(config *models.SystemConfigDto, provider models.WebSearchProvider) bool {
+	if config == nil {
 		return false
 	}
 	switch provider {
 	case models.WebSearchProviderTavily:
-		return settings.TavilyAPIKey != ""
+		return config.TavilyAPIKey != ""
 	case models.WebSearchProviderBrave:
-		return settings.BraveAPIKey != ""
+		return config.BraveAPIKey != ""
 	case models.WebSearchProviderFirecrawl:
-		return settings.FirecrawlAPIKey != ""
+		return config.FirecrawlAPIKey != ""
 	default:
 		return false
 	}
