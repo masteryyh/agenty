@@ -25,6 +25,8 @@ import (
 	"github.com/masteryyh/agenty/pkg/customerrors"
 )
 
+const deepSeekMaxTokensDefault = 393216
+
 type DeepSeekProvider struct{}
 
 func NewDeepSeekProvider() *DeepSeekProvider {
@@ -45,13 +47,10 @@ func deepSeekEffortFromLevel(level string) string {
 func (p *DeepSeekProvider) buildMessageParams(req *ChatRequest) anthropic.MessageNewParams {
 	systemPrompts, messages := buildAnthropicMessages(req.Messages)
 	params := anthropic.MessageNewParams{
-		Model:    anthropic.Model(req.Model),
-		System:   systemPrompts,
-		Messages: messages,
-	}
-
-	if req.MaxTokens > 0 {
-		params.MaxTokens = req.MaxTokens
+		Model:     anthropic.Model(req.Model),
+		System:    systemPrompts,
+		Messages:  messages,
+		MaxTokens: deepSeekMaxTokensDefault,
 	}
 
 	if len(req.Tools) > 0 {
