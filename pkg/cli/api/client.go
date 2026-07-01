@@ -351,8 +351,8 @@ func (c *Client) DisconnectMCPServer(serverID uuid.UUID) error {
 	return err
 }
 
-func (c *Client) GetSystemSettings() (*models.SystemSettingsDto, error) {
-	return doRequest[models.SystemSettingsDto](c, "GET", "/api/v1/system/settings", nil)
+func (c *Client) GetSystemConfig() (*models.SystemConfigDto, error) {
+	return doRequest[models.SystemConfigDto](c, "GET", "/api/v1/system/config", nil)
 }
 
 func (c *Client) GetSystemVersion() (*models.VersionDto, error) {
@@ -361,12 +361,12 @@ func (c *Client) GetSystemVersion() (*models.VersionDto, error) {
 
 func (c *Client) SetSystemInitialized() error {
 	initialized := true
-	_, err := doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", &models.UpdateSystemSettingsDto{Initialized: &initialized})
+	_, err := doRequest[models.SystemConfigDto](c, "PUT", "/api/v1/system/config", &models.UpdateSystemConfigDto{Initialized: &initialized})
 	return err
 }
 
-func (c *Client) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
-	return doRequest[models.SystemSettingsDto](c, "PUT", "/api/v1/system/settings", dto)
+func (c *Client) UpdateSystemConfig(dto *models.UpdateSystemConfigDto) (*models.SystemConfigDto, error) {
+	return doRequest[models.SystemConfigDto](c, "PUT", "/api/v1/system/config", dto)
 }
 
 func (c *Client) ListMemories(agentID uuid.UUID) (*[]models.KnowledgeItemSummaryDto, error) {

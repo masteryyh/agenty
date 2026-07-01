@@ -128,7 +128,7 @@ const (
 Available channels:
 - "knowledge_base": Searches all knowledge base categories (llm_memory, session_memory, user_document) using hybrid vector + BM25 + keyword retrieval.
 - "workspace_files": Searches file names and file contents under the current session cwd. This channel is only available when cwd is set; paths are constrained to cwd.
-- "web_search": Searches the internet via the configured provider (Brave / Tavily / Firecrawl). Only available when a web search API key is configured in system settings.
+- "web_search": Searches the internet via the configured provider (Brave / Tavily / Firecrawl). Only available when a web search API key is configured in system config.
 
 Query format guidance per channel and strategy:
 - knowledge_base + semantic (vector): Natural language question, e.g., "How did Google perform in Q3 2025?"
@@ -205,7 +205,7 @@ Rules:
 - Organize the summary into exactly three sections: completed task goals; key methods used and key decisions made; unfinished task goals.
 - Each section must use markdown unordered list items only, with no prose outside the lists.
 - Include files inspected or changed, major operations, unresolved tasks, constraints, and user preferences in the most relevant section.
-- Do not modify files, memories, todos, settings, providers, models, agents, MCP servers, or other persistent state while compacting.
+- Do not modify files, memories, todos, config, providers, models, agents, MCP servers, or other persistent state while compacting.
 - Do not include temporary-file implementation details.
 - Output only the summary text.`
 )

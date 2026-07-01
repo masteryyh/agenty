@@ -31,7 +31,7 @@ const (
 	WebSearchProviderFirecrawl WebSearchProvider = "firecrawl"
 )
 
-type SystemSettings struct {
+type SystemConfig struct {
 	ID                              uuid.UUID
 	Initialized                     bool
 	EmbeddingModelID                *uuid.UUID
@@ -46,12 +46,12 @@ type SystemSettings struct {
 	UpdatedAt                       time.Time
 }
 
-func (SystemSettings) TableName() string {
+func (SystemConfig) TableName() string {
 	return "system_settings"
 }
 
-func (s *SystemSettings) ToDto() *SystemSettingsDto {
-	return &SystemSettingsDto{
+func (s *SystemConfig) ToDto() *SystemConfigDto {
+	return &SystemConfigDto{
 		Initialized:                     s.Initialized,
 		EmbeddingModelID:                s.EmbeddingModelID,
 		ContextCompressionModelID:       s.ContextCompressionModelID,
@@ -65,7 +65,7 @@ func (s *SystemSettings) ToDto() *SystemSettingsDto {
 	}
 }
 
-func (s *SystemSettings) ConfiguredWebSearchProviders() []WebSearchProvider {
+func (s *SystemConfig) ConfiguredWebSearchProviders() []WebSearchProvider {
 	if s == nil {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (s *SystemSettings) ConfiguredWebSearchProviders() []WebSearchProvider {
 	return providers
 }
 
-func (s *SystemSettings) IsWebSearchProviderConfigured(provider WebSearchProvider) bool {
+func (s *SystemConfig) IsWebSearchProviderConfigured(provider WebSearchProvider) bool {
 	if s == nil {
 		return false
 	}
@@ -100,7 +100,7 @@ func (s *SystemSettings) IsWebSearchProviderConfigured(provider WebSearchProvide
 	}
 }
 
-func (s *SystemSettings) ResolveWebSearchProvider() WebSearchProvider {
+func (s *SystemConfig) ResolveWebSearchProvider() WebSearchProvider {
 	if s == nil {
 		return WebSearchProviderDisabled
 	}
@@ -126,7 +126,7 @@ func censorAPIKey(key string) string {
 	return key[:4] + "****" + key[len(key)-4:]
 }
 
-type SystemSettingsDto struct {
+type SystemConfigDto struct {
 	Initialized                     bool                `json:"initialized"`
 	EmbeddingModelID                *uuid.UUID          `json:"embeddingModelId,omitempty"`
 	ContextCompressionModelID       *uuid.UUID          `json:"contextCompressionModelId,omitempty"`
@@ -139,7 +139,7 @@ type SystemSettingsDto struct {
 	FirecrawlBaseURL                string              `json:"firecrawlBaseUrl,omitempty"`
 }
 
-type UpdateSystemSettingsDto struct {
+type UpdateSystemConfigDto struct {
 	Initialized               *bool              `json:"initialized" binding:"omitempty"`
 	EmbeddingModelID          *uuid.UUID         `json:"embeddingModelId" binding:"omitempty"`
 	ContextCompressionModelID *uuid.UUID         `json:"contextCompressionModelId" binding:"omitempty"`

@@ -220,36 +220,36 @@ func newModelCmd() *cobra.Command {
 	return cmd
 }
 
-func newSettingsCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "settings", Short: "Inspect system settings"}
+func newConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "config", Short: "Inspect system config"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get",
-		Short: "Show system settings",
+		Short: "Show system config",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWithRuntime(cmd, false, false, func(runtime *Runtime) error {
-				settings, err := runtime.Backend.GetSystemSettings()
+				config, err := runtime.Backend.GetSystemConfig()
 				if err != nil {
 					return err
 				}
 				if outputJSON {
-					return writeJSON(cmd, settings)
+					return writeJSON(cmd, config)
 				}
-				configured := make([]string, 0, len(settings.ConfiguredWebSearchProviders))
-				for _, provider := range settings.ConfiguredWebSearchProviders {
+				configured := make([]string, 0, len(config.ConfiguredWebSearchProviders))
+				for _, provider := range config.ConfiguredWebSearchProviders {
 					configured = append(configured, string(provider))
 				}
 				rows := [][2]string{
-					{"Initialized", strconv.FormatBool(settings.Initialized)},
-					{"Embedding model ID", formatUUIDPointer(settings.EmbeddingModelID)},
-					{"Context compression model ID", formatUUIDPointer(settings.ContextCompressionModelID)},
-					{"Web search provider", string(settings.WebSearchProvider)},
+					{"Initialized", strconv.FormatBool(config.Initialized)},
+					{"Embedding model ID", formatUUIDPointer(config.EmbeddingModelID)},
+					{"Context compression model ID", formatUUIDPointer(config.ContextCompressionModelID)},
+					{"Web search provider", string(config.WebSearchProvider)},
 					{"Configured web search providers", strings.Join(configured, ", ")},
-					{"Last configured web search provider", string(settings.LastConfiguredWebSearchProvider)},
-					{"Brave API key", settings.BraveAPIKey},
-					{"Tavily API key", settings.TavilyAPIKey},
-					{"Firecrawl API key", settings.FirecrawlAPIKey},
-					{"Firecrawl base URL", settings.FirecrawlBaseURL},
+					{"Last configured web search provider", string(config.LastConfiguredWebSearchProvider)},
+					{"Brave API key", config.BraveAPIKey},
+					{"Tavily API key", config.TavilyAPIKey},
+					{"Firecrawl API key", config.FirecrawlAPIKey},
+					{"Firecrawl base URL", config.FirecrawlBaseURL},
 				}
 				return writeKeyValues(cmd, rows)
 			})

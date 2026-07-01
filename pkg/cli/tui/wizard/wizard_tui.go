@@ -40,11 +40,11 @@ func Run(b backend.Backend) error {
 		return fmt.Errorf("failed to list providers: %w", err)
 	}
 
-	settings, _ := b.GetSystemSettings()
+	config, _ := b.GetSystemConfig()
 	theme.InitTheme(theme.DetectDarkBackground())
 	refreshStyles()
 
-	m := newWizardModel(b, providers.Data, settings)
+	m := newWizardModel(b, providers.Data, config)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {

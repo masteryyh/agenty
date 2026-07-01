@@ -357,7 +357,7 @@ func doUpdateModel(b backend.Backend, bridge Bridge, target models.ModelDto) err
 }
 
 func offerSetActiveEmbeddingModel(b backend.Backend, bridge Bridge, modelID uuid.UUID) error {
-	setActive, err := bridge.ShowConfirm("Set as active embedding model in system settings?")
+	setActive, err := bridge.ShowConfirm("Set as active embedding model in system config?")
 	if err != nil {
 		return err
 	}
@@ -365,13 +365,13 @@ func offerSetActiveEmbeddingModel(b backend.Backend, bridge Bridge, modelID uuid
 		return nil
 	}
 
-	settings, err := b.GetSystemSettings()
+	config, err := b.GetSystemConfig()
 	if err != nil {
-		bridge.Warning("Failed to get system settings: %v", err)
+		bridge.Warning("Failed to get system config: %v", err)
 		return nil
 	}
 
-	if settings.EmbeddingModelID != nil && *settings.EmbeddingModelID != modelID {
+	if config.EmbeddingModelID != nil && *config.EmbeddingModelID != modelID {
 		bridge.Warning("Switching the embedding model will trigger re-generation of ALL existing embedding data in the background. This may take time and incur API costs.")
 		confirmed, err := bridge.ShowConfirm("Proceed with switching the active embedding model?")
 		if err != nil {
@@ -382,7 +382,7 @@ func offerSetActiveEmbeddingModel(b backend.Backend, bridge Bridge, modelID uuid
 		}
 	}
 
-	if _, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &modelID}); err != nil {
+	if _, err := b.UpdateSystemConfig(&models.UpdateSystemConfigDto{EmbeddingModelID: &modelID}); err != nil {
 		bridge.Warning("Failed to set active embedding model: %v", err)
 		return nil
 	}

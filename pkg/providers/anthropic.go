@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/bytedance/sonic"
 	"github.com/masteryyh/agenty/pkg/conn"
@@ -45,8 +46,11 @@ func (p *AnthropicProvider) Name() string {
 func (p *AnthropicProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
 	params := p.buildMessageParams(req)
+	return anthropicChat(ctx, client, params)
+}
 
-	resp, err := client.Messages.New(ctx, params)
+func anthropicChat(ctx context.Context, client anthropic.Client, params anthropic.MessageNewParams, opts ...option.RequestOption) (*ChatResponse, error) {
+	resp, err := client.Messages.New(ctx, params, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,12 +206,15 @@ func (p *AnthropicProvider) buildMessageParams(req *ChatRequest) anthropic.Messa
 func (p *AnthropicProvider) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	client := conn.GetAnthropicClient(req.BaseURL, req.APIKey)
 	params := p.buildMessageParams(req)
+	return anthropicStreamChat(ctx, "anthropic-stream", client, params)
+}
 
-	stream := client.Messages.NewStreaming(ctx, params)
+func anthropicStreamChat(ctx context.Context, name string, client anthropic.Client, params anthropic.MessageNewParams, opts ...option.RequestOption) (<-chan StreamEvent, error) {
+	stream := client.Messages.NewStreaming(ctx, params, opts...)
 
 	ch := make(chan StreamEvent, 64)
 
-	safe.GoOnce("anthropic-stream", func() {
+	safe.GoOnce(name, func() {
 		defer close(ch)
 		var currentThinkingContent strings.Builder
 		var currentSignature string

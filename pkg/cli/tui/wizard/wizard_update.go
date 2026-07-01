@@ -286,7 +286,7 @@ func (m wizardModel) handleFirecrawlURLInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		wsKey := m.wsKey
 		b := m.backend
 		provider := models.WebSearchProviderFirecrawl
-		dto := &models.UpdateSystemSettingsDto{
+		dto := &models.UpdateSystemConfigDto{
 			WebSearchProvider: &provider,
 			FirecrawlAPIKey:   &wsKey,
 		}
@@ -296,7 +296,7 @@ func (m wizardModel) handleFirecrawlURLInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		m.step = wizStepSaving
 		m.savingLabel = "Saving Firecrawl config…"
 		return m, func() tea.Msg {
-			_, err := b.UpdateSystemSettings(dto)
+			_, err := b.UpdateSystemConfig(dto)
 			return wizSaveWebSearchMsg{err: err}
 		}
 	default:
@@ -340,7 +340,7 @@ func (m wizardModel) handleEmbedSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.step = wizStepSaving
 		m.savingLabel = "Saving embedding model…"
 		return m, func() tea.Msg {
-			_, err := b.UpdateSystemSettings(&models.UpdateSystemSettingsDto{EmbeddingModelID: &embedID})
+			_, err := b.UpdateSystemConfig(&models.UpdateSystemConfigDto{EmbeddingModelID: &embedID})
 			return wizSaveEmbedModelMsg{err: err}
 		}
 	case tea.KeyEsc:
@@ -351,11 +351,11 @@ func (m wizardModel) handleEmbedSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- Shared action helpers ---
 
-// saveWebSearchProvider saves Tavily or Brave web search settings.
+// saveWebSearchProvider saves Tavily or Brave web search config.
 func (m wizardModel) saveWebSearchProvider(key string) (tea.Model, tea.Cmd) {
 	provider := wizWSProviders[m.wsNav.pos].provider
 	b := m.backend
-	dto := &models.UpdateSystemSettingsDto{WebSearchProvider: &provider}
+	dto := &models.UpdateSystemConfigDto{WebSearchProvider: &provider}
 	switch provider {
 	case models.WebSearchProviderTavily:
 		dto.TavilyAPIKey = &key
@@ -365,7 +365,7 @@ func (m wizardModel) saveWebSearchProvider(key string) (tea.Model, tea.Cmd) {
 	m.step = wizStepSaving
 	m.savingLabel = "Saving web search config…"
 	return m, func() tea.Msg {
-		_, err := b.UpdateSystemSettings(dto)
+		_, err := b.UpdateSystemConfig(dto)
 		return wizSaveWebSearchMsg{err: err}
 	}
 }

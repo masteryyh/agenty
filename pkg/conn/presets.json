@@ -209,6 +209,54 @@
             "baseUrl": "https://api.anthropic.com",
             "models": [
                 {
+                    "id": "019f1cd3-a563-793b-b6fd-52bb8a9331df",
+                    "name": "Claude Fable 5",
+                    "code": "claude-fable-5",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
+                    "anthropicAdaptiveThinking": true
+                },
+                {
+                    "id": "019f1cd3-a563-7b30-98ca-05d9c8f2bde2",
+                    "name": "Claude Opus 4.8",
+                    "code": "claude-opus-4-8",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
+                    "anthropicAdaptiveThinking": true
+                },
+                {
+                    "id": "019f1cd3-a563-70c0-9f3f-27d4f5ee882f",
+                    "name": "Claude Sonnet 5",
+                    "code": "claude-sonnet-5",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false,
+                    "thinkingLevels": [
+                        "low",
+                        "medium",
+                        "high",
+                        "max"
+                    ],
+                    "anthropicAdaptiveThinking": true
+                },
+                {
                     "id": "019dfb37-034c-7da4-90ca-3fb0eaffe897",
                     "name": "Claude Opus 4.7",
                     "code": "claude-opus-4-7",
@@ -303,6 +351,15 @@
             "baseUrl": "https://api.minimaxi.com/anthropic",
             "models": [
                 {
+                    "id": "019f1cd3-a563-71d3-848f-2a2f01c5a9f8",
+                    "name": "Minimax M3",
+                    "code": "MiniMax-M3",
+                    "contextWindow": 1000000,
+                    "thinking": true,
+                    "multiModal": true,
+                    "light": false
+                },
+                {
                     "id": "019d81b2-434f-78d1-8723-658a43c683d0",
                     "name": "Minimax M2.7",
                     "code": "MiniMax-M2.7",
@@ -311,33 +368,6 @@
                     "multiModal": false,
                     "light": false,
                     "defaultModel": true
-                },
-                {
-                    "id": "019d81b2-434f-78d9-8958-431f52c42a46",
-                    "name": "Minimax M2.7 High Speed",
-                    "code": "MiniMax-M2.7-highspeed",
-                    "contextWindow": 204800,
-                    "thinking": true,
-                    "multiModal": false,
-                    "light": true
-                },
-                {
-                    "id": "019d81b2-434f-78e1-af15-7af0f27b1a4e",
-                    "name": "Minimax M2.5",
-                    "code": "MiniMax-M2.5",
-                    "contextWindow": 204800,
-                    "thinking": true,
-                    "multiModal": false,
-                    "light": false
-                },
-                {
-                    "id": "019d81b2-434f-78ed-8e48-1c416ba3a601",
-                    "name": "Minimax M2.5 High Speed",
-                    "code": "MiniMax-M2.5-highspeed",
-                    "contextWindow": 204800,
-                    "thinking": true,
-                    "multiModal": false,
-                    "light": true
                 }
             ]
         },
@@ -348,6 +378,15 @@
             "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
             "models": [
                 {
+                    "id": "019f1cd3-a563-7bea-aab8-f9c6953de1b4",
+                    "name": "GLM-5.2",
+                    "code": "glm-5.2",
+                    "contextWindow": 1024000,
+                    "thinking": true,
+                    "multiModal": false,
+                    "light": false
+                },
+                {
                     "id": "019d81b2-434f-7c77-a252-d2e4c9fb8667",
                     "name": "GLM-5.1",
                     "code": "glm-5.1",
@@ -356,51 +395,6 @@
                     "multiModal": false,
                     "light": false,
                     "defaultModel": true
-                },
-                {
-                    "id": "019d81b2-434f-7c92-9b93-1e7eeea222f5",
-                    "name": "GLM-5V-Turbo",
-                    "code": "glm-5v-turbo",
-                    "contextWindow": 200000,
-                    "thinking": true,
-                    "multiModal": true,
-                    "light": true
-                },
-                {
-                    "id": "019d81b2-434f-7c9e-afad-677d92566544",
-                    "name": "GLM-4.7",
-                    "code": "glm-4.7",
-                    "contextWindow": 200000,
-                    "thinking": true,
-                    "multiModal": false,
-                    "light": false
-                },
-                {
-                    "id": "019d81b2-434f-7caa-b4bb-faa1782e84bf",
-                    "name": "GLM-4.7-FlashX",
-                    "code": "glm-4.7-flashx",
-                    "contextWindow": 200000,
-                    "thinking": true,
-                    "multiModal": false,
-                    "light": true
-                },
-                {
-                    "id": "019d81b2-434f-7cb2-bf4e-a75d42ce3a2d",
-                    "name": "Embedding-3",
-                    "code": "embedding-3",
-                    "contextWindow": 8192,
-                    "multiModal": false,
-                    "light": false,
-                    "embeddingModel": true
-                },
-                {
-                    "id": "019d81b2-434f-7cb5-9797-4634bc836d88",
-                    "name": "Embedding-2",
-                    "code": "embedding-2",
-                    "contextWindow": 8192,
-                    "multiModal": false,
-                    "light": false,
-                    "embeddingModel": true
                 }
             ]
         },
@@ -471,7 +465,7 @@
             "id": "019dfb41-1f8f-7935-bfca-dbf6801d5c17",
             "name": "DeepSeek",
             "type": "deepseek",
-            "baseUrl": "https://api.deepseek.com",
+            "baseUrl": "https://api.deepseek.com/anthropic",
             "models": [
                 {
                     "id": "019dfb48-1f50-7812-954f-1e1e007d1019",

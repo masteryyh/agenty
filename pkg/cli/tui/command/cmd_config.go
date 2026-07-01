@@ -32,46 +32,46 @@ var webSearchProviders = []models.WebSearchProvider{
 	models.WebSearchProviderFirecrawl,
 }
 
-func handleSettingsCmd(b backend.Backend, bridge Bridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
-	settings, err := b.GetSystemSettings()
+func handleConfigCmd(b backend.Backend, bridge Bridge, args []string, sessionID uuid.UUID, modelID uuid.UUID, agentID uuid.UUID, state *ChatState) (CommandResult, error) {
+	config, err := b.GetSystemConfig()
 	if err != nil {
-		return CommandResult{Handled: true}, fmt.Errorf("failed to get settings: %w", err)
+		return CommandResult{Handled: true}, fmt.Errorf("failed to get config: %w", err)
 	}
 
 	if len(args) == 0 {
-		if err := doEditSettings(b, bridge, settings); err != nil && !errors.Is(err, ErrCancelled) {
-			bridge.Error("Failed to update settings: %v", err)
+		if err := doEditConfig(b, bridge, config); err != nil && !errors.Is(err, ErrCancelled) {
+			bridge.Error("Failed to update config: %v", err)
 		}
 		return CommandResult{Handled: true}, nil
 	}
 
 	switch args[0] {
 	case "show":
-		printSettings(bridge, settings)
+		printConfig(bridge, config)
 	case "edit":
-		if err := doEditSettings(b, bridge, settings); err != nil && !errors.Is(err, ErrCancelled) {
-			bridge.Error("Failed to update settings: %v", err)
+		if err := doEditConfig(b, bridge, config); err != nil && !errors.Is(err, ErrCancelled) {
+			bridge.Error("Failed to update config: %v", err)
 		}
 	default:
 		bridge.Warning("Unknown subcommand: %s", args[0])
-		bridge.Info("Usage: /settings [show|edit]")
+		bridge.Info("Usage: /config [show|edit]")
 	}
 
 	return CommandResult{Handled: true}, nil
 }
 
-func printSettings(bridge Bridge, settings *models.SystemSettingsDto) {
+func printConfig(bridge Bridge, config *models.SystemConfigDto) {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(renderSectionHeader("System Settings"))
+	sb.WriteString(renderSectionHeader("System Config"))
 
 	embeddingModel := styleGray.Render("not set")
-	if settings.EmbeddingModelID != nil {
-		embeddingModel = styleCyan.Render(settings.EmbeddingModelID.String())
+	if config.EmbeddingModelID != nil {
+		embeddingModel = styleCyan.Render(config.EmbeddingModelID.String())
 	}
 	compressionModel := styleGray.Render("not set")
-	if settings.ContextCompressionModelID != nil {
-		compressionModel = styleCyan.Render(settings.ContextCompressionModelID.String())
+	if config.ContextCompressionModelID != nil {
+		compressionModel = styleCyan.Render(config.ContextCompressionModelID.String())
 	}
 
 	sb.WriteString(renderKV("Embedding Model", embeddingModel, 24))
@@ -81,11 +81,11 @@ func printSettings(bridge Bridge, settings *models.SystemSettingsDto) {
 	sb.WriteString(renderSectionHeader("Web Search"))
 
 	providerStr := styleGray.Render("disabled")
-	if settings.WebSearchProvider != "" && settings.WebSearchProvider != models.WebSearchProviderDisabled {
-		providerStr = styleGreen.Render(webSearchProviderDisplayName(settings.WebSearchProvider))
+	if config.WebSearchProvider != "" && config.WebSearchProvider != models.WebSearchProviderDisabled {
+		providerStr = styleGreen.Render(webSearchProviderDisplayName(config.WebSearchProvider))
 	}
 	sb.WriteString(renderKV("Provider", providerStr, 24))
-	sb.WriteString(renderKV("Configured", renderConfiguredWebSearchProviders(settings), 24))
+	sb.WriteString(renderKV("Configured", renderConfiguredWebSearchProviders(config), 24))
 
 	writeAPIKeyField := func(label, val string) {
 		display := styleGray.Render("not set")
@@ -95,27 +95,27 @@ func printSettings(bridge Bridge, settings *models.SystemSettingsDto) {
 		sb.WriteString(renderKV(label, display, 24))
 	}
 
-	writeAPIKeyField("Brave API Key", settings.BraveAPIKey)
-	writeAPIKeyField("Tavily API Key", settings.TavilyAPIKey)
-	writeAPIKeyField("Firecrawl API Key", settings.FirecrawlAPIKey)
-	if settings.FirecrawlBaseURL != "" {
-		sb.WriteString(renderKV("Firecrawl Base URL", styleGray.Render(settings.FirecrawlBaseURL), 24))
+	writeAPIKeyField("Brave API Key", config.BraveAPIKey)
+	writeAPIKeyField("Tavily API Key", config.TavilyAPIKey)
+	writeAPIKeyField("Firecrawl API Key", config.FirecrawlAPIKey)
+	if config.FirecrawlBaseURL != "" {
+		sb.WriteString(renderKV("Firecrawl Base URL", styleGray.Render(config.FirecrawlBaseURL), 24))
 	}
 
 	bridge.Print(sb.String())
 }
 
-func doEditSettings(b backend.Backend, bridge Bridge, settings *models.SystemSettingsDto) error {
-	return bridge.ShowSettingsEditor(b, settings)
+func doEditConfig(b backend.Backend, bridge Bridge, config *models.SystemConfigDto) error {
+	return bridge.ShowConfigEditor(b, config)
 }
 
-func renderConfiguredWebSearchProviders(settings *models.SystemSettingsDto) string {
-	if len(settings.ConfiguredWebSearchProviders) == 0 {
+func renderConfiguredWebSearchProviders(config *models.SystemConfigDto) string {
+	if len(config.ConfiguredWebSearchProviders) == 0 {
 		return styleGray.Render("none")
 	}
 
-	names := make([]string, len(settings.ConfiguredWebSearchProviders))
-	for i, provider := range settings.ConfiguredWebSearchProviders {
+	names := make([]string, len(config.ConfiguredWebSearchProviders))
+	for i, provider := range config.ConfiguredWebSearchProviders {
 		names[i] = webSearchProviderDisplayName(provider)
 	}
 	return styleYellow.Render(strings.Join(names, ", "))

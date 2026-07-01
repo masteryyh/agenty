@@ -26,7 +26,7 @@ import (
 )
 
 type SystemRoutes struct {
-	service *services.SystemService
+	service *services.ConfigService
 }
 
 var (
@@ -37,7 +37,7 @@ var (
 func GetSystemRoutes() *SystemRoutes {
 	systemOnce.Do(func() {
 		systemRoutes = &SystemRoutes{
-			service: services.GetSystemService(),
+			service: services.GetConfigService(),
 		}
 	})
 	return systemRoutes
@@ -47,8 +47,8 @@ func (r *SystemRoutes) RegisterRoutes(router *gin.RouterGroup) {
 	systemGroup := router.Group("/system")
 	{
 		systemGroup.GET("/version", r.GetVersion)
-		systemGroup.GET("/settings", r.GetSettings)
-		systemGroup.PUT("/settings", r.UpdateSettings)
+		systemGroup.GET("/config", r.GetConfig)
+		systemGroup.PUT("/config", r.UpdateConfig)
 	}
 }
 
@@ -61,8 +61,8 @@ func (r *SystemRoutes) GetVersion(c *gin.Context) {
 	response.OK(c, dto)
 }
 
-func (r *SystemRoutes) GetSettings(c *gin.Context) {
-	dto, err := r.service.GetSettings(c.Request.Context())
+func (r *SystemRoutes) GetConfig(c *gin.Context) {
+	dto, err := r.service.GetConfig(c.Request.Context())
 	if err != nil {
 		response.Failed(c, err)
 		return
@@ -70,13 +70,13 @@ func (r *SystemRoutes) GetSettings(c *gin.Context) {
 	response.OK(c, dto)
 }
 
-func (r *SystemRoutes) UpdateSettings(c *gin.Context) {
-	var dto models.UpdateSystemSettingsDto
+func (r *SystemRoutes) UpdateConfig(c *gin.Context) {
+	var dto models.UpdateSystemConfigDto
 	if err := c.ShouldBindJSON(&dto); err != nil {
 		response.Failed(c, err)
 		return
 	}
-	result, err := r.service.UpdateSettings(c.Request.Context(), &dto)
+	result, err := r.service.UpdateConfig(c.Request.Context(), &dto)
 	if err != nil {
 		response.Failed(c, err)
 		return

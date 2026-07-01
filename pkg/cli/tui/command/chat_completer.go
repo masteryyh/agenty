@@ -86,9 +86,9 @@ var commands = []Command{
 		}},
 	},
 	{
-		Name:        "/settings",
-		Description: "Edit system settings",
-		Usage:       "/settings [show|edit]",
+		Name:        "/config",
+		Description: "Edit system config",
+		Usage:       "/config [show|edit]",
 		Args: []ArgCompleter{{
 			Placeholder: "show|edit",
 			Completer: func(_ backend.Backend, _ uuid.UUID) []string {

@@ -211,7 +211,7 @@ func (r *RemoteBackend) DisconnectMCPServer(serverID uuid.UUID) error {
 }
 
 func (r *RemoteBackend) IsInitialized() (bool, error) {
-	dto, err := r.client.GetSystemSettings()
+	dto, err := r.client.GetSystemConfig()
 	if err != nil {
 		return false, err
 	}
@@ -222,12 +222,12 @@ func (r *RemoteBackend) SetInitialized() error {
 	return r.client.SetSystemInitialized()
 }
 
-func (r *RemoteBackend) GetSystemSettings() (*models.SystemSettingsDto, error) {
-	return r.client.GetSystemSettings()
+func (r *RemoteBackend) GetSystemConfig() (*models.SystemConfigDto, error) {
+	return r.client.GetSystemConfig()
 }
 
-func (r *RemoteBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
-	return r.client.UpdateSystemSettings(dto)
+func (r *RemoteBackend) UpdateSystemConfig(dto *models.UpdateSystemConfigDto) (*models.SystemConfigDto, error) {
+	return r.client.UpdateSystemConfig(dto)
 }
 
 func (r *RemoteBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error) {

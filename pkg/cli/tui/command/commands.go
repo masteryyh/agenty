@@ -68,7 +68,7 @@ type Bridge interface {
 	ShowListWithCursorAndActions(title string, items []string, hints string, cursor int, validate func(action ListAction, idx int) error, deleteConfirm func(idx int) string, subtitle ...string) (*ListResult, error)
 	ShowHuhForm(form *huh.Form) (bool, error)
 	ShowValidatedHuhForm(form *huh.Form, validate func() error) (bool, error)
-	ShowSettingsEditor(backend backend.Backend, settings *models.SystemSettingsDto) error
+	ShowConfigEditor(backend backend.Backend, config *models.SystemConfigDto) error
 	ShowConfirm(message string) (bool, error)
 	ShowMultiSelect(title string, options []string, defaultIndices []int) ([]int, error)
 	ShowLogViewer()
@@ -204,8 +204,8 @@ func Handler(name string) CommandHandler {
 		return handleGatewayCmd
 	case "/mcp":
 		return handleMCPCmd
-	case "/settings":
-		return handleSettingsCmd
+	case "/config":
+		return handleConfigCmd
 	case "/memory":
 		return handleMemoryCmd
 	case "/cwd":

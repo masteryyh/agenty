@@ -154,7 +154,7 @@ type wizardModel struct {
 	aborted     bool
 }
 
-func newWizardModel(b backend.Backend, providers []models.ModelProviderDto, settings *models.SystemSettingsDto) wizardModel {
+func newWizardModel(b backend.Backend, providers []models.ModelProviderDto, config *models.SystemConfigDto) wizardModel {
 	m := wizardModel{
 		backend:          b,
 		providers:        providers,
@@ -168,24 +168,24 @@ func newWizardModel(b backend.Backend, providers []models.ModelProviderDto, sett
 			m.configuredIDs[p.ID.String()] = true
 		}
 	}
-	if settings != nil {
-		m.wsCurrentProvider = settings.WebSearchProvider
-		if settings.TavilyAPIKey != "" {
-			m.wsConfiguredKeys[string(models.WebSearchProviderTavily)] = settings.TavilyAPIKey
+	if config != nil {
+		m.wsCurrentProvider = config.WebSearchProvider
+		if config.TavilyAPIKey != "" {
+			m.wsConfiguredKeys[string(models.WebSearchProviderTavily)] = config.TavilyAPIKey
 		}
-		if settings.BraveAPIKey != "" {
-			m.wsConfiguredKeys[string(models.WebSearchProviderBrave)] = settings.BraveAPIKey
+		if config.BraveAPIKey != "" {
+			m.wsConfiguredKeys[string(models.WebSearchProviderBrave)] = config.BraveAPIKey
 		}
-		if settings.FirecrawlAPIKey != "" {
-			m.wsConfiguredKeys[string(models.WebSearchProviderFirecrawl)] = settings.FirecrawlAPIKey
+		if config.FirecrawlAPIKey != "" {
+			m.wsConfiguredKeys[string(models.WebSearchProviderFirecrawl)] = config.FirecrawlAPIKey
 		}
 		for i, ws := range wizWSProviders {
-			if ws.provider == settings.WebSearchProvider {
+			if ws.provider == config.WebSearchProvider {
 				m.wsNav.pos = i
 				break
 			}
 		}
-		m.currentEmbedModelID = settings.EmbeddingModelID
+		m.currentEmbedModelID = config.EmbeddingModelID
 	}
 	return m
 }

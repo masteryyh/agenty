@@ -57,16 +57,16 @@ func (s *EmbeddingService) IsEnabled(ctx context.Context) bool {
 }
 
 func (s *EmbeddingService) getEmbeddingConfig(ctx context.Context) (*models.Model, *models.ModelProvider, error) {
-	settings, err := GetSystemService().getOrCreate(ctx)
+	config, err := GetConfigService().getOrCreate(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get system settings: %w", err)
+		return nil, nil, fmt.Errorf("failed to get system config: %w", err)
 	}
-	if settings.EmbeddingModelID == nil {
+	if config.EmbeddingModelID == nil {
 		return nil, nil, fmt.Errorf("embedding model is not configured")
 	}
 
 	model, err := gorm.G[models.Model](s.db).
-		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *settings.EmbeddingModelID).
+		Where("id = ? AND deleted_at IS NULL AND embedding_model IS TRUE", *config.EmbeddingModelID).
 		First(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to find embedding model: %w", err)

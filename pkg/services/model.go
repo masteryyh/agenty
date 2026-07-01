@@ -242,7 +242,7 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 
 		if dto.EmbeddingModel != nil && *dto.EmbeddingModel != model.EmbeddingModel {
 			if !*dto.EmbeddingModel && model.EmbeddingModel {
-				if _, err := gorm.G[models.SystemSettings](tx).
+				if _, err := gorm.G[models.SystemConfig](tx).
 					Where("embedding_model_id = ?", modelID).
 					Update(ctx, "embedding_model_id", gorm.Expr("NULL")); err != nil {
 					return err
@@ -253,7 +253,7 @@ func (s *ModelService) UpdateModel(ctx context.Context, modelID uuid.UUID, dto *
 
 		if dto.ContextCompressionModel != nil && *dto.ContextCompressionModel != model.ContextCompressionModel {
 			if !*dto.ContextCompressionModel && model.ContextCompressionModel {
-				if _, err := gorm.G[models.SystemSettings](tx).
+				if _, err := gorm.G[models.SystemConfig](tx).
 					Where("context_compression_model_id = ?", modelID).
 					Update(ctx, "context_compression_model_id", gorm.Expr("NULL")); err != nil {
 					return err
@@ -496,7 +496,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error
 		}
 
 		if model.EmbeddingModel {
-			if _, err := gorm.G[models.SystemSettings](tx).
+			if _, err := gorm.G[models.SystemConfig](tx).
 				Where("embedding_model_id = ?", modelID).
 				Update(ctx, "embedding_model_id", gorm.Expr("NULL")); err != nil {
 				slog.ErrorContext(ctx, "failed to clear embedding model reference", "error", err, "modelId", modelID)
@@ -505,7 +505,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, modelID uuid.UUID) error
 		}
 
 		if model.ContextCompressionModel {
-			if _, err := gorm.G[models.SystemSettings](tx).
+			if _, err := gorm.G[models.SystemConfig](tx).
 				Where("context_compression_model_id = ?", modelID).
 				Update(ctx, "context_compression_model_id", gorm.Expr("NULL")); err != nil {
 				slog.ErrorContext(ctx, "failed to clear context compression model reference", "error", err, "modelId", modelID)

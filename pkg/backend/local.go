@@ -255,19 +255,19 @@ func (l *LocalBackend) DisconnectMCPServer(serverID uuid.UUID) error {
 }
 
 func (l *LocalBackend) IsInitialized() (bool, error) {
-	return services.GetSystemService().IsInitialized(signal.GetBaseContext())
+	return services.GetConfigService().IsInitialized(signal.GetBaseContext())
 }
 
 func (l *LocalBackend) SetInitialized() error {
-	return services.GetSystemService().SetInitialized(signal.GetBaseContext())
+	return services.GetConfigService().SetInitialized(signal.GetBaseContext())
 }
 
-func (l *LocalBackend) GetSystemSettings() (*models.SystemSettingsDto, error) {
-	return services.GetSystemService().GetSettings(signal.GetBaseContext())
+func (l *LocalBackend) GetSystemConfig() (*models.SystemConfigDto, error) {
+	return services.GetConfigService().GetConfig(signal.GetBaseContext())
 }
 
-func (l *LocalBackend) UpdateSystemSettings(dto *models.UpdateSystemSettingsDto) (*models.SystemSettingsDto, error) {
-	return services.GetSystemService().UpdateSettings(signal.GetBaseContext(), dto)
+func (l *LocalBackend) UpdateSystemConfig(dto *models.UpdateSystemConfigDto) (*models.SystemConfigDto, error) {
+	return services.GetConfigService().UpdateConfig(signal.GetBaseContext(), dto)
 }
 
 func (l *LocalBackend) ListMemories(agentID uuid.UUID) ([]models.KnowledgeItemSummaryDto, error) {

@@ -49,7 +49,7 @@ type WebFetchResponse struct {
 
 type WebFetchService struct {
 	httpClient       *http.Client
-	systemService    *SystemService
+	systemService    *ConfigService
 	tavilyExtractURL string
 	braveContextURL  string
 	firecrawlBaseURL string
@@ -65,7 +65,7 @@ func GetWebFetchService() *WebFetchService {
 	webFetchOnce.Do(func() {
 		webFetchService = &WebFetchService{
 			httpClient:       conn.GetHTTPClient(),
-			systemService:    GetSystemService(),
+			systemService:    GetConfigService(),
 			tavilyExtractURL: defaultTavilyExtractURL,
 			braveContextURL:  defaultBraveLLMContextURL,
 			firecrawlBaseURL: defaultFirecrawlBaseURL,
@@ -83,33 +83,33 @@ func (s *WebFetchService) Fetch(ctx context.Context, rawURL string) (*WebFetchRe
 
 	systemService := s.systemService
 	if systemService == nil {
-		systemService = GetSystemService()
+		systemService = GetConfigService()
 	}
-	settings, err := systemService.getOrCreate(ctx)
+	config, err := systemService.getOrCreate(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get system settings: %w", err)
+		return nil, fmt.Errorf("failed to get system config: %w", err)
 	}
-	return s.fetchWithSettings(ctx, settings, targetURL)
+	return s.fetchWithConfig(ctx, config, targetURL)
 }
 
-func (s *WebFetchService) fetchWithSettings(ctx context.Context, settings *models.SystemSettings, targetURL string) (*WebFetchResponse, error) {
-	switch s.selectProvider(settings) {
+func (s *WebFetchService) fetchWithConfig(ctx context.Context, config *models.SystemConfig, targetURL string) (*WebFetchResponse, error) {
+	switch s.selectProvider(config) {
 	case models.WebSearchProviderTavily:
-		return s.fetchTavily(ctx, settings.TavilyAPIKey, targetURL)
+		return s.fetchTavily(ctx, config.TavilyAPIKey, targetURL)
 	case models.WebSearchProviderFirecrawl:
-		return s.fetchFirecrawl(ctx, settings.FirecrawlAPIKey, settings.FirecrawlBaseURL, targetURL)
+		return s.fetchFirecrawl(ctx, config.FirecrawlAPIKey, config.FirecrawlBaseURL, targetURL)
 	case models.WebSearchProviderBrave:
-		return s.fetchBrave(ctx, settings.BraveAPIKey, targetURL)
+		return s.fetchBrave(ctx, config.BraveAPIKey, targetURL)
 	default:
 		return s.fetchDirect(ctx, targetURL)
 	}
 }
 
-func (s *WebFetchService) selectProvider(settings *models.SystemSettings) models.WebSearchProvider {
-	if settings == nil {
+func (s *WebFetchService) selectProvider(config *models.SystemConfig) models.WebSearchProvider {
+	if config == nil {
 		return models.WebSearchProviderDisabled
 	}
-	return settings.ResolveWebSearchProvider()
+	return config.ResolveWebSearchProvider()
 }
 
 type tavilyExtractResponse struct {
