@@ -169,6 +169,30 @@ export interface VersionDto {
 	version: string;
 }
 
+export interface SystemSettingsDto {
+	initialized: boolean;
+	embeddingModelId?: string;
+	contextCompressionModelId?: string;
+	webSearchProvider: string;
+	configuredWebSearchProviders?: string[];
+	lastConfiguredWebSearchProvider?: string;
+	braveApiKey?: string;
+	tavilyApiKey?: string;
+	firecrawlApiKey?: string;
+	firecrawlBaseUrl?: string;
+}
+
+export interface UpdateSystemSettingsDto {
+	initialized?: boolean;
+	embeddingModelId?: string;
+	contextCompressionModelId?: string;
+	webSearchProvider?: string;
+	braveApiKey?: string;
+	tavilyApiKey?: string;
+	firecrawlApiKey?: string;
+	firecrawlBaseUrl?: string;
+}
+
 export interface GenericResponse<T> {
 	code: number;
 	message: string;

@@ -37,6 +37,14 @@ interface CrudListProps {
 	hints?: string;
 }
 
+const LABEL_W = 24;
+const SUBTITLE_W = 40;
+
+function pad(s: string, w: number): string {
+	if (s.length >= w) return s.slice(0, w - 1) + "…";
+	return s + " ".repeat(w - s.length);
+}
+
 export function CrudList({
 	title,
 	items,
@@ -77,39 +85,59 @@ export function CrudList({
 	});
 
 	return (
-		<Box flexDirection="column" paddingX={2} paddingY={1}>
-			<Box marginBottom={1} gap={1}>
-				<Text color="magenta" bold>
-					{title}
-				</Text>
-				<Text dimColor>· {hints ?? "↑↓ navigate · Enter edit · a add · d delete · Esc back"}</Text>
+		<Box flexDirection="column" flexGrow={1}>
+			<Box marginBottom={1}>
+				<Text color="magenta" bold>{title}</Text>
 			</Box>
 			{items === null ? (
 				<Spinner label="Loading..." />
 			) : items.length === 0 ? (
 				<Text dimColor>No providers yet. Press `a` to add one.</Text>
 			) : (
-				items.map((it, i) => (
-					<Box key={it.id} gap={1}>
-						<Text color={i === cursor ? "cyan" : "gray"}>
-							{i === cursor ? "❯" : " "}
+				<Box flexDirection="column">
+					{/* header row */}
+					<Box>
+						<Text color="gray" dimColor>
+							{"  "}{pad("Name", LABEL_W)}  {pad("Info", SUBTITLE_W)}
 						</Text>
-						<Text color="white" bold={i === cursor}>
-							{it.label}
-						</Text>
-						{it.badge ? (
-							<Text color="yellow" dimColor>
-								[{it.badge}]
-							</Text>
-						) : null}
-						{it.subtitle ? (
-							<Text color="gray" dimColor>
-								{it.subtitle}
-							</Text>
-						) : null}
 					</Box>
-				))
+					{items.map((it, i) => {
+						const selected = i === cursor;
+						const label = pad(it.label, LABEL_W);
+						const info = pad(it.subtitle ?? "", SUBTITLE_W);
+						const badge = it.badge ? ` [${it.badge}]` : "";
+						return (
+							<Box key={it.id}>
+								<Text color={selected ? "cyan" : "gray"}>
+									{selected ? "❯" : " "}
+								</Text>
+								<Text> </Text>
+								<Text
+									color={selected ? "cyan" : "white"}
+									bold={selected}
+								>
+									{label}
+								</Text>
+								<Text>  </Text>
+								<Text
+									color={selected ? "cyan" : "gray"}
+									dimColor={!selected}
+								>
+									{info}
+								</Text>
+								{badge ? (
+									<Text color="yellow" dimColor>{badge}</Text>
+								) : null}
+							</Box>
+						);
+					})}
+				</Box>
 			)}
+			{hints ? (
+				<Box marginTop={1}>
+					<Text dimColor>{hints}</Text>
+				</Box>
+			) : null}
 		</Box>
 	);
 }

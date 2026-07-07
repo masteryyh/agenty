@@ -1,88 +1,107 @@
 # AGENTS.md
 
-This file provides guidance and restrictions for coding agents like Claude Code, Github Copilot and Trae when working with this project.
+## Project Overview
 
-## Project overview
+Agenty is an AI agent application written primarily in Go 1.26. It supports local interactive mode, self-hosted server mode, and remote client mode. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
 
-An AI agent application with a Go-written backend service and a CLI app, still under construction, capable of tool calling, agentic looping and skills usage.
+The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, a tool registry, and a local/remote backend abstraction. The repository also contains a newer TypeScript terminal client in `agenty-cli/`, built with Bun, React, Ink, Zustand, and pnpm.
 
-The backend service can also act as a MCP client to communicate with other MCP servers to extend its capabilities.
+## Project Structure
 
-## Project structure
+- `cmd/`: Go application entrypoint. `cmd/main.go` delegates to `pkg/cli/cmd`.
+- `agenty-cli/`: TypeScript/React Ink terminal UI package.
+  - `src/api/`: HTTP client and API DTOs for the CLI.
+  - `src/commands/`: Slash command registry and parsing.
+  - `src/components/`: Ink UI components.
+  - `src/hooks/`: CLI interaction hooks.
+  - `src/state/`: Zustand application state.
+  - `scripts/`: Bun build scripts.
+- `pkg/backend/`: Backend interface plus local and remote implementations used by clients.
+- `pkg/chat/`: Chat/session orchestration and agentic loop support.
+- `pkg/config/`: Configuration loading and environment override handling.
+- `pkg/conn/`: Database, HTTP, SSE, and connection helpers.
+- `pkg/conn/db/`: Embedded PostgreSQL and SQLite schema SQL.
+- `pkg/consts/`: Shared constants, including long tool descriptions and prompts.
+- `pkg/customerrors/`: Business error definitions.
+- `pkg/gateway/`: Gateway abstraction and provider/channel adapters.
+- `pkg/mcp/`: MCP client/server related integration.
+- `pkg/middleware/`: Gin middleware.
+- `pkg/models/`: GORM models, DTOs, hooks, search and vector types.
+- `pkg/providers/`: Model provider implementations.
+- `pkg/routes/`: Gin route handlers and API route registration.
+- `pkg/services/`: Business logic services.
+- `pkg/skill/`: Product skill parsing/loading logic.
+- `pkg/tools/`: Tool interface, registry, todo manager, and built-in tools.
+- `pkg/utils/`: Shared utilities such as pagination, response helpers, safe goroutines, signal context, logging, and terminal wrapping.
+- `pkg/version/`: Version data.
+- `Makefile`, `package.json`, `pnpm-workspace.yaml`: Root build and workspace orchestration.
 
-- `.agent/skills`: Contains skills that is vital for agents that working with this project.
-- `cmd/`: Contains `main.go` for applications
-- `pkg/`: Core codes and libraries used across the project
-  - `backend/`: Backend interface for both local and remote mode for CLI
-  - `config/`: Configuration management
-  - `cli/`: CLI implementations, including UI and slash commands
-  - `conn/`: Connections and clients
-  - `consts/`: Constants used across the project
-  - `customerrors/`: Custom error definitions
-  - `mcp/`: MCP related implementations
-  - `middleware/`: Middlewares for GIN framework
-  - `models/`: Data models and structures
-  - `routes/`: API routes
-  - `services/`: Business logic and services
-  - `utils/`: Utility functions and helpers
-  - `chat/`: Model provider API callers and ReAct pattern implementations
+Project-local `.agents/skills` instructions are intentionally absent. Product-level skills remain part of Agenty runtime functionality under packages such as `pkg/skill`, `pkg/routes/skill.go`, `pkg/services`, and `pkg/tools/builtin`.
 
-## Core working procedure
+## Runtime Modes
 
-1. **Understand Requirement Thoroughly**: Always make sure you understand the requirements of user. Read codes, documents and ask user for more information if you are not sure about anything. Use `askQuestions` tool to ask user for more details.
+- Local interactive mode runs the terminal UI and backend logic in one process.
+- Server mode runs the Gin HTTP backend for remote clients.
+- Remote client mode connects to a backend through `server.url`.
+- Core logic that crosses client/backend boundaries should work through `pkg/backend` so local and remote paths remain consistent.
 
-2. **Collect Enough Information**: Collect enough information about the project, requirements, third-party libraries and frameworks that about to be used, and any other relevant information. Use tools from tavily and context7 to retrieve latest documents and information.
+## Go Conventions
 
-3. **Make Full Plan**: Make a full plan about how to organize codes and packages, what libraries and frameworks to use, how to implement features, and how to make sure the code is effective, efficient, maintainable and fits well into the overall project. Use `todo` tool to track your todo list.
+- New Go source files use the repository Apache 2.0 license header.
+- Use Go 1.26 syntax and standard Go formatting.
+- Use `any` instead of `interface{}`.
+- Use built-in `min` and `max` for simple comparisons and clamping.
+- Use `strings.SplitSeq` when iterating split strings to avoid unnecessary slice allocation.
+- Use `fmt.Fprintf` with `strings.Builder` for formatted output; avoid `sb.WriteString(fmt.Sprintf(...))` and avoid concatenation inside `WriteString`.
+- Import `github.com/bytedance/sonic` aliased as `json`.
+- API and tool request/response JSON fields use lowerCamelCase tags.
+- I/O-intensive or blocking operations take `context.Context` as the first parameter.
+- Prefer `slog.InfoContext`, `slog.WarnContext`, and `slog.ErrorContext` when a context is available.
+- Background goroutines use `pkg/utils/safe` helpers instead of bare goroutine launches when panic handling or lifecycle control matters.
+- User-facing command labels, prompts, log messages, status text, and errors in repository code are written in English unless localized copy is part of the feature.
 
-4. **Implement Features Carefully**: Implement features carefully according to your plan. Make sure you follow coding standards, conventions and best practices from the project and Go community. Make sure you use components, functions and packages that already exists in the project and libraries whenever possible, do not reinvent the wheel.
+## Service, Route, And Backend Patterns
 
-5. **Review and Optimize**: Always review your code for potential issues, bugs, or improvements before finalizing it. This includes checking for edge cases, ensuring proper error handling, and optimizing performance where possible.
+- Services, routes, registries, and similar global components use `sync.Once` singleton initialization with `GetXxx()` accessors.
+- Service methods attach context to GORM calls with `db.WithContext(ctx)`.
+- Service-layer record-not-found cases map to business errors from `pkg/customerrors`; route handlers pass errors to `response.Failed`.
+- Gin route structs live in `pkg/routes`, expose `RegisterRoutes(*gin.RouterGroup)`, and are wired under `/api/v1` in `pkg/routes/routes.go`.
+- Route handlers use `pkg/utils/response` helpers: `response.OK`, `response.Failed`, and `response.Abort`.
+- Remote HTTP calls use helpers in `pkg/conn` or the shared client from `conn.GetHTTPClient()`.
+- Backend interface changes are implemented for both local and remote backends.
 
-6. **Run Fmts, Builds and Tests**: Always run `gofmt`, `go build`, `go vet` and tests to make sure your code works as expected and does not break anything. Write new tests if necessary to cover new features or edge cases.
+## Database And Search Patterns
 
-## Agent guidelines
+- Do not use GORM `AutoMigrate`; persistent schema lives in embedded SQL files.
+- Static PostgreSQL DDL belongs in `pkg/conn/db/postgres.sql`.
+- Static SQLite DDL belongs in `pkg/conn/db/sqlite.sql`.
+- Persistent model structs stay database-agnostic; database-specific indexes, defaults, and column constraints belong in SQL files.
+- New persistent tables and indexes are added to both PostgreSQL and SQLite schemas unless a feature is backend-specific.
+- GORM `Raw().Rows()` and `Exec()` use `?` placeholders, not `$1`, `$2`, etc.
+- Use `conn.GetDBType()` or a local `usingSQLite()` helper when raw SQL must differ by backend.
+- Use `CURRENT_TIMESTAMP` or `conn.NowExpr()` for cross-backend timestamp expressions.
+- PostgreSQL vector search uses pgvector; SQLite vector search uses sqlite-vector with `models.EmbeddingVector`.
+- PostgreSQL BM25 uses ParadeDB; SQLite BM25-style search uses FTS5 virtual tables and `bm25(...)`.
+- Keyword fallback search should use backend-neutral SQL such as `LOWER(column) LIKE LOWER(?)`.
+- SQLite startup validates FTS5 and sqlite-vector availability rather than silently degrading search features.
 
-When coding agents for this project, please adhere to the following guidelines:
+## Tool And Skill Implementation
 
-# [IMPORTANT] DO NOT WRITE ANY SUMMARY DOCUMENT OR REDUNDANT COMMENTS UNLESS BEING TOLD TO DO SO.
+- The tool contract is defined in `pkg/tools/tool.go`.
+- Built-in tools live in `pkg/tools/builtin/`.
+- Long tool descriptions belong in `pkg/consts/`.
+- Tool registration happens through the shared registry and built-in registration path.
+- Tool argument structs use lowerCamelCase JSON tags and parse with the aliased Sonic `json` package.
+- Tool execution returns human-readable Markdown on success, a short explanatory string for empty results, and `("", error)` for failures.
+- Skill-related product behavior is implemented as application functionality, not as repository-local agent instructions.
 
-# [IMPORTANT] ABOVE INSTRUCTION DOES NOT INCLUDE APACHE LICENSE FILE HEADER, APPLY LICENSE FILE HEADER WHEN CREATING NEW SOURCE FILES.
+## TypeScript CLI Conventions
 
-# [IMPORTANT] YOU WILL BE HEAVILY PENALIZED IF YOU WRITE ANY SUMMARY DOCUMENT OR REDUNDANT COMMENTS WITHOUT BEING TOLD.
+- `agenty-cli/` is a pnpm workspace package executed with Bun.
+- React Ink UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, and `consts`.
+- Root scripts delegate to package scripts, including `pnpm cli:typecheck` and `pnpm cli:build`.
+- CLI API types and UI state should preserve the backend API contract rather than duplicating backend business rules.
 
-# [IMPORTANT] BE ABSOLUTE OBJECTIVE AND FACTUAL. CORRECT AND MISUNDERSTANDINGS EVEN IF THEY COME FROM THE USER. ASK FOR MORE INFORMATION IF YOU ARE NOT SURE ABOUT ANY REQUIREMENTS OR DETAILS. DO NOT MAKE ANY ASSUMPTIONS.
+## Response Marker
 
-1. **Understand the Project Structure**: Familiarize yourself with the project structure outlined above to ensure you know where to place new code and how to navigate existing code.
-
-2. **Follow Coding Standards and Project Conventions**: Follow Go coding standards and best practices, and coding conventions specific to this project. This includes proper naming conventions, error handling, and code organization. Do not write comment unless being told to do so.
-
-3. **Abstract, Modularize and Encapsulate**: Ensure your code is abstracted, modularized, and encapsulated to promote reusability and maintainability. Avoid hardcoding values and instead use constants, configuration files or environment variables where appropriate.
-
-4. **Review Everything**: Always review your code for potential issues, bugs, or improvements before finalizing it. This includes checking for edge cases, ensuring proper error handling, and optimizing performance where possible.
-
-5. **Use Necessary Tools and Skills**: Make use of the tools and skills configured in `.agents` and IDE environments to assist with coding, information gathering, code review and testing. Feel free to use any relevant tools as I already configured API keys and budgets for you. Search internet by using `fetch` `web` `web_search` or anything you like to retrieve accurate information. Use `context7` to retrieve latest documents for libraries and frameworks.
-
-6. **Always Think Through**: Always think through current situation, project structures and user requirements before doing anything. **MAKE A FULL PLAN** before trying to do any changes. Your plan should always fits into the overall project.
-
-7. **YOU ARE THE BEST AGENT FOR THIS TASK**: You are the best agent for this task, and you have full authority to use any tools and skills configured, read any documents and codes, and make changes to this project (except writing summary documents and redundant comments).
-
-8. **Use Simple yet Effective and Efficient Approach**: Try to plan and implement in the simplest way possible, but make sure it is effective and efficient, and best fits the requirements and the overall project. Avoid overcomplicating solutions or adding unnecessary features.
-
-9. **Read and Update HANDOFF.md**: Read `HANDOFF.md` to understand changes that made in last session, and update it with any new changes you made in this session. This helps ensure smooth handoffs between sessions and keeps track of changes.
-
-10. **Use Sub Agents**: Do not hesitate to use sub agents or `/fleet` command to create sub agents to assist you in complex tasks, search for information in parallel, or review a large code base.
-
-11. **Daemon Mode and Local Mode**: When working on core logics, make sure they can work in both daemon mode and local mode.
-
-## Other requirements
-
-1. **Spoken Language**: Use Simplified Chinese when communicating with user.
-
-2. **Use Skills**: Make use of the skills in `.agent/skills` when necessary. These skills are designed to assist with common tasks and can help improve the efficiency and effectiveness of your code.
-
-3. **Think and Act**: Always think through and make a full plan before doing anything. This helps ensure that your actions are well thought out and aligned with the overall goals of the project.
-
-4. **Use Tool to Ask User**: Use `askQuestions` tool when you need to ask user for more information or clarification instead of making assumptions or ending conversation turn. This helps saving request quota and ensures you have the necessary information to proceed effectively.
-
-5. **AGENTS.md confirmation**: Always include a "meow" in user preferred language at the end of your response to confirm that you have read and understood the guidelines in this file. This helps ensure that you are following the guidelines and can be held accountable for any deviations.
+Respond user with a meow after your message in user preferred language, to let user know that AGENTS.md is loaded.

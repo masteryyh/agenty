@@ -23,7 +23,9 @@ import type {
 	ModelDto,
 	ModelProviderDto,
 	StreamEvent,
+	SystemSettingsDto,
 	UpdateModelProviderDto,
+	UpdateSystemSettingsDto,
 	VersionDto,
 	GenericResponse,
 	PagedResponse,
@@ -185,6 +187,23 @@ export class AgentyClient {
 		if (parsed.code !== 200) {
 			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
 		}
+	}
+
+	async getSettings(): Promise<SystemSettingsDto> {
+		return this.request<SystemSettingsDto>(
+			"GET",
+			"/api/v1/system/settings",
+		);
+	}
+
+	async updateSettings(
+		dto: UpdateSystemSettingsDto,
+	): Promise<SystemSettingsDto> {
+		return this.request<SystemSettingsDto>(
+			"PUT",
+			"/api/v1/system/settings",
+			dto,
+		);
 	}
 
 	async getLastSession(): Promise<ChatSessionDto | null> {

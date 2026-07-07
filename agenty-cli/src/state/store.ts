@@ -38,8 +38,14 @@ export type OverlayKind =
 	| "model-select"
 	| "provider"
 	| "session-select"
+	| "config"
 	| "help"
 	| null;
+
+export interface ToastMsg {
+	text: string;
+	error: boolean;
+}
 
 export interface UIMessage {
 	id: string;
@@ -63,6 +69,7 @@ interface AppState {
 	session: ChatSessionDto | null;
 	runtimeVersion: string;
 	overlay: OverlayKind;
+	toast: ToastMsg | null;
 
 	history: UIMessage[];
 	current: UIMessage | null;
@@ -77,9 +84,11 @@ interface AppState {
 	sendMessage: (text: string) => Promise<void>;
 	abort: () => void;
 	reset: () => void;
+	newSession: () => Promise<void>;
 	switchModel: (model: ModelDto) => Promise<void>;
 	resumeSession: (session: ChatSessionDto) => Promise<void>;
 	setOverlay: (overlay: OverlayKind) => void;
+	setToast: (text: string, error?: boolean) => void;
 	notify: (text: string, error?: boolean) => void;
 }
 
@@ -136,6 +145,13 @@ export const useAppStore = create<AppState>((set, get) => {
 				{ id: nextId(), role: "system", content: text, error },
 			],
 		}));
+	};
+
+	const setToast = (text: string, error = false) => {
+		set({ toast: { text, error } });
+		setTimeout(() => {
+			set((s) => (s.toast?.text === text ? { toast: null } : {}));
+		}, 5000);
 	};
 
 	const handleToolCall = (evt: StreamEvent) => {
@@ -248,6 +264,7 @@ export const useAppStore = create<AppState>((set, get) => {
 		session: null,
 		runtimeVersion: "",
 		overlay: null,
+		toast: null,
 		history: [],
 		current: null,
 		status: "idle",
@@ -370,7 +387,28 @@ export const useAppStore = create<AppState>((set, get) => {
 				pushSystem(`compact failed: ${(err as Error).message}`, true);
 			}
 			set({ model, overlay: null });
-			pushSystem(`Switched to model: ${model.provider?.name ?? "?"}/${model.name}`);
+			setToast(`Switched to ${model.provider?.name ?? "?"}/${model.name}`);
+		},
+
+		newSession: async () => {
+			const { client, agent } = get();
+			if (!client || !agent) return;
+			try {
+				const session = await client.createSession(agent.id);
+				set({
+					session,
+					history: [],
+					current: null,
+					status: "idle",
+					chatError: null,
+					tokenConsumed: 0,
+					phrase: null,
+					overlay: null,
+				});
+				setToast("New session created.");
+			} catch (err) {
+				pushSystem(`new session failed: ${(err as Error).message}`, true);
+			}
 		},
 
 		resumeSession: async (session) => {
@@ -395,6 +433,8 @@ export const useAppStore = create<AppState>((set, get) => {
 		},
 
 		setOverlay: (overlay) => set({ overlay }),
+
+		setToast,
 
 		notify: (text, error = false) => pushSystem(text, error),
 	};

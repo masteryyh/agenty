@@ -43,9 +43,19 @@ export const commands: Command[] = [
 		},
 	},
 	{
+		name: "/new",
+		description: "Start a new empty session",
+		usage: "/new",
+	},
+	{
 		name: "/provider",
 		description: "Manage model providers (CRUD)",
 		usage: "/provider",
+	},
+	{
+		name: "/config",
+		description: "View and edit system settings",
+		usage: "/config",
 	},
 	{
 		name: "/resume",

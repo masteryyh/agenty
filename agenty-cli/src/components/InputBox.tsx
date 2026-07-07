@@ -18,6 +18,7 @@ import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { Spinner } from "@inkjs/ui";
+import type { ToastMsg } from "../state/store";
 
 const PLACEHOLDER = "type a message, or / for commands";
 
@@ -39,6 +40,7 @@ interface InputBoxProps {
 	cwd: string;
 	tokenConsumed: number;
 	abort: () => void;
+	toast: ToastMsg | null;
 }
 
 export function InputBox({
@@ -52,6 +54,7 @@ export function InputBox({
 	cwd,
 	tokenConsumed,
 	abort,
+	toast,
 }: InputBoxProps) {
 	const [tabNonce, setTabNonce] = useState(0);
 
@@ -77,7 +80,11 @@ export function InputBox({
 				<Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
 					<Text color="gray">{"─".repeat(300)}</Text>
 				</Box>
-				<Text color="cyan">{` ▸ ${modelName}`}</Text>
+				{toast ? (
+					<Text color={toast.error ? "red" : "green"}>{toast.text}</Text>
+				) : (
+					<Text color="cyan">{` ▸ ${modelName}`}</Text>
+				)}
 			</Box>
 
 			<Box flexDirection="row">

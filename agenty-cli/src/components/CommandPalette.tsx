@@ -23,10 +23,9 @@ const HIGHLIGHT = "#4FA8FF";
 interface CommandPaletteProps {
 	palette: Palette;
 	marginTop: number;
-	query: string;
 }
 
-export function CommandPalette({ palette, marginTop, query }: CommandPaletteProps) {
+export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 	const { columns } = useWindowSize();
 	if (palette.mode === "none") return null;
 
@@ -37,22 +36,54 @@ export function CommandPalette({ palette, marginTop, query }: CommandPaletteProp
 	};
 
 	if (palette.mode === "commands") {
-		const isTrigger = query === "/";
+		const matchPrefix = palette.matchPrefix;
+		const isExactSlash = matchPrefix === "/";
 		const items = palette.matches.slice(0, MAX_ITEMS);
 		return (
 			<Box flexDirection="column" marginTop={marginTop}>
-				{items.map((c) => {
-					const isFull = c.name === query;
-					const matchedPart = isTrigger ? c.name : c.name.slice(0, query.length);
-					const unmatchedPart = isTrigger ? "" : c.name.slice(query.length);
-					const contentLen = 1 + c.name.length + 3 + c.description.length;
+				{items.map((c, i) => {
+					const isFull = c.name === matchPrefix;
+					const selected = i === palette.highlight;
+					const cursor = selected ? "❯ " : "  ";
+					if (isExactSlash) {
+						const contentLen =
+							cursor.length + c.name.length + 3 + c.description.length;
+						return (
+							<Text key={c.name}>
+								<Text color={selected ? HIGHLIGHT : undefined}>
+									{cursor}
+								</Text>
+								<Text color={selected ? HIGHLIGHT : undefined}>
+									{c.name}
+								</Text>
+								<Text color="gray">
+									{" — "}
+									{c.description}
+								</Text>
+								<Text>{padSpaces(contentLen)}</Text>
+							</Text>
+						);
+					}
+					const matchedPart = c.name.slice(0, matchPrefix.length);
+					const unmatchedPart = c.name.slice(matchPrefix.length);
+					const contentLen =
+						cursor.length + c.name.length + 3 + c.description.length;
 					return (
 						<Text key={c.name}>
-							{" "}
-							<Text color={HIGHLIGHT} bold={isFull}>
+							<Text color={selected ? HIGHLIGHT : undefined}>
+								{cursor}
+							</Text>
+							<Text
+								color={HIGHLIGHT}
+								bold={isFull}
+							>
 								{matchedPart}
 							</Text>
-							{unmatchedPart ? <Text>{unmatchedPart}</Text> : null}
+							{unmatchedPart ? (
+								<Text color={selected ? HIGHLIGHT : undefined}>
+									{unmatchedPart}
+								</Text>
+							) : null}
 							<Text color="gray">
 								{" — "}
 								{c.description}
@@ -62,8 +93,8 @@ export function CommandPalette({ palette, marginTop, query }: CommandPaletteProp
 					);
 				})}
 				<Text dimColor>
-					{"  Tab to complete · Enter to run"}
-					{padSpaces(2 + "Tab to complete · Enter to run".length)}
+					{"  Tab to select · Enter to run"}
+					{padSpaces(2 + "Tab to select · Enter to run".length)}
 				</Text>
 			</Box>
 		);

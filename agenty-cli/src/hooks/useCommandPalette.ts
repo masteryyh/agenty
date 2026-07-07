@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentyClient } from "../api/client";
 import {
 	findCommand,
-	longestCommonPrefix,
 	matchingCommands,
 	parseCommandTokens,
 	quoteArg,
@@ -29,7 +28,12 @@ const MAX_ITEMS = 8;
 
 export type Palette =
 	| { mode: "none" }
-	| { mode: "commands"; matches: Command[] }
+	| {
+			mode: "commands";
+			matches: Command[];
+			highlight: number;
+			matchPrefix: string;
+	  }
 	| {
 			mode: "args";
 			command: Command;
@@ -51,6 +55,10 @@ export function useCommandPalette(
 	const [cache, setCache] = useState<Record<string, string[]>>({});
 	const [loading, setLoading] = useState(false);
 	const fetchedRef = useRef<Set<string>>(new Set());
+	const [cmdHighlight, setCmdHighlight] = useState(-1);
+	const selectedCmdRef = useRef(-1);
+	const pendingTabRef = useRef(false);
+	const originalQueryRef = useRef(value);
 
 	const tokens = parseCommandTokens(value);
 	const startsSlash = value.startsWith("/");
@@ -59,9 +67,19 @@ export function useCommandPalette(
 	const hasSpace = value.includes(" ");
 	const exactCmd = cmdToken ? findCommand(cmdToken) : undefined;
 
+	useEffect(() => {
+		if (pendingTabRef.current) {
+			pendingTabRef.current = false;
+			return;
+		}
+		selectedCmdRef.current = -1;
+		setCmdHighlight(-1);
+		originalQueryRef.current = value;
+	}, [value]);
+
 	let palette: Palette = { mode: "none" };
 
-	if (startsSlash && exactCmd && exactCmd.completeArgs) {
+	if (startsSlash && exactCmd && exactCmd.completeArgs && hasSpace) {
 		const cands = cache[exactCmd.name] ?? null;
 		let highlight = 0;
 		if (cands) {
@@ -84,9 +102,17 @@ export function useCommandPalette(
 			highlight,
 		};
 	} else if (startsSlash && !hasSpace) {
-		const matches = matchingCommands(value);
+		const matchPrefix = pendingTabRef.current
+			? originalQueryRef.current
+			: value;
+		const matches = matchingCommands(matchPrefix);
 		if (matches.length > 0) {
-			palette = { mode: "commands", matches };
+			palette = {
+				mode: "commands",
+				matches,
+				highlight: cmdHighlight,
+				matchPrefix,
+			};
 		}
 	}
 
@@ -109,12 +135,18 @@ export function useCommandPalette(
 			});
 	}, [fetchKey, client]);
 
-	const tab = (): string | null => {
+	const tab = useCallback((): string | null => {
 		if (palette.mode === "commands") {
 			const names = palette.matches.map((m) => m.name);
-			const prefix = longestCommonPrefix(names);
-			if (prefix.length > value.length) return prefix;
-			return null;
+			if (names.length === 0) return null;
+			const next =
+				selectedCmdRef.current < 0
+					? 0
+					: (selectedCmdRef.current + 1) % names.length;
+			selectedCmdRef.current = next;
+			setCmdHighlight(next);
+			pendingTabRef.current = true;
+			return names[next];
 		}
 		if (palette.mode === "args" && palette.candidates) {
 			const cands = palette.candidates;
@@ -128,10 +160,11 @@ export function useCommandPalette(
 				const pi = cands.findIndex((c) => c.toLowerCase().startsWith(lower));
 				next = pi >= 0 ? pi : 0;
 			}
+			pendingTabRef.current = true;
 			return `${cmdToken} ${quoteArg(cands[next])}`;
 		}
 		return null;
-	};
+	}, [palette, cmdToken, argPart]);
 
 	let height = 0;
 	if (palette.mode === "commands") {

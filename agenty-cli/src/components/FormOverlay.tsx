@@ -50,46 +50,39 @@ export function FormOverlay({
 		for (const f of fields) init[f.key] = f.defaultValue ?? "";
 		return init;
 	});
-	const [step, setStep] = useState(0);
+	const [focus, setFocus] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 
 	useInput((_input, key) => {
-		if (key.escape) onClose();
+		if (key.escape) {
+			onSubmit(values);
+			onClose();
+			return;
+		}
+		if (key.upArrow) {
+			setFocus((f) => Math.max(f - 1, 0));
+			setError(null);
+			return;
+		}
+		if (key.downArrow) {
+			setFocus((f) => Math.min(f + 1, fields.length - 1));
+			setError(null);
+			return;
+		}
 	});
 
-	const field = fields[step];
-	const isLast = step === fields.length - 1;
-
-	const advance = () => {
-		if (field.required && values[field.key].trim() === "") {
-			setError(`${field.label} is required`);
-			return;
-		}
-		setError(null);
-		if (isLast) {
-			onSubmit(values);
-			return;
-		}
-		setStep((s) => s + 1);
-	};
-
-	const setValue = (v: string) => {
-		setValues((prev) => ({ ...prev, [field.key]: v }));
-	};
+	const isLast = focus === fields.length - 1;
 
 	return (
-		<Box flexDirection="column" paddingX={2} paddingY={1}>
+		<Box flexDirection="column">
 			<Box marginBottom={1} gap={1}>
 				<Text color="magenta" bold>
 					{title}
 				</Text>
-				<Text dimColor>
-					· step {step + 1}/{fields.length} · Esc to cancel
-				</Text>
 			</Box>
 
 			{fields.map((f, i) => {
-				const active = i === step;
+				const active = i === focus;
 				const val = values[f.key];
 				const display =
 					f.kind === "select"
@@ -114,24 +107,27 @@ export function FormOverlay({
 							<Box paddingLeft={2}>
 								<TextInput
 									value={val}
-									onChange={setValue}
-									onSubmit={advance}
+									onChange={(v) => {
+										setValues((prev) => ({ ...prev, [f.key]: v }));
+										setError(null);
+									}}
 									placeholder={f.placeholder ?? ""}
 								/>
 							</Box>
 						) : null}
 						{active && f.kind === "select" && f.options ? (
-							<Box paddingLeft={2} marginTop={0}>
+							<Box paddingLeft={2}>
 								<Select
 									options={f.options.map((o) => ({ label: o, value: o }))}
 									defaultValue={val || f.options[0]}
 									onChange={(v) => {
-										setValue(v);
+										setValues((prev) => ({ ...prev, [f.key]: v }));
 										setError(null);
 										if (isLast) {
 											onSubmit({ ...values, [f.key]: v });
+											onClose();
 										} else {
-											setStep((s) => s + 1);
+											setFocus((f) => f + 1);
 										}
 									}}
 								/>
@@ -143,11 +139,7 @@ export function FormOverlay({
 
 			{error ? (
 				<Text color="red">{error}</Text>
-			) : (
-				<Text dimColor>
-					{isLast ? `Enter to ${submitLabel}` : "Enter to continue"}
-				</Text>
-			)}
+			) : null}
 		</Box>
 	);
 }

@@ -20,6 +20,7 @@ import type { AgentDto, ChatSessionDto, ModelDto } from "../api/types";
 import {
 	useAppStore,
 	type OverlayKind,
+	type ToastMsg,
 } from "../state/store";
 
 export interface AppSlice {
@@ -31,11 +32,14 @@ export interface AppSlice {
 	session: ChatSessionDto | null;
 	runtimeVersion: string;
 	overlay: OverlayKind;
+	toast: ToastMsg | null;
 	init: () => Promise<void>;
 	reset: () => void;
+	newSession: () => Promise<void>;
 	switchModel: (model: ModelDto) => Promise<void>;
 	resumeSession: (session: ChatSessionDto) => Promise<void>;
 	setOverlay: (overlay: OverlayKind) => void;
+	setToast: (text: string, error?: boolean) => void;
 	notify: (text: string, error?: boolean) => void;
 }
 
@@ -50,11 +54,14 @@ export function useApp(): AppSlice {
 			session: s.session,
 			runtimeVersion: s.runtimeVersion,
 			overlay: s.overlay,
+			toast: s.toast,
 			init: s.init,
 			reset: s.reset,
+			newSession: s.newSession,
 			switchModel: s.switchModel,
 			resumeSession: s.resumeSession,
 			setOverlay: s.setOverlay,
+			setToast: s.setToast,
 			notify: s.notify,
 		})),
 	);

@@ -25,11 +25,15 @@ import { InputBox } from "./components/InputBox";
 import { CommandPalette } from "./components/CommandPalette";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
+import { ConfigOverlay } from "./components/ConfigOverlay";
+import { PanelBox } from "./components/PanelBox";
 import { commands, parseCommandTokens } from "./commands/registry";
 import type { ModelDto, ChatSessionDto } from "./api/types";
 
 const LOGO_HEIGHT = 5;
 const INPUT_HEIGHT = 4;
+const CONFIG_OVERLAY_HEIGHT = 12;
+const PROVIDER_OVERLAY_HEIGHT = 18;
 
 export function App() {
 	const app = useApp();
@@ -80,7 +84,17 @@ function ChatView() {
 	);
 
 	const streaming = chat.status === "streaming";
-	const messageHeight = Math.max(rows - LOGO_HEIGHT - INPUT_HEIGHT, 1);
+
+	const hasPanelOverlay =
+		app.overlay === "provider" || app.overlay === "config";
+	// Overlay replaces InputBox; it's taller so it "covers" more area
+	const bottomH = app.overlay === "provider"
+		? PROVIDER_OVERLAY_HEIGHT
+		: hasPanelOverlay
+			? CONFIG_OVERLAY_HEIGHT
+			: INPUT_HEIGHT;
+	// palette uses negative margin already — don't subtract it from message height
+	const messageHeight = Math.max(rows - LOGO_HEIGHT - bottomH, 1);
 
 	const switchModelByRef = async (ref: string) => {
 		if (!client) return;
@@ -112,8 +126,14 @@ function ChatView() {
 					if (arg) void switchModelByRef(arg);
 					else app.setOverlay("model-select");
 					return;
+				case "/new":
+					void app.newSession();
+					return;
 				case "/provider":
 					app.setOverlay("provider");
+					return;
+				case "/config":
+					app.setOverlay("config");
 					return;
 				case "/resume":
 					app.setOverlay("session-select");
@@ -135,6 +155,7 @@ function ChatView() {
 		return false;
 	};
 
+	// Full-screen overlays
 	if (app.overlay === "model-select") {
 		return (
 			<ModelSelectOverlay
@@ -151,9 +172,6 @@ function ChatView() {
 			/>
 		);
 	}
-	if (app.overlay === "provider") {
-		return <ProviderOverlay />;
-	}
 	if (app.overlay === "help") {
 		return <HelpOverlay onClose={() => app.setOverlay(null)} />;
 	}
@@ -166,20 +184,34 @@ function ChatView() {
 				current={chat.current}
 				height={messageHeight}
 			/>
-			<CommandPalette palette={palette} marginTop={-paletteHeight} query={value} />
-			<InputBox
-				value={value}
-				onChange={setValue}
-				onSubmit={handleSubmit}
-				onTab={handleTab}
-				streaming={streaming}
-				phrase={chat.phrase}
-				modelName={`${app.model?.provider?.name ?? "?"}/${app.model?.name ?? "?"}`}
-				cwd={app.session?.cwd ?? process.cwd()}
-				tokenConsumed={chat.tokenConsumed}
-				abort={chat.abort}
-			/>
+			<CommandPalette palette={palette} marginTop={-paletteHeight} />
+			{hasPanelOverlay ? (
+				<OverlayPanel kind={app.overlay!} />
+			) : (
+				<InputBox
+					value={value}
+					onChange={setValue}
+					onSubmit={handleSubmit}
+					onTab={handleTab}
+					streaming={streaming}
+					phrase={chat.phrase}
+					modelName={`${app.model?.provider?.name ?? "?"}/${app.model?.name ?? "?"}`}
+					cwd={app.session?.cwd ?? process.cwd()}
+					tokenConsumed={chat.tokenConsumed}
+					abort={chat.abort}
+					toast={app.toast}
+				/>
+			)}
 		</Box>
+	);
+}
+
+function OverlayPanel({ kind }: { kind: "provider" | "config" }) {
+	const height = kind === "provider" ? PROVIDER_OVERLAY_HEIGHT : CONFIG_OVERLAY_HEIGHT;
+	return (
+		<PanelBox height={height}>
+			{kind === "provider" ? <ProviderOverlay /> : <ConfigOverlay />}
+		</PanelBox>
 	);
 }
 

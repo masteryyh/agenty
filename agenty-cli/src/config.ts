@@ -31,7 +31,7 @@ export interface CliOptions {
 	newSession: boolean;
 }
 
-const DEFAULT_SERVER_URL = "http://localhost:8080";
+const DEFAULT_SERVER_URL = "http://localhost:8081";
 
 interface ClientYaml {
 	server?: {
