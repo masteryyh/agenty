@@ -47,3 +47,13 @@ HANDOFF.md
 
 .codex/
 docs/
+
+# Node / pnpm
+node_modules/
+agenty-cli/dist/
+agenty-cli/bun.lockb
+
+# Coding Agents
+.reasonix
+.codex
+.remember

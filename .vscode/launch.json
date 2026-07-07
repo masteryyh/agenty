@@ -33,6 +33,17 @@
             "console": "integratedTerminal",
             "args": ["--config", "agenty-client.yaml"],
             "buildFlags": ["-tags=fts5"]
+        },
+        // agenty-cli TUI debug. Requires the Bun VS Code extension (oven-sh.bun-vscode).
+        // Start "Launch agenty in server mode" first so the CLI has an HTTP backend to connect to.
+        {
+            "name": "Launch agenty-cli (bun)",
+            "type": "bun",
+            "request": "launch",
+            "program": "${workspaceFolder}/agenty-cli/src/index.tsx",
+            "cwd": "${workspaceFolder}",
+            "args": [],
+            "runtime": "bun"
         }
     ]
 }

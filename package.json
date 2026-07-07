@@ -1,0 +1,14 @@
+{
+  "name": "agenty",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "make build",
+    "test": "make test",
+    "run": "make build && ./bin/agenty",
+    "cli:dev": "bun agenty-cli/src/index.tsx",
+    "cli:build": "bun run agenty-cli/scripts/build.ts",
+    "cli:typecheck": "pnpm --filter agenty-cli typecheck"
+  },
+  "packageManager": "pnpm@11.1.3"
+}
