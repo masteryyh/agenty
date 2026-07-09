@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+import { useEffect, useRef, useState } from "react";
 import { Box, Text, useWindowSize } from "ink";
 import type { Palette } from "../hooks/useCommandPalette";
 
@@ -27,7 +28,6 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 	const { columns } = useWindowSize();
-	if (palette.mode === "none") return null;
 
 	const width = Math.max(columns, 1);
 	const padSpaces = (contentLen: number): string => {
@@ -35,15 +35,51 @@ export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 		return w > 0 ? " ".repeat(w) : "";
 	};
 
+	const hl = palette.mode === "none" ? -1 : palette.highlight;
+
+	// One-at-a-time scrolling window, driven by highlight changes
+	const [start, setStart] = useState(0);
+	const prevHL = useRef(-1);
+
+	useEffect(() => {
+		const prev = prevHL.current;
+		prevHL.current = hl;
+
+		if (hl < 0) {
+			setStart(0);
+			return;
+		}
+
+		const diff = hl - prev;
+		if (prev < 0 || Math.abs(diff) > 1) {
+			// First time or large jump — snap
+			setStart(Math.floor(hl / MAX_ITEMS) * MAX_ITEMS);
+		} else {
+			setStart((s) => {
+				if (diff > 0 && hl >= s + MAX_ITEMS) return s + 1;
+				if (diff < 0 && hl < s) return Math.max(0, s - 1);
+				return s;
+			});
+		}
+	}, [hl]);
+
+	// Ensure highlight is visible even if state hasn't updated yet
+	const windowStart = hl >= 0
+		? (hl < start ? hl : hl >= start + MAX_ITEMS ? hl - MAX_ITEMS + 1 : start)
+		: 0;
+
+	if (palette.mode === "none") return null;
+
 	if (palette.mode === "commands") {
 		const matchPrefix = palette.matchPrefix;
 		const isExactSlash = matchPrefix === "/";
-		const items = palette.matches.slice(0, MAX_ITEMS);
+		const items = palette.matches.slice(windowStart, windowStart + MAX_ITEMS);
 		return (
 			<Box flexDirection="column" marginTop={marginTop}>
 				{items.map((c, i) => {
+					const absIdx = windowStart + i;
 					const isFull = c.name === matchPrefix;
-					const selected = i === palette.highlight;
+					const selected = absIdx === palette.highlight;
 					const cursor = selected ? "❯ " : "  ";
 					if (isExactSlash) {
 						const contentLen =
@@ -101,7 +137,6 @@ export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 	}
 
 	const { command, candidates, loading, highlight } = palette;
-	const windowStart = Math.floor(highlight / MAX_ITEMS) * MAX_ITEMS;
 	const items = candidates
 		? candidates.slice(windowStart, windowStart + MAX_ITEMS)
 		: [];

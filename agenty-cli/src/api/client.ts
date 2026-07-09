@@ -17,13 +17,20 @@ limitations under the License.
 import { StreamEventType } from "./types";
 import type {
 	AgentDto,
+	CreateAgentDto,
 	ChatDto,
 	ChatSessionDto,
+	CreateMCPServerDto,
 	CreateModelProviderDto,
+	MCPServerDto,
 	ModelDto,
 	ModelProviderDto,
+	SkillDto,
+	SkillContentResult,
 	StreamEvent,
 	SystemSettingsDto,
+	UpdateAgentDto,
+	UpdateMCPServerDto,
 	UpdateModelProviderDto,
 	UpdateSystemSettingsDto,
 	VersionDto,
@@ -145,6 +152,63 @@ export class AgentyClient {
 		return matched;
 	}
 
+	async createAgent(dto: CreateAgentDto): Promise<AgentDto> {
+		return this.request<AgentDto>("POST", "/api/v1/agents", dto);
+	}
+
+	async updateAgent(id: string, dto: UpdateAgentDto): Promise<void> {
+		// Backend returns nil data for UpdateAgent; bypass request()'s null-data check.
+		const init: RequestInit = {
+			method: "PUT",
+			headers: this.headers({ "Content-Type": "application/json" }),
+			body: JSON.stringify(dto),
+		};
+		const resp = await fetch(this.baseURL + `/api/v1/agents/${id}`, init);
+		const text = await resp.text();
+		let parsed: GenericResponse<unknown>;
+		try {
+			parsed = JSON.parse(text) as GenericResponse<unknown>;
+		} catch {
+			throw new Error(
+				`HTTP ${resp.status}: failed to parse response from /api/v1/agents/${id}`,
+			);
+		}
+		if (parsed.code !== 200) {
+			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
+		}
+	}
+
+	async deleteAgent(id: string): Promise<void> {
+		// Backend returns nil data for DeleteAgent; bypass request()'s null-data check.
+		const init: RequestInit = { method: "DELETE", headers: this.headers() };
+		const resp = await fetch(this.baseURL + `/api/v1/agents/${id}`, init);
+		const text = await resp.text();
+		let parsed: GenericResponse<unknown>;
+		try {
+			parsed = JSON.parse(text) as GenericResponse<unknown>;
+		} catch {
+			throw new Error(
+				`HTTP ${resp.status}: failed to parse response from /api/v1/agents/${id}`,
+			);
+		}
+		if (parsed.code !== 200) {
+			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
+		}
+	}
+
+	async getLastSessionByAgent(
+		agentId: string,
+	): Promise<ChatSessionDto | null> {
+		try {
+			return await this.request<ChatSessionDto>(
+				"GET",
+				`/api/v1/chats/session/last/${agentId}`,
+			);
+		} catch {
+			return null;
+		}
+	}
+
 	async createSession(agentId: string): Promise<ChatSessionDto> {
 		return this.request<ChatSessionDto>("POST", "/api/v1/chats/session", {
 			agentId,
@@ -187,6 +251,58 @@ export class AgentyClient {
 		if (parsed.code !== 200) {
 			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
 		}
+	}
+
+	async listMcpServers(page = 1, pageSize = 100): Promise<MCPServerDto[]> {
+		const result = await this.request<PagedResponse<MCPServerDto>>(
+			"GET",
+			`/api/v1/mcp/servers?page=${page}&pageSize=${pageSize}`,
+		);
+		return result.data ?? [];
+	}
+
+	async createMcpServer(
+		dto: CreateMCPServerDto,
+	): Promise<MCPServerDto> {
+		return this.request<MCPServerDto>("POST", "/api/v1/mcp/servers", dto);
+	}
+
+	async updateMcpServer(
+		id: string,
+		dto: UpdateMCPServerDto,
+	): Promise<MCPServerDto> {
+		return this.request<MCPServerDto>("PUT", `/api/v1/mcp/servers/${id}`, dto);
+	}
+
+	async deleteMcpServer(id: string): Promise<void> {
+		const init: RequestInit = { method: "DELETE", headers: this.headers() };
+		const resp = await fetch(this.baseURL + `/api/v1/mcp/servers/${id}`, init);
+		const text = await resp.text();
+		let parsed: GenericResponse<unknown>;
+		try {
+			parsed = JSON.parse(text) as GenericResponse<unknown>;
+		} catch {
+			throw new Error(
+				`HTTP ${resp.status}: failed to parse response from /api/v1/mcp/servers/${id}`,
+			);
+		}
+		if (parsed.code !== 200) {
+			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
+		}
+	}
+
+	async connectMcpServer(id: string): Promise<MCPServerDto> {
+		return this.request<MCPServerDto>(
+			"POST",
+			`/api/v1/mcp/servers/${id}/connect`,
+		);
+	}
+
+	async disconnectMcpServer(id: string): Promise<MCPServerDto> {
+		return this.request<MCPServerDto>(
+			"POST",
+			`/api/v1/mcp/servers/${id}/disconnect`,
+		);
 	}
 
 	async getSettings(): Promise<SystemSettingsDto> {
@@ -232,6 +348,34 @@ export class AgentyClient {
 		);
 	}
 
+	async setSessionCwd(
+		sessionId: string,
+		cwd: string | null,
+		agentsMD?: string | null,
+	): Promise<void> {
+		const init: RequestInit = {
+			method: "PATCH",
+			headers: this.headers({ "Content-Type": "application/json" }),
+			body: JSON.stringify({ cwd, agentsMD: agentsMD ?? null }),
+		};
+		const resp = await fetch(
+			this.baseURL + `/api/v1/chats/session/${sessionId}/cwd`,
+			init,
+		);
+		const text = await resp.text();
+		let parsed: GenericResponse<unknown>;
+		try {
+			parsed = JSON.parse(text) as GenericResponse<unknown>;
+		} catch {
+			throw new Error(
+				`HTTP ${resp.status}: failed to parse response from /api/v1/chats/session/${sessionId}/cwd`,
+			);
+		}
+		if (parsed.code !== 200) {
+			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
+		}
+	}
+
 	async compactSessionForModel(
 		sessionId: string,
 		modelId: string,
@@ -242,6 +386,24 @@ export class AgentyClient {
 			{ modelId },
 		);
 		return result.compacted;
+	}
+
+	async listSkills(sessionId?: string): Promise<SkillDto[]> {
+		const qs = sessionId ? `?sessionId=${sessionId}` : "";
+		return this.request<SkillDto[]>(
+			"GET",
+			`/api/v1/skills${qs}`,
+		);
+	}
+
+	async getSkillContent(name: string, sessionId?: string): Promise<SkillContentResult> {
+		const body: Record<string, string> = { name };
+		if (sessionId) body.sessionId = sessionId;
+		return this.request<SkillContentResult>(
+			"POST",
+			"/api/v1/skills/content",
+			body,
+		);
 	}
 
 	async prepareSession(opts: {

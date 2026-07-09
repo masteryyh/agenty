@@ -17,8 +17,10 @@ limitations under the License.
 
 import { render } from "ink";
 import { App } from "./App";
+import { wrapStdin } from "./mouse/mouseStdin";
 
 render(<App />, {
+	stdin: wrapStdin(process.stdin),
 	alternateScreen: true,
 	interactive: true,
 	exitOnCtrlC: true,

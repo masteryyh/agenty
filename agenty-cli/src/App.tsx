@@ -17,7 +17,7 @@ limitations under the License.
 import { useEffect, useState } from "react";
 import { Box, Text, useApp as useInkApp, useInput, useWindowSize } from "ink";
 import { useApp, useChat } from "./hooks";
-import { useAppStore } from "./state/store";
+import { useAppStore, type OverlayKind } from "./state/store";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { LogoHeader } from "./components/LogoHeader";
 import { MessageList } from "./components/MessageList";
@@ -26,14 +26,46 @@ import { CommandPalette } from "./components/CommandPalette";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
 import { ConfigOverlay } from "./components/ConfigOverlay";
+import { McpOverlay } from "./components/McpOverlay";
+import { SkillOverlay } from "./components/SkillOverlay";
+import { AgentOverlay } from "./components/AgentOverlay";
+import { StatusOverlay } from "./components/StatusOverlay";
 import { PanelBox } from "./components/PanelBox";
 import { commands, parseCommandTokens } from "./commands/registry";
 import type { ModelDto, ChatSessionDto } from "./api/types";
 
 const LOGO_HEIGHT = 5;
 const INPUT_HEIGHT = 4;
-const CONFIG_OVERLAY_HEIGHT = 12;
+const CONFIG_OVERLAY_HEIGHT = 18;
 const PROVIDER_OVERLAY_HEIGHT = 18;
+const MCP_OVERLAY_HEIGHT = 18;
+const AGENTS_OVERLAY_HEIGHT = 18;
+const STATUS_OVERLAY_HEIGHT = 14;
+
+// SGR mouse tracking (1000 = button events, 1006 = SGR extended coordinates).
+// Enabled only while the chat view owns input so overlay text fields are not
+// disturbed by mouse reports. wrapStdin() strips these reports before they can
+// reach ink's keyboard pipeline; here we just toggle the terminal into sending
+// them.
+const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
+const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l";
+
+function panelHeight(overlay: OverlayKind): number | null {
+	switch (overlay) {
+		case "provider":
+			return PROVIDER_OVERLAY_HEIGHT;
+		case "mcp":
+			return MCP_OVERLAY_HEIGHT;
+		case "agents":
+			return AGENTS_OVERLAY_HEIGHT;
+		case "config":
+			return CONFIG_OVERLAY_HEIGHT;
+		case "status":
+			return STATUS_OVERLAY_HEIGHT;
+		default:
+			return null;
+	}
+}
 
 export function App() {
 	const app = useApp();
@@ -76,6 +108,7 @@ function ChatView() {
 	const { exit } = useInkApp();
 	const { rows } = useWindowSize();
 	const client = useAppStore((s) => s.client);
+	const thinkingLevel = useAppStore((s) => s.thinkingLevel);
 	const [value, setValue] = useState("");
 
 	const { palette, height: paletteHeight, tab } = useCommandPalette(
@@ -84,17 +117,29 @@ function ChatView() {
 	);
 
 	const streaming = chat.status === "streaming";
+	const reasoningActive = streaming && !!chat.current?.reasoning && !chat.current.content;
 
-	const hasPanelOverlay =
-		app.overlay === "provider" || app.overlay === "config";
+	const panelH = panelHeight(app.overlay);
+	const hasPanelOverlay = panelH !== null;
 	// Overlay replaces InputBox; it's taller so it "covers" more area
-	const bottomH = app.overlay === "provider"
-		? PROVIDER_OVERLAY_HEIGHT
-		: hasPanelOverlay
-			? CONFIG_OVERLAY_HEIGHT
-			: INPUT_HEIGHT;
-	// palette uses negative margin already — don't subtract it from message height
-	const messageHeight = Math.max(rows - LOGO_HEIGHT - bottomH, 1);
+	const bottomH = panelH ?? INPUT_HEIGHT;
+	// The logo now scrolls inside the message list, so it no longer subtracts
+	// from the message viewport height. palette uses negative margin already —
+	// don't subtract it from message height either.
+	const messageHeight = Math.max(rows - bottomH, 1);
+
+	// Toggle SGR mouse tracking so the message list receives wheel events. Keep
+	// it off whenever an overlay (which may host a text field) owns the screen.
+	useEffect(() => {
+		const active = app.overlay === null;
+		if (active) {
+			process.stdout.write(MOUSE_ON);
+			return () => {
+				process.stdout.write(MOUSE_OFF);
+			};
+		}
+		return undefined;
+	}, [app.overlay]);
 
 	const switchModelByRef = async (ref: string) => {
 		if (!client) return;
@@ -103,6 +148,16 @@ function ChatView() {
 			await app.switchModel(m);
 		} catch (e) {
 			app.notify(`model not found: ${ref} (${(e as Error).message})`, true);
+		}
+	};
+
+	const switchAgentByRef = async (ref: string) => {
+		if (!client) return;
+		try {
+			const a = await client.resolveAgent(ref);
+			await app.switchAgent(a);
+		} catch (e) {
+			app.notify(`agent not found: ${ref} (${(e as Error).message})`, true);
 		}
 	};
 
@@ -132,12 +187,65 @@ function ChatView() {
 				case "/provider":
 					app.setOverlay("provider");
 					return;
+				case "/agents":
+					if (arg) void switchAgentByRef(arg);
+					else app.setOverlay("agents");
+					return;
 				case "/config":
 					app.setOverlay("config");
 					return;
 				case "/resume":
 					app.setOverlay("session-select");
 					return;
+				case "/mcp":
+					app.setOverlay("mcp");
+					return;
+				case "/think": {
+					const a = arg.toLowerCase();
+					if (!a) {
+						if (app.thinkingEnabled) {
+							const lvl = app.thinkingLevel || "on";
+							app.setToast(`thinking: ${lvl}${app.thinkingLevel ? ` (${app.thinkingLevel} effort)` : ""}`);
+						} else {
+							app.setToast("thinking: off");
+						}
+					} else if (a === "off") {
+						app.setThinking(false, "");
+					} else if (a === "on") {
+						app.setThinking(true, "");
+					} else {
+						app.setThinking(true, a);
+					}
+					return;
+				}
+				case "/compact":
+					void app.compactSession();
+					return;
+				case "/skill":
+					app.setOverlay("skill");
+					return;
+				case "/status":
+					app.setOverlay("status");
+					return;
+				case "/cwd": {
+					if (!arg) {
+						app.setToast(`CWD: ${app.session?.cwd ?? process.cwd()}`);
+					} else if (arg === "clear") {
+						void app.setCwd(null);
+					} else {
+						let resolved = arg;
+						if (resolved.startsWith("~")) {
+							const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+							if (home) resolved = home + resolved.slice(1);
+						}
+						if (resolved.includes("..")) {
+							app.setToast("cwd: path traversal (..) is not allowed", true);
+						} else {
+							void app.setCwd(resolved);
+						}
+					}
+					return;
+				}
 				default:
 					app.notify(`unknown command: ${cmd}`, true);
 			}
@@ -156,6 +264,16 @@ function ChatView() {
 	};
 
 	// Full-screen overlays
+	if (app.overlay === "skill") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<LogoHeader runtimeVersion={app.runtimeVersion} />
+				<PanelBox height={Math.max(rows - LOGO_HEIGHT, 1)}>
+					<SkillOverlay />
+				</PanelBox>
+			</Box>
+		);
+	}
 	if (app.overlay === "model-select") {
 		return (
 			<ModelSelectOverlay
@@ -178,11 +296,12 @@ function ChatView() {
 
 	return (
 		<Box flexDirection="column" height={rows}>
-			<LogoHeader runtimeVersion={app.runtimeVersion} />
 			<MessageList
 				history={chat.history}
 				current={chat.current}
 				height={messageHeight}
+				header={<LogoHeader runtimeVersion={app.runtimeVersion} />}
+				interactive={!hasPanelOverlay && paletteHeight === 0}
 			/>
 			<CommandPalette palette={palette} marginTop={-paletteHeight} />
 			{hasPanelOverlay ? (
@@ -198,6 +317,8 @@ function ChatView() {
 					modelName={`${app.model?.provider?.name ?? "?"}/${app.model?.name ?? "?"}`}
 					cwd={app.session?.cwd ?? process.cwd()}
 					tokenConsumed={chat.tokenConsumed}
+					thinkingLevel={thinkingLevel}
+					reasoningActive={reasoningActive}
 					abort={chat.abort}
 					toast={app.toast}
 				/>
@@ -206,11 +327,25 @@ function ChatView() {
 	);
 }
 
-function OverlayPanel({ kind }: { kind: "provider" | "config" }) {
-	const height = kind === "provider" ? PROVIDER_OVERLAY_HEIGHT : CONFIG_OVERLAY_HEIGHT;
+function OverlayPanel({
+	kind,
+}: {
+	kind: "provider" | "config" | "mcp" | "agents" | "status";
+}) {
+	const height = panelHeight(kind) ?? INPUT_HEIGHT;
 	return (
 		<PanelBox height={height}>
-			{kind === "provider" ? <ProviderOverlay /> : <ConfigOverlay />}
+			{kind === "provider" ? (
+				<ProviderOverlay />
+			) : kind === "mcp" ? (
+				<McpOverlay />
+			) : kind === "agents" ? (
+				<AgentOverlay />
+			) : kind === "status" ? (
+				<StatusOverlay />
+			) : (
+				<ConfigOverlay />
+			)}
 		</PanelBox>
 	);
 }

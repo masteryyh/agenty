@@ -14,23 +14,53 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
-import { Select, Spinner } from "@inkjs/ui";
+import { Spinner } from "@inkjs/ui";
 import type { ModelProviderDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { providerTypes, providerDefaultBaseURLs } from "../consts/providerTypes";
+import { FormPanel } from "./FormPanel";
+import type { FormField } from "./FormPanel";
 
 const MAX_VISIBLE = 9;
 const NAME_W = 34;
 const URL_W = 62;
 
+const PROVIDER_TYPE_OPTIONS = providerTypes.map((t) => ({ label: t, value: t }));
+
+function buildCreateFields(formType: string): FormField[] {
+	const baseUrl = providerDefaultBaseURLs[formType] ?? "";
+	return [
+		{ key: "name", label: "Name", kind: "text" as const, value: "", placeholder: "my-provider" },
+		{ key: "type", label: "Type", kind: "select" as const, value: formType, options: PROVIDER_TYPE_OPTIONS },
+		{ key: "baseUrl", label: "Base URL", kind: "text" as const, value: baseUrl },
+		{ key: "apiKey", label: "API Key", kind: "text" as const, value: "", placeholder: "sk-...", secret: true },
+	];
+}
+
+function buildEditFields(target: ModelProviderDto): FormField[] {
+	if (target.isPreset) {
+		return [
+			{ key: "name", label: "Name", kind: "text" as const, value: target.name, readOnly: true },
+			{ key: "type", label: "Type", kind: "text" as const, value: target.type, readOnly: true },
+			{ key: "baseUrl", label: "Base URL", kind: "text" as const, value: target.baseUrl, readOnly: true },
+			{ key: "apiKey", label: "API Key", kind: "text" as const, value: "", placeholder: "leave blank to keep", secret: true },
+		];
+	}
+	return [
+		{ key: "name", label: "Name", kind: "text" as const, value: target.name, placeholder: target.name },
+		{ key: "type", label: "Type", kind: "select" as const, value: target.type, options: PROVIDER_TYPE_OPTIONS },
+		{ key: "baseUrl", label: "Base URL", kind: "text" as const, value: target.baseUrl },
+		{ key: "apiKey", label: "API Key", kind: "text" as const, value: "", placeholder: "leave blank to keep", secret: true },
+	];
+}
+
 function trunc(s: string, width: number): string {
 	if (width <= 0) return "";
 	if (s.length <= width) return s;
-	if (width === 1) return "…";
-	return s.slice(0, width - 1) + "…";
+	if (width === 1) return "\u2026";
+	return s.slice(0, width - 1) + "\u2026";
 }
 
 function pad(s: string, width: number): string {
@@ -52,6 +82,8 @@ export function ProviderOverlay() {
 	const [providers, setProviders] = useState<ModelProviderDto[] | null>(null);
 	const [cursor, setCursor] = useState(0);
 	const [mode, setMode] = useState<Mode>({ kind: "list" });
+	const modeRef = useRef(mode);
+	modeRef.current = mode;
 
 	const reload = useCallback(async () => {
 		if (!client) return;
@@ -69,7 +101,17 @@ export function ProviderOverlay() {
 		void reload();
 	}, [reload]);
 
+	// track provider type for auto baseUrl
+	const [formType, setFormType] = useState<string>(providerTypes[0]);
+
 	const close = () => setOverlay(null);
+
+	// Top-level input handler — ensures empty / loading list states respond to keyboard.
+	useInput((input, key) => {
+		if (modeRef.current.kind !== "list") return;
+		if (key.escape) { close(); return; }
+		if (input === "a") { setMode({ kind: "create" }); return; }
+	});
 
 	const handleCreate = async (values: Record<string, string>) => {
 		if (!client) return;
@@ -120,15 +162,32 @@ export function ProviderOverlay() {
 	};
 
 	if (mode.kind === "create") {
-		return <CreateForm onSave={handleCreate} onCancel={() => setMode({ kind: "list" })} />;
+		return (
+			<FormPanel
+				title="Add Provider"
+				fields={buildCreateFields(formType)}
+				onChange={(key, allValues) => {
+					if (key === "type") setFormType(allValues.type);
+				}}
+				onAction={(action, values) => {
+					if (action === "save") handleCreate(values);
+					else setMode({ kind: "list" });
+				}}
+				onClose={() => setMode({ kind: "list" })}
+			/>
+		);
 	}
 
 	if (mode.kind === "edit") {
 		return (
-			<EditForm
-				target={mode.target}
-				onSave={(v) => void handleEdit(mode.target, v)}
-				onCancel={() => setMode({ kind: "list" })}
+			<FormPanel
+				title={`Edit: ${mode.target.name}`}
+				fields={buildEditFields(mode.target)}
+				onAction={(action, values) => {
+					if (action === "save") void handleEdit(mode.target, values);
+					else setMode({ kind: "list" });
+				}}
+				onClose={() => setMode({ kind: "list" })}
 			/>
 		);
 	}
@@ -143,7 +202,6 @@ export function ProviderOverlay() {
 		);
 	}
 
-	// --- list view ---
 	return (
 		<Box flexDirection="column" flexGrow={1}>
 			<Box marginBottom={1}>
@@ -232,7 +290,7 @@ function ProviderList({
 					return (
 						<Box key={p.id}>
 							<Text color={selected ? "cyan" : "gray"}>
-								{selected ? "❯" : " "}
+								{selected ? "\u276f" : " "}
 							</Text>
 							<Text> </Text>
 							<Text color={selected ? "cyan" : "white"} bold={selected}>
@@ -254,270 +312,8 @@ function ProviderList({
 				})}
 			</Box>
 			<Box>
-				<Text dimColor>↑↓ navigate · Enter edit · a add · d delete · Esc back</Text>
+				<Text dimColor>{"\u2191\u2193 navigate · Enter edit · a add · d delete · Esc back"}</Text>
 			</Box>
-		</Box>
-	);
-}
-
-// ─── Create form ────────────────────────────────────────────────────
-
-function CreateForm({
-	onSave,
-	onCancel,
-}: {
-	onSave: (values: Record<string, string>) => void;
-	onCancel: () => void;
-}) {
-	const [name, setName] = useState("");
-	const [type, setType] = useState<string>(providerTypes[0]);
-	const [baseUrl, setBaseUrl] = useState(providerDefaultBaseURLs[providerTypes[0]]);
-	const [apiKey, setApiKey] = useState("");
-	const [focus, setFocus] = useState(0);
-	const fields = ["name", "type", "baseUrl", "apiKey"] as const;
-	const actionOffset = fields.length;
-
-	const save = () => onSave({ name, type, baseUrl, apiKey });
-	const cancel = () => onCancel();
-
-	useInput((_input, key) => {
-		if (key.escape) {
-			cancel();
-			return;
-		}
-		if (key.leftArrow && focus >= actionOffset) { setFocus(actionOffset); return; }
-		if (key.rightArrow && focus >= actionOffset) { setFocus(actionOffset + 1); return; }
-		if (key.upArrow) {
-			setFocus((f) => f >= actionOffset ? fields.length - 1 : Math.max(f - 1, 0));
-			return;
-		}
-		if (key.downArrow) {
-			setFocus((f) => f >= actionOffset ? f : Math.min(f + 1, actionOffset));
-			return;
-		}
-		if (key.return && focus >= actionOffset) {
-			if (focus === actionOffset) save();
-			else cancel();
-		}
-	});
-
-	return (
-		<Box flexDirection="column" flexGrow={1}>
-			<Box marginBottom={1}>
-				<Text color="magenta" bold>Add Provider</Text>
-			</Box>
-				<FieldRow label="Name" focus={focus === 0}>
-					{focus === 0 ? (
-						<TextInput
-							value={name}
-							onChange={setName}
-							onSubmit={() => setFocus(1)}
-							placeholder="my-provider"
-						/>
-					) : (
-						<Text>{name || <Text dimColor>—</Text>}</Text>
-					)}
-				</FieldRow>
-				<FieldRow label="Type" focus={focus === 1}>
-					{focus === 1 ? (
-						<Select
-							options={providerTypes.map((o) => ({ label: o, value: o }))}
-							defaultValue={type}
-							onChange={(v) => { setType(v); setBaseUrl(providerDefaultBaseURLs[v] ?? ""); }}
-						/>
-					) : (
-						<Text>{type}</Text>
-					)}
-				</FieldRow>
-				<FieldRow label="Base URL" focus={focus === 2}>
-					{focus === 2 ? (
-						<TextInput value={baseUrl} onChange={setBaseUrl} onSubmit={() => setFocus(3)} />
-					) : (
-						<Text>{baseUrl || <Text dimColor>—</Text>}</Text>
-					)}
-				</FieldRow>
-				<FieldRow label="API Key" focus={focus === 3}>
-					{focus === 3 ? (
-						<TextInput value={apiKey} onChange={setApiKey} onSubmit={() => setFocus(4)} placeholder="sk-..." />
-					) : (
-						<Text>{apiKey ? "•".repeat(Math.min(apiKey.length, 16)) : <Text dimColor>—</Text>}</Text>
-					)}
-				</FieldRow>
-				<ActionRow
-					saveFocus={focus === actionOffset}
-					cancelFocus={focus === actionOffset + 1}
-				/>
-				<Box flexGrow={1} />
-				<Box>
-					<Text dimColor>↑↓ navigate · ←→ action · Enter choose · Esc cancel</Text>
-				</Box>
-			</Box>
-		);
-	}
-
-	// ─── Edit form ──────────────────────────────────────────────────────
-
-function EditForm({
-	target,
-	onSave,
-	onCancel,
-}: {
-	target: ModelProviderDto;
-	onSave: (values: Record<string, string>) => void;
-	onCancel: () => void;
-}) {
-	const [name, setName] = useState(target.name);
-	const [type, setType] = useState(target.type);
-	const [baseUrl, setBaseUrl] = useState(target.baseUrl);
-	const [apiKey, setApiKey] = useState("");
-	const [focus, setFocus] = useState(0);
-
-	const editableFields = target.isPreset
-		? (["apiKey"] as const)
-		: (["name", "type", "baseUrl", "apiKey"] as const);
-	const actionOffset = editableFields.length;
-
-	const save = () => onSave({ name, type, baseUrl, apiKey });
-	const cancel = () => onCancel();
-
-	useInput((_input, key) => {
-		if (key.escape) {
-			cancel();
-			return;
-		}
-		if (key.leftArrow && focus >= actionOffset) { setFocus(actionOffset); return; }
-		if (key.rightArrow && focus >= actionOffset) { setFocus(actionOffset + 1); return; }
-		if (key.upArrow) {
-			setFocus((f) => f >= actionOffset ? editableFields.length - 1 : Math.max(f - 1, 0));
-			return;
-		}
-		if (key.downArrow) {
-			setFocus((f) => f >= actionOffset ? f : Math.min(f + 1, actionOffset));
-			return;
-		}
-		if (key.return && focus >= actionOffset) {
-			if (focus === actionOffset) save();
-			else cancel();
-		}
-	});
-
-	const isPreset = target.isPreset;
-
-	return (
-		<Box flexDirection="column" flexGrow={1}>
-			<Box marginBottom={1}>
-				<Text color="magenta" bold>Edit: {target.name}</Text>
-			</Box>
-
-				{isPreset ? (
-					<>
-						<FieldRow label="Name" focus={false}>
-							<Text dimColor>{target.name}</Text>
-						</FieldRow>
-						<FieldRow label="Type" focus={false}>
-							<Text dimColor>{target.type}</Text>
-						</FieldRow>
-						<FieldRow label="Base URL" focus={false}>
-							<Text dimColor>{target.baseUrl}</Text>
-						</FieldRow>
-					</>
-				) : (
-						<>
-							<FieldRow label="Name" focus={focus === 0}>
-								{focus === 0 ? (
-									<TextInput value={name} onChange={setName} onSubmit={() => setFocus(1)} />
-								) : (
-									<Text>{name || <Text dimColor>—</Text>}</Text>
-								)}
-							</FieldRow>
-							<FieldRow label="Type" focus={focus === 1}>
-								{focus === 1 ? (
-									<Select
-										options={providerTypes.map((o) => ({ label: o, value: o }))}
-										defaultValue={type}
-										onChange={setType}
-									/>
-								) : (
-									<Text>{type}</Text>
-								)}
-							</FieldRow>
-							<FieldRow label="Base URL" focus={focus === 2}>
-								{focus === 2 ? (
-									<TextInput value={baseUrl} onChange={setBaseUrl} onSubmit={() => setFocus(3)} />
-								) : (
-									<Text>{baseUrl || <Text dimColor>—</Text>}</Text>
-								)}
-							</FieldRow>
-						</>
-					)}
-
-				<FieldRow label="API Key" focus={isPreset ? focus === 0 : focus === 3}>
-					{(isPreset ? focus === 0 : focus === 3) ? (
-						<TextInput
-							value={apiKey}
-							onChange={setApiKey}
-							onSubmit={() => setFocus(actionOffset)}
-							placeholder="leave blank to keep"
-						/>
-					) : (
-						<Text>{apiKey ? "•".repeat(Math.min(apiKey.length, 16)) : <Text dimColor>leave blank to keep</Text>}</Text>
-					)}
-				</FieldRow>
-
-				<ActionRow
-					saveFocus={focus === actionOffset}
-					cancelFocus={focus === actionOffset + 1}
-				/>
-				<Box flexGrow={1} />
-				<Box>
-					<Text dimColor>↑↓ navigate · ←→ action · Enter choose · Esc cancel</Text>
-				</Box>
-			</Box>
-		);
-	}
-
-	// ─── Field row ──────────────────────────────────────────────────────
-
-function FieldRow({
-	label,
-	focus,
-	children,
-}: {
-	label: string;
-	focus: boolean;
-	children: React.ReactNode;
-}) {
-	return (
-		<Box>
-			<Text color={focus ? "cyan" : "gray"}>
-				{focus ? "❯" : " "}
-			</Text>
-			<Text> </Text>
-			<Box width={12}>
-				<Text color={focus ? "cyan" : "gray"} bold={focus}>{label}:</Text>
-			</Box>
-			<Box flexGrow={1}>
-				{children}
-			</Box>
-		</Box>
-	);
-}
-
-function ActionRow({
-	saveFocus,
-	cancelFocus,
-}: {
-	saveFocus: boolean;
-	cancelFocus: boolean;
-}) {
-	return (
-		<Box marginTop={1} gap={2}>
-			<Text color={saveFocus ? "cyan" : "gray"} bold={saveFocus}>
-				{saveFocus ? "❯ " : "  "}Save
-			</Text>
-			<Text color={cancelFocus ? "cyan" : "gray"} bold={cancelFocus}>
-				{cancelFocus ? "❯ " : "  "}Cancel
-			</Text>
 		</Box>
 	);
 }

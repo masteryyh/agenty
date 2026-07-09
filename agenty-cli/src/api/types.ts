@@ -138,6 +138,20 @@ export interface AgentDto {
 	models?: ModelDto[];
 }
 
+export interface CreateAgentDto {
+	name: string;
+	soul?: string;
+	isDefault: boolean;
+	modelIds?: string[];
+}
+
+export interface UpdateAgentDto {
+	name?: string;
+	soul?: string;
+	isDefault?: boolean;
+	modelIds?: string[];
+}
+
 export interface ChatMessageDto {
 	id: string;
 	roundId: string;
@@ -191,6 +205,62 @@ export interface UpdateSystemSettingsDto {
 	tavilyApiKey?: string;
 	firecrawlApiKey?: string;
 	firecrawlBaseUrl?: string;
+}
+
+export type MCPTransportType = "stdio" | "sse" | "streamable-http";
+
+export interface MCPServerDto {
+	id: string;
+	name: string;
+	transport: MCPTransportType;
+	enabled: boolean;
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	url?: string;
+	headers?: Record<string, string>;
+	status?: string;
+	tools?: string[];
+	error?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface CreateMCPServerDto {
+	name: string;
+	transport: MCPTransportType;
+	enabled?: boolean;
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	url?: string;
+	headers?: Record<string, string>;
+}
+
+export interface UpdateMCPServerDto {
+	name?: string;
+	transport?: MCPTransportType;
+	enabled?: boolean;
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	url?: string;
+	headers?: Record<string, string>;
+}
+
+export interface SkillDto {
+	id: string;
+	name: string;
+	description: string;
+	skillMdPath: string;
+	scope?: "global" | "project";
+	sourceDir?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface SkillContentResult {
+	content: string;
 }
 
 export interface GenericResponse<T> {

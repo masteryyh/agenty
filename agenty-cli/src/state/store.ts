@@ -25,7 +25,6 @@ import type {
 	ChatSessionDto,
 	ModelDto,
 	StreamEvent,
-	ToolCall,
 	ToolResult,
 } from "../api/types";
 import { loadOptions, parseThinking } from "../config";
@@ -40,6 +39,10 @@ export type OverlayKind =
 	| "session-select"
 	| "config"
 	| "help"
+	| "mcp"
+	| "skill"
+	| "agents"
+	| "status"
 	| null;
 
 export interface ToastMsg {
@@ -47,13 +50,22 @@ export interface ToastMsg {
 	error: boolean;
 }
 
+export interface UIToolCall {
+	id: string;
+	name: string;
+	arguments: string;
+	result?: ToolResult;
+}
+
 export interface UIMessage {
 	id: string;
-	role: "user" | "assistant" | "tool" | "system";
+	role: "user" | "assistant" | "system";
 	content: string;
 	reasoning?: string;
-	toolCalls?: ToolCall[];
-	toolResult?: ToolResult;
+	reasoningStartedAt?: number;
+	reasoningEndedAt?: number;
+	reasoningDurationMillis?: number;
+	toolCalls?: UIToolCall[];
 	error?: boolean;
 }
 
@@ -71,6 +83,9 @@ interface AppState {
 	overlay: OverlayKind;
 	toast: ToastMsg | null;
 
+	thinkingEnabled: boolean;
+	thinkingLevel: string;
+
 	history: UIMessage[];
 	current: UIMessage | null;
 	status: MessageStatus;
@@ -87,9 +102,13 @@ interface AppState {
 	newSession: () => Promise<void>;
 	switchModel: (model: ModelDto) => Promise<void>;
 	resumeSession: (session: ChatSessionDto) => Promise<void>;
+	switchAgent: (agent: AgentDto) => Promise<void>;
 	setOverlay: (overlay: OverlayKind) => void;
 	setToast: (text: string, error?: boolean) => void;
 	notify: (text: string, error?: boolean) => void;
+	setThinking: (enabled: boolean, level: string) => void;
+	compactSession: () => Promise<void>;
+	setCwd: (path: string | null) => Promise<void>;
 }
 
 let idCounter = 0;
@@ -119,20 +138,47 @@ function hasContent(msg: UIMessage): boolean {
 function messageToUi(msg: ChatMessageDto): UIMessage {
 	return {
 		id: msg.id || nextId(),
-		role: msg.role,
+		role: msg.role as "user" | "assistant" | "system",
 		content: msg.content,
 		reasoning: msg.reasoningContent,
-		toolCalls: msg.toolCalls,
-		toolResult: msg.toolResult,
+		reasoningDurationMillis: msg.reasoningDurationMillis,
+		toolCalls: msg.toolCalls?.map((tc) => ({ ...tc })),
 		error: false,
 	};
+}
+
+function buildHistory(messages: ChatMessageDto[]): UIMessage[] {
+	const history: UIMessage[] = [];
+	for (const msg of messages) {
+		if (msg.role === "tool") {
+			const tr = msg.toolResult;
+			if (tr) {
+				for (let i = history.length - 1; i >= 0; i--) {
+					const h = history[i];
+					if (h.role !== "assistant" || !h.toolCalls) continue;
+					const idx = h.toolCalls.findIndex((tc) => tc.id === tr.callId);
+					if (idx >= 0) {
+						h.toolCalls[idx] = { ...h.toolCalls[idx], result: tr };
+						break;
+					}
+				}
+			}
+			continue;
+		}
+		history.push(messageToUi(msg));
+	}
+	return history;
 }
 
 export const useAppStore = create<AppState>((set, get) => {
 	const flushCurrent = () => {
 		const cur = get().current;
 		if (cur && hasContent(cur)) {
-			set((s) => ({ history: [...s.history, cur], current: null }));
+			const finalized =
+				cur.reasoning && !cur.reasoningEndedAt
+					? { ...cur, reasoningEndedAt: Date.now() }
+					: cur;
+			set((s) => ({ history: [...s.history, finalized], current: null }));
 		} else {
 			set({ current: null });
 		}
@@ -186,7 +232,14 @@ export const useAppStore = create<AppState>((set, get) => {
 					calls.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
 				}
 			}
-			return { current: { ...cur, toolCalls: calls } };
+			return {
+				current: {
+					...cur,
+					reasoningEndedAt:
+						cur.reasoning && !cur.reasoningEndedAt ? Date.now() : cur.reasoningEndedAt,
+					toolCalls: calls,
+				},
+			};
 		});
 	};
 
@@ -195,8 +248,24 @@ export const useAppStore = create<AppState>((set, get) => {
 			case StreamEventType.ContentDelta:
 				if (evt.content) {
 					set((s) => {
-						const cur = s.current ?? newAssistantMsg();
-						return { current: { ...cur, content: cur.content + evt.content } };
+						let cur = s.current;
+						let history = s.history;
+						if (cur && cur.toolCalls?.some((c) => c.result)) {
+							if (hasContent(cur)) history = [...history, cur];
+							cur = newAssistantMsg();
+						}
+						cur = cur ?? newAssistantMsg();
+						return {
+							history,
+							current: {
+								...cur,
+								reasoningEndedAt:
+									cur.reasoning && !cur.reasoningEndedAt
+										? Date.now()
+										: cur.reasoningEndedAt,
+								content: cur.content + evt.content,
+							},
+						};
 					});
 				}
 				break;
@@ -207,6 +276,7 @@ export const useAppStore = create<AppState>((set, get) => {
 						return {
 							current: {
 								...cur,
+								reasoningStartedAt: cur.reasoningStartedAt ?? Date.now(),
 								reasoning: (cur.reasoning ?? "") + evt.reasoning,
 							},
 						};
@@ -219,19 +289,28 @@ export const useAppStore = create<AppState>((set, get) => {
 				handleToolCall(evt);
 				break;
 			case StreamEventType.ToolResult:
-				flushCurrent();
 				if (evt.toolResult) {
-					set((s) => ({
-						history: [
-							...s.history,
-							{
-								id: nextId(),
-								role: "tool",
-								content: "",
-								toolResult: evt.toolResult,
+					const tr = evt.toolResult;
+					set((s) => {
+						const cur = s.current ?? newAssistantMsg();
+						const calls = cur.toolCalls ? [...cur.toolCalls] : [];
+						const idx = calls.findIndex((c) => c.id === tr.callId);
+						if (idx >= 0) {
+							calls[idx] = { ...calls[idx], result: tr };
+						} else {
+							calls.push({ id: tr.callId, name: tr.name, arguments: "", result: tr });
+						}
+						return {
+							current: {
+								...cur,
+								reasoningEndedAt:
+									cur.reasoning && !cur.reasoningEndedAt
+										? Date.now()
+										: cur.reasoningEndedAt,
+								toolCalls: calls,
 							},
-						],
-					}));
+						};
+					});
 				}
 				break;
 			case StreamEventType.MessageDone:
@@ -265,6 +344,8 @@ export const useAppStore = create<AppState>((set, get) => {
 		runtimeVersion: "",
 		overlay: null,
 		toast: null,
+		thinkingEnabled: false,
+		thinkingLevel: "",
 		history: [],
 		current: null,
 		status: "idle",
@@ -287,7 +368,7 @@ export const useAppStore = create<AppState>((set, get) => {
 					modelRef: opts.modelRef,
 					newSession: opts.newSession,
 				});
-				const history = (prepared.session.messages ?? []).map(messageToUi);
+				const history = buildHistory(prepared.session.messages ?? []);
 				set({
 					phase: "ready",
 					client,
@@ -297,6 +378,8 @@ export const useAppStore = create<AppState>((set, get) => {
 					runtimeVersion: version.version ?? "",
 					history,
 					tokenConsumed: prepared.session.tokenConsumed,
+					thinkingEnabled: parseThinking(opts.thinking).thinking,
+					thinkingLevel: parseThinking(opts.thinking).thinkingLevel,
 					initError: null,
 				});
 			} catch (err) {
@@ -309,7 +392,7 @@ export const useAppStore = create<AppState>((set, get) => {
 			if (!trimmed) return;
 			const state = get();
 			if (state.abortController) return;
-			const { client, session, model, opts } = state;
+			const { client, session, model } = state;
 			if (!client || !session || !model) return;
 
 			const userMsg: UIMessage = {
@@ -318,7 +401,10 @@ export const useAppStore = create<AppState>((set, get) => {
 				content: trimmed,
 			};
 			const controller = new AbortController();
-			const thinking = parseThinking(opts.thinking);
+			const thinking = {
+				thinking: state.thinkingEnabled,
+				thinkingLevel: state.thinkingLevel,
+			};
 
 			set((s) => ({
 				history: [...s.history, userMsg],
@@ -416,7 +502,7 @@ export const useAppStore = create<AppState>((set, get) => {
 			if (!client) return;
 			try {
 				const full = await client.getSession(session.id);
-				const history = (full.messages ?? []).map(messageToUi);
+				const history = buildHistory(full.messages ?? []);
 				set({
 					session: full,
 					history,
@@ -432,10 +518,83 @@ export const useAppStore = create<AppState>((set, get) => {
 			}
 		},
 
+		switchAgent: async (agent) => {
+			const { client } = get();
+			if (!client) return;
+			try {
+				const session =
+					(await client.getLastSessionByAgent(agent.id)) ??
+					(await client.createSession(agent.id));
+				const history = buildHistory(session.messages ?? []);
+				let model = get().model;
+				const agentModelIds = (agent.models ?? []).map((m) => m.id);
+				if (
+					!model ||
+					(agentModelIds.length > 0 && !agentModelIds.includes(model.id))
+				) {
+					model = agent.models?.[0] ?? (await client.getDefaultModel());
+				}
+				set({
+					agent,
+					session,
+					history,
+					current: null,
+					status: "idle",
+					chatError: null,
+					tokenConsumed: session.tokenConsumed,
+					phrase: null,
+					overlay: null,
+					model,
+				});
+				setToast(`Switched to agent: ${agent.name}`);
+			} catch (err) {
+				pushSystem(`switch agent failed: ${(err as Error).message}`, true);
+			}
+		},
+
 		setOverlay: (overlay) => set({ overlay }),
 
 		setToast,
 
 		notify: (text, error = false) => pushSystem(text, error),
+
+		setThinking: (enabled, level) => {
+			set({ thinkingEnabled: enabled, thinkingLevel: level });
+			const label = enabled
+				? level
+					? `thinking enabled (${level} effort)`
+					: "thinking enabled"
+				: "thinking disabled";
+			setToast(label);
+		},
+
+		compactSession: async () => {
+			const { client, session, model, status } = get();
+			if (!client || !session || !model) return;
+			if (status === "streaming") {
+				setToast("cannot compact while streaming", true);
+				return;
+			}
+			try {
+				const ok = await client.compactSessionForModel(session.id, model.id);
+				setToast(ok ? "Context compacted." : "Compaction skipped (nothing to compact).");
+			} catch (err) {
+				setToast(`compact failed: ${(err as Error).message}`, true);
+			}
+		},
+
+		setCwd: async (path) => {
+			const { client, session } = get();
+			if (!client || !session) return;
+			try {
+				await client.setSessionCwd(session.id, path);
+				set((s) => ({
+					session: s.session ? { ...s.session, cwd: path ?? undefined } : null,
+				}));
+				setToast(path ? `CWD set to ${path}` : "CWD cleared.");
+			} catch (err) {
+				setToast(`cwd failed: ${(err as Error).message}`, true);
+			}
+		},
 	};
 });

@@ -33,14 +33,20 @@ export interface AppSlice {
 	runtimeVersion: string;
 	overlay: OverlayKind;
 	toast: ToastMsg | null;
+	thinkingEnabled: boolean;
+	thinkingLevel: string;
 	init: () => Promise<void>;
 	reset: () => void;
 	newSession: () => Promise<void>;
 	switchModel: (model: ModelDto) => Promise<void>;
 	resumeSession: (session: ChatSessionDto) => Promise<void>;
+	switchAgent: (agent: AgentDto) => Promise<void>;
 	setOverlay: (overlay: OverlayKind) => void;
 	setToast: (text: string, error?: boolean) => void;
 	notify: (text: string, error?: boolean) => void;
+	setThinking: (enabled: boolean, level: string) => void;
+	compactSession: () => Promise<void>;
+	setCwd: (path: string | null) => Promise<void>;
 }
 
 export function useApp(): AppSlice {
@@ -55,14 +61,20 @@ export function useApp(): AppSlice {
 			runtimeVersion: s.runtimeVersion,
 			overlay: s.overlay,
 			toast: s.toast,
+			thinkingEnabled: s.thinkingEnabled,
+			thinkingLevel: s.thinkingLevel,
 			init: s.init,
 			reset: s.reset,
 			newSession: s.newSession,
 			switchModel: s.switchModel,
 			resumeSession: s.resumeSession,
+			switchAgent: s.switchAgent,
 			setOverlay: s.setOverlay,
 			setToast: s.setToast,
 			notify: s.notify,
+			setThinking: s.setThinking,
+			compactSession: s.compactSession,
+			setCwd: s.setCwd,
 		})),
 	);
 }

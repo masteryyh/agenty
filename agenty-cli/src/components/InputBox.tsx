@@ -29,6 +29,22 @@ function abbreviateCwd(wd: string, max = 40): string {
 	return `…${display.slice(display.length - max + 1)}`;
 }
 
+function effortColor(level: string): string {
+	switch (level) {
+		case "low":
+			return "gray";
+		case "medium":
+			return "yellow";
+		case "high":
+			return "cyan";
+		case "xhigh":
+		case "max":
+			return "magenta";
+		default:
+			return "green";
+	}
+}
+
 interface InputBoxProps {
 	value: string;
 	onChange: (v: string) => void;
@@ -39,6 +55,8 @@ interface InputBoxProps {
 	modelName: string;
 	cwd: string;
 	tokenConsumed: number;
+	thinkingLevel: string;
+	reasoningActive: boolean;
 	abort: () => void;
 	toast: ToastMsg | null;
 }
@@ -53,6 +71,8 @@ export function InputBox({
 	modelName,
 	cwd,
 	tokenConsumed,
+	thinkingLevel,
+	reasoningActive,
 	abort,
 	toast,
 }: InputBoxProps) {
@@ -74,6 +94,11 @@ export function InputBox({
 				{streaming && phrase ? (
 					<>
 						<Spinner label={phrase} />
+						{reasoningActive && thinkingLevel ? (
+							<Text dimColor>
+								{` (thinking with ${thinkingLevel} effort)`}
+							</Text>
+						) : null}
 						<Text dimColor> Esc to cancel </Text>
 					</>
 				) : null}
@@ -109,11 +134,16 @@ export function InputBox({
 			</Box>
 
 			<Box flexDirection="row" height={1} overflow="hidden">
-				<Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
+				<Box flexDirection="row" flexShrink={1} height={1} overflow="hidden">
 					<Text color="gray" dimColor wrap="truncate-start">
 						{abbreviateCwd(cwd)}
 					</Text>
+					{thinkingLevel ? <Text> </Text> : null}
+					{thinkingLevel ? (
+						<Text color={effortColor(thinkingLevel)}>{`thinking: ${thinkingLevel}`}</Text>
+					) : null}
 				</Box>
+				<Box flexGrow={1} flexBasis={0} height={1} overflow="hidden" />
 				<Text color="gray" dimColor>{`tokens: ${tokenConsumed}`}</Text>
 			</Box>
 		</Box>

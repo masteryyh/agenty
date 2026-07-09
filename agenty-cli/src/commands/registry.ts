@@ -49,8 +49,18 @@ export const commands: Command[] = [
 	},
 	{
 		name: "/provider",
-		description: "Manage model providers (CRUD)",
+		description: "Manage model providers",
 		usage: "/provider",
+	},
+	{
+		name: "/agents",
+		description: "Manage agents and switch current agent",
+		usage: "/agents [<name>]",
+		argHint: "name",
+		completeArgs: async (client) => {
+			const agents = await client.listAgents();
+			return agents.map((a) => a.name);
+		},
 	},
 	{
 		name: "/config",
@@ -66,6 +76,36 @@ export const commands: Command[] = [
 		name: "/exit",
 		description: "Quit agenty-cli",
 		usage: "/exit",
+	},
+	{
+		name: "/mcp",
+		description: "Manage MCP servers",
+		usage: "/mcp",
+	},
+	{
+		name: "/think",
+		description: "Set thinking mode (off/on/low/medium/high/xhigh)",
+		usage: "/think [off|on|low|medium|high|xhigh]",
+	},
+	{
+		name: "/compact",
+		description: "Compact the current conversation context",
+		usage: "/compact",
+	},
+	{
+		name: "/skill",
+		description: "Browse available skills",
+		usage: "/skill",
+	},
+	{
+		name: "/status",
+		description: "Show current session status",
+		usage: "/status",
+	},
+	{
+		name: "/cwd",
+		description: "Set or show the session working directory",
+		usage: "/cwd [<path>|clear]",
 	},
 ];
 
