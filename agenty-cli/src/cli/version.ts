@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /*
 Copyright © 2026 masteryyh <yyh991013@163.com>
 
@@ -15,19 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { render } from "ink";
-import { App } from "./App";
-import { runCLICommand } from "./cli/run";
-import { wrapStdin } from "./mouse/mouseStdin";
+import type { ParsedArgs } from "./utils";
 
-const command = await runCLICommand(process.argv.slice(2));
-if (command.handled) {
-	process.exitCode = command.exitCode;
-} else {
-	render(<App />, {
-		stdin: wrapStdin(process.stdin),
-		alternateScreen: true,
-		interactive: true,
-		exitOnCtrlC: true,
-	});
+export function handleVersion(_: ParsedArgs): void {
+    process.stdout.write(`${process.env.AGENTY_CLI_VERSION ?? "dev"}\n`);
 }

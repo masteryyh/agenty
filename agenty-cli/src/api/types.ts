@@ -95,6 +95,7 @@ export interface ModelProviderDto {
 	name: string;
 	type: string;
 	baseUrl: string;
+	bailianMultiModalEmbeddingBaseUrl?: string;
 	apiKeyCensored: string;
 	isPreset: boolean;
 }
@@ -103,6 +104,7 @@ export interface CreateModelProviderDto {
 	name: string;
 	type: string;
 	baseUrl: string;
+	bailianMultiModalEmbeddingBaseUrl?: string;
 	apiKey: string;
 }
 
@@ -110,6 +112,7 @@ export interface UpdateModelProviderDto {
 	name?: string;
 	type?: string;
 	baseUrl?: string;
+	bailianMultiModalEmbeddingBaseUrl?: string;
 	apiKey?: string;
 }
 
@@ -128,6 +131,31 @@ export interface ModelDto {
 	anthropicAdaptiveThinking: boolean;
 	isPreset: boolean;
 	contextWindow: number;
+}
+
+export interface CreateModelDto {
+	providerId: string;
+	name: string;
+	code: string;
+	embeddingModel?: boolean;
+	contextCompressionModel?: boolean;
+	multiModal?: boolean;
+	light?: boolean;
+	thinking?: boolean;
+	thinkingLevels?: string[];
+	anthropicAdaptiveThinking?: boolean;
+}
+
+export interface UpdateModelDto {
+	name?: string;
+	defaultModel?: boolean;
+	embeddingModel?: boolean;
+	contextCompressionModel?: boolean;
+	multiModal?: boolean;
+	light?: boolean;
+	thinking?: boolean;
+	thinkingLevels?: string[];
+	anthropicAdaptiveThinking?: boolean;
 }
 
 export interface AgentDto {

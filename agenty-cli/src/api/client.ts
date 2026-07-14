@@ -21,6 +21,7 @@ import type {
 	ChatDto,
 	ChatSessionDto,
 	CreateMCPServerDto,
+	CreateModelDto,
 	CreateModelProviderDto,
 	MCPServerDto,
 	ModelDto,
@@ -31,6 +32,7 @@ import type {
 	SystemSettingsDto,
 	UpdateAgentDto,
 	UpdateMCPServerDto,
+	UpdateModelDto,
 	UpdateModelProviderDto,
 	UpdateSystemSettingsDto,
 	VersionDto,
@@ -57,7 +59,9 @@ export class AgentyClient {
 
 	private headers(extra?: Record<string, string>): Record<string, string> {
 		const h: Record<string, string> = { ...extra };
-		if (this.authHeader) h["Authorization"] = this.authHeader;
+		if (this.authHeader) {
+			h["Authorization"] = this.authHeader;
+		}
 		return h;
 	}
 
@@ -72,7 +76,9 @@ export class AgentyClient {
 				body !== undefined ? { "Content-Type": "application/json" } : {},
 			),
 		};
-		if (body !== undefined) init.body = JSON.stringify(body);
+		if (body !== undefined) {
+			init.body = JSON.stringify(body);
+		}
 
 		const resp = await fetch(this.baseURL + path, init);
 		const text = await resp.text();
@@ -105,6 +111,13 @@ export class AgentyClient {
 		return page.data ?? [];
 	}
 
+	async listAgentsPage(page = 1, pageSize = 100): Promise<PagedResponse<AgentDto>> {
+		return this.request<PagedResponse<AgentDto>>(
+			"GET",
+			`/api/v1/agents?page=${page}&pageSize=${pageSize}`,
+		);
+	}
+
 	async resolveAgent(ref?: string): Promise<AgentDto> {
 		const agents = await this.listAgents();
 		if (agents.length === 0) {
@@ -114,7 +127,9 @@ export class AgentyClient {
 			const lower = ref.toLowerCase();
 			const matched = agents.find((a) => a.id === ref) ??
 				agents.find((a) => a.name.toLowerCase() === lower);
-			if (!matched) throw new Error(`agent not found: ${ref}`);
+			if (!matched) {
+				throw new Error(`agent not found: ${ref}`);
+			}
 			return matched;
 		}
 		return agents.find((a) => a.isDefault) ?? agents[0];
@@ -132,8 +147,29 @@ export class AgentyClient {
 		return page.data ?? [];
 	}
 
+	async listModelsPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelDto>> {
+		return this.request<PagedResponse<ModelDto>>(
+			"GET",
+			`/api/v1/models?page=${page}&pageSize=${pageSize}`,
+		);
+	}
+
+	async createModel(dto: CreateModelDto): Promise<ModelDto> {
+		return this.request<ModelDto>("POST", "/api/v1/models", dto);
+	}
+
+	async updateModel(id: string, dto: UpdateModelDto): Promise<void> {
+		return this.requestWithoutData("PUT", `/api/v1/models/${id}`, dto);
+	}
+
+	async deleteModel(id: string): Promise<void> {
+		return this.requestWithoutData("DELETE", `/api/v1/models/${id}`);
+	}
+
 	async resolveModel(ref?: string): Promise<ModelDto> {
-		if (!ref) return this.getDefaultModel();
+		if (!ref) {
+			return this.getDefaultModel();
+		}
 
 		const models = await this.listModels();
 		const lower = ref.toLowerCase();
@@ -145,7 +181,9 @@ export class AgentyClient {
 				const provider = m.provider?.name?.toLowerCase();
 				return provider ? `${provider}/${m.name}`.toLowerCase() === lower : false;
 			});
-		if (!matched) throw new Error(`model not found: ${ref}`);
+		if (!matched) {
+			throw new Error(`model not found: ${ref}`);
+		}
 		if (matched.embeddingModel) {
 			throw new Error(`model ${ref} is not a chat model`);
 		}
@@ -157,43 +195,11 @@ export class AgentyClient {
 	}
 
 	async updateAgent(id: string, dto: UpdateAgentDto): Promise<void> {
-		// Backend returns nil data for UpdateAgent; bypass request()'s null-data check.
-		const init: RequestInit = {
-			method: "PUT",
-			headers: this.headers({ "Content-Type": "application/json" }),
-			body: JSON.stringify(dto),
-		};
-		const resp = await fetch(this.baseURL + `/api/v1/agents/${id}`, init);
-		const text = await resp.text();
-		let parsed: GenericResponse<unknown>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<unknown>;
-		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from /api/v1/agents/${id}`,
-			);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
+		return this.requestWithoutData("PUT", `/api/v1/agents/${id}`, dto);
 	}
 
 	async deleteAgent(id: string): Promise<void> {
-		// Backend returns nil data for DeleteAgent; bypass request()'s null-data check.
-		const init: RequestInit = { method: "DELETE", headers: this.headers() };
-		const resp = await fetch(this.baseURL + `/api/v1/agents/${id}`, init);
-		const text = await resp.text();
-		let parsed: GenericResponse<unknown>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<unknown>;
-		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from /api/v1/agents/${id}`,
-			);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
+		return this.requestWithoutData("DELETE", `/api/v1/agents/${id}`);
 	}
 
 	async getLastSessionByAgent(
@@ -223,6 +229,13 @@ export class AgentyClient {
 		return result.data ?? [];
 	}
 
+	async listProvidersPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelProviderDto>> {
+		return this.request<PagedResponse<ModelProviderDto>>(
+			"GET",
+			`/api/v1/providers?page=${page}&pageSize=${pageSize}`,
+		);
+	}
+
 	async createProvider(
 		dto: CreateModelProviderDto,
 	): Promise<ModelProviderDto> {
@@ -237,20 +250,7 @@ export class AgentyClient {
 	}
 
 	async deleteProvider(id: string): Promise<void> {
-		const init: RequestInit = { method: "DELETE", headers: this.headers() };
-		const resp = await fetch(this.baseURL + `/api/v1/providers/${id}`, init);
-		const text = await resp.text();
-		let parsed: GenericResponse<unknown>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<unknown>;
-		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from /api/v1/providers/${id}`,
-			);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
+		return this.requestWithoutData("DELETE", `/api/v1/providers/${id}`);
 	}
 
 	async listMcpServers(page = 1, pageSize = 100): Promise<MCPServerDto[]> {
@@ -259,6 +259,13 @@ export class AgentyClient {
 			`/api/v1/mcp/servers?page=${page}&pageSize=${pageSize}`,
 		);
 		return result.data ?? [];
+	}
+
+	async listMcpServersPage(page = 1, pageSize = 100): Promise<PagedResponse<MCPServerDto>> {
+		return this.request<PagedResponse<MCPServerDto>>(
+			"GET",
+			`/api/v1/mcp/servers?page=${page}&pageSize=${pageSize}`,
+		);
 	}
 
 	async createMcpServer(
@@ -275,16 +282,29 @@ export class AgentyClient {
 	}
 
 	async deleteMcpServer(id: string): Promise<void> {
-		const init: RequestInit = { method: "DELETE", headers: this.headers() };
-		const resp = await fetch(this.baseURL + `/api/v1/mcp/servers/${id}`, init);
+		return this.requestWithoutData("DELETE", `/api/v1/mcp/servers/${id}`);
+	}
+
+	async rescanGlobalSkills(): Promise<void> {
+		return this.requestWithoutData("POST", "/api/v1/skills/rescan");
+	}
+
+	private async requestWithoutData(method: string, path: string, body?: unknown): Promise<void> {
+		const init: RequestInit = {
+			method,
+			headers: this.headers(body !== undefined ? { "Content-Type": "application/json" } : {}),
+		};
+		if (body !== undefined) {
+			init.body = JSON.stringify(body);
+		}
+
+		const resp = await fetch(this.baseURL + path, init);
 		const text = await resp.text();
 		let parsed: GenericResponse<unknown>;
 		try {
 			parsed = JSON.parse(text) as GenericResponse<unknown>;
 		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from /api/v1/mcp/servers/${id}`,
-			);
+			throw new Error(`HTTP ${resp.status}: failed to parse response from ${path}`);
 		}
 		if (parsed.code !== 200) {
 			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
@@ -320,6 +340,15 @@ export class AgentyClient {
 			"/api/v1/system/settings",
 			dto,
 		);
+	}
+
+	async isInitialized(): Promise<boolean> {
+		const settings = await this.getSettings();
+		return !!settings.initialized;
+	}
+
+	async setInitialized(): Promise<void> {
+		await this.updateSettings({ initialized: true });
 	}
 
 	async getLastSession(): Promise<ChatSessionDto | null> {
@@ -358,6 +387,7 @@ export class AgentyClient {
 			headers: this.headers({ "Content-Type": "application/json" }),
 			body: JSON.stringify({ cwd, agentsMD: agentsMD ?? null }),
 		};
+
 		const resp = await fetch(
 			this.baseURL + `/api/v1/chats/session/${sessionId}/cwd`,
 			init,
@@ -412,7 +442,26 @@ export class AgentyClient {
 		newSession: boolean;
 	}): Promise<PreparedSession> {
 		const agent = await this.resolveAgent(opts.agentRef);
-		const model = await this.resolveModel(opts.modelRef);
+
+		let model: ModelDto | null = null;
+		if (opts.modelRef) {
+			model = await this.resolveModel(opts.modelRef);
+		} else {
+			const fromAgent = (agent.models ?? []).find((m) => !m.embeddingModel);
+			if (fromAgent) {
+				model = fromAgent;
+			} else {
+				try {
+					model = await this.getDefaultModel();
+				} catch {
+					const all = await this.listModels();
+					model = all.find((m) => !m.embeddingModel) ?? null;
+				}
+			}
+		}
+		if (!model) {
+			throw new Error("no chat model available; use /model to pick one");
+		}
 
 		let session: ChatSessionDto | null = null;
 		if (!opts.newSession) {
@@ -456,10 +505,16 @@ export class AgentyClient {
 		let dataLines: string[] = [];
 
 		const dispatch = () => {
-			if (dataLines.length === 0) return;
+			if (dataLines.length === 0) {
+				return;
+			}
+
 			const payload = dataLines.join("\n");
 			dataLines = [];
-			if (payload.trim() === "") return;
+			if (payload.trim() === "") {
+				return;
+			}
+
 			try {
 				const evt = JSON.parse(payload) as StreamEvent;
 				onEvent(evt);
@@ -477,7 +532,10 @@ export class AgentyClient {
 
 		for (;;) {
 			const { done, value } = await reader.read();
-			if (done) break;
+			if (done) {
+				break;
+			}
+
 			buffer += decoder.decode(value, { stream: true });
 
 			let nlIndex: number;
@@ -487,10 +545,14 @@ export class AgentyClient {
 
 				if (line === "") {
 					const finished = dispatch();
-					if (finished) return;
+					if (finished) {
+						return;
+					}
 					continue;
 				}
-				if (line.startsWith(":")) continue;
+				if (line.startsWith(":")) {
+					continue;
+				}
 				if (line.startsWith("data:")) {
 					dataLines.push(line.slice(5).replace(/^ /, ""));
 				}

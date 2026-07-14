@@ -30,6 +30,7 @@ import { McpOverlay } from "./components/McpOverlay";
 import { SkillOverlay } from "./components/SkillOverlay";
 import { AgentOverlay } from "./components/AgentOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
+import { WizardOverlay } from "./components/WizardOverlay";
 import { PanelBox } from "./components/PanelBox";
 import { commands, parseCommandTokens } from "./commands/registry";
 import type { ModelDto, ChatSessionDto } from "./api/types";
@@ -78,10 +79,16 @@ export function App() {
 		return (
 			<Box padding={1}>
 				<Text color="cyan">
-					Connecting to agenty server at {app.opts.serverURL}…
+					{app.opts.localMode
+						? "Starting local agenty server…"
+						: `Connecting to agenty server at ${app.opts.serverURL}…`}
 				</Text>
 			</Box>
 		);
+	}
+
+	if (app.phase === "wizard") {
+		return <WizardOverlay />;
 	}
 
 	if (app.phase === "error") {
@@ -92,8 +99,9 @@ export function App() {
 				</Text>
 				<Text color="red">{app.initError}</Text>
 				<Text dimColor>
-					Check that the agenty server is running (agenty --server) and that
-					agenty-client.yaml points to the right URL. Press Ctrl+C to exit.
+					{app.opts.localMode
+						? "The embedded agenty server failed to start. Make sure `make build` succeeded and the configured database is reachable. Press Ctrl+C to exit."
+						: "Check that the agenty server is running (agenty) and that agenty-client.yaml points to the right URL. Press Ctrl+C to exit."}
 				</Text>
 			</Box>
 		);

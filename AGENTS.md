@@ -2,23 +2,24 @@
 
 ## Project Overview
 
-Agenty is an AI agent application written primarily in Go 1.26. It supports local interactive mode, self-hosted server mode, and remote client mode. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
+Agenty is an AI agent application written primarily in Go 1.26. The Go binary is an HTTP server, while `agenty-cli` provides local interactive and remote client modes. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
 
-The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, a tool registry, and a local/remote backend abstraction. The repository also contains a newer TypeScript terminal client in `agenty-cli/`, built with Bun, React, Ink, Zustand, and pnpm.
+The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository also contains a TypeScript terminal client in `agenty-cli/`, built with Bun, React, Ink, Zustand, and pnpm.
 
 ## Project Structure
 
 - `cmd/`: Go application entrypoint. `cmd/main.go` delegates to `pkg/cli/cmd`.
-- `agenty-cli/`: TypeScript/React Ink terminal UI package.
+- `agenty-cli/`: TypeScript/React Ink terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
   - `src/api/`: HTTP client and API DTOs for the CLI.
   - `src/commands/`: Slash command registry and parsing.
-  - `src/components/`: Ink UI components.
+  - `src/components/`: Ink UI components (chat, overlays, setup wizard).
   - `src/hooks/`: CLI interaction hooks.
   - `src/state/`: Zustand application state.
-  - `scripts/`: Bun build scripts.
-- `pkg/backend/`: Backend interface plus local and remote implementations used by clients.
+  - `src/localServer.ts`: embedded-server lifecycle (binary discovery, port pick, health check, fork `agenty --port <port>`).
+  - `scripts/`: Bun build scripts (bundles the CLI and embeds `bin/agenty` into `dist/`).
+- `pkg/cli/`: Go launch layer for the `agenty` backend binary. `pkg/cli/cmd/` handles server startup flags, version output, and exit codes; all interactive and resource-management client behavior lives in `agenty-cli`. `pkg/cli/theme/` is reused by the logger. The legacy Go TUI, local/client modes, and direct resource subcommands have been removed.
 - `pkg/chat/`: Chat/session orchestration and agentic loop support.
-- `pkg/config/`: Configuration loading and environment override handling.
+- `pkg/config/`: Server runtime defaults, database configuration types, validation, and SQLite path resolution. The Go binary does not load a configuration file.
 - `pkg/conn/`: Database, HTTP, SSE, and connection helpers.
 - `pkg/conn/db/`: Embedded PostgreSQL and SQLite schema SQL.
 - `pkg/consts/`: Shared constants, including long tool descriptions and prompts.
@@ -40,10 +41,9 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 
 ## Runtime Modes
 
-- Local interactive mode runs the terminal UI and backend logic in one process.
-- Server mode runs the Gin HTTP backend for remote clients.
-- Remote client mode connects to a backend through `server.url`.
-- Core logic that crosses client/backend boundaries should work through `pkg/backend` so local and remote paths remain consistent.
+- Running `agenty` always starts the Gin HTTP backend. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled; `--port`, `--db`, and `--debug` override those defaults.
+- Local interactive mode runs `agenty-cli`, which forks an embedded `agenty` subprocess on a random port and connects to it over HTTP.
+- Remote client mode belongs to `agenty-cli` and connects to an existing backend through its `--server` option or client configuration.
 
 ## Go Conventions
 
@@ -60,7 +60,7 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 - Background goroutines use `pkg/utils/safe` helpers instead of bare goroutine launches when panic handling or lifecycle control matters.
 - User-facing command labels, prompts, log messages, status text, and errors in repository code are written in English unless localized copy is part of the feature.
 
-## Service, Route, And Backend Patterns
+## Service And Route Patterns
 
 - Services, routes, registries, and similar global components use `sync.Once` singleton initialization with `GetXxx()` accessors.
 - Service methods attach context to GORM calls with `db.WithContext(ctx)`.
@@ -68,7 +68,6 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 - Gin route structs live in `pkg/routes`, expose `RegisterRoutes(*gin.RouterGroup)`, and are wired under `/api/v1` in `pkg/routes/routes.go`.
 - Route handlers use `pkg/utils/response` helpers: `response.OK`, `response.Failed`, and `response.Abort`.
 - Remote HTTP calls use helpers in `pkg/conn` or the shared client from `conn.GetHTTPClient()`.
-- Backend interface changes are implemented for both local and remote backends.
 
 ## Database And Search Patterns
 

@@ -1,4 +1,4 @@
-.PHONY: all build clean test vet fmt install
+.PHONY: all build cli clean test vet fmt install
 
 VERSION ?= $(shell sh -c 'rev=$$(git rev-parse --short=12 HEAD); if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then printf "%s-dirty" "$$rev"; else printf "%s" "$$rev"; fi')
 LDFLAGS := -X github.com/masteryyh/agenty/pkg/version.Version=$(VERSION)
@@ -9,6 +9,10 @@ build:
 	@echo "Building agenty..."
 	go build -tags=fts5 -ldflags "$(LDFLAGS)" -o bin/agenty cmd/main.go
 
+cli:
+	@echo "Building agenty-cli (single executable with embedded agenty)..."
+	pnpm cli:build
+
 install: build
 	@echo "Installing agenty to /usr/local/bin..."
 	sudo install -m 755 bin/agenty /usr/local/bin/agenty
@@ -17,6 +21,7 @@ install: build
 clean:
 	@echo "Cleaning..."
 	rm -rf bin/
+	rm -rf agenty-cli/dist
 
 test:
 	@echo "Running tests..."

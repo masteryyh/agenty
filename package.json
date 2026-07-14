@@ -6,7 +6,7 @@
     "build": "make build",
     "test": "make test",
     "run": "make build && ./bin/agenty",
-    "cli:dev": "bun agenty-cli/src/index.tsx",
+    "cli:dev": "bun run agenty-cli/scripts/ensure-embedded.ts && bun agenty-cli/src/index.tsx",
     "cli:build": "bun run agenty-cli/scripts/build.ts",
     "cli:typecheck": "pnpm --filter agenty-cli typecheck"
   },

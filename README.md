@@ -29,137 +29,76 @@ chmod +x agenty
 sudo install -m 755 agenty /usr/local/bin/agenty
 ```
 
-To use a specific configuration file:
+Start the backend with its defaults (port `8080`, SQLite at `~/.agenty/agenty.db`, debug logging disabled):
 
 ```bash
-agenty --config /path/to/config.yaml
+agenty
 ```
 
-On first run, Agenty initializes its database, seeds preset providers and models, creates the default agent, and opens a setup wizard for API keys and system settings.
+On first run, `agenty` initializes its database, seeds preset providers and models, and creates the default agent. When you start `agenty-cli` against a fresh system, it detects the uninitialized state and opens a setup wizard to configure provider API keys, web search, and default models.
 
 ## Run Modes
 
-Agenty can run as a single local app, a self-hosted server, or a remote client connected to that server.
+Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `agenty-cli` (React Ink TUI plus resource-management subcommands, embedding `agenty` for local use).
 
 | Mode | Command | Use case |
 | --- | --- | --- |
-| Local interactive mode | `agenty` | Run the TUI and backend logic in one local process. |
-| Local interactive mode with config | `agenty --config /path/to/config.yaml` | Use an explicit config file. |
-| Server mode | `agenty --server --config /path/to/config.yaml` | Run the HTTP backend service for remote clients. |
-| Remote interactive mode | `agenty --config agenty-client.yaml` | Connect the TUI to a server through `server.url`. |
+| Local interactive mode | `agenty-cli` | Run the TUI; agenty-cli spawns an embedded `agenty` on a random local port and connects to it. |
+| Local interactive mode (dev) | `pnpm cli:dev` | Run the TUI from source; reuses `bin/agenty` or builds it via `make build` on first run. |
+| Local interactive mode with database | `agenty-cli --db /path/to/agenty.db` | Use an explicit SQLite database for the embedded server. |
+| Server mode | `agenty` | Run the HTTP backend service with default settings. |
+| Remote interactive mode | `agenty-cli --server http://host:8080` | Connect the TUI to a remote `agenty` server instead of spawning a local one. |
+| Resource-management CLI | `agenty-cli <subcommand>` | Initialize and manage agents, providers, models, settings, MCP servers, and global skills. See `agenty-cli --help`. |
+
+On first run, `agenty-cli` detects an uninitialized system and opens a setup wizard to configure provider API keys, web search, and default models.
 
 Common slash commands inside the TUI:
 
 | Command | Purpose |
 | --- | --- |
 | `/help` | Show available commands. |
-| `/provider` | Configure model provider API keys. |
-| `/model` | Manage and switch chat models. |
-| `/agent` | Manage and switch agents. |
-| `/settings` | Edit system settings such as web search provider and embedding model. |
+| `/provider` | Manage model providers. |
+| `/model` | Switch the chat model. |
+| `/agents` | Manage agents and switch the current agent. |
+| `/config` | View and edit system settings. |
 | `/mcp` | Manage MCP servers. |
-| `/skill` | View available skills. |
-| `/memory` | View agent long-term memories. |
+| `/skill` | Browse available skills. |
 | `/compact` | Compact the current conversation. |
-| `/cwd` | Set or show the working directory in local mode. |
+| `/cwd` | Set or show the session working directory. |
 | `/think` | Set the current model thinking level. |
+| `/status` | Show current session status. |
+| `/new` | Start a new session. |
+| `/resume` | Resume a previous session. |
 | `/exit` | Quit the TUI. |
 
 ## Configuration
 
-If you do not pass `--config`, Agenty uses `$HOME/.agenty/config.yaml`. On first run, if that file does not exist, Agenty creates it automatically with a local-mode default configuration (`debug: false` and `db.type: sqlite`). If you pass `--config`, that exact file must exist or startup fails.
+The Go backend does not read or create a configuration file. Its runtime settings are command-line flags:
 
-Minimal local configuration:
-
-```yaml
-debug: false
-
-db:
-  type: sqlite
-```
-
-Server configuration with HTTP Basic Auth:
-
-```yaml
-debug: false
-port: 8080
-
-db:
-  type: sqlite
-
-auth:
-  enabled: true
-  username: admin
-  password: change-me
-```
-
-Client configuration:
-
-```yaml
-server:
-  url: http://localhost:8080
-  username: admin
-  password: change-me
-```
-
-PostgreSQL configuration:
-
-```yaml
-db:
-  type: postgres
-  host: 127.0.0.1
-  port: 5432
-  username: postgres
-  password: change-me
-  database: agenty
-```
-
-Supported configuration keys:
-
-| Key | Default | Description |
+| Flag | Default | Description |
 | --- | --- | --- |
-| `port` | `8080` | HTTP listen port in server mode. Optional in config; Agenty falls back to `8080` when omitted. |
-| `debug` | `false` | Enables verbose logging and debug behavior. |
-| `db.type` | `sqlite` | Database backend: `sqlite` or `postgres`. |
-| `db.host` | `localhost` | PostgreSQL host. |
-| `db.port` | `5432` | PostgreSQL port. |
-| `db.username` | `postgres` | PostgreSQL username. |
-| `db.password` | empty | PostgreSQL password. Required when `db.type` is `postgres`. |
-| `db.database` | `agenty` | PostgreSQL database name. |
-| `db.sqliteVectorExtensionPath` | user config dir | Optional sqlite-vector native extension path. |
-| `auth.enabled` | `false` | Enables HTTP Basic Auth in server mode. |
-| `auth.username` | empty | Basic Auth username. |
-| `auth.password` | empty | Basic Auth password. |
-| `mcp.healthCheckInterval` | `30` | MCP health-check interval in seconds. |
-| `mcp.connectTimeout` | `15` | MCP connection timeout in seconds. |
-| `server.url` | empty | Remote backend URL. If set outside server mode, Agenty runs as a remote client. |
-| `server.username` | empty | Remote backend Basic Auth username. |
-| `server.password` | empty | Remote backend Basic Auth password. |
+| `--port` | `8080` | HTTP listen port. |
+| `--db` | `~/.agenty/agenty.db` | SQLite database file. `~` is expanded to the current user's home directory. |
+| `--debug` | disabled | Enable debug logging and Gin debug mode. |
+| `--version`, `-v` | disabled | Print version information and exit. |
 
-Several configuration values can be overridden with `AGENTY_` environment variables, for example:
+For example:
 
 ```bash
-AGENTY_DB_PASSWORD=secret agenty --config /path/to/config.yaml
-AGENTY_SERVER_URL=http://localhost:8080 agenty
+agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
-If the main config file is found, Agenty also merges sibling fragments named like `agenty.local.yaml` or `agenty.private.yml`. The `include` key can point to additional YAML, JSON, or TOML fragments.
+`agenty-cli` passes `--db` and `--debug` through to its embedded backend in local mode. Its remote-client settings remain separate; see `agenty-cli --help` for `--server` and `--client-config`.
 
 ## Database
 
-SQLite is the default database. Agenty stores the SQLite database at `os.UserConfigDir()/agenty/agenty.db`, which maps to the platform user configuration directory such as:
+SQLite is the active database backend. By default, Agenty stores it at `~/.agenty/agenty.db`; use `--db` to select another file. The parent directory is created automatically.
 
-| Platform | Typical path |
-| --- | --- |
-| macOS | `$HOME/Library/Application Support/agenty/agenty.db` |
-| Linux | `$XDG_CONFIG_HOME/agenty/agenty.db` or `$HOME/.config/agenty/agenty.db` |
-| Windows | `%AppData%\agenty\agenty.db` |
+SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. Agenty stores the sqlite-vector native extension next to the selected database and downloads the matching release asset when the extension is missing.
 
-SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. If `db.sqliteVectorExtensionPath` is not configured, Agenty uses `os.UserConfigDir()/agenty/vector.{so,dylib,dll}` and downloads the matching sqlite-vector release asset when the extension is missing.
+Windows `arm64` cannot currently run the server because sqlite-vector does not provide that platform and PostgreSQL selection is not exposed through the CLI.
 
-Windows `arm64` cannot use the default SQLite mode because `sqlite-vector` does not provide that platform. On Windows `arm64`, configure an external PostgreSQL database before starting Agenty in local or server mode.
-
-PostgreSQL is intended for server deployments. Before pointing Agenty at PostgreSQL, create the database:
+The PostgreSQL implementation and schema remain in the codebase for a later decision, but the current server CLI does not expose PostgreSQL connection parameters. A future PostgreSQL deployment would still require creating the database:
 
 ```sql
 CREATE DATABASE agenty;

@@ -24,7 +24,7 @@ import {
 } from "../state/store";
 
 export interface AppSlice {
-	phase: "loading" | "error" | "ready";
+	phase: "loading" | "error" | "wizard" | "ready";
 	initError: string | null;
 	opts: CliOptions;
 	agent: AgentDto | null;

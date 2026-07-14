@@ -14,14 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { CLI_VERSION } from "../src/version";
+import { existsSync, copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+
+const ROOT = resolve(import.meta.dir, "../..");
+const PKG = resolve(import.meta.dir, "..");
+const EMBEDDED_DIR = join(PKG, "src/_embedded");
+const EMBEDDED_BIN = join(EMBEDDED_DIR, "agenty-bin");
+const GO_BIN = join(ROOT, "bin/agenty");
+const DIST = join(PKG, "dist");
 
 function readCliVersion(): string {
 	const fromEnv = process.env.AGENTY_CLI_VERSION;
 	if (fromEnv && fromEnv !== "undefined") return fromEnv;
-	const envPath = resolve(import.meta.dir, "../.env");
+	const envPath = join(PKG, ".env");
 	if (existsSync(envPath)) {
 		try {
 			const text = readFileSync(envPath, "utf8");
@@ -31,24 +37,44 @@ function readCliVersion(): string {
 			// fall through
 		}
 	}
-	return CLI_VERSION;
+	return "dev";
 }
 
-const version = readCliVersion();
+// 1. Build the agenty Go backend binary.
+const build = Bun.spawn(["make", "build"], {
+	cwd: ROOT,
+	stdout: "inherit",
+	stderr: "inherit",
+});
+const code = await build.exited;
+if (code !== 0) {
+	console.error(`\`make build\` failed with exit code ${code}`);
+	process.exit(1);
+}
 
+// 2. Copy the binary into src/_embedded so `with { type: "file" }` can embed it
+//    into the compiled single executable.
+mkdirSync(EMBEDDED_DIR, { recursive: true });
+copyFileSync(GO_BIN, EMBEDDED_BIN);
+
+// 3. Compile agenty-cli into a single standalone executable with the embedded
+//    agenty server binary baked in.
+const version = readCliVersion();
+mkdirSync(DIST, { recursive: true });
+const outfile = join(DIST, "agenty-cli");
 const result = await Bun.build({
-	entrypoints: [resolve(import.meta.dir, "../src/index.tsx")],
-	outdir: resolve(import.meta.dir, "../dist"),
+	entrypoints: [join(PKG, "src/index.tsx")],
+	compile: { outfile },
 	target: "bun",
-	packages: "external",
 	define: {
 		"process.env.AGENTY_CLI_VERSION": JSON.stringify(version),
 	},
 });
-
 if (!result.success) {
-	for (const log of result.logs) console.error(log);
+	for (const log of result.logs) console.error(log.message);
 	process.exit(1);
 }
 
-console.log(`agenty-cli built (cli version ${version}) -> dist/`);
+console.log(
+	`agenty-cli single executable built -> dist/agenty-cli (cli ${version}, embedded agenty server)`,
+);

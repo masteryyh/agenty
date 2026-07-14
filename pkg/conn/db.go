@@ -126,16 +126,12 @@ func openPostgres(cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
 }
 
 func openSQLite(ctx context.Context, cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve user config dir: %w", err)
-	}
-	agentyDir := filepath.Join(configDir, "agenty")
-	if err = os.MkdirAll(agentyDir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create sqlite config dir: %w", err)
+	dbPath := cfg.SQLitePath
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create sqlite database directory: %w", err)
 	}
 
-	dbPath := filepath.Join(agentyDir, "agenty.db")
 	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_busy_timeout=5000", dbPath)
 	dbConn, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		TranslateError: true,
@@ -154,7 +150,7 @@ func openSQLite(ctx context.Context, cfg *config.DatabaseConfig, debug bool) (*g
 	if err = ensureSQLiteFTS5(ctx, dbConn); err != nil {
 		return nil, err
 	}
-	if err = loadSQLiteVector(ctx, sqlDB, cfg.SQLiteVectorExtensionPath, agentyDir); err != nil {
+	if err = loadSQLiteVector(ctx, sqlDB, "", dbDir); err != nil {
 		return nil, err
 	}
 	if err = verifySQLiteVector(ctx, dbConn); err != nil {

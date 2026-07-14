@@ -22,15 +22,19 @@ export type ThinkingFlag = "off" | "on" | string;
 
 export interface CliOptions {
 	serverURL: string;
+	localMode: boolean;
 	agentRef?: string;
 	modelRef?: string;
 	username?: string;
 	password?: string;
 	thinking: ThinkingFlag;
-	configPath?: string;
+	databasePath?: string;
+	backendDebug: boolean;
 	newSession: boolean;
 }
 
+// Used only as a remote fallback hint in error messages; local mode resolves
+// the URL dynamically via startLocalServer().
 const DEFAULT_SERVER_URL = "http://localhost:8081";
 
 interface ClientYaml {
@@ -43,6 +47,8 @@ interface ClientYaml {
 	};
 }
 
+const BOOLEAN_FLAGS = new Set(["debug", "new-session"]);
+
 function parseArgs(argv: string[]): Record<string, string | boolean> {
 	const flags: Record<string, string | boolean> = {};
 	for (let i = 0; i < argv.length; i++) {
@@ -50,7 +56,7 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
 		if (!arg.startsWith("--")) continue;
 		const key = arg.slice(2);
 		const next = argv[i + 1];
-		if (next !== undefined && !next.startsWith("--")) {
+		if (!BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith("--")) {
 			flags[key] = next;
 			i++;
 		} else {
@@ -86,15 +92,19 @@ function findDefaultConfig(): string | null {
 export function loadOptions(): CliOptions {
 	const flags = parseArgs(process.argv.slice(2));
 
-	const configPath =
-		typeof flags.config === "string" ? flags.config : findDefaultConfig();
-	const yaml: ClientYaml = configPath ? (loadYaml(configPath) ?? {}) : {};
-
-	const serverURL =
+	const clientConfigPath =
+		typeof flags["client-config"] === "string"
+			? flags["client-config"]
+			: findDefaultConfig();
+	const yaml: ClientYaml = clientConfigPath ? (loadYaml(clientConfigPath) ?? {}) : {};
+	// Local mode (default) spins up an embedded `agenty` server subprocess.
+	// Remote mode is opted into by providing any explicit server URL.
+	const explicitServer =
 		(typeof flags.server === "string" && flags.server) ||
 		process.env.AGENTY_SERVER_URL ||
-		yaml.server?.url ||
-		DEFAULT_SERVER_URL;
+		yaml.server?.url;
+	const localMode = !explicitServer;
+	const serverURL = explicitServer ? explicitServer.replace(/\/+$/, "") : "";
 
 	const username =
 		(typeof flags.user === "string" && flags.user) ||
@@ -112,13 +122,15 @@ export function loadOptions(): CliOptions {
 		(typeof flags.thinking === "string" && flags.thinking) || "off";
 
 	return {
-		serverURL: serverURL.replace(/\/+$/, ""),
+		serverURL,
+		localMode,
 		agentRef: typeof flags.agent === "string" ? flags.agent : undefined,
 		modelRef: typeof flags.model === "string" ? flags.model : undefined,
 		username,
 		password,
 		thinking,
-		configPath: configPath ?? undefined,
+		databasePath: typeof flags.db === "string" ? flags.db : undefined,
+		backendDebug: flags.debug === true,
 		newSession: flags["new-session"] === true,
 	};
 }
@@ -136,3 +148,5 @@ export function parseThinking(flag: ThinkingFlag): {
 	}
 	return { thinking: true, thinkingLevel: flag.trim() };
 }
+
+export { DEFAULT_SERVER_URL };

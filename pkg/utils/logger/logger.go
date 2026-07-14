@@ -71,7 +71,7 @@ func (h *multiHandler) WithGroup(name string) slog.Handler {
 	return &multiHandler{handlers: handlers}
 }
 
-func Init(isServerMode bool, debug bool, logFilePath string) error {
+func Init(debug bool, logFilePath string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -94,11 +94,7 @@ func Init(isServerMode bool, debug bool, logFilePath string) error {
 	handlers := []slog.Handler{
 		slog.NewJSONHandler(f, opts),
 	}
-	if isServerMode {
-		handlers = append(handlers, slog.NewTextHandler(os.Stdout, opts))
-	} else {
-		handlers = append(handlers, newTUIHandler(level))
-	}
+	handlers = append(handlers, slog.NewTextHandler(os.Stdout, opts))
 
 	slog.SetDefault(slog.New(&multiHandler{handlers: handlers}))
 

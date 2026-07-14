@@ -51,6 +51,7 @@ docs/
 # Node / pnpm
 node_modules/
 agenty-cli/dist/
+agenty-cli/src/_embedded/agenty-bin
 agenty-cli/bun.lockb
 
 # Coding Agents

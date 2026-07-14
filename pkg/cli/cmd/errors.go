@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /*
 Copyright © 2026 masteryyh <yyh991013@163.com>
 
@@ -15,19 +14,37 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { render } from "ink";
-import { App } from "./App";
-import { runCLICommand } from "./cli/run";
-import { wrapStdin } from "./mouse/mouseStdin";
+package cmd
 
-const command = await runCLICommand(process.argv.slice(2));
-if (command.handled) {
-	process.exitCode = command.exitCode;
-} else {
-	render(<App />, {
-		stdin: wrapStdin(process.stdin),
-		alternateScreen: true,
-		interactive: true,
-		exitOnCtrlC: true,
-	});
+import "errors"
+
+type exitCodeError struct {
+	code int
+	err  error
+}
+
+func (e *exitCodeError) Error() string {
+	return e.err.Error()
+}
+
+func (e *exitCodeError) Unwrap() error {
+	return e.err
+}
+
+func withExitCode(err error, code int) error {
+	if err == nil {
+		return nil
+	}
+	return &exitCodeError{code: code, err: err}
+}
+
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	if coded, ok := errors.AsType[*exitCodeError](err); ok {
+		return coded.code
+	}
+	return 1
 }

@@ -29,7 +29,6 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/masteryyh/agenty/pkg/config"
 	"github.com/masteryyh/agenty/pkg/models"
 	"github.com/masteryyh/agenty/pkg/services"
 	"github.com/masteryyh/agenty/pkg/tools"
@@ -58,11 +57,12 @@ type mcpConnection struct {
 }
 
 type MCPManager struct {
-	mu          sync.RWMutex
-	connections map[uuid.UUID]*mcpConnection
-	registry    *tools.Registry
-	service     *services.MCPServerService
-	cfg         *config.MCPConfig
+	mu                  sync.RWMutex
+	connections         map[uuid.UUID]*mcpConnection
+	registry            *tools.Registry
+	service             *services.MCPServerService
+	healthCheckInterval time.Duration
+	connectTimeout      time.Duration
 }
 
 var (
@@ -76,16 +76,12 @@ func GetManager() *MCPManager {
 
 func InitManager(_ context.Context, registry *tools.Registry) *MCPManager {
 	managerOnce.Do(func() {
-		cfg := config.GetConfigManager().GetConfig().MCP
-		if cfg == nil {
-			cfg = &config.MCPConfig{HealthCheckInterval: 30, ConnectTimeout: 15}
-		}
-
 		globalManager = &MCPManager{
-			connections: make(map[uuid.UUID]*mcpConnection),
-			registry:    registry,
-			service:     services.GetMCPServerService(),
-			cfg:         cfg,
+			connections:         make(map[uuid.UUID]*mcpConnection),
+			registry:            registry,
+			service:             services.GetMCPServerService(),
+			healthCheckInterval: 30 * time.Second,
+			connectTimeout:      15 * time.Second,
 		}
 	})
 	return globalManager
@@ -107,7 +103,7 @@ func (m *MCPManager) Start() {
 	}
 
 	safe.GoSafeWithCtx("mcp-health-check", ctx, func(ctx context.Context) {
-		ticker := time.NewTicker(time.Duration(m.cfg.HealthCheckInterval) * time.Second)
+		ticker := time.NewTicker(m.healthCheckInterval)
 		defer ticker.Stop()
 
 		for {
@@ -220,7 +216,7 @@ func (m *MCPManager) connect(ctx context.Context, server *models.MCPServer) erro
 	}
 	m.mu.Unlock()
 
-	connectCtx, cancel := context.WithTimeout(ctx, time.Duration(m.cfg.ConnectTimeout)*time.Second)
+	connectCtx, cancel := context.WithTimeout(ctx, m.connectTimeout)
 	defer cancel()
 
 	t, err := m.createTransport(server)

@@ -18,84 +18,52 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
-	clitui "github.com/masteryyh/agenty/pkg/cli/tui"
+	"github.com/masteryyh/agenty/pkg/config"
+	"github.com/masteryyh/agenty/pkg/utils/logger"
 	"github.com/masteryyh/agenty/pkg/version"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var (
-	cfgFile       string
-	serverMode    bool
-	showVersion   bool
-	outputJSON    bool
-	quietOutput   bool
-	noColorOutput bool
-	page          int
-	pageSize      int
-	rootCmd       = &cobra.Command{
+	serverPort   int
+	databasePath string
+	debugMode    bool
+	showVersion  bool
+	rootCmd      = &cobra.Command{
 		Use:   "agenty",
 		Short: "Agenty - An AI agent application",
 		Long: `Agenty is an AI agent application with tool calling, 
 agentic looping and skills usage capabilities.`,
 		SilenceUsage: true,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if serverMode && cmd.Parent() != nil {
-				return withExitCode(fmt.Errorf("server mode can only be started without subcommands"), 2)
-			}
-			return nil
+		Args: func(cmd *cobra.Command, args []string) error {
+			return withExitCode(cobra.NoArgs(cmd, args), 2)
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if showVersion {
 				fmt.Fprintln(cmd.OutOrStdout(), version.Current())
 				return nil
 			}
 
-			if serverMode {
-				_, closeLogger, err := initCommandEnvironment(true)
-				if err != nil {
-					return err
-				}
-				defer closeLogger()
-				return startServer()
-			}
-
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return withExitCode(fmt.Errorf("must be run in an interactive terminal"), 2)
-			}
-
-			runtime, err := initRuntime(cmd.Context(), true, true)
+			cfg, err := config.NewServerConfig(serverPort, databasePath, debugMode)
 			if err != nil {
-				return err
+				return withExitCode(fmt.Errorf("invalid server options: %w", err), 2)
 			}
-			defer runtime.Close()
-			return clitui.StartChat(runtime.Backend, runtime.Local)
+			if err := logger.Init(cfg.Debug, ""); err != nil {
+				return fmt.Errorf("failed to initialize logger: %w", err)
+			}
+			defer logger.Close()
+			return startServer(cfg)
 		},
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default ~/.agenty/config.yaml)")
-	rootCmd.PersistentFlags().BoolVar(&serverMode, "server", false, "run in server mode")
-	rootCmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show version")
-	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "output JSON")
-	rootCmd.PersistentFlags().BoolVar(&quietOutput, "quiet", false, "suppress non-essential output")
-	rootCmd.PersistentFlags().BoolVar(&noColorOutput, "no-color", false, "disable color output")
-	rootCmd.PersistentFlags().IntVar(&page, "page", 1, "page number for list commands")
-	rootCmd.PersistentFlags().IntVar(&pageSize, "page-size", 50, "page size for list commands")
-	rootCmd.AddCommand(newChatCmd())
-	rootCmd.AddCommand(newAgentCmd())
-	rootCmd.AddCommand(newProviderCmd())
-	rootCmd.AddCommand(newModelCmd())
-	rootCmd.AddCommand(newConfigCmd())
-	rootCmd.AddCommand(newSessionCmd())
-	rootCmd.AddCommand(newMemoryCmd())
-	rootCmd.AddCommand(newSkillCmd())
-	rootCmd.AddCommand(newInitCmd())
-	rootCmd.AddCommand(newMCPCmd())
-	rootCmd.AddCommand(newGatewayCmd())
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+	rootCmd.Flags().IntVar(&serverPort, "port", config.DefaultServerPort, "HTTP server port")
+	rootCmd.Flags().StringVar(&databasePath, "db", config.DefaultSQLitePath, "SQLite database path")
+	rootCmd.Flags().BoolVar(&debugMode, "debug", false, "enable debug logging")
+	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "show version")
 }
 
 func Execute() error {

@@ -40,9 +40,7 @@ import (
 	"github.com/masteryyh/agenty/pkg/utils/signal"
 )
 
-func startServer() error {
-	cfg := config.GetConfigManager().GetConfig()
-
+func startServer(cfg *config.AppConfig) error {
 	slog.Info("starting agenty server...")
 
 	baseCtx, cancel := signal.SetupContext()
@@ -108,11 +106,6 @@ func startServer() error {
 	}
 	engine.Use(middleware.RecoveryMiddleware())
 	engine.Use(middleware.CORSMiddleware())
-
-	if cfg.Auth != nil && cfg.Auth.Enabled {
-		slog.InfoContext(baseCtx, "HTTP Basic Auth enabled")
-		engine.Use(middleware.BasicAuthMiddleware(cfg.Auth))
-	}
 
 	apiRoute := engine.Group("/api")
 	v1Route := routes.GetV1Routes()

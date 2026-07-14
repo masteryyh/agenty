@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/index.tsx",
-    "start": "bun run src/index.tsx",
+    "dev": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
+    "start": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -16,6 +16,7 @@
     "ink-scroll-list": "^0.4.1",
     "ink-text-input": "^6.0.0",
     "react": "^19.2.7",
+    "react-devtools-core": "^7.0.1",
     "yaml": "^2.9.0",
     "zustand": "^5.0.14"
   },

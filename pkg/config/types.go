@@ -25,99 +25,25 @@ const (
 	DatabaseTypePostgres = "postgres"
 	DatabaseTypeSQLite   = "sqlite"
 	DefaultServerPort    = 8080
+	DefaultSQLitePath    = "~/.agenty/agenty.db"
 )
 
-// MCPConfig holds runtime parameters for MCP client connections
-type MCPConfig struct {
-	HealthCheckInterval int `mapstructure:"healthCheckInterval"`
-	ConnectTimeout      int `mapstructure:"connectTimeout"`
-}
-
-func (c *MCPConfig) Validate() error {
-	if c == nil {
-		return nil
-	}
-	if c.HealthCheckInterval <= 0 {
-		c.HealthCheckInterval = 30
-	}
-	if c.ConnectTimeout <= 0 {
-		c.ConnectTimeout = 15
-	}
-	return nil
-}
-
-// ServerConfig holds configuration for connecting to a remote agenty server outside server mode
-type ServerConfig struct {
-	// URL of the remote server (e.g. http://localhost:8080)
-	URL string `mapstructure:"url"`
-
-	// Username for authentication with the remote server
-	Username string `mapstructure:"username"`
-
-	// Password for authentication with the remote server
-	Password string `mapstructure:"password"`
-}
-
-// AppConfig is the config definition for this app
 type AppConfig struct {
-	// ServerMode indicates whether to run as the HTTP server
-	ServerMode bool `mapstructure:"-"`
-
-	// Debug mode enables more verbose logging and other debug features
-	Debug bool `mapstructure:"debug"`
-
-	// Port of the HTTP server
-	Port int `mapstructure:"port"`
-
-	// DB configuration
-	DB *DatabaseConfig `mapstructure:"db"`
-
-	// Auth configuration for HTTP Basic Auth
-	Auth *AuthConfig `mapstructure:"auth"`
-
-	// MCP client runtime configuration
-	MCP *MCPConfig `mapstructure:"mcp"`
-
-	// Server configuration for remote mode
-	Server *ServerConfig `mapstructure:"server"`
+	Debug bool
+	Port  int
+	DB    *DatabaseConfig
 }
 
-func (c *AppConfig) IsRemoteMode() bool {
-	return !c.ServerMode && c.Server != nil && c.Server.URL != ""
-}
-
-// AuthConfig is the config definition for HTTP Basic Auth
-type AuthConfig struct {
-	// Enabled indicates whether HTTP Basic Auth is enabled
-	Enabled bool `mapstructure:"enabled"`
-
-	// Username for HTTP Basic Auth
-	Username string `mapstructure:"username"`
-
-	// Password for HTTP Basic Auth
-	Password string `mapstructure:"password"`
-}
-
-// DatabaseConfig is the config definition for database connection.
+// DatabaseConfig retains PostgreSQL fields while the server CLI currently
+// constructs only SQLite configurations.
 type DatabaseConfig struct {
-	Type string `mapstructure:"type"`
-
-	// Host of the database server
-	Host string `mapstructure:"host"`
-
-	// Port of the database server
-	Port int `mapstructure:"port"`
-
-	// Username for database authentication
-	Username string `mapstructure:"username"`
-
-	// Password for database authentication
-	Password string `mapstructure:"password"`
-
-	// Database name
-	Database string `mapstructure:"database"`
-
-	SQLiteVectorExtensionPath string `mapstructure:"sqliteVectorExtensionPath"`
+	Type       string
+	SQLitePath string
+	Host       string
+	Port       int
+	Username   string
+	Password   string
+	Database   string
 }
 
 func (c *DatabaseConfig) Validate() error {
@@ -128,6 +54,9 @@ func (c *DatabaseConfig) Validate() error {
 	case DatabaseTypeSQLite:
 		if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
 			return fmt.Errorf("external database is required on Windows ARM64 due to lack of SQLite vector support")
+		}
+		if c.SQLitePath == "" {
+			return fmt.Errorf("sqlite database path is required")
 		}
 		return nil
 	case DatabaseTypePostgres:
@@ -152,54 +81,18 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
-func (c *AuthConfig) Validate() error {
-	if c == nil || !c.Enabled {
-		return nil
-	}
-	if c.Username == "" {
-		return fmt.Errorf("auth username is required when auth is enabled")
-	}
-	if c.Password == "" {
-		return fmt.Errorf("auth password is required when auth is enabled")
-	}
-	return nil
-}
-
 func (c *AppConfig) Validate() error {
-	if c.ServerMode {
-		if c.Port <= 0 {
-			c.Port = DefaultServerPort
-		}
-		if c.Port > 65535 {
-			return fmt.Errorf("invalid port number: %d", c.Port)
-		}
-		if c.DB == nil {
-			return fmt.Errorf("database configuration is required in server mode")
-		}
-		if err := c.DB.Validate(); err != nil {
-			return fmt.Errorf("invalid db config: %w", err)
-		}
-		if err := c.Auth.Validate(); err != nil {
-			return fmt.Errorf("invalid auth config: %w", err)
-		}
-		if err := c.MCP.Validate(); err != nil {
-			return fmt.Errorf("invalid mcp config: %w", err)
-		}
-		return nil
+	if c.Port <= 0 {
+		c.Port = DefaultServerPort
 	}
-
-	if c.IsRemoteMode() {
-		return nil
+	if c.Port > 65535 {
+		return fmt.Errorf("invalid port number: %d", c.Port)
 	}
-
 	if c.DB == nil {
-		return fmt.Errorf("database configuration is required (or configure server.url for remote mode)")
+		return fmt.Errorf("database configuration is required")
 	}
 	if err := c.DB.Validate(); err != nil {
 		return fmt.Errorf("invalid db config: %w", err)
-	}
-	if err := c.MCP.Validate(); err != nil {
-		return fmt.Errorf("invalid mcp config: %w", err)
 	}
 	return nil
 }

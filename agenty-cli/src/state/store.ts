@@ -30,6 +30,7 @@ import type {
 import { loadOptions, parseThinking } from "../config";
 import type { CliOptions } from "../config";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
+import { startLocalServer } from "../localServer";
 
 export type MessageStatus = "idle" | "streaming" | "error";
 
@@ -69,7 +70,7 @@ export interface UIMessage {
 	error?: boolean;
 }
 
-type Phase = "loading" | "error" | "ready";
+type Phase = "loading" | "error" | "wizard" | "ready";
 
 interface AppState {
 	phase: Phase;
@@ -94,8 +95,10 @@ interface AppState {
 	phrase: string | null;
 
 	abortController: AbortController | null;
+	_localServerStop: (() => void) | null;
 
 	init: () => Promise<void>;
+	finishWizard: () => Promise<void>;
 	sendMessage: (text: string) => Promise<void>;
 	abort: () => void;
 	reset: () => void;
@@ -135,7 +138,7 @@ function hasContent(msg: UIMessage): boolean {
 	);
 }
 
-function messageToUi(msg: ChatMessageDto): UIMessage {
+function messageToUI(msg: ChatMessageDto): UIMessage {
 	return {
 		id: msg.id || nextId(),
 		role: msg.role as "user" | "assistant" | "system",
@@ -165,7 +168,7 @@ function buildHistory(messages: ChatMessageDto[]): UIMessage[] {
 			}
 			continue;
 		}
-		history.push(messageToUi(msg));
+		history.push(messageToUI(msg));
 	}
 	return history;
 }
@@ -202,7 +205,10 @@ export const useAppStore = create<AppState>((set, get) => {
 
 	const handleToolCall = (evt: StreamEvent) => {
 		const tc = evt.toolCall;
-		if (!tc) return;
+		if (!tc) {
+			return;
+		}
+
 		set((s) => {
 			const cur = s.current ?? newAssistantMsg();
 			const calls = cur.toolCalls ? [...cur.toolCalls] : [];
@@ -333,6 +339,28 @@ export const useAppStore = create<AppState>((set, get) => {
 		}
 	};
 
+	const prepareAndReady = async (client: AgentyClient, opts: CliOptions) => {
+		const prepared: PreparedSession = await client.prepareSession({
+			agentRef: opts.agentRef,
+			modelRef: opts.modelRef,
+			newSession: opts.newSession,
+		});
+		const history = buildHistory(prepared.session.messages ?? []);
+		set({
+			phase: "ready",
+			client,
+			agent: prepared.agent,
+			model: prepared.model,
+			session: prepared.session,
+			runtimeVersion: get().runtimeVersion,
+			history,
+			tokenConsumed: prepared.session.tokenConsumed,
+			thinkingEnabled: parseThinking(opts.thinking).thinking,
+			thinkingLevel: parseThinking(opts.thinking).thinkingLevel,
+			initError: null,
+		});
+	};
+
 	return {
 		phase: "loading",
 		initError: null,
@@ -353,35 +381,47 @@ export const useAppStore = create<AppState>((set, get) => {
 		tokenConsumed: 0,
 		phrase: null,
 		abortController: null,
+		_localServerStop: null,
 
 		init: async () => {
 			const opts = get().opts;
-			const client = new AgentyClient(
-				opts.serverURL,
-				opts.username,
-				opts.password,
-			);
 			try {
+				let serverURL = opts.serverURL;
+				if (opts.localMode) {
+					const local = await startLocalServer({
+						databasePath: opts.databasePath,
+						debug: opts.backendDebug,
+					});
+					serverURL = local.url;
+					set({ _localServerStop: local.stop });
+				}
+				const client = new AgentyClient(
+					serverURL,
+					opts.username,
+					opts.password,
+				);
 				const version = await client.checkVersion();
-				const prepared: PreparedSession = await client.prepareSession({
-					agentRef: opts.agentRef,
-					modelRef: opts.modelRef,
-					newSession: opts.newSession,
-				});
-				const history = buildHistory(prepared.session.messages ?? []);
-				set({
-					phase: "ready",
-					client,
-					agent: prepared.agent,
-					model: prepared.model,
-					session: prepared.session,
-					runtimeVersion: version.version ?? "",
-					history,
-					tokenConsumed: prepared.session.tokenConsumed,
-					thinkingEnabled: parseThinking(opts.thinking).thinking,
-					thinkingLevel: parseThinking(opts.thinking).thinkingLevel,
-					initError: null,
-				});
+				set({ runtimeVersion: version.version ?? "" });
+
+				const initialized = await client.isInitialized();
+				if (!initialized) {
+					// First run: hand off to the setup wizard before preparing a session.
+					set({ phase: "wizard", client, initError: null });
+					return;
+				}
+
+				await prepareAndReady(client, opts);
+			} catch (err) {
+				set({ phase: "error", initError: (err as Error).message });
+			}
+		},
+
+		finishWizard: async () => {
+			const { client, opts } = get();
+			if (!client) return;
+			try {
+				await client.setInitialized();
+				await prepareAndReady(client, opts);
 			} catch (err) {
 				set({ phase: "error", initError: (err as Error).message });
 			}
