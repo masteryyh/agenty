@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["bin/**", "dist/**"],
+      "env": ["GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME", "VERSION"]
+    },
+    "agenty-cli#build": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["OS", "ARCH", "AGENTY_CLI_VERSION"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {}
+  }
+}

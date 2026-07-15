@@ -8,7 +8,7 @@ RUN apk add --no-cache alpine-sdk curl ca-certificates \
 
 FROM builder-base AS pgvector-build
 
-ARG PGVECTOR_VERSION=0.8.2
+ARG PGVECTOR_VERSION=0.8.5
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN git clone --branch v${PGVECTOR_VERSION} https://github.com/pgvector/pgvector
 FROM builder-base AS pg-search-build
 
 ARG PG_MAJOR_VERSION
-ARG PG_SEARCH_VERSION=0.22.5
+ARG PG_SEARCH_VERSION=0.24.2
 
 WORKDIR /app
 

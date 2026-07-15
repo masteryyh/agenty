@@ -29,137 +29,76 @@ chmod +x agenty
 sudo install -m 755 agenty /usr/local/bin/agenty
 ```
 
-使用指定配置文件启动：
+使用默认设置启动后端（端口 `8080`、SQLite 位于 `~/.agenty/agenty.db`、关闭 debug 日志）：
 
 ```bash
-agenty --config /path/to/config.yaml
+agenty
 ```
 
-首次运行时，Agenty 会初始化数据库、写入预置供应商和模型、创建默认 agent，并打开设置向导用于配置 API key 和系统设置。
+首次运行时，`agenty` 会初始化数据库、写入预置供应商和模型、创建默认 agent。当你在一个全新系统上启动 `agenty-cli` 时，它会检测到未初始化状态，并打开设置向导用于配置供应商 API key、web search 和默认模型。
 
 ## 运行模式
 
-Agenty 可以作为单机本地应用运行，也可以作为自托管服务运行，或者作为连接到 server 的远程客户端运行。
+Agenty 由两个产物组成：`agenty` Go 二进制（仅提供 HTTP 后端）和 `agenty-cli`（React Ink TUI 与资源管理子命令，本地使用时会内嵌 `agenty` 二进制）。
 
 | 模式 | 命令 | 使用场景 |
 | --- | --- | --- |
-| 本地交互模式 | `agenty` | 在一个本地进程中运行 TUI 和后端逻辑。 |
-| 指定配置的本地交互模式 | `agenty --config /path/to/config.yaml` | 使用明确指定的配置文件。 |
-| Server 模式 | `agenty --server --config /path/to/config.yaml` | 运行 HTTP 后端服务，供远程客户端连接。 |
-| 远程交互模式 | `agenty --config agenty-client.yaml` | 通过 `server.url` 连接 server 后端。 |
+| 本地交互模式 | `agenty-cli` | 运行 TUI；agenty-cli 会在随机本地端口启动一个内嵌的 `agenty` 子进程并连接它。 |
+| 本地交互模式（开发） | `pnpm cli:dev` | 从源码运行 TUI；复用 `agenty-runtime` 二进制，缺失时首次会自动执行 `make build`。 |
+| 指定数据库的本地交互模式 | `agenty-cli --db /path/to/agenty.db` | 为内嵌 server 指定 SQLite 数据库。 |
+| Server 模式 | `agenty` | 使用默认设置运行 HTTP 后端服务。 |
+| 远程交互模式 | `agenty-cli --server http://host:8080` | 将 TUI 连接到远程 `agenty` server，而不是启动本地 server。 |
+| 资源管理 CLI | `agenty-cli <子命令>` | 初始化并管理 agents、providers、models、settings、MCP servers 和全局 skills。详见 `agenty-cli --help`。 |
+
+首次运行时，`agenty-cli` 会检测到未初始化状态，并打开设置向导用于配置供应商 API key、web search 和默认模型。
 
 TUI 中常用的 slash commands：
 
 | 命令 | 用途 |
 | --- | --- |
 | `/help` | 查看可用命令。 |
-| `/provider` | 配置模型供应商 API key。 |
-| `/model` | 管理和切换聊天模型。 |
-| `/agent` | 管理和切换 agents。 |
-| `/settings` | 编辑系统设置，例如 web search 供应商和 embedding 模型。 |
+| `/provider` | 管理模型供应商。 |
+| `/model` | 切换聊天模型。 |
+| `/agents` | 管理 agents 并切换当前 agent。 |
+| `/config` | 查看和编辑系统设置。 |
 | `/mcp` | 管理 MCP servers。 |
-| `/skill` | 查看可用 skills。 |
-| `/memory` | 查看 agent 长期记忆。 |
+| `/skill` | 浏览可用 skills。 |
 | `/compact` | 压缩当前会话。 |
-| `/cwd` | 在本地模式中设置或查看工作目录。 |
+| `/cwd` | 设置或查看会话工作目录。 |
 | `/think` | 设置当前模型 thinking level。 |
+| `/status` | 查看当前会话状态。 |
+| `/new` | 开启新会话。 |
+| `/resume` | 恢复历史会话。 |
 | `/exit` | 退出 TUI。 |
 
 ## 配置
 
-如果没有传入 `--config`，Agenty 会使用 `$HOME/.agenty/config.yaml`。首次启动时如果这个文件不存在，Agenty 会自动写入一份本地模式默认配置，其中 `debug: false`、`db.type: sqlite`。如果显式传入了 `--config`，则该文件必须存在，否则会直接启动失败。
+Go 后端不再读取或创建配置文件，运行参数统一通过 CLI flags 传入：
 
-最小本地配置：
-
-```yaml
-debug: false
-
-db:
-  type: sqlite
-```
-
-启用 HTTP Basic Auth 的 server 配置：
-
-```yaml
-debug: false
-port: 8080
-
-db:
-  type: sqlite
-
-auth:
-  enabled: true
-  username: admin
-  password: change-me
-```
-
-客户端配置：
-
-```yaml
-server:
-  url: http://localhost:8080
-  username: admin
-  password: change-me
-```
-
-PostgreSQL 配置：
-
-```yaml
-db:
-  type: postgres
-  host: 127.0.0.1
-  port: 5432
-  username: postgres
-  password: change-me
-  database: agenty
-```
-
-支持的配置项：
-
-| 配置项 | 默认值 | 说明 |
+| Flag | 默认值 | 说明 |
 | --- | --- | --- |
-| `port` | `8080` | server 模式中的 HTTP 监听端口。配置里可省略，省略时会自动回落到 `8080`。 |
-| `debug` | `false` | 启用更详细的日志和调试行为。 |
-| `db.type` | `sqlite` | 数据库后端：`sqlite` 或 `postgres`。 |
-| `db.host` | `localhost` | PostgreSQL host。 |
-| `db.port` | `5432` | PostgreSQL port。 |
-| `db.username` | `postgres` | PostgreSQL 用户名。 |
-| `db.password` | 空 | PostgreSQL 密码。`db.type` 为 `postgres` 时必填。 |
-| `db.database` | `agenty` | PostgreSQL 数据库名。 |
-| `db.sqliteVectorExtensionPath` | 用户配置目录 | 可选的 sqlite-vector 原生扩展路径。 |
-| `auth.enabled` | `false` | 在 server 模式中启用 HTTP Basic Auth。 |
-| `auth.username` | 空 | Basic Auth 用户名。 |
-| `auth.password` | 空 | Basic Auth 密码。 |
-| `mcp.healthCheckInterval` | `30` | MCP 健康检查间隔，单位为秒。 |
-| `mcp.connectTimeout` | `15` | MCP 连接超时时间，单位为秒。 |
-| `server.url` | 空 | 远程后端 URL。非 server 模式下设置后，Agenty 会作为远程客户端运行。 |
-| `server.username` | 空 | 远程后端 Basic Auth 用户名。 |
-| `server.password` | 空 | 远程后端 Basic Auth 密码。 |
+| `--port` | `8080` | HTTP 监听端口。 |
+| `--db` | `~/.agenty/agenty.db` | SQLite 数据库文件；`~` 会展开为当前用户主目录。 |
+| `--debug` | 关闭 | 启用 debug 日志和 Gin debug 模式。 |
+| `--version`、`-v` | 关闭 | 输出版本信息后退出。 |
 
-部分配置值可以通过 `AGENTY_` 环境变量覆盖，例如：
+例如：
 
 ```bash
-AGENTY_DB_PASSWORD=secret agenty --config /path/to/config.yaml
-AGENTY_SERVER_URL=http://localhost:8080 agenty
+agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
-如果主配置文件存在，Agenty 还会合并同目录下类似 `agenty.local.yaml` 或 `agenty.private.yml` 的配置片段。`include` 配置项可以指向额外的 YAML、JSON 或 TOML 片段。
+`agenty-cli` 在本地模式下会把 `--db` 和 `--debug` 透传给内嵌后端。远程客户端设置保持独立，`--server` 和 `--client-config` 详见 `agenty-cli --help`。
 
 ## 数据库
 
-SQLite 是默认数据库。Agenty 会把 SQLite 数据库保存在 `os.UserConfigDir()/agenty/agenty.db`，对应到不同系统上的用户配置目录，例如：
+SQLite 是当前启用的数据库后端。Agenty 默认把数据库保存在 `~/.agenty/agenty.db`，可通过 `--db` 指定其他文件；父目录会自动创建。
 
-| 平台 | 常见路径 |
-| --- | --- |
-| macOS | `$HOME/Library/Application Support/agenty/agenty.db` |
-| Linux | `$XDG_CONFIG_HOME/agenty/agenty.db` 或 `$HOME/.config/agenty/agenty.db` |
-| Windows | `%AppData%\agenty\agenty.db` |
+SQLite 启动需要 FTS5 和 sqlite-vector。release 二进制应包含 FTS5 支持。Agenty 会把 sqlite-vector 原生扩展放在所选数据库的同一目录；扩展不存在时会下载匹配当前平台的 release asset。
 
-SQLite 启动需要 FTS5 和 sqlite-vector。release 二进制应包含 FTS5 支持。如果没有配置 `db.sqliteVectorExtensionPath`，Agenty 会使用 `os.UserConfigDir()/agenty/vector.{so,dylib,dll}`；当扩展文件不存在时，会下载匹配当前平台的 sqlite-vector release asset。
+Windows `arm64` 当前无法运行 server，因为 sqlite-vector 没有该平台产物，同时 CLI 暂未暴露 PostgreSQL 选择能力。
 
-Windows `arm64` 无法使用默认 SQLite 模式，因为 `sqlite-vector` 当前没有该平台产物。若运行在 Windows `arm64` 上，请在启动 Agenty 的本地模式或 server 模式前先配置外部 PostgreSQL 数据库。
-
-PostgreSQL 适合 server 部署。将 Agenty 指向 PostgreSQL 前，需要先创建数据库：
+PostgreSQL 实现和 schema 暂时保留在代码中，等待后续决策，但当前 server CLI 不提供 PostgreSQL 连接参数。未来若重新开放 PostgreSQL 部署，仍需先创建数据库：
 
 ```sql
 CREATE DATABASE agenty;
