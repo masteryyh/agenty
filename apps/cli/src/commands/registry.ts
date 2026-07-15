@@ -64,7 +64,7 @@ export const commands: Command[] = [
 	},
 	{
 		name: "/config",
-		description: "View and edit system settings",
+		description: "View and edit system config",
 		usage: "/config",
 	},
 	{

@@ -39,80 +39,8 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build-cross:
-    name: Cross-compile linux/windows release packages
-    needs: precheck
-    if: needs.precheck.outputs.exists != 'true'
-    runs-on: ubuntu-26.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: packages/agenty-runtime/go.mod
-          cache: true
-
-      - name: Set up Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.1
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: lts/Krypton
-          cache: pnpm
-
-      - name: Build linux/windows release packages
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          targets=(
-            "linux|amd64||x86_64-linux-gnu"
-            "linux|arm64||aarch64-linux-gnu"
-            "windows|amd64|.exe|x86_64-windows-gnu"
-          )
-
-          for target in "${targets[@]}"; do
-            IFS="|" read -r os arch binary_ext zig_target <<< "$target"
-            package_dir="bin/${os}_${arch}"
-            runtime_bin="agenty${binary_ext}"
-            asset_name="agenty_${tag}_${os}_${arch}.tar.gz"
-
-            echo "Building agenty runtime ${os}/${arch} with zig target ${zig_target}"
-
-            GOOS="${os}" \
-            GOARCH="${arch}" \
-            CC="zig cc -target ${zig_target}" \
-            CXX="zig c++ -target ${zig_target}" \
-            PACKAGE_DIR="${package_dir}" \
-            BIN_NAME="${runtime_bin}" \
-            VERSION="${tag}" \
-              pnpm run runtime:build
-            
-            mv "packages/agenty-runtime/${package_dir}/${runtime_bin}" apps/cli/src/_embedded/agenty-bin
-            echo "AGENTY_CLI_VERSION=${tag}" > apps/cli/.env
-            OS="${os}" ARCH="${arch}" pnpm run cli:build
-
-            mkdir -p dist
-            tar -czf "dist/${asset_name}" "apps/cli/dist/agenty-cli-${os}-${arch}${binary_ext}"
-          done
-
-      - name: Upload linux/windows release packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-cross
-          path: dist/*.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
-  build-macos:
-    name: Build macos/${{ matrix.arch }}
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
     needs: precheck
     if: needs.precheck.outputs.exists != 'true'
     runs-on: ${{ matrix.runner }}
@@ -120,10 +48,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-26-intel
+          - runner: ubuntu-26.04
+            goos: linux
+            os: linux
             arch: amd64
-          - runner: macos-26
+            bin_ext: ""
+          - runner: ubuntu-26.04-arm
+            goos: linux
+            os: linux
             arch: arm64
+            bin_ext: ""
+          - runner: macos-26-intel
+            goos: darwin
+            os: macos
+            arch: amd64
+            bin_ext: ""
+          - runner: macos-26
+            goos: darwin
+            os: macos
+            arch: arm64
+            bin_ext: ""
+          - runner: windows-latest
+            goos: windows
+            os: windows
+            arch: amd64
+            bin_ext: ".exe"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -143,33 +92,37 @@ jobs:
           node-version: lts/Krypton
           cache: pnpm
 
-      - name: Build macOS release package
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build runtime and CLI
         shell: bash
         run: |
-          mkdir -p dist
           tag="${GITHUB_REF_NAME}"
-          package_dir="bin/macos_${{ matrix.arch }}"
-          asset_name="agenty_${tag}_macos_${{ matrix.arch }}.tar.gz"
+          export GOOS="${{ matrix.goos }}"
+          export GOARCH="${{ matrix.arch }}"
+          export PACKAGE_DIR="bin/${{ matrix.os }}_${{ matrix.arch }}"
+          export BIN_NAME="agenty${{ matrix.bin_ext }}"
+          export VERSION="${tag}"
+          export OS="${{ matrix.os }}"
+          export ARCH="${{ matrix.arch }}"
+          export AGENTY_CLI_VERSION="${tag}"
 
-          GOOS=darwin \
-          GOARCH=${{ matrix.arch }} \
-          PACKAGE_DIR="${package_dir}" \
-          BIN_NAME="agenty" \
-          VERSION="${tag}" \
-            pnpm run runtime:build
+          pnpm run runtime:build
+          pnpm run cli:build
 
-          mv "packages/agenty-runtime/${package_dir}/agenty" apps/cli/src/_embedded/agenty-bin
-          echo "AGENTY_CLI_VERSION=${tag}" > apps/cli/.env
-
-          OS=macos ARCH=${{ matrix.arch }} pnpm run cli:build
-
+      - name: Package
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
           mkdir -p dist
-          tar -czf "dist/${asset_name}" apps/cli/dist/agenty-cli-macos-${{ matrix.arch }}
+          tar -czf "dist/agenty_${tag}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" \
+            "apps/cli/dist/agenty-cli-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.bin_ext }}"
 
-      - name: Upload macOS release package
+      - name: Upload release package
         uses: actions/upload-artifact@v7
         with:
-          name: release-macos-${{ matrix.arch }}
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 1
@@ -178,8 +131,7 @@ jobs:
     name: Publish GitHub release
     needs:
       - precheck
-      - build-cross
-      - build-macos
+      - build
     if: needs.precheck.outputs.exists != 'true'
     runs-on: ubuntu-26.04
     steps:
@@ -197,6 +149,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          BETA: ${{ needs.precheck.outputs.beta }}
         shell: bash
         run: |
           mapfile -t assets < <(find dist -type f | sort)
@@ -211,7 +164,7 @@ jobs:
             --generate-notes
           )
 
-          if [[ "${{ needs.precheck.outputs.beta }}" == "true" ]]; then
+          if [[ "$BETA" == "true" ]]; then
             args+=(--prerelease)
           fi
 

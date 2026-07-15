@@ -125,6 +125,7 @@ function resolveRuntimeBinary(os: string | null, arch: string | null): string {
 const os = resolveOS();
 const arch = resolveArch();
 const runtimeBin = resolveRuntimeBinary(os, arch);
+mkdirSync(EMBEDDED_DIR, { recursive: true });
 copyFileSync(runtimeBin, EMBEDDED_BIN);
 console.log(`embedded agenty runtime <- ${runtimeBin}`);
 
