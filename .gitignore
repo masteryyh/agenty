@@ -31,7 +31,6 @@ go.work.sum
 .idea/
 
 **/__debug_bin*
-*.yaml
 !.github/**/*.yaml
 
 # Build output
