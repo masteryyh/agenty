@@ -19,7 +19,6 @@ import type { UpdateModelProviderDto } from "@/api/types";
 import {
 	action,
 	CliError,
-	flag,
 	hasFlag,
 	outputFields,
 	outputTable,

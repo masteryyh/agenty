@@ -20,7 +20,6 @@ import {
 	mkdirSync,
 	readFileSync,
 	readdirSync,
-	statSync,
 } from "node:fs";
 import { resolve, join } from "node:path";
 
