@@ -33,6 +33,7 @@ import { StatusOverlay } from "./components/StatusOverlay";
 import { WizardOverlay } from "./components/WizardOverlay";
 import { PanelBox } from "./components/PanelBox";
 import { commands, parseCommandTokens } from "./commands/registry";
+import { MOUSE_ON, MOUSE_OFF, useMouseCapability } from "./mouse/mouseStdin";
 import type { ModelDto, ChatSessionDto } from "./api/types";
 
 const LOGO_HEIGHT = 5;
@@ -42,14 +43,6 @@ const PROVIDER_OVERLAY_HEIGHT = 18;
 const MCP_OVERLAY_HEIGHT = 18;
 const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
-
-// SGR mouse tracking (1000 = button events, 1006 = SGR extended coordinates).
-// Enabled only while the chat view owns input so overlay text fields are not
-// disturbed by mouse reports. wrapStdin() strips these reports before they can
-// reach ink's keyboard pipeline; here we just toggle the terminal into sending
-// them.
-const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l";
 
 function panelHeight(overlay: OverlayKind): number | null {
 	switch (overlay) {
@@ -136,18 +129,19 @@ function ChatView() {
 	// don't subtract it from message height either.
 	const messageHeight = Math.max(rows - bottomH, 1);
 
-	// Toggle SGR mouse tracking so the message list receives wheel events. Keep
-	// it off whenever an overlay (which may host a text field) owns the screen.
+	// Toggle SGR mouse tracking so the message list receives wheel/drag events.
+	// Keep it off whenever an overlay (which may host a text field) owns the
+	// screen, or when the terminal does not support SGR-1006 (downgraded at
+	// runtime by mouseStdin on legacy mouse reports). Keyboard scrolling
+	// remains available regardless.
+	const mouseCapable = useMouseCapability();
 	useEffect(() => {
-		const active = app.overlay === null;
-		if (active) {
-			process.stdout.write(MOUSE_ON);
-			return () => {
-				process.stdout.write(MOUSE_OFF);
-			};
-		}
-		return undefined;
-	}, [app.overlay]);
+		if (app.overlay !== null || !mouseCapable) return undefined;
+		process.stdout.write(MOUSE_ON);
+		return () => {
+			process.stdout.write(MOUSE_OFF);
+		};
+	}, [app.overlay, mouseCapable]);
 
 	const switchModelByRef = async (ref: string) => {
 		if (!client) return;

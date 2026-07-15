@@ -23,7 +23,7 @@ import agentyBinUrl from "./_embedded/agenty-bin" with { type: "file" };
 
 export interface LocalServer {
 	url: string;
-	stop: () => void;
+	stop: () => Promise<void>;
 }
 
 export interface LocalServerOptions {
@@ -31,8 +31,8 @@ export interface LocalServerOptions {
 	debug?: boolean;
 }
 
-const PROJECT_ROOT = join(import.meta.dir, "../..");
-const DEV_BINARY = join(import.meta.dir, "../../bin/agenty");
+const RUNTIME_DIR = join(import.meta.dir, "../../../packages/agenty-runtime");
+const DEV_BINARY = join(RUNTIME_DIR, "bin/agenty");
 
 function embeddedPath(): string {
 	return agentyBinUrl.startsWith("/") ? agentyBinUrl : join(import.meta.dir, agentyBinUrl);
@@ -73,12 +73,12 @@ async function extractEmbedded(): Promise<string> {
 }
 
 async function buildGoBinary(): Promise<string> {
-	if (!existsSync(join(PROJECT_ROOT, "Makefile"))) {
+	if (!existsSync(join(RUNTIME_DIR, "Makefile"))) {
 		throw new Error("agenty binary not found. Run `make build` or set AGENTY_BIN.");
 	}
 	process.stderr.write("agenty binary not found; building with `make build`…\n");
 	const build = Bun.spawn(["make", "build"], {
-		cwd: PROJECT_ROOT,
+		cwd: RUNTIME_DIR,
 		stdout: "inherit",
 		stderr: "inherit",
 	});
@@ -136,46 +136,55 @@ async function waitForHealth(url: string, timeoutMs = 20000): Promise<void> {
 	throw new Error(`local agenty server did not become healthy at ${url}`);
 }
 
-// startLocalServer spawns `agenty` on a random port and waits for it
-// to pass a health check. The child is killed on process exit so it never leaks.
 export async function startLocalServer(options: LocalServerOptions = {}): Promise<LocalServer> {
 	const bin = await resolveAgentyBinary();
 	const port = await pickFreePort();
 	const args = [bin, "--port", String(port)];
-	if (options.databasePath) args.push("--db", options.databasePath);
-	if (options.debug) args.push("--debug");
+	if (options.databasePath) {
+		args.push("--db", options.databasePath);
+	}
+	if (options.debug) {
+		args.push("--debug");
+	}
+
 	const proc = Bun.spawn(args, {
 		env: process.env,
 		stdout: "ignore",
-		stderr: "pipe",
+		stderr: "ignore",
 	});
 
 	const url = `http://127.0.0.1:${port}`;
 	let stopped = false;
-	const stop = () => {
+	const stop = async (): Promise<void> => {
 		if (stopped) return;
 		stopped = true;
 		try {
-			proc.kill();
-		} catch {
-			// process may have already exited
-		}
+			proc.kill("SIGTERM");
+		} catch {}
+
+		const forceKill = new Promise<void>((resolve) => {
+			const timer = setTimeout(() => {
+				try {
+					proc.kill("SIGKILL");
+				} catch {}
+				resolve();
+			}, 5000);
+			timer.unref?.();
+		});
+
+		try {
+			await Promise.race([proc.exited.catch(() => {}), forceKill]);
+		} catch {}
 	};
 
-	process.on("exit", stop);
-	process.on("SIGINT", () => {
-		stop();
-		process.exit(0);
-	});
-	process.on("SIGTERM", () => {
-		stop();
-		process.exit(0);
+	process.on("exit", () => {
+		void stop();
 	});
 
 	try {
 		await waitForHealth(url);
 	} catch (err) {
-		stop();
+		void stop();
 		throw err;
 	}
 

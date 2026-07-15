@@ -26,7 +26,7 @@ export interface CommandResult {
 
 export interface LocalServerConnectResult {
     client: AgentyClient
-    stop?: () => void
+    stop?: () => Promise<void>
 }
 
 type FlagValue = string | boolean | string[];

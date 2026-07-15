@@ -20,10 +20,10 @@ limitations under the License.
 import { existsSync, copyFileSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-const ROOT = resolve(import.meta.dir, "../..");
+const RUNTIME_DIR = resolve(import.meta.dir, "../../../packages/agenty-runtime");
 const EMBEDDED_DIR = resolve(import.meta.dir, "../src/_embedded");
 const EMBEDDED_BIN = join(EMBEDDED_DIR, "agenty-bin");
-const GO_BIN = join(ROOT, "bin/agenty");
+const GO_BIN = join(RUNTIME_DIR, "bin/agenty");
 
 function isRealBinary(path: string): boolean {
 	try {
@@ -45,7 +45,7 @@ if (isRealBinary(GO_BIN)) {
 
 // Build the Go binary first, then copy it into place.
 const build = Bun.spawn(["make", "build"], {
-	cwd: ROOT,
+	cwd: RUNTIME_DIR,
 	stdout: "inherit",
 	stderr: "inherit",
 });

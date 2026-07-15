@@ -75,7 +75,7 @@ export async function runCLICommand(argv: string[]): Promise<CommandResult> {
 		try {
 			await handler(client, args);
 		} finally {
-			stop?.();
+			await stop?.();
 		}
 		return { handled: true, exitCode: 0 };
 	} catch (error) {

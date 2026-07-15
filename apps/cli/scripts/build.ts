@@ -17,11 +17,11 @@ limitations under the License.
 import { existsSync, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-const ROOT = resolve(import.meta.dir, "../..");
 const PKG = resolve(import.meta.dir, "..");
+const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const EMBEDDED_DIR = join(PKG, "src/_embedded");
 const EMBEDDED_BIN = join(EMBEDDED_DIR, "agenty-bin");
-const GO_BIN = join(ROOT, "bin/agenty");
+const RUNTIME_BIN = join(REPO_ROOT, "packages/agenty-runtime/bin/agenty");
 const DIST = join(PKG, "dist");
 
 function readCliVersion(): string {
@@ -40,22 +40,20 @@ function readCliVersion(): string {
 	return "dev";
 }
 
-// 1. Build the agenty Go backend binary.
-const build = Bun.spawn(["make", "build"], {
-	cwd: ROOT,
-	stdout: "inherit",
-	stderr: "inherit",
-});
-const code = await build.exited;
-if (code !== 0) {
-	console.error(`\`make build\` failed with exit code ${code}`);
+// 1. The agenty runtime binary is built by the `agenty-runtime` package via
+//    Turborepo's `^build` dependency, so it must already exist here.
+if (!existsSync(RUNTIME_BIN)) {
+	console.error(
+		`agenty-runtime binary not found at ${RUNTIME_BIN}\n` +
+			"Run via `turbo run build` (or `pnpm build`) so the runtime is built first.",
+	);
 	process.exit(1);
 }
 
 // 2. Copy the binary into src/_embedded so `with { type: "file" }` can embed it
 //    into the compiled single executable.
 mkdirSync(EMBEDDED_DIR, { recursive: true });
-copyFileSync(GO_BIN, EMBEDDED_BIN);
+copyFileSync(RUNTIME_BIN, EMBEDDED_BIN);
 
 // 3. Compile agenty-cli into a single standalone executable with the embedded
 //    agenty server binary baked in.

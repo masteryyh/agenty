@@ -4,12 +4,15 @@
 
 Agenty is an AI agent application written primarily in Go 1.26. The Go binary is an HTTP server, while `agenty-cli` provides local interactive and remote client modes. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
 
-The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository also contains a TypeScript terminal client in `agenty-cli/`, built with Bun, React, Ink, Zustand, and pnpm.
+The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository is a pnpm + Turborepo monorepo: the Go backend lives in `packages/agenty-runtime/`, and a TypeScript terminal client lives in `apps/cli/`, built with Bun, React, Ink, Zustand, and pnpm.
 
 ## Project Structure
 
+The repository is a pnpm + Turborepo monorepo with two workspaces: `apps/cli` (TypeScript CLI) and `packages/agenty-runtime` (Go backend). Go paths below (`cmd/`, `pkg/...`) are relative to `packages/agenty-runtime/`.
+
+- `packages/agenty-runtime/`: Go HTTP backend (Go module `github.com/masteryyh/agenty`). Built via its own `Makefile` (`make build` → `bin/agenty`) and consumed by `apps/cli` as an embedded binary.
 - `cmd/`: Go application entrypoint. `cmd/main.go` delegates to `pkg/cli/cmd`.
-- `agenty-cli/`: TypeScript/React Ink terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
+- `apps/cli/`: TypeScript/React Ink terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
   - `src/api/`: HTTP client and API DTOs for the CLI.
   - `src/commands/`: Slash command registry and parsing.
   - `src/components/`: Ink UI components (chat, overlays, setup wizard).
@@ -35,7 +38,8 @@ The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, pro
 - `pkg/tools/`: Tool interface, registry, todo manager, and built-in tools.
 - `pkg/utils/`: Shared utilities such as pagination, response helpers, safe goroutines, signal context, logging, and terminal wrapping.
 - `pkg/version/`: Version data.
-- `Makefile`, `package.json`, `pnpm-workspace.yaml`: Root build and workspace orchestration.
+- `turbo.json`: Turborepo task pipeline (`build`, `test`, `typecheck`). `apps/cli` declares a `workspace:*` dependency on `agenty-runtime` so Turborepo builds the Go binary first via `^build`.
+- `package.json`, `pnpm-workspace.yaml`: Root workspace and Turborepo orchestration. Go build/test/vet/fmt targets live in `packages/agenty-runtime/Makefile`.
 
 Project-local `.agents/skills` instructions are intentionally absent. Product-level skills remain part of Agenty runtime functionality under packages such as `pkg/skill`, `pkg/routes/skill.go`, `pkg/services`, and `pkg/tools/builtin`.
 
@@ -44,6 +48,15 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 - Running `agenty` always starts the Gin HTTP backend. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled; `--port`, `--db`, and `--debug` override those defaults.
 - Local interactive mode runs `agenty-cli`, which forks an embedded `agenty` subprocess on a random port and connects to it over HTTP.
 - Remote client mode belongs to `agenty-cli` and connects to an existing backend through its `--server` option or client configuration.
+
+## Monorepo And Build Orchestration
+
+- The repository is a pnpm workspace (`pnpm-workspace.yaml`: `apps/*`, `packages/*`) orchestrated by Turborepo (`turbo.json`).
+- Responsibility split: pnpm owns workspace resolution and dependency install; Turborepo owns task orchestration and caching; Bun is only invoked inside a package to run and bundle the CLI, and must not manage the workspace.
+- Do not add an npm `workspaces` field to the root `package.json`; it would make Bun try to take over workspace resolution and conflict with pnpm.
+- `turbo run build` builds in topological order: `agenty-runtime` (Go, via `make build`) then `agenty-cli` (Bun compile embedding the Go binary). The cross-package edge is the `agenty-runtime` `workspace:*` dependency in `apps/cli/package.json`.
+- The `agenty-cli` build sets `cache: false` in `turbo.json` because its output is a large single executable; the `agenty-runtime` Go build is cached.
+- Go build and test require the `fts5` build tag (already wired in `packages/agenty-runtime/Makefile`).
 
 ## Go Conventions
 
@@ -96,9 +109,9 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 
 ## TypeScript CLI Conventions
 
-- `agenty-cli/` is a pnpm workspace package executed with Bun.
+- `apps/cli/` is a pnpm workspace package (name `agenty-cli`) executed with Bun.
 - React Ink UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, and `consts`.
-- Root scripts delegate to package scripts, including `pnpm cli:typecheck` and `pnpm cli:build`.
+- Root scripts delegate through Turborepo: `pnpm build`/`pnpm test`/`pnpm typecheck` run `turbo run <task>`; `pnpm cli:typecheck` and `pnpm cli:build` filter to the CLI.
 - CLI API types and UI state should preserve the backend API contract rather than duplicating backend business rules.
 
 ## Response Marker

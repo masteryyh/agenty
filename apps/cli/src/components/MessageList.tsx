@@ -19,10 +19,7 @@ import { Box, Text, useInput } from "ink";
 import { ScrollList, type ScrollListRef } from "ink-scroll-list";
 import type { UIMessage } from "../state/store";
 import { MessageItem, type MessageRenderItem } from "./MessageItem";
-import { useMouseClick, useMouseWheel } from "../mouse/mouseStdin";
 
-// Lines scrolled per wheel notch — matches the feel of most terminal pagers.
-const WHEEL_STEP = 3;
 const HINT_BACKGROUND = "#24383f";
 const HINT_FOREGROUND = "#c7f5ff";
 
@@ -32,8 +29,8 @@ interface MessageListProps {
 	height: number;
 	// Rendered as the first, scroll-away item at the top of the list (the logo).
 	header?: ReactNode;
-	// Whether keyboard scrolling (PageUp/PageDown, arrows, End) is active. Turned
-	// off while an overlay/palette owns input so keystrokes are not double-handled.
+	// Whether keyboard scrolling (PageUp/PageDown, arrows, End, and wheel-via-
+	// 1007 arrows) is active. Turned off while an overlay/palette owns input.
 	interactive?: boolean;
 }
 
@@ -218,78 +215,23 @@ export function MessageList({
 		listRef.current?.scrollToBottom();
 	};
 
-	const toggleReasoning = (id: string) => {
-		setExpandedReasoningIds((prev) => {
-			const next = new Set(prev);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
-	};
-
-	// While follow is on, selectedIndex pins the last item and ScrollList
-	// constrains scrollBy to keep it visible. An upward scroll therefore has to
-	// detach first and defer the actual scroll to the next render (once
-	// selectedIndex is cleared), otherwise the first notch would jump a full
-	// viewport instead of scrolling a few lines.
-	const pendingScrollRef = useRef<number | null>(null);
-
+	// Scroll one line at a time. selectedIndex stays undefined (no constraint),
+	// so scrollBy is always free; auto-follow is handled by
+	// onContentHeightChange -> scrollToBottom.
 	const scrollByLines = (delta: number) => {
 		const ref = listRef.current;
 		if (!ref) return;
 		if (delta < 0) {
 			if ((ref.getScrollOffset?.() ?? 0) <= 0) return;
-			if (follow) {
-				pendingScrollRef.current = delta;
-				setFollow(false);
-				return;
-			}
-			ref.scrollBy(delta);
-			return;
+			if (follow) setFollow(false);
 		}
 		ref.scrollBy(delta);
 		handleScrollPosition();
 	};
 
-	useEffect(() => {
-		if (pendingScrollRef.current !== null && !follow) {
-			listRef.current?.scrollBy(pendingScrollRef.current);
-			pendingScrollRef.current = null;
-			handleScrollPosition();
-		}
-	}, [follow]);
-
-	useMouseWheel(
-		(event) => {
-			if (empty) return;
-			scrollByLines(event.direction === "up" ? -WHEEL_STEP : WHEEL_STEP);
-		},
-		interactive && !empty,
-	);
-
-	useMouseClick(
-		(event) => {
-			const ref = listRef.current;
-			if (!ref || empty) return;
-			const visibleLine = event.y - 1;
-			if (visibleLine < 0 || visibleLine >= ref.getViewportHeight()) return;
-			const contentLine = (ref.getScrollOffset?.() ?? 0) + visibleLine;
-			for (let index = headerOffset; index < childCount; index += 1) {
-				const position = ref.getItemPosition?.(index);
-				if (
-					position &&
-					contentLine >= position.top &&
-					contentLine < position.top + position.height
-				) {
-					const item = renderItems[index - headerOffset];
-					if (item?.type === "reasoning") toggleReasoning(item.id);
-					return;
-				}
-			}
-		},
-		interactive && !empty,
-	);
-
+	// Wheel scrolling arrives as Up/Down arrows via DECSET 1007 (alternate
+	// screen scroll mode); ink-text-input ignores Up/Down, so these only drive
+	// the list. One arrow = one line, matching the terminal pager feel.
 	useInput(
 		(input, key) => {
 			if (key.ctrl && input === "r") {
@@ -333,7 +275,7 @@ export function MessageList({
 				<ScrollList
 					ref={listRef}
 					height={listHeight}
-					selectedIndex={follow ? childCount - 1 : undefined}
+					selectedIndex={undefined}
 					scrollAlignment="auto"
 					onScroll={handleScrollPosition}
 					onContentHeightChange={() => {

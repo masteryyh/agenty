@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+import { memo } from "react";
 import type React from "react";
 import { Box, Text } from "ink";
 import type { ToolResult } from "../api/types";
@@ -175,7 +176,11 @@ function Rail({
 	);
 }
 
-export function MessageItem({ item }: { item: MessageRenderItem }) {
+export const MessageItem = memo(function MessageItem({
+	item,
+}: {
+	item: MessageRenderItem;
+}) {
 	if (item.type === "reasoning") {
 		return (
 			<Rail color="magenta">
@@ -234,4 +239,4 @@ export function MessageItem({ item }: { item: MessageRenderItem }) {
 			</Text>
 		</Rail>
 	);
-}
+});

@@ -95,7 +95,7 @@ interface AppState {
 	phrase: string | null;
 
 	abortController: AbortController | null;
-	_localServerStop: (() => void) | null;
+	_localServerStop: (() => Promise<void>) | null;
 
 	init: () => Promise<void>;
 	finishWizard: () => Promise<void>;
@@ -138,6 +138,12 @@ function hasContent(msg: UIMessage): boolean {
 	);
 }
 
+function finalizeReasoning(msg: UIMessage): UIMessage {
+	return msg.reasoning && !msg.reasoningEndedAt
+		? { ...msg, reasoningEndedAt: Date.now() }
+		: msg;
+}
+
 function messageToUI(msg: ChatMessageDto): UIMessage {
 	return {
 		id: msg.id || nextId(),
@@ -177,11 +183,10 @@ export const useAppStore = create<AppState>((set, get) => {
 	const flushCurrent = () => {
 		const cur = get().current;
 		if (cur && hasContent(cur)) {
-			const finalized =
-				cur.reasoning && !cur.reasoningEndedAt
-					? { ...cur, reasoningEndedAt: Date.now() }
-					: cur;
-			set((s) => ({ history: [...s.history, finalized], current: null }));
+			set((s) => ({
+				history: [...s.history, finalizeReasoning(cur)],
+				current: null,
+			}));
 		} else {
 			set({ current: null });
 		}
@@ -240,9 +245,7 @@ export const useAppStore = create<AppState>((set, get) => {
 			}
 			return {
 				current: {
-					...cur,
-					reasoningEndedAt:
-						cur.reasoning && !cur.reasoningEndedAt ? Date.now() : cur.reasoningEndedAt,
+					...finalizeReasoning(cur),
 					toolCalls: calls,
 				},
 			};
@@ -257,18 +260,16 @@ export const useAppStore = create<AppState>((set, get) => {
 						let cur = s.current;
 						let history = s.history;
 						if (cur && cur.toolCalls?.some((c) => c.result)) {
-							if (hasContent(cur)) history = [...history, cur];
+							if (hasContent(cur)) {
+								history = [...history, finalizeReasoning(cur)];
+							}
 							cur = newAssistantMsg();
 						}
 						cur = cur ?? newAssistantMsg();
 						return {
 							history,
 							current: {
-								...cur,
-								reasoningEndedAt:
-									cur.reasoning && !cur.reasoningEndedAt
-										? Date.now()
-										: cur.reasoningEndedAt,
+								...finalizeReasoning(cur),
 								content: cur.content + evt.content,
 							},
 						};
@@ -308,11 +309,7 @@ export const useAppStore = create<AppState>((set, get) => {
 						}
 						return {
 							current: {
-								...cur,
-								reasoningEndedAt:
-									cur.reasoning && !cur.reasoningEndedAt
-										? Date.now()
-										: cur.reasoningEndedAt,
+								...finalizeReasoning(cur),
 								toolCalls: calls,
 							},
 						};

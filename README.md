@@ -44,7 +44,7 @@ Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `a
 | Mode | Command | Use case |
 | --- | --- | --- |
 | Local interactive mode | `agenty-cli` | Run the TUI; agenty-cli spawns an embedded `agenty` on a random local port and connects to it. |
-| Local interactive mode (dev) | `pnpm cli:dev` | Run the TUI from source; reuses `bin/agenty` or builds it via `make build` on first run. |
+| Local interactive mode (dev) | `pnpm cli:dev` | Run the TUI from source; reuses the `agenty-runtime` binary or builds it via `make build` on first run. |
 | Local interactive mode with database | `agenty-cli --db /path/to/agenty.db` | Use an explicit SQLite database for the embedded server. |
 | Server mode | `agenty` | Run the HTTP backend service with default settings. |
 | Remote interactive mode | `agenty-cli --server http://host:8080` | Connect the TUI to a remote `agenty` server instead of spawning a local one. |

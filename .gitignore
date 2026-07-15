@@ -30,14 +30,15 @@ go.work.sum
 # Editor/IDE
 .idea/
 
-cmd/__debug*
+**/__debug_bin*
 *.yaml
 !.github/**/*.yaml
 
 # Build output
 bin/
-/cli
-/agenty
+
+# Turborepo
+.turbo/
 
 # Handoff documents
 HANDOFF.md
@@ -50,9 +51,9 @@ docs/
 
 # Node / pnpm
 node_modules/
-agenty-cli/dist/
-agenty-cli/src/_embedded/agenty-bin
-agenty-cli/bun.lockb
+apps/cli/dist/
+apps/cli/src/_embedded/agenty-bin
+apps/cli/bun.lockb
 
 # Coding Agents
 .reasonix

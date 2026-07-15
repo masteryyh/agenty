@@ -9,15 +9,6 @@ build:
 	@echo "Building agenty..."
 	go build -tags=fts5 -ldflags "$(LDFLAGS)" -o bin/agenty cmd/main.go
 
-cli:
-	@echo "Building agenty-cli (single executable with embedded agenty)..."
-	pnpm cli:build
-
-install: build
-	@echo "Installing agenty to /usr/local/bin..."
-	sudo install -m 755 bin/agenty /usr/local/bin/agenty
-	sudo chmod +x /usr/local/bin/agenty
-
 clean:
 	@echo "Cleaning..."
 	rm -rf bin/
@@ -26,11 +17,3 @@ clean:
 test:
 	@echo "Running tests..."
 	go test ./... -v
-
-vet:
-	@echo "Running go vet..."
-	go vet ./...
-
-fmt:
-	@echo "Running go fmt..."
-	go fmt ./...

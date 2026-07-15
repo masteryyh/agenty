@@ -18,16 +18,21 @@ limitations under the License.
 import { render } from "ink";
 import { App } from "./App";
 import { runCLICommand } from "./cli/run";
-import { wrapStdin } from "./mouse/mouseStdin";
+import { useAppStore } from "./state/store";
 
 const command = await runCLICommand(process.argv.slice(2));
 if (command.handled) {
 	process.exitCode = command.exitCode;
 } else {
-	render(<App />, {
-		stdin: wrapStdin(process.stdin),
+	const instance = render(<App />, {
 		alternateScreen: true,
 		interactive: true,
 		exitOnCtrlC: true,
 	});
+
+	await instance.waitUntilExit().catch(() => {});
+	const { abort, _localServerStop } = useAppStore.getState();
+	abort();
+	await _localServerStop?.();
+	process.exit(0);
 }

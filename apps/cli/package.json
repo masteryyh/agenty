@@ -21,6 +21,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "agenty-runtime": "workspace:*",
     "@types/bun": "^1.3.14",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.17",

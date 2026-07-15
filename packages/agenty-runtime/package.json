@@ -1,0 +1,11 @@
+{
+  "name": "agenty-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "make build",
+    "test": "make test",
+    "vet": "go vet ./...",
+    "fmt": "go fmt ./..."
+  }
+}
