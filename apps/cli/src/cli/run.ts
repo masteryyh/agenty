@@ -21,7 +21,7 @@ import { handleInit } from "./init";
 import { handleMCP } from "./mcp";
 import { handleModel } from "./model";
 import { handleProvider } from "./provider";
-import { handleSettings } from "./settings";
+import { handleSettings } from "./config";
 import { handleSkill } from "./skill";
 import {
 	CliError,

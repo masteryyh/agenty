@@ -29,12 +29,12 @@ import type {
 	SkillDto,
 	SkillContentResult,
 	StreamEvent,
-	SystemSettingsDto,
+	SystemConfigDto,
 	UpdateAgentDto,
 	UpdateMCPServerDto,
 	UpdateModelDto,
 	UpdateModelProviderDto,
-	UpdateSystemSettingsDto,
+	UpdateSystemConfigDto,
 	VersionDto,
 	GenericResponse,
 	PagedResponse,
@@ -325,30 +325,30 @@ export class AgentyClient {
 		);
 	}
 
-	async getSettings(): Promise<SystemSettingsDto> {
-		return this.request<SystemSettingsDto>(
+	async getConfig(): Promise<SystemConfigDto> {
+		return this.request<SystemConfigDto>(
 			"GET",
-			"/api/v1/system/settings",
+			"/api/v1/system/config",
 		);
 	}
 
-	async updateSettings(
-		dto: UpdateSystemSettingsDto,
-	): Promise<SystemSettingsDto> {
-		return this.request<SystemSettingsDto>(
+	async updateConfig(
+		dto: UpdateSystemConfigDto,
+	): Promise<SystemConfigDto> {
+		return this.request<SystemConfigDto>(
 			"PUT",
-			"/api/v1/system/settings",
+			"/api/v1/system/config",
 			dto,
 		);
 	}
 
 	async isInitialized(): Promise<boolean> {
-		const settings = await this.getSettings();
-		return !!settings.initialized;
+		const config = await this.getConfig();
+		return !!config.initialized;
 	}
 
 	async setInitialized(): Promise<void> {
-		await this.updateSettings({ initialized: true });
+		await this.updateConfig({ initialized: true });
 	}
 
 	async getLastSession(): Promise<ChatSessionDto | null> {
@@ -530,7 +530,7 @@ export class AgentyClient {
 			return false;
 		};
 
-		for (;;) {
+		for (; ;) {
 			const { done, value } = await reader.read();
 			if (done) {
 				break;

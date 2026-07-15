@@ -16,8 +16,8 @@ limitations under the License.
 
 import type { AgentyClient } from "@/api/client";
 import type {
-	SystemSettingsDto,
-	UpdateSystemSettingsDto,
+	SystemConfigDto,
+	UpdateSystemConfigDto,
 } from "@/api/types";
 import {
 	action,
@@ -47,7 +47,7 @@ export async function handleSettings(
 	const subcommand = args.positionals[1];
 	if (subcommand === "get") {
 		requirePositionals(args, 2, "settings get");
-		const settings = await client.getSettings();
+		const settings = await client.getConfig();
 		render(args, settings, () => renderSettings(settings));
 		return;
 	}
@@ -63,7 +63,7 @@ async function handleUpdateSettings(
 	args: ParsedArgs,
 ): Promise<void> {
 	requirePositionals(args, 2, "settings update [options]");
-	const dto: UpdateSystemSettingsDto = {};
+	const dto: UpdateSystemConfigDto = {};
 
 	if (hasFlag(args, "initialized")) {
 		dto.initialized = parseBoolean(flag(args, "initialized"), "--initialized");
@@ -123,11 +123,11 @@ async function handleUpdateSettings(
 		throw new CliError("no changes specified");
 	}
 
-	const updated = await client.updateSettings(dto);
+	const updated = await client.updateConfig(dto);
 	action(args, updated, "System settings updated.");
 }
 
-function renderSettings(settings: SystemSettingsDto): void {
+function renderSettings(settings: SystemConfigDto): void {
 	outputFields([
 		["Initialized", String(settings.initialized)],
 		["Embedding model ID", settings.embeddingModelId ?? ""],

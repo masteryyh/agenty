@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "make build",
-    "test": "make test",
+    "build": "CGO_ENABLED=1 GOOS=\"${GOOS}\" GOARCH=\"${GOARCH}\" CC=\"${CC}\" CXX=\"${CXX}\" go build -tags=fts5 -ldflags \"-X github.com/masteryyh/agenty/pkg/version.Version=${VERSION:dev}\" -o \"${PACKAGE_DIR:bin}/${BIN_NAME:agenty}\" ./cmd/main.go",
+    "test": "go test ./...",
     "vet": "go vet ./...",
-    "fmt": "go fmt ./..."
+    "fmt": "go fmt ./...",
+    "clean": "rm -rf bin"
   }
 }

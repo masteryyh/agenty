@@ -87,7 +87,7 @@ async function runInit(client: AgentyClient, args: ParsedArgs): Promise<void> {
 		if (!configured(model)) {
 			throw new CliError(`model ${JSON.stringify(displayModel(model))} is not configured because its provider API key is missing`);
 		}
-		await client.updateSettings({ embeddingModelId: model.id });
+		await client.updateConfig({ embeddingModelId: model.id });
 		embeddingModel = displayModel(model);
 	}
 
@@ -97,7 +97,7 @@ async function runInit(client: AgentyClient, args: ParsedArgs): Promise<void> {
 			throw new CliError(`unsupported web search provider: ${webSearchProvider}`);
 		}
 
-		const settings = await client.getSettings();
+		const settings = await client.getConfig();
 		const keyField = webSearchProvider === "tavily"
 			? "tavilyApiKey"
 			: webSearchProvider === "brave"
@@ -106,13 +106,13 @@ async function runInit(client: AgentyClient, args: ParsedArgs): Promise<void> {
 		if (webSearchProvider !== "disabled" && !webSearchKey && !settings[keyField]) {
 			throw new CliError(`web search provider ${webSearchProvider} requires --web-search-api-key or --web-search-api-key-env`);
 		}
-		await client.updateSettings({
+		await client.updateConfig({
 			webSearchProvider,
 			...(webSearchKey ? { [keyField]: webSearchKey } : {}),
 			...(webSearchProvider === "firecrawl"
 				&& flag(args, "firecrawl-base-url")
-					? { firecrawlBaseUrl: flag(args, "firecrawl-base-url") }
-					: {}),
+				? { firecrawlBaseUrl: flag(args, "firecrawl-base-url") }
+				: {}),
 		});
 	}
 

@@ -17,7 +17,7 @@ limitations under the License.
 import { useCallback, useEffect, useState } from "react";
 import { Text } from "ink";
 import { Spinner } from "@inkjs/ui";
-import type { SystemSettingsDto, UpdateSystemSettingsDto } from "../api/types";
+import type { SystemConfigDto, UpdateSystemConfigDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { FormPanel } from "./FormPanel";
 import type { FormField } from "./FormPanel";
@@ -37,7 +37,7 @@ const EDITABLE_KEYS = [
 	"firecrawlBaseUrl",
 ] as const;
 
-function buildConfigFields(s: SystemSettingsDto): FormField[] {
+function buildConfigFields(s: SystemConfigDto): FormField[] {
 	return [
 		{ key: "webSearchProvider", label: "Web Search", kind: "select", value: s.webSearchProvider ?? "disabled", options: SEARCH_PROVIDER_OPTIONS },
 		{ key: "braveApiKey", label: "Brave API Key", kind: "text", value: s.braveApiKey ?? "", secret: true },
@@ -52,13 +52,13 @@ export function ConfigOverlay() {
 	const setToast = useAppStore((s) => s.setToast);
 	const setOverlay = useAppStore((s) => s.setOverlay);
 
-	const [settings, setSettings] = useState<SystemSettingsDto | null>(null);
+	const [settings, setSettings] = useState<SystemConfigDto | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	const reload = useCallback(async () => {
 		if (!client) return;
 		try {
-			const s = await client.getSettings();
+			const s = await client.getConfig();
 			setSettings(s);
 			setError(null);
 		} catch (e) {
@@ -77,7 +77,7 @@ export function ConfigOverlay() {
 		}
 		if (!client || !settings) return;
 
-		const dto: UpdateSystemSettingsDto = {};
+		const dto: UpdateSystemConfigDto = {};
 		for (const key of EDITABLE_KEYS) {
 			if ((values[key] ?? "") !== (settings[key] ?? "")) {
 				(dto as Record<string, string>)[key] = values[key] ?? "";
@@ -86,7 +86,7 @@ export function ConfigOverlay() {
 
 		try {
 			if (Object.keys(dto).length > 0) {
-				const updated = await client.updateSettings(dto);
+				const updated = await client.updateConfig(dto);
 				setSettings(updated);
 				setToast("Settings saved.");
 			} else {

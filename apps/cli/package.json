@@ -7,7 +7,8 @@
     "dev": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
     "start": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
     "build": "bun run scripts/build.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist agenty.log"
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",

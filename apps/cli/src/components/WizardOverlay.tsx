@@ -165,7 +165,7 @@ export function WizardOverlay() {
 			if (firecrawlUrl) dto.firecrawlBaseUrl = firecrawlUrl;
 		}
 		try {
-			await client.updateSettings(dto);
+			await client.updateConfig(dto);
 			setFeedback(null);
 			setStep("models");
 		} catch (e) {
@@ -216,7 +216,7 @@ export function WizardOverlay() {
 		setStep("saving");
 		setSavingLabel("Saving embedding model…");
 		try {
-			await client.updateSettings({ embeddingModelId: m.id });
+			await client.updateConfig({ embeddingModelId: m.id });
 			await finish();
 		} catch (e) {
 			setFeedback({
@@ -359,9 +359,8 @@ export function WizardOverlay() {
 						if (idx >= 0) return sel.filter((i) => i !== modelCursor);
 						if (sel.length >= MAX_MODELS) {
 							setFeedback({
-								msg: `Maximum ${MAX_MODELS} models allowed (1 primary + ${
-									MAX_MODELS - 1
-								} fallbacks)`,
+								msg: `Maximum ${MAX_MODELS} models allowed (1 primary + ${MAX_MODELS - 1
+									} fallbacks)`,
 								kind: "warn",
 							});
 							return sel;

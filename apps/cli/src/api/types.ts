@@ -211,7 +211,7 @@ export interface VersionDto {
 	version: string;
 }
 
-export interface SystemSettingsDto {
+export interface SystemConfigDto {
 	initialized: boolean;
 	embeddingModelId?: string;
 	contextCompressionModelId?: string;
@@ -224,7 +224,7 @@ export interface SystemSettingsDto {
 	firecrawlBaseUrl?: string;
 }
 
-export interface UpdateSystemSettingsDto {
+export interface UpdateSystemConfigDto {
 	initialized?: boolean;
 	embeddingModelId?: string;
 	contextCompressionModelId?: string;
