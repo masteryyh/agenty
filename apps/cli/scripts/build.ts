@@ -47,11 +47,11 @@ function readCliVersion(): string {
 	return "dev";
 }
 
-function resolveArch(): string {
-	const rawArch = process.env.ARCH?.trim();
-	if (!rawArch) {
-		return null;
-	}
+type TargetOS = "linux" | "macos" | "windows";
+type TargetArch = "amd64" | "arm64";
+
+function resolveArch(): TargetArch {
+	const rawArch = process.env.ARCH?.trim() || process.arch;
 
 	const lowerArch = rawArch.toLowerCase();
 	if (lowerArch === "x64" || lowerArch === "x86_64" || lowerArch === "amd64") {
@@ -60,14 +60,12 @@ function resolveArch(): string {
 	if (lowerArch === "arm64" || lowerArch === "aarch64") {
 		return "arm64";
 	}
-	return lowerArch;
+	console.error(`unsupported CLI architecture: ${rawArch}`);
+	process.exit(1);
 }
 
-function resolveOS(): string | null {
-	const rawOS = process.env.OS?.trim();
-	if (!rawOS) {
-		return null;
-	}
+function resolveOS(): TargetOS {
+	const rawOS = process.env.OS?.trim() || process.platform;
 
 	const lowerOS = rawOS.toLowerCase();
 	if (lowerOS === "darwin" || lowerOS === "macos") {
@@ -76,7 +74,25 @@ function resolveOS(): string | null {
 	if (lowerOS.startsWith("win")) {
 		return "windows";
 	}
-	return lowerOS;
+	if (lowerOS === "linux") return "linux";
+	console.error(`unsupported CLI operating system: ${rawOS}`);
+	process.exit(1);
+}
+
+function resolveBunTarget(os: TargetOS, arch: TargetArch): string {
+	const bunArch = arch === "amd64" ? "x64" : "arm64";
+	const bunOS = os === "macos" ? "darwin" : os;
+	return `bun-${bunOS}-${bunArch}`;
+}
+
+function resolveOpenTUILibc(os: TargetOS): string | null {
+	if (os !== "linux") return null;
+	const libc = process.env.OPENTUI_LIBC?.trim() || "glibc";
+	if (libc !== "glibc" && libc !== "musl") {
+		console.error(`unsupported OPENTUI_LIBC: ${libc} (expected glibc or musl)`);
+		process.exit(1);
+	}
+	return libc;
 }
 
 function findAgentyBinary(dir: string): string | null {
@@ -95,34 +111,35 @@ function findAgentyBinary(dir: string): string | null {
 	}
 
 	if (hits.length > 1) {
-		console.error('multiple runtime binary found, exiting.');
+		console.error("multiple runtime binary found, exiting.");
 		process.exit(1);
 	}
 	return hits[0];
 }
 
-function resolveRuntimeBinary(os: string | null, arch: string | null): string {
-	if (os && arch) {
-		const target = `${os}_${arch}`;
-		const dir = join(RUNTIME_BIN_DIR, target);
-		const bin = findAgentyBinary(dir);
-		if (!bin) {
-			console.error(`agenty-runtime binary not found for OS=${os} ARCH=${arch}\n`);
-			process.exit(1);
-		}
-		return bin!;
-	}
+function resolveRuntimeBinary(os: TargetOS, arch: TargetArch): string {
+	const targetDir = join(RUNTIME_BIN_DIR, `${os}_${arch}`);
+	const targetBinary = findAgentyBinary(targetDir);
+	if (targetBinary) return targetBinary;
 
+	const hostOS =
+		process.platform === "darwin"
+			? "macos"
+			: process.platform === "win32"
+				? "windows"
+				: process.platform;
+	const hostArch = process.arch === "x64" ? "amd64" : process.arch;
 	const flat = join(RUNTIME_BIN_DIR, "agenty");
-	if (!existsSync(flat)) {
-		console.error(`agenty-runtime binary not found at ${flat}\n`);
-		process.exit(1);
-	}
-	return flat;
+	if (os === hostOS && arch === hostArch && existsSync(flat)) return flat;
+
+	console.error(`agenty-runtime binary not found for OS=${os} ARCH=${arch}\n`);
+	process.exit(1);
 }
 
 const os = resolveOS();
 const arch = resolveArch();
+const bunTarget = resolveBunTarget(os, arch);
+const opentuiLibc = resolveOpenTUILibc(os);
 const runtimeBin = resolveRuntimeBinary(os, arch);
 mkdirSync(EMBEDDED_DIR, { recursive: true });
 copyFileSync(runtimeBin, EMBEDDED_BIN);
@@ -134,10 +151,13 @@ const outfile = join(DIST, `agenty-cli-${os}-${arch}${os === "windows" ? ".exe" 
 
 const result = await Bun.build({
 	entrypoints: [join(PKG, "src/index.tsx")],
-	compile: { outfile },
+	compile: { outfile, target: bunTarget },
 	target: "bun",
 	define: {
 		"process.env.AGENTY_CLI_VERSION": JSON.stringify(version),
+		...(opentuiLibc
+			? { "process.env.OPENTUI_LIBC": JSON.stringify(opentuiLibc) }
+			: {}),
 	},
 });
 if (!result.success) {
@@ -147,4 +167,6 @@ if (!result.success) {
 	process.exit(1);
 }
 
-console.log(`agenty-cli single executable built -> dist/agenty-cli`);
+console.log(
+	`agenty-cli single executable built -> ${outfile} (${bunTarget}${opentuiLibc ? `, ${opentuiLibc}` : ""})`,
+);

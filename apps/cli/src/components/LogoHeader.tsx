@@ -15,8 +15,7 @@ limitations under the License.
 */
 
 import { useMemo } from "react";
-import { Box, Text } from "ink";
-import Gradient from "ink-gradient";
+import { Box, GradientText, Text } from "./ui";
 import { pickAsciiArt } from "../consts/asciiArts";
 import { CLI_VERSION } from "../version";
 
@@ -30,7 +29,7 @@ export function LogoHeader({ runtimeVersion }: LogoHeaderProps) {
 
 	return (
 		<Box
-			borderStyle="round"
+			borderStyle="rounded"
 			borderColor="magenta"
 			paddingX={1}
 			flexDirection="row"
@@ -44,9 +43,9 @@ export function LogoHeader({ runtimeVersion }: LogoHeaderProps) {
 				))}
 			</Box>
 			<Box flexDirection="column" justifyContent="center" gap={0}>
-				<Gradient colors={["#00E5FF", "#FF00E5"]}>
-					<Text bold>agenty-cli</Text>
-				</Gradient>
+				<GradientText colors={["#00E5FF", "#FF00E5"]}>
+					agenty-cli
+				</GradientText>
 				<Text color="gray">cli: v{CLI_VERSION}</Text>
 				<Text color="gray">
 					runtime: v{runtimeVersion || "—"}

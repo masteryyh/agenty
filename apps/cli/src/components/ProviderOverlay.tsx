@@ -15,17 +15,14 @@ limitations under the License.
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Spinner, Text } from "./ui";
 import type { ModelProviderDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { providerTypes, providerDefaultBaseURLs } from "../consts/providerTypes";
 import { FormPanel } from "./FormPanel";
 import type { FormField } from "./FormPanel";
-
-const MAX_VISIBLE = 9;
-const NAME_W = 34;
-const URL_W = 62;
+import { useBottomDialogSize } from "./BottomDialog";
 
 const PROVIDER_TYPE_OPTIONS = providerTypes.map((t) => ({ label: t, value: t }));
 
@@ -109,6 +106,7 @@ export function ProviderOverlay() {
 	// Top-level input handler — ensures empty / loading list states respond to keyboard.
 	useInput((input, key) => {
 		if (modeRef.current.kind !== "list") return;
+		if (providers !== null && providers.length > 0) return;
 		if (key.escape) { close(); return; }
 		if (input === "a") { setMode({ kind: "create" }); return; }
 	});
@@ -251,8 +249,17 @@ function ProviderList({
 	onDelete: (p: ModelProviderDto) => void;
 	onClose: () => void;
 }) {
+	const dialogSize = useBottomDialogSize();
 	const n = providers.length;
-	const maxVis = Math.min(MAX_VISIBLE, n);
+	const compact = dialogSize.width < 46;
+	const nameWidth = compact
+		? Math.max(dialogSize.width - 2, 8)
+		: Math.max(Math.min(Math.floor(dialogSize.width * 0.28), 30), 14);
+	const urlWidth = compact
+		? 0
+		: Math.max(dialogSize.width - nameWidth - 4, 8);
+	const maxVisible = Math.max(dialogSize.height - 7 - (compact ? 1 : 0), 1);
+	const maxVis = Math.min(maxVisible, n);
 	const half = Math.floor(maxVis / 2);
 	let start = cursor - half;
 	if (start < 0) start = 0;
@@ -273,22 +280,28 @@ function ProviderList({
 		<Box flexDirection="column" flexGrow={1}>
 			<Box marginBottom={1}>
 				<Text dimColor>
-					{"  "}{pad("Name", NAME_W)}  {pad("Base URL", URL_W)}  Status
+					{compact
+						? `  ${pad("Name", nameWidth)}`
+						: `  ${pad("Name", nameWidth)}  ${pad("Base URL", urlWidth)}`}
 				</Text>
 			</Box>
 			<Box flexDirection="column" flexGrow={1} overflow="hidden">
 				{visible.map((p) => {
 					const i = providers.indexOf(p);
 					const selected = i === cursor;
-					const configured = !!p.apiKeyCensored;
-					const status = configured ? "[configured]" : p.isPreset ? "" : "[not configured]";
-					const statusColor = configured ? "green" : "gray";
 					const customBadge = p.isPreset ? "" : " [custom]";
-					const nameW = NAME_W - customBadge.length;
+					const nameW = Math.max(nameWidth - customBadge.length, 1);
 					const name = pad(p.name, nameW);
-					const url = pad(p.baseUrl, URL_W);
+					const url = pad(p.baseUrl, urlWidth);
 					return (
-						<Box key={p.id}>
+						<Box
+							key={p.id}
+							onMouseOver={() => onCursor(i)}
+							onMouseClick={() => {
+								onCursor(i);
+								onSelect(p);
+							}}
+						>
 							<Text color={selected ? "cyan" : "gray"}>
 								{selected ? "\u276f" : " "}
 							</Text>
@@ -297,22 +310,33 @@ function ProviderList({
 								{name}
 							</Text>
 							{customBadge ? <Text dimColor>{customBadge}</Text> : null}
-							<Text>  </Text>
-							<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-								{url}
-							</Text>
-							<Text>  </Text>
-							{status ? (
-								<Text color={statusColor} dimColor={!selected}>
-									{status}
+							{compact ? null : <Text>  </Text>}
+							{compact ? null : (
+								<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
+									{url}
 								</Text>
-							) : null}
+							)}
 						</Box>
 					);
 				})}
 			</Box>
-			<Box>
-				<Text dimColor>{"\u2191\u2193 navigate · Enter edit · a add · d delete · Esc back"}</Text>
+			{compact ? (
+				<Box height={1} overflow="hidden">
+					<Text dimColor wrap="truncate">
+						{trunc(`Base URL: ${providers[cursor]?.baseUrl ?? "—"}`, dialogSize.width)}
+					</Text>
+				</Box>
+			) : null}
+			<Box gap={3} height={1} marginTop={1} overflow="hidden">
+				<Text color="cyan" onMouseClick={onAdd}>Add</Text>
+				<Text color="cyan" onMouseClick={() => onDelete(providers[cursor])}>Delete</Text>
+			</Box>
+			<Box height={1} overflow="hidden">
+				<Text dimColor wrap="truncate">
+					{compact
+						? "\u2191\u2193 move · Enter edit · d del · Esc close"
+						: "\u2191\u2193 navigate · Enter edit · d delete · Esc back"}
+				</Text>
 			</Box>
 		</Box>
 	);
@@ -342,8 +366,9 @@ function DeleteConfirm({
 				Delete provider "{target.name}"?
 			</Text>
 			<Text dimColor>This also deletes all its models.</Text>
-			<Box marginTop={1}>
-				<Text dimColor>y to confirm · n or Esc to cancel</Text>
+			<Box marginTop={1} gap={2}>
+				<Text color="red" bold onMouseClick={onConfirm}>[Delete]</Text>
+				<Text color="cyan" onMouseClick={onCancel}>[Cancel]</Text>
 			</Box>
 		</Box>
 	);

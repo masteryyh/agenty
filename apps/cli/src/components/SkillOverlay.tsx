@@ -15,8 +15,8 @@ limitations under the License.
 */
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { Select, Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Select, Spinner, Text } from "./ui";
 import { useAppStore } from "../state/store";
 import type { SkillDto } from "../api/types";
 

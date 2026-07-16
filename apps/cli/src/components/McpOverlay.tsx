@@ -15,17 +15,13 @@ limitations under the License.
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Spinner, Text } from "./ui";
 import type { MCPServerDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { FormPanel } from "./FormPanel";
 import type { FormField } from "./FormPanel";
-
-const MAX_VISIBLE = 9;
-const NAME_W = 28;
-const TRANSPORT_W = 16;
-const STATUS_W = 16;
+import { useBottomDialogSize } from "./BottomDialog";
 
 const MCP_TRANSPORTS = ["stdio", "sse", "streamable-http"] as const;
 
@@ -99,6 +95,7 @@ export function McpOverlay() {
 	// Only fires in list mode; sub-forms handle their own input.
 	useInput((input, key) => {
 		if (modeRef.current.kind !== "list") return;
+		if (servers !== null && servers.length > 0) return;
 		if (key.escape) { close(); return; }
 		if (input === "a") { setMode({ kind: "create" }); return; }
 	});
@@ -281,8 +278,19 @@ function ServerList({
 	onDisconnect: (s: MCPServerDto) => void;
 	onClose: () => void;
 }) {
+	const dialogSize = useBottomDialogSize();
 	const n = servers.length;
-	const maxVis = Math.min(MAX_VISIBLE, n);
+	const transportWidth = 16;
+	const statusWidth = 16;
+	const compact = dialogSize.width < 58;
+	const nameWidth = compact
+		? Math.max(dialogSize.width - statusWidth - 4, 8)
+		: Math.max(
+				Math.min(dialogSize.width - transportWidth - statusWidth - 6, 32),
+				12,
+			);
+	const maxVisible = Math.max(dialogSize.height - 6 - (compact ? 1 : 0), 1);
+	const maxVis = Math.min(maxVisible, n);
 	const half = Math.floor(maxVis / 2);
 	let start = cursor - half;
 	if (start < 0) start = 0;
@@ -307,7 +315,9 @@ function ServerList({
 		<Box flexDirection="column" flexGrow={1}>
 			<Box marginBottom={1}>
 				<Text dimColor>
-					{"  "}{pad("Name", NAME_W)}  {pad("Transport", TRANSPORT_W)}  {pad("Status", STATUS_W)}
+					{compact
+						? `  ${pad("Name", nameWidth)}  ${pad("Status", statusWidth)}`
+						: `  ${pad("Name", nameWidth)}  ${pad("Transport", transportWidth)}  ${pad("Status", statusWidth)}`}
 				</Text>
 			</Box>
 			<Box flexDirection="column" flexGrow={1} overflow="hidden">
@@ -317,12 +327,18 @@ function ServerList({
 					const statusText = s.status ?? (s.enabled ? "enabled" : "disabled");
 					const isConnected = s.status === "connected";
 					const statusColor = isConnected ? "green" : "gray";
-					const name = pad(s.name, NAME_W);
-					const transport = pad(s.transport, TRANSPORT_W);
-					const st = pad(statusText, STATUS_W);
-					const toolCount = s.tools ? ` [${s.tools.length} tools]` : "";
+					const name = pad(s.name, nameWidth);
+					const transport = pad(s.transport, transportWidth);
+					const st = pad(statusText, statusWidth);
 					return (
-						<Box key={s.id}>
+						<Box
+							key={s.id}
+							onMouseOver={() => onCursor(i)}
+							onMouseClick={() => {
+								onCursor(i);
+								onEdit(s);
+							}}
+						>
 							<Text color={selected ? "cyan" : "gray"}>
 								{selected ? "\u276f" : " "}
 							</Text>
@@ -330,26 +346,47 @@ function ServerList({
 							<Text color={selected ? "cyan" : "white"} bold={selected}>
 								{name}
 							</Text>
-							<Text>  </Text>
-							<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-								{transport}
-							</Text>
+							{compact ? null : <Text>  </Text>}
+							{compact ? null : (
+								<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
+									{transport}
+								</Text>
+							)}
 							<Text>  </Text>
 							<Text color={statusColor} dimColor={!selected}>
 								{st}
 							</Text>
-							{toolCount ? (
-								<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-									{toolCount}
-								</Text>
-							) : null}
 						</Box>
 					);
 				})}
 			</Box>
-			<Box>
-				<Text dimColor>
-					{"\u2191\u2193 navigate · Enter edit · a add · e edit · d delete · c connect · x disconnect · Esc back"}
+			{compact ? (
+				<Box height={1} overflow="hidden">
+					<Text dimColor wrap="truncate">
+						{trunc(
+							`${servers[cursor]?.transport ?? "?"} · ${servers[cursor]?.status ?? "disabled"} · ${servers[cursor]?.tools?.length ?? 0} tools`,
+							dialogSize.width,
+						)}
+					</Text>
+				</Box>
+			) : null}
+			<Box gap={1} height={1} overflow="hidden">
+				<Text color="cyan" onMouseClick={onAdd}>[Add]</Text>
+				<Text color="cyan" onMouseClick={() => onConnect(servers[cursor])}>
+					{compact ? "[On]" : "[Connect]"}
+				</Text>
+				<Text color="cyan" onMouseClick={() => onDisconnect(servers[cursor])}>
+					{compact ? "[Off]" : "[Disconnect]"}
+				</Text>
+				<Text color="cyan" onMouseClick={() => onDelete(servers[cursor])}>
+					{compact ? "[Del]" : "[Delete]"}
+				</Text>
+			</Box>
+			<Box height={1} overflow="hidden">
+				<Text dimColor wrap="truncate">
+					{compact
+						? "\u2191\u2193 move · Enter edit · c on · x off · Esc"
+						: "\u2191\u2193 navigate · Enter edit · c connect · x disconnect · Esc back"}
 				</Text>
 			</Box>
 		</Box>
@@ -379,8 +416,9 @@ function DeleteConfirm({
 			<Text color="red" bold>
 				Delete MCP server "{target.name}"?
 			</Text>
-			<Box marginTop={1}>
-				<Text dimColor>y to confirm · n or Esc to cancel</Text>
+			<Box marginTop={1} gap={2}>
+				<Text color="red" bold onMouseClick={onConfirm}>[Delete]</Text>
+				<Text color="cyan" onMouseClick={onCancel}>[Cancel]</Text>
 			</Box>
 		</Box>
 	);

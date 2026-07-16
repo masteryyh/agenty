@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-export { useApp, type AppSlice } from "./useApp";
-export { useChat, type ChatSlice } from "./useChat";
-export { useInput, type InputKey } from "./useInput";
-export { useWindowSize } from "./useWindowSize";
+import { useTerminalDimensions } from "@opentui/react";
+
+export function useWindowSize(): { rows: number; columns: number } {
+	const { width, height } = useTerminalDimensions();
+	return { rows: height, columns: width };
+}

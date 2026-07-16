@@ -15,8 +15,7 @@ limitations under the License.
 */
 
 import { useCallback, useEffect, useState } from "react";
-import { Text } from "ink";
-import { Spinner } from "@inkjs/ui";
+import { Spinner, Text } from "./ui";
 import type { SystemConfigDto, UpdateSystemConfigDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { FormPanel } from "./FormPanel";

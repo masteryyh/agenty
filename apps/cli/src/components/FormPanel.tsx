@@ -15,8 +15,9 @@ limitations under the License.
 */
 
 import { useState, useRef, useCallback, useMemo } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { useInput } from "../hooks/useInput";
+import { useBottomDialogSize } from "./BottomDialog";
+import { Box, Text, TextInput } from "./ui";
 
 // ─── types ──────────────────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ export function FormPanel({
 	onAction,
 	onClose,
 }: FormPanelProps) {
+	const dialogSize = useBottomDialogSize();
 	const [values, setValues] = useState<Record<string, string>>(() => {
 		const init: Record<string, string> = {};
 		for (const f of fields) init[f.key] = f.value;
@@ -127,6 +129,11 @@ export function FormPanel({
 	);
 	const actionStart = visibleFields.length;
 	const actionEnd = actionStart + actDefs.length - 1;
+	const keyWidth = Math.min(KEY_WIDTH, Math.max(Math.floor(dialogSize.width / 3), 12));
+	const maxExpandedOptions = Math.max(
+		2,
+		Math.min(6, dialogSize.height - visibleFields.length - 4),
+	);
 
 	const [cursor, setCursor] = useState(0);
 	const [fstate, setFstate] = useState<FieldState>({ kind: "idle" });
@@ -229,12 +236,55 @@ export function FormPanel({
 		setFstate({ kind: "idle" });
 	}, []);
 
-	useInput((input, key) => {
+	const activateField = useCallback(
+		(visibleIndex: number) => {
+			const field = visibleRef.current[visibleIndex];
+			if (!field || field.readOnly) return;
+			setCursor(visibleIndex);
+			const current = valuesRef.current[field.key] ?? field.value;
+			if (field.kind === "boolean") {
+				updateValue(field.key, current === "true" ? "false" : "true");
+				return;
+			}
+			if (field.kind === "select") {
+				const options = field.options ?? [];
+				if (options.length === 0) return;
+				const selected = options.findIndex((option) => option.value === current);
+				setFstate({
+					kind: "selecting",
+					visibleIndex,
+					selection: selected >= 0 ? selected : 0,
+				});
+				return;
+			}
+			if (field.kind === "multiselect") {
+				const options = field.options ?? [];
+				if (options.length === 0) return;
+				const chosen = parseMulti(current);
+				const firstChosen = options.findIndex((option) => chosen.has(option.value));
+				setFstate({
+					kind: "multi-selecting",
+					visibleIndex,
+					selection: firstChosen >= 0 ? firstChosen : 0,
+					chosen,
+				});
+				return;
+			}
+			setFstate({ kind: "editing", visibleIndex, text: current });
+		},
+		[updateValue],
+	);
+
+	useInput((input, key, event) => {
 		const st = fstateRef.current;
 
 		// ── editing text field ──
 		if (st.kind === "editing") {
-			if (key.escape) { cancelEdit(); return; }
+			if (key.escape) {
+				event.preventDefault();
+				cancelEdit();
+				return;
+			}
 			// TextInput handles Enter to submit
 			return;
 		}
@@ -360,51 +410,23 @@ export function FormPanel({
 
 		if (vf.kind === "boolean") {
 			if (key.leftArrow || key.rightArrow) {
-				const current = valuesRef.current[vf.key] ?? vf.value;
-				updateValue(vf.key, current === "true" ? "false" : "true");
+				activateField(c);
 			}
 			return;
 		}
 
 		if (vf.kind === "select") {
-			if (key.rightArrow || key.return) {
-				const opts = vf.options ?? [];
-				if (opts.length === 0) return;
-				const cur = valuesRef.current[vf.key] ?? vf.value;
-				const idx = opts.findIndex((o) => o.value === cur);
-				setFstate({
-					kind: "selecting",
-					visibleIndex: c,
-					selection: idx >= 0 ? idx : 0,
-				});
-			}
+			if (key.rightArrow || key.return) activateField(c);
 			return;
 		}
 
 		if (vf.kind === "multiselect") {
-			if (key.rightArrow || key.return) {
-				const opts = vf.options ?? [];
-				if (opts.length === 0) return;
-				const chosen = parseMulti(valuesRef.current[vf.key] ?? vf.value);
-				const firstChosen = opts.findIndex((o) => chosen.has(o.value));
-				setFstate({
-					kind: "multi-selecting",
-					visibleIndex: c,
-					selection: firstChosen >= 0 ? firstChosen : 0,
-					chosen,
-				});
-			}
+			if (key.rightArrow || key.return) activateField(c);
 			return;
 		}
 
 		if (vf.kind === "text") {
-			if (key.return) {
-				setFstate({
-					kind: "editing",
-					visibleIndex: c,
-					text: valuesRef.current[vf.key] ?? vf.value,
-				});
-			}
+			if (key.return) activateField(c);
 			return;
 		}
 	});
@@ -427,11 +449,37 @@ export function FormPanel({
 					const isMultiSelecting =
 						st.kind === "multi-selecting" && st.visibleIndex === vi;
 					const curVal = values[f.key] ?? f.value;
+					const expandedSelection = isSelecting
+						? st.kind === "selecting"
+							? st.selection
+							: 0
+						: isMultiSelecting && st.kind === "multi-selecting"
+							? st.selection
+							: 0;
+					const optionCount = f.options?.length ?? 0;
+					const optionStart = Math.max(
+						0,
+						Math.min(
+							expandedSelection - Math.floor(maxExpandedOptions / 2),
+							Math.max(optionCount - maxExpandedOptions, 0),
+						),
+					);
+					const visibleOptions =
+						f.options?.slice(optionStart, optionStart + maxExpandedOptions) ?? [];
 
 					return (
-						<Box key={f.key} flexDirection="column">
+						<Box
+							key={f.key}
+							flexDirection="column"
+							onMouseOver={() => {
+								if (fstate.kind === "idle") setCursor(vi);
+							}}
+							onMouseClick={() => {
+								if (!isEditing) activateField(vi);
+							}}
+						>
 							{/* label + value row */}
-							<Box>
+							<Box height={1} overflow="hidden">
 								<Box width={2}>
 									<Text
 										color={
@@ -441,7 +489,7 @@ export function FormPanel({
 										{isActive && !isEditing ? "\u276f" : " "}
 									</Text>
 								</Box>
-								<Box width={KEY_WIDTH}>
+								<Box width={keyWidth}>
 									<Text
 										color={
 											isActive && !isEditing
@@ -450,26 +498,28 @@ export function FormPanel({
 										}
 										bold={isActive && !isEditing}
 									>
-										{pad(f.label + ":", KEY_WIDTH)}
+										{pad(f.label + ":", keyWidth)}
 									</Text>
 								</Box>
 								<Text> </Text>
 								{isEditing ? (
-									<Box flexGrow={1}>
+									<Box
+										flexGrow={1}
+										flexBasis={0}
+										height={1}
+										overflow="hidden"
+									>
 										<TextInput
 											value={curVal}
-											onChange={(v) =>
-												updateValue(f.key, v)
-											}
+											onChange={(v) => updateValue(f.key, v)}
 											onSubmit={(v) => commitEdit(v)}
 											placeholder={f.placeholder ?? ""}
 										/>
 									</Box>
 								) : (
 									<Text
-										color={
-											isActive ? "cyan" : "white"
-										}
+										wrap="truncate"
+										color={isActive ? "cyan" : "white"}
 									>
 										{f.kind === "boolean"
 											? renderBoolean(isActive, curVal)
@@ -494,14 +544,27 @@ export function FormPanel({
 							f.options ? (
 								<Box
 									flexDirection="column"
-									marginLeft={KEY_WIDTH + 3}
+									marginLeft={keyWidth + 3}
 								>
-									{f.options.map((opt, oi) => {
+									{visibleOptions.map((opt, localIndex) => {
+										const oi = optionStart + localIndex;
 										const sel =
 											st.kind === "selecting" &&
 											st.selection === oi;
 										return (
-											<Box key={opt.value}>
+											<Box
+												key={opt.value}
+												onMouseOver={() => {
+													setFstate((state) =>
+														state.kind === "selecting"
+															? { ...state, selection: oi }
+															: state,
+													);
+												}}
+												onMouseClick={() => {
+													commitSelect(oi);
+												}}
+											>
 												<Text
 													color={
 														sel
@@ -535,9 +598,10 @@ export function FormPanel({
 							f.options ? (
 								<Box
 									flexDirection="column"
-									marginLeft={KEY_WIDTH + 3}
+									marginLeft={keyWidth + 3}
 								>
-									{f.options.map((opt, oi) => {
+									{visibleOptions.map((opt, localIndex) => {
+										const oi = optionStart + localIndex;
 										const sel =
 											st.kind === "multi-selecting" &&
 											st.selection === oi;
@@ -545,7 +609,25 @@ export function FormPanel({
 											st.kind === "multi-selecting" &&
 											st.chosen.has(opt.value);
 										return (
-											<Box key={opt.value}>
+											<Box
+												key={opt.value}
+												onMouseOver={() => {
+													setFstate((state) =>
+														state.kind === "multi-selecting"
+															? { ...state, selection: oi }
+															: state,
+													);
+												}}
+												onMouseClick={() => {
+													setFstate((state) => {
+														if (state.kind !== "multi-selecting") return state;
+														const next = new Set(state.chosen);
+														if (next.has(opt.value)) next.delete(opt.value);
+														else next.add(opt.value);
+														return { ...state, selection: oi, chosen: next };
+													});
+												}}
+											>
 												<Text color={sel ? "cyan" : "gray"}>
 													{sel ? "❯ " : "  "}
 												</Text>
@@ -564,34 +646,37 @@ export function FormPanel({
 						</Box>
 					);
 				})}
+			</Box>
 
-				{/* spacer */}
-				<Box flexGrow={1} />
-
-				{/* action row */}
-				<Box gap={3}>
-					{actDefs.map((act, ai) => {
-						const ac = actionStart + ai;
-						const active = cursor === ac;
-						return (
-							<Box key={act.key}>
-								<Text
-									color={active ? "cyan" : "gray"}
-									bold={active}
-								>
-									{active ? "\u276f " : "  "}
-									{act.label}
-								</Text>
-							</Box>
-						);
-					})}
-				</Box>
+			{/* action row */}
+			<Box gap={3}>
+				{actDefs.map((act, ai) => {
+					const ac = actionStart + ai;
+					const active = cursor === ac;
+					return (
+						<Box
+							key={act.key}
+							onMouseClick={() => {
+								setCursor(ac);
+								if (act.key === "cancel") onClose();
+								else onAction(act.key, valuesRef.current);
+							}}
+						>
+							<Text color={active ? "cyan" : "gray"} bold={active}>
+								{active ? "\u276f " : "  "}
+								{act.label}
+							</Text>
+						</Box>
+					);
+				})}
 			</Box>
 
 			{/* hints */}
-			<Box>
-				<Text dimColor>
-					{"\u2191\u2193 navigate \u00b7 \u2190\u2192 toggle \u00b7 Enter edit/choose \u00b7 Space toggle · Esc back"}
+			<Box height={1} overflow="hidden">
+				<Text dimColor wrap="truncate">
+					{dialogSize.width < 60
+						? "\u2191\u2193 move · \u2190\u2192 change · Enter select · Esc back"
+						: "\u2191\u2193 navigate · \u2190\u2192 toggle · Enter edit/choose · Space toggle · Esc back"}
 				</Text>
 			</Box>
 		</Box>

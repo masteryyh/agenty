@@ -52,26 +52,31 @@ jobs:
             goos: linux
             os: linux
             arch: amd64
+            opentui_libc: glibc
             bin_ext: ""
           - runner: ubuntu-26.04-arm
             goos: linux
             os: linux
             arch: arm64
+            opentui_libc: glibc
             bin_ext: ""
           - runner: macos-26-intel
             goos: darwin
             os: macos
             arch: amd64
+            opentui_libc: ""
             bin_ext: ""
           - runner: macos-26
             goos: darwin
             os: macos
             arch: arm64
+            opentui_libc: ""
             bin_ext: ""
           - runner: windows-latest
             goos: windows
             os: windows
             arch: amd64
+            opentui_libc: ""
             bin_ext: ".exe"
     steps:
       - name: Checkout repository
@@ -92,6 +97,11 @@ jobs:
           node-version: lts/Krypton
           cache: pnpm
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -106,8 +116,10 @@ jobs:
           export VERSION="${tag}"
           export OS="${{ matrix.os }}"
           export ARCH="${{ matrix.arch }}"
+          export OPENTUI_LIBC="${{ matrix.opentui_libc }}"
           export AGENTY_CLI_VERSION="${tag}"
 
+          pnpm run cli:typecheck
           pnpm run runtime:build
           pnpm run cli:build
 
