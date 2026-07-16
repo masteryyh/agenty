@@ -4,7 +4,7 @@
 
 Agenty is an AI agent application written primarily in Go 1.26. The Go binary is an HTTP server, while `agenty-cli` provides local interactive and remote client modes. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
 
-The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository is a pnpm + Turborepo monorepo: the Go backend lives in `packages/agenty-runtime/`, and a TypeScript terminal client lives in `apps/cli/`, built with Bun, React, Ink, Zustand, and pnpm.
+The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository is a pnpm + Turborepo monorepo: the Go backend lives in `packages/agenty-runtime/`, and a TypeScript terminal client lives in `apps/cli/`, built with Bun, React, OpenTUI, Zustand, and pnpm.
 
 ## Project Structure
 
@@ -12,10 +12,12 @@ The repository is a pnpm + Turborepo monorepo with two workspaces: `apps/cli` (T
 
 - `packages/agenty-runtime/`: Go HTTP backend (Go module `github.com/masteryyh/agenty`). Built via its own `Makefile` (`make build` → `bin/agenty`) and consumed by `apps/cli` as an embedded binary.
 - `cmd/`: Go application entrypoint. `cmd/main.go` delegates to `pkg/cli/cmd`.
-- `apps/cli/`: TypeScript/React Ink terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
+- `apps/cli/`: TypeScript/React OpenTUI terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
   - `src/api/`: HTTP client and API DTOs for the CLI.
   - `src/commands/`: Slash command registry and parsing.
-  - `src/components/`: Ink UI components (chat, overlays, setup wizard).
+  - `src/components/`: OpenTUI React components (chat, overlays, setup wizard).
+  - `src/components/ui/`: Shared OpenTUI primitives, with one component per file.
+  - `src/tui/`: OpenTUI renderer lifecycle context.
   - `src/hooks/`: CLI interaction hooks.
   - `src/state/`: Zustand application state.
   - `src/localServer.ts`: embedded-server lifecycle (binary discovery, port pick, health check, fork `agenty --port <port>`).
@@ -110,7 +112,8 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 ## TypeScript CLI Conventions
 
 - `apps/cli/` is a pnpm workspace package (name `agenty-cli`) executed with Bun.
-- React Ink UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, and `consts`.
+- React OpenTUI UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, `tui`, and `consts`.
+- OpenTUI includes native libraries. `apps/cli/scripts/build.ts` maps `OS` and `ARCH` to an explicit Bun compile target; Linux builds also set `OPENTUI_LIBC` to `glibc` or `musl` (default `glibc`). Keep the release matrix and Turborepo build environment in sync with those inputs.
 - Root scripts delegate through Turborepo: `pnpm build`/`pnpm test`/`pnpm typecheck` run `turbo run <task>`; `pnpm cli:typecheck` and `pnpm cli:build` filter to the CLI.
 - CLI API types and UI state should preserve the backend API contract rather than duplicating backend business rules.
 

@@ -15,8 +15,14 @@ limitations under the License.
 */
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { ScrollList, type ScrollListRef } from "ink-scroll-list";
+import {
+	CliRenderEvents,
+	type ScrollBoxRenderable,
+	type ThemeMode,
+} from "@opentui/core";
+import { useRenderer } from "@opentui/react";
+import { useInput } from "../hooks/useInput";
+import { Box, Text } from "./ui";
 import type { UIMessage } from "../state/store";
 import { MessageItem, type MessageRenderItem } from "./MessageItem";
 
@@ -41,7 +47,8 @@ export function MessageList({
 	header,
 	interactive = true,
 }: MessageListProps) {
-	const listRef = useRef<ScrollListRef>(null);
+	const renderer = useRenderer();
+	const listRef = useRef<ScrollBoxRenderable>(null);
 	// follow = pinned to the bottom, auto-scrolling as new content streams in.
 	// When the user scrolls up we detach; new messages then accrue into `unseen`.
 	const [follow, setFollow] = useState(true);
@@ -52,6 +59,25 @@ export function MessageList({
 	);
 	const [now, setNow] = useState(() => Date.now());
 	const [blinkOn, setBlinkOn] = useState(true);
+	const [themeMode, setThemeMode] = useState<ThemeMode>(
+		() => renderer.themeMode ?? "dark",
+	);
+
+	useEffect(() => {
+		let cancelled = false;
+		const handleThemeMode = (mode: ThemeMode) => {
+			if (!cancelled) setThemeMode(mode);
+		};
+
+		renderer.on(CliRenderEvents.THEME_MODE, handleThemeMode);
+		void renderer.waitForThemeMode().then((mode) => {
+			if (mode) handleThemeMode(mode);
+		});
+		return () => {
+			cancelled = true;
+			renderer.off(CliRenderEvents.THEME_MODE, handleThemeMode);
+		};
+	}, [renderer]);
 
 	const messages: UIMessage[] = useMemo(() => {
 		const list: UIMessage[] = [...history];
@@ -140,9 +166,6 @@ export function MessageList({
 	]);
 
 	const empty = renderItems.length === 0;
-	// The header occupies index 0 when present, so message indices are offset.
-	const headerOffset = header ? 1 : 0;
-	const childCount = renderItems.length + headerOffset;
 	const itemIds = useMemo(
 		() => renderItems.map((item) => item.id),
 		[renderItems],
@@ -151,10 +174,10 @@ export function MessageList({
 	const isAtBottom = (offset?: number): boolean => {
 		const ref = listRef.current;
 		if (!ref) return follow;
-		const contentHeight = ref.getContentHeight?.() ?? 0;
-		const viewportHeight = ref.getViewportHeight?.() ?? 0;
+		const contentHeight = ref.scrollHeight;
+		const viewportHeight = ref.viewport.height;
 		const maxScroll = Math.max(0, contentHeight - viewportHeight);
-		const currentOffset = offset ?? ref.getScrollOffset?.() ?? 0;
+		const currentOffset = offset ?? ref.scrollTop;
 		return maxScroll - currentOffset <= 0;
 	};
 
@@ -163,8 +186,15 @@ export function MessageList({
 		setUnseen(0);
 	};
 
+	const scrollToBottom = () => {
+		const ref = listRef.current;
+		if (!ref) return;
+		ref.scrollTo(Math.max(0, ref.scrollHeight - ref.viewport.height));
+	};
+
 	const handleScrollPosition = (offset?: number) => {
 		if (isAtBottom(offset)) attachToBottom();
+		else setFollow(false);
 	};
 
 	// Track appended message ids while detached. Content deltas for the current
@@ -180,14 +210,14 @@ export function MessageList({
 
 		if (!isAppend) {
 			attachToBottom();
-			listRef.current?.scrollToBottom();
+			scrollToBottom();
 			return;
 		}
 
 		if (appended > 0) {
 			if (follow || isAtBottom()) {
 				attachToBottom();
-				listRef.current?.scrollToBottom();
+				scrollToBottom();
 			} else {
 				setUnseen((n) => n + appended);
 			}
@@ -198,43 +228,30 @@ export function MessageList({
 		if (follow) setUnseen(0);
 	}, [follow]);
 
-	useEffect(() => {
-		listRef.current?.remeasure();
-	}, [height, childCount]);
-
-	useEffect(() => {
-		const onResize = () => listRef.current?.remeasure();
-		process.stdout.on("resize", onResize);
-		return () => {
-			process.stdout.off("resize", onResize);
-		};
-	}, []);
-
 	const jumpToBottom = () => {
 		attachToBottom();
-		listRef.current?.scrollToBottom();
+		scrollToBottom();
 	};
 
-	// Scroll one line at a time. selectedIndex stays undefined (no constraint),
-	// so scrollBy is always free; auto-follow is handled by
-	// onContentHeightChange -> scrollToBottom.
+	// OpenTUI owns measurement and sticky-bottom behavior. This local state only
+	// tracks whether new-message affordances should be shown while detached.
 	const scrollByLines = (delta: number) => {
 		const ref = listRef.current;
 		if (!ref) return;
 		if (delta < 0) {
-			if ((ref.getScrollOffset?.() ?? 0) <= 0) return;
+			if (ref.scrollTop <= 0) return;
 			if (follow) setFollow(false);
 		}
 		ref.scrollBy(delta);
-		handleScrollPosition();
+		queueMicrotask(() => handleScrollPosition());
 	};
 
-	// Wheel scrolling arrives as Up/Down arrows via DECSET 1007 (alternate
-	// screen scroll mode); ink-text-input ignores Up/Down, so these only drive
-	// the list. One arrow = one line, matching the terminal pager feel.
+	// Keyboard scrolling remains available while mouse wheel input is handled
+	// natively by ScrollBox through OpenTUI's hit-test system.
 	useInput(
-		(input, key) => {
+		(input, key, event) => {
 			if (key.ctrl && input === "r") {
+				event.preventDefault();
 				setAllReasoningExpanded((expanded) => {
 					if (expanded) setExpandedReasoningIds(new Set());
 					return !expanded;
@@ -242,7 +259,16 @@ export function MessageList({
 				return;
 			}
 			if (empty) return;
-			const viewport = listRef.current?.getViewportHeight?.() ?? 1;
+			const viewport = listRef.current?.viewport.height ?? 1;
+			if (
+				key.upArrow ||
+				key.downArrow ||
+				key.pageUp ||
+				key.pageDown ||
+				key.end
+			) {
+				event.preventDefault();
+			}
 			if (key.upArrow) scrollByLines(-1);
 			else if (key.downArrow) scrollByLines(1);
 			else if (key.pageUp) scrollByLines(-viewport);
@@ -272,24 +298,17 @@ export function MessageList({
 	return (
 		<Box flexDirection="column" height={height} paddingX={1} overflow="hidden">
 			<Box height={listHeight} overflowY="hidden">
-				<ScrollList
+				<scrollbox
 					ref={listRef}
 					height={listHeight}
-					selectedIndex={undefined}
-					scrollAlignment="auto"
-					onScroll={handleScrollPosition}
-					onContentHeightChange={() => {
-						if (follow) listRef.current?.scrollToBottom();
-						else handleScrollPosition();
+					stickyScroll
+					stickyStart="bottom"
+					viewportCulling
+					scrollY
+					onMouseScroll={() => {
+						queueMicrotask(() => handleScrollPosition());
 					}}
-					onItemHeightChange={() => {
-						if (follow) listRef.current?.scrollToBottom();
-						else handleScrollPosition();
-					}}
-					onViewportSizeChange={() => {
-						if (follow) listRef.current?.scrollToBottom();
-						else handleScrollPosition();
-					}}
+					verticalScrollbarOptions={{ showArrows: false }}
 				>
 					{header ? (
 						<Box key="__logo__" flexDirection="column">
@@ -302,14 +321,29 @@ export function MessageList({
 							flexDirection="column"
 							marginTop={i === 0 ? (header ? 1 : 0) : 1}
 						>
-							<MessageItem item={item} />
+							<MessageItem
+								item={item}
+								themeMode={themeMode}
+								onToggleReasoning={(id) => {
+									setExpandedReasoningIds((ids) => {
+										const next = new Set(ids);
+										if (next.has(id)) next.delete(id);
+										else next.add(id);
+										return next;
+									});
+								}}
+							/>
 						</Box>
 					))}
-				</ScrollList>
+				</scrollbox>
 			</Box>
 			{showHint ? (
 				<Box height={1} marginTop={-2} justifyContent="center" overflow="hidden">
-					<Text color={HINT_FOREGROUND} backgroundColor={HINT_BACKGROUND}>
+					<Text
+						color={HINT_FOREGROUND}
+						backgroundColor={HINT_BACKGROUND}
+						onMouseClick={jumpToBottom}
+					>
 						{` ${hintLabel} `}
 					</Text>
 				</Box>

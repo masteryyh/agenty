@@ -15,8 +15,8 @@ limitations under the License.
 */
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { Select, Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Select, Spinner, Text } from "./ui";
 
 export interface SelectEntry<T> {
 	label: string;
@@ -29,6 +29,8 @@ interface SelectOverlayProps<T> {
 	onSelect: (data: T) => void;
 	onClose: () => void;
 	emptyHint?: string;
+	dialog?: boolean;
+	visibleOptionCount?: number;
 }
 
 export function SelectOverlay<T>({
@@ -37,6 +39,8 @@ export function SelectOverlay<T>({
 	onSelect,
 	onClose,
 	emptyHint,
+	dialog = false,
+	visibleOptionCount = 10,
 }: SelectOverlayProps<T>) {
 	const [entries, setEntries] = useState<SelectEntry<T>[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -66,7 +70,12 @@ export function SelectOverlay<T>({
 		entries?.map((e, i) => ({ label: e.label, value: String(i) })) ?? [];
 
 	return (
-		<Box flexDirection="column" paddingX={2} paddingY={1}>
+		<Box
+			flexDirection="column"
+			flexGrow={dialog ? 1 : undefined}
+			paddingX={dialog ? 0 : 2}
+			paddingY={dialog ? 0 : 1}
+		>
 			<Box marginBottom={1} gap={1}>
 				<Text color="magenta" bold>
 					{title}
@@ -82,7 +91,10 @@ export function SelectOverlay<T>({
 			) : (
 				<Select
 					options={options}
-					visibleOptionCount={Math.min(options.length, 10)}
+					visibleOptionCount={Math.max(
+						1,
+						Math.min(options.length, visibleOptionCount),
+					)}
 					onChange={(v) => {
 						const idx = Number(v);
 						const entry = entries[idx];

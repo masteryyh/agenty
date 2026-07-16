@@ -16,21 +16,15 @@ limitations under the License.
 
 import { memo } from "react";
 import type React from "react";
-import { Box, Text } from "ink";
+import type { ThemeMode } from "@opentui/core";
+import { Box, Text } from "./ui";
 import type { ToolResult } from "../api/types";
 import type { UIToolCall } from "../state/store";
 
-const GUTTER = "▏";
-const RAIL_BORDER = {
-	topLeft: "",
-	topRight: "",
-	bottomLeft: "",
-	bottomRight: "",
-	left: GUTTER,
-	right: "",
-	top: "",
-	bottom: "",
-} as const;
+const USER_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
+	dark: "#2a3f47",
+	light: "#dbe8ec",
+};
 
 const ARG_KEYS = [
 	"filePath",
@@ -157,19 +151,22 @@ export type MessageRenderItem =
 function Rail({
 	color,
 	children,
+	onMouseClick,
 }: {
 	color: string;
 	children: React.ReactNode;
+	onMouseClick?: () => void;
 }) {
 	return (
 		<Box
 			flexDirection="column"
-			borderStyle={RAIL_BORDER}
+			borderStyle="single"
 			borderColor={color}
 			borderTop={false}
 			borderRight={false}
 			borderBottom={false}
 			paddingLeft={1}
+			onMouseClick={onMouseClick}
 		>
 			{children}
 		</Box>
@@ -178,12 +175,21 @@ function Rail({
 
 export const MessageItem = memo(function MessageItem({
 	item,
+	onToggleReasoning,
+	themeMode = "dark",
 }: {
 	item: MessageRenderItem;
+	onToggleReasoning?: (id: string) => void;
+	themeMode?: ThemeMode;
 }) {
 	if (item.type === "reasoning") {
 		return (
-			<Rail color="magenta">
+			<Box
+				flexDirection="column"
+				width="100%"
+				paddingX={1}
+				onMouseClick={() => onToggleReasoning?.(item.id)}
+			>
 				<Text dimColor={!item.expanded} italic={!item.expanded} wrap="wrap">
 					{item.done
 						? `Thought for ${item.durationSeconds.toFixed(1)}s.`
@@ -196,7 +202,7 @@ export const MessageItem = memo(function MessageItem({
 						</Text>
 					</Box>
 				) : null}
-			</Rail>
+			</Box>
 		);
 	}
 
@@ -211,13 +217,17 @@ export const MessageItem = memo(function MessageItem({
 
 	if (item.role === "user") {
 		return (
-			<Rail color="cyan">
+			<Box
+				width="100%"
+				paddingX={1}
+				backgroundColor={USER_MESSAGE_BACKGROUNDS[themeMode]}
+			>
 				<Text wrap="wrap">
 					<Text dimColor>you</Text>
 					<Text color="cyan"> › </Text>
 					{item.content}
 				</Text>
-			</Rail>
+			</Box>
 		);
 	}
 
@@ -232,11 +242,10 @@ export const MessageItem = memo(function MessageItem({
 	}
 
 	return (
-		<Rail color="magenta">
+		<Box width="100%" paddingX={1}>
 			<Text wrap="wrap">
-				<Text color="magenta">⏺ </Text>
 				{item.content}
 			</Text>
-		</Rail>
+		</Box>
 	);
 });

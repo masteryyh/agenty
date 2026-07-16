@@ -9,7 +9,7 @@
     "agenty-cli#build": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["OS", "ARCH", "AGENTY_CLI_VERSION"]
+      "env": ["OS", "ARCH", "OPENTUI_LIBC", "AGENTY_CLI_VERSION"]
     },
     "test": {
       "dependsOn": ["^build"]

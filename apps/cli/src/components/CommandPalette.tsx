@@ -15,8 +15,10 @@ limitations under the License.
 */
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Text, useWindowSize } from "ink";
+import { useWindowSize } from "../hooks/useWindowSize";
+import { Box, Text } from "./ui";
 import type { Palette } from "../hooks/useCommandPalette";
+import { quoteArg } from "../commands/registry";
 
 const MAX_ITEMS = 8;
 const HIGHLIGHT = "#4FA8FF";
@@ -24,9 +26,10 @@ const HIGHLIGHT = "#4FA8FF";
 interface CommandPaletteProps {
 	palette: Palette;
 	marginTop: number;
+	onChoose: (value: string) => void;
 }
 
-export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
+export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteProps) {
 	const { columns } = useWindowSize();
 
 	const width = Math.max(columns, 1);
@@ -85,7 +88,10 @@ export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 						const contentLen =
 							cursor.length + c.name.length + 3 + c.description.length;
 						return (
-							<Text key={c.name}>
+							<Text
+								key={c.name}
+								onMouseClick={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
+							>
 								<Text color={selected ? HIGHLIGHT : undefined}>
 									{cursor}
 								</Text>
@@ -105,7 +111,10 @@ export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 					const contentLen =
 						cursor.length + c.name.length + 3 + c.description.length;
 					return (
-						<Text key={c.name}>
+					<Text
+						key={c.name}
+						onMouseClick={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
+					>
 							<Text color={selected ? HIGHLIGHT : undefined}>
 								{cursor}
 							</Text>
@@ -174,6 +183,7 @@ export function CommandPalette({ palette, marginTop }: CommandPaletteProps) {
 							color={selected ? HIGHLIGHT : "white"}
 							dimColor={!selected}
 							bold={selected}
+							onMouseClick={() => onChoose(`${command.name} ${quoteArg(c)}`)}
 						>
 							{prefix}
 							{c}

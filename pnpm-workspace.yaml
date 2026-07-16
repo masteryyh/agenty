@@ -1,3 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+peerDependencyRules:
+  allowedVersions:
+    "bun-ffi-structs@0.2.4>typescript": ">=5 <7"

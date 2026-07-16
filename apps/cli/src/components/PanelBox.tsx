@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 import type { ReactNode } from "react";
-import { Box } from "ink";
+import { Box } from "./ui";
 
 interface PanelBoxProps {
 	height: number;
@@ -26,13 +26,14 @@ export function PanelBox({ height, children }: PanelBoxProps) {
 	return (
 		<Box
 			flexDirection="column"
+			width="100%"
 			height={height}
 			borderStyle="single"
 			borderColor="magenta"
 			paddingX={1}
 			paddingY={1}
 		>
-			<Box flexGrow={1} overflow="hidden">
+			<Box flexDirection="column" flexGrow={1} width="100%" overflow="hidden">
 				{children}
 			</Box>
 		</Box>

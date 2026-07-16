@@ -15,15 +15,13 @@ limitations under the License.
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Spinner, Text } from "./ui";
 import type { AgentDto } from "../api/types";
 import { useAppStore } from "../state/store";
 import { FormPanel } from "./FormPanel";
 import type { FormField, FormOption } from "./FormPanel";
-
-const MAX_VISIBLE = 9;
-const NAME_W = 28;
+import { useBottomDialogSize } from "./BottomDialog";
 
 function trunc(s: string, width: number): string {
 	if (width <= 0) return "";
@@ -107,6 +105,7 @@ export function AgentOverlay() {
 	// Top-level input handler - ensures empty / loading list states respond to keyboard.
 	useInput((input, key) => {
 		if (modeRef.current.kind !== "list") return;
+		if (agents !== null && agents.length > 0) return;
 		if (key.escape) { close(); return; }
 		if (input === "a") { setMode({ kind: "create" }); return; }
 	});
@@ -266,8 +265,15 @@ function AgentList({
 	onDelete: (a: AgentDto) => void;
 	onClose: () => void;
 }) {
+	const dialogSize = useBottomDialogSize();
 	const n = agents.length;
-	const maxVis = Math.min(MAX_VISIBLE, n);
+	const compact = dialogSize.width < 44;
+	const flagsWidth = compact ? 0 : 24;
+	const nameWidth = compact
+		? Math.max(dialogSize.width - 2, 8)
+		: Math.max(Math.min(dialogSize.width - flagsWidth - 4, 32), 12);
+	const maxVisible = Math.max(dialogSize.height - 6 - (compact ? 1 : 0), 1);
+	const maxVis = Math.min(maxVisible, n);
 	const half = Math.floor(maxVis / 2);
 	let start = cursor - half;
 	if (start < 0) start = 0;
@@ -290,7 +296,9 @@ function AgentList({
 		<Box flexDirection="column" flexGrow={1}>
 			<Box marginBottom={1}>
 				<Text dimColor>
-					{"  "}{pad("Name", NAME_W)}  Flags
+					{compact
+						? `  ${pad("Name", nameWidth)}`
+						: `  ${pad("Name", nameWidth)}  ${pad("Flags", flagsWidth)}`}
 				</Text>
 			</Box>
 			<Box flexDirection="column" flexGrow={1} overflow="hidden">
@@ -299,9 +307,16 @@ function AgentList({
 					const selected = i === cursor;
 					const flags =
 						`${a.isDefault ? "[default] " : ""}${a.id === currentAgentId ? "← current" : ""}`.trim();
-					const name = pad(a.name, NAME_W);
+					const name = pad(a.name, nameWidth);
 					return (
-						<Box key={a.id}>
+						<Box
+							key={a.id}
+							onMouseOver={() => onCursor(i)}
+							onMouseClick={() => {
+								onCursor(i);
+								onSwitch(a);
+							}}
+						>
 							<Text color={selected ? "cyan" : "gray"}>
 								{selected ? "❯" : " "}
 							</Text>
@@ -309,19 +324,36 @@ function AgentList({
 							<Text color={selected ? "cyan" : "white"} bold={selected}>
 								{name}
 							</Text>
-							<Text>  </Text>
-							{flags ? (
+							{compact ? null : <Text>  </Text>}
+							{compact ? null : (
 								<Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-									{flags}
+									{pad(flags, flagsWidth)}
 								</Text>
-							) : null}
+							)}
 						</Box>
 					);
 				})}
 			</Box>
-			<Box>
-				<Text dimColor>
-					{"↑↓ navigate · Enter/s switch · a add · e edit · d delete · Esc back"}
+			{compact ? (
+				<Box height={1} overflow="hidden">
+					<Text dimColor wrap="truncate">
+						{trunc(
+							`${agents[cursor]?.isDefault ? "[default] " : ""}${agents[cursor]?.id === currentAgentId ? "← current" : ""}`.trim() || "No flags",
+							dialogSize.width,
+						)}
+					</Text>
+				</Box>
+			) : null}
+			<Box gap={2} height={1} overflow="hidden">
+				<Text color="cyan" onMouseClick={onAdd}>[Add]</Text>
+				<Text color="cyan" onMouseClick={() => onEdit(agents[cursor])}>[Edit]</Text>
+				<Text color="cyan" onMouseClick={() => onDelete(agents[cursor])}>[Delete]</Text>
+			</Box>
+			<Box height={1} overflow="hidden">
+				<Text dimColor wrap="truncate">
+					{compact
+						? "↑↓ move · Enter switch · e edit · d del · Esc"
+						: "↑↓ navigate · Enter/s switch · e edit · d delete · Esc back"}
 				</Text>
 			</Box>
 		</Box>
@@ -352,8 +384,9 @@ function DeleteConfirm({
 				Delete agent &quot;{target.name}&quot;?
 			</Text>
 			<Text dimColor>This also deletes all its sessions, messages and memories.</Text>
-			<Box marginTop={1}>
-				<Text dimColor>y to confirm · n or Esc to cancel</Text>
+			<Box marginTop={1} gap={2}>
+				<Text color="red" bold onMouseClick={onConfirm}>[Delete]</Text>
+				<Text color="cyan" onMouseClick={onCancel}>[Cancel]</Text>
 			</Box>
 		</Box>
 	);

@@ -15,8 +15,10 @@ limitations under the License.
 */
 
 import { useEffect, useState } from "react";
-import { Box, Text, useApp as useInkApp, useInput, useWindowSize } from "ink";
-import { useApp, useChat } from "./hooks";
+import { useRenderer, useSelectionHandler } from "@opentui/react";
+import { Box, Text } from "./components/ui";
+import { useApp, useChat, useInput, useWindowSize } from "./hooks";
+import { useTuiRuntime } from "./tui/runtime";
 import { useAppStore, type OverlayKind } from "./state/store";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { LogoHeader } from "./components/LogoHeader";
@@ -32,8 +34,8 @@ import { AgentOverlay } from "./components/AgentOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
 import { WizardOverlay } from "./components/WizardOverlay";
 import { PanelBox } from "./components/PanelBox";
+import { BottomDialog, useBottomDialogSize } from "./components/BottomDialog";
 import { commands, parseCommandTokens } from "./commands/registry";
-import { MOUSE_ON, MOUSE_OFF, useMouseCapability } from "./mouse/mouseStdin";
 import type { ModelDto, ChatSessionDto } from "./api/types";
 
 const LOGO_HEIGHT = 5;
@@ -43,6 +45,7 @@ const PROVIDER_OVERLAY_HEIGHT = 18;
 const MCP_OVERLAY_HEIGHT = 18;
 const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
+const MODEL_OVERLAY_HEIGHT = 18;
 
 function panelHeight(overlay: OverlayKind): number | null {
 	switch (overlay) {
@@ -56,6 +59,8 @@ function panelHeight(overlay: OverlayKind): number | null {
 			return CONFIG_OVERLAY_HEIGHT;
 		case "status":
 			return STATUS_OVERLAY_HEIGHT;
+		case "model-select":
+			return MODEL_OVERLAY_HEIGHT;
 		default:
 			return null;
 	}
@@ -63,6 +68,22 @@ function panelHeight(overlay: OverlayKind): number | null {
 
 export function App() {
 	const app = useApp();
+	const renderer = useRenderer();
+	const { exit } = useTuiRuntime();
+
+	useInput((_input, key, event) => {
+		if (key.ctrl && event.name === "c") {
+			event.preventDefault();
+			event.stopPropagation();
+			exit(130);
+		}
+	});
+
+	useSelectionHandler((selection) => {
+		if (selection.isDragging) return;
+		const text = selection.getSelectedText();
+		if (text) renderer.copyToClipboardOSC52(text);
+	});
 
 	useEffect(() => {
 		void app.init();
@@ -106,8 +127,8 @@ export function App() {
 function ChatView() {
 	const app = useApp();
 	const chat = useChat();
-	const { exit } = useInkApp();
-	const { rows } = useWindowSize();
+	const { exit } = useTuiRuntime();
+	const { rows, columns } = useWindowSize();
 	const client = useAppStore((s) => s.client);
 	const thinkingLevel = useAppStore((s) => s.thinkingLevel);
 	const [value, setValue] = useState("");
@@ -122,26 +143,9 @@ function ChatView() {
 
 	const panelH = panelHeight(app.overlay);
 	const hasPanelOverlay = panelH !== null;
-	// Overlay replaces InputBox; it's taller so it "covers" more area
-	const bottomH = panelH ?? INPUT_HEIGHT;
-	// The logo now scrolls inside the message list, so it no longer subtracts
-	// from the message viewport height. palette uses negative margin already —
-	// don't subtract it from message height either.
-	const messageHeight = Math.max(rows - bottomH, 1);
-
-	// Toggle SGR mouse tracking so the message list receives wheel/drag events.
-	// Keep it off whenever an overlay (which may host a text field) owns the
-	// screen, or when the terminal does not support SGR-1006 (downgraded at
-	// runtime by mouseStdin on legacy mouse reports). Keyboard scrolling
-	// remains available regardless.
-	const mouseCapable = useMouseCapability();
-	useEffect(() => {
-		if (app.overlay !== null || !mouseCapable) return undefined;
-		process.stdout.write(MOUSE_ON);
-		return () => {
-			process.stdout.write(MOUSE_OFF);
-		};
-	}, [app.overlay, mouseCapable]);
+	// Bottom dialogs float over the chat and input instead of changing the main
+	// flex flow. This keeps scroll position and message layout stable.
+	const messageHeight = Math.max(rows - INPUT_HEIGHT, 1);
 
 	const switchModelByRef = async (ref: string) => {
 		if (!client) return;
@@ -276,14 +280,6 @@ function ChatView() {
 			</Box>
 		);
 	}
-	if (app.overlay === "model-select") {
-		return (
-			<ModelSelectOverlay
-				onClose={() => app.setOverlay(null)}
-				onSelect={(m) => void app.switchModel(m)}
-			/>
-		);
-	}
 	if (app.overlay === "session-select") {
 		return (
 			<SessionSelectOverlay
@@ -305,26 +301,35 @@ function ChatView() {
 				header={<LogoHeader runtimeVersion={app.runtimeVersion} />}
 				interactive={!hasPanelOverlay && paletteHeight === 0}
 			/>
-			<CommandPalette palette={palette} marginTop={-paletteHeight} />
+			<CommandPalette
+				palette={palette}
+				marginTop={-paletteHeight}
+				onChoose={setValue}
+			/>
+			<InputBox
+				value={value}
+				onChange={setValue}
+				onSubmit={handleSubmit}
+				onTab={handleTab}
+				streaming={streaming}
+				phrase={chat.phrase}
+				modelName={`${app.model?.provider?.name ?? "?"}/${app.model?.name ?? "?"}`}
+				cwd={app.session?.cwd ?? process.cwd()}
+				tokenConsumed={chat.tokenConsumed}
+				thinkingLevel={thinkingLevel}
+				reasoningActive={reasoningActive}
+				abort={chat.abort}
+				toast={app.toast}
+				active={!hasPanelOverlay}
+			/>
 			{hasPanelOverlay ? (
-				<OverlayPanel kind={app.overlay!} />
-			) : (
-				<InputBox
-					value={value}
-					onChange={setValue}
-					onSubmit={handleSubmit}
-					onTab={handleTab}
-					streaming={streaming}
-					phrase={chat.phrase}
-					modelName={`${app.model?.provider?.name ?? "?"}/${app.model?.name ?? "?"}`}
-					cwd={app.session?.cwd ?? process.cwd()}
-					tokenConsumed={chat.tokenConsumed}
-					thinkingLevel={thinkingLevel}
-					reasoningActive={reasoningActive}
-					abort={chat.abort}
-					toast={app.toast}
-				/>
-			)}
+				<BottomDialog
+					width={Math.max(columns - 2, 1)}
+					height={Math.max(Math.min(panelH!, Math.max(rows - 2, 1)), 1)}
+				>
+					<OverlayPanel kind={app.overlay!} />
+				</BottomDialog>
+			) : null}
 		</Box>
 	);
 }
@@ -332,23 +337,24 @@ function ChatView() {
 function OverlayPanel({
 	kind,
 }: {
-	kind: "provider" | "config" | "mcp" | "agents" | "status";
+	kind: "provider" | "config" | "mcp" | "agents" | "status" | "model-select";
 }) {
-	const height = panelHeight(kind) ?? INPUT_HEIGHT;
-	return (
-		<PanelBox height={height}>
-			{kind === "provider" ? (
-				<ProviderOverlay />
-			) : kind === "mcp" ? (
-				<McpOverlay />
-			) : kind === "agents" ? (
-				<AgentOverlay />
-			) : kind === "status" ? (
-				<StatusOverlay />
-			) : (
-				<ConfigOverlay />
-			)}
-		</PanelBox>
+	const app = useApp();
+	return kind === "model-select" ? (
+		<ModelSelectOverlay
+			onClose={() => app.setOverlay(null)}
+			onSelect={(model) => void app.switchModel(model)}
+		/>
+	) : kind === "provider" ? (
+		<ProviderOverlay />
+	) : kind === "mcp" ? (
+		<McpOverlay />
+	) : kind === "agents" ? (
+		<AgentOverlay />
+	) : kind === "status" ? (
+		<StatusOverlay />
+	) : (
+		<ConfigOverlay />
 	);
 }
 
@@ -360,9 +366,12 @@ function ModelSelectOverlay({
 	onSelect: (model: ModelDto) => void;
 }) {
 	const client = useAppStore((s) => s.client);
+	const dialogSize = useBottomDialogSize();
 	return (
 		<SelectOverlay<ModelDto>
 			title="Switch Model"
+			dialog
+			visibleOptionCount={Math.max(dialogSize.height - 2, 1)}
 			emptyHint="No switchable chat models found"
 			onClose={onClose}
 			onSelect={onSelect}

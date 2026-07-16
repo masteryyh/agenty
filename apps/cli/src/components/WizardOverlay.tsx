@@ -15,9 +15,9 @@ limitations under the License.
 */
 
 import { useEffect, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
-import { Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { useTuiRuntime } from "../tui/runtime";
+import { Box, Spinner, Text, TextInput } from "./ui";
 import { useAppStore } from "../state/store";
 import type { ModelDto, ModelProviderDto } from "../api/types";
 
@@ -56,7 +56,7 @@ function maskKey(key: string): string {
 export function WizardOverlay() {
 	const client = useAppStore((s) => s.client);
 	const finishWizard = useAppStore((s) => s.finishWizard);
-	const { exit } = useApp();
+	const { exit } = useTuiRuntime();
 
 	const [step, setStep] = useState<Step>("welcome");
 	const [providers, setProviders] = useState<ModelProviderDto[]>([]);
@@ -206,9 +206,9 @@ export function WizardOverlay() {
 		}
 	};
 
-	const saveEmbed = async () => {
+	const saveEmbed = async (selectedIndex = embedCursor) => {
 		if (!client) return;
-		const m = embedModels[embedCursor];
+		const m = embedModels[selectedIndex];
 		if (!m) {
 			await finish();
 			return;
@@ -232,7 +232,78 @@ export function WizardOverlay() {
 		await finishWizard();
 	};
 
-	useInput((ch, key) => {
+	const beginProviderInput = (index: number) => {
+		setProvCursor(index);
+		setSelectedProvIdx(index);
+		setInput("");
+		setFeedback(null);
+		setStep("providerInput");
+	};
+
+	const continueFromProviders = () => {
+		setProvCursor(providers.length);
+		if (configuredIds.size === 0) {
+			setFeedback({
+				msg: "Configure at least one provider to continue",
+				kind: "warn",
+			});
+			return;
+		}
+		setFeedback(null);
+		setStep("saving");
+		setSavingLabel("Loading models…");
+		void loadModels()
+			.then(({ chat }) => {
+				if (chat.length === 0) {
+					setFeedback({
+						msg: "No models found for configured providers",
+						kind: "warn",
+					});
+					setStep("providers");
+				} else {
+					setStep("webSearch");
+				}
+			})
+			.catch((error) => {
+				setFeedback({
+					msg: `Failed to load models: ${(error as Error).message}`,
+					kind: "err",
+				});
+				setStep("providers");
+			});
+	};
+
+	const chooseWebSearch = (index: number) => {
+		setWsCursor(index);
+		setInput("");
+		setFeedback(null);
+		setStep("webSearchKey");
+	};
+
+	const skipWebSearch = () => {
+		setWsCursor(WS_PROVIDERS.length);
+		setFeedback(null);
+		setStep("models");
+	};
+
+	const toggleModel = (index: number) => {
+		setModelCursor(index);
+		setSelectedModels((selected) => {
+			const existing = selected.indexOf(index);
+			if (existing >= 0) return selected.filter((value) => value !== index);
+			if (selected.length >= MAX_MODELS) {
+				setFeedback({
+					msg: `Maximum ${MAX_MODELS} models allowed (1 primary + ${MAX_MODELS - 1} fallbacks)`,
+					kind: "warn",
+				});
+				return selected;
+			}
+			setFeedback(null);
+			return [...selected, index];
+		});
+	};
+
+	useInput((ch, key, event) => {
 		if (step === "saving" || step === "done") return;
 		switch (step) {
 			case "welcome":
@@ -255,46 +326,16 @@ export function WizardOverlay() {
 				}
 				if (key.return) {
 					if (provCursor >= providers.length) {
-						if (configuredIds.size === 0) {
-							setFeedback({
-								msg: "Configure at least one provider to continue",
-								kind: "warn",
-							});
-							return;
-						}
-						setFeedback(null);
-						setStep("saving");
-						setSavingLabel("Loading models…");
-						void loadModels()
-							.then(({ chat }) => {
-								if (chat.length === 0) {
-									setFeedback({
-										msg: "No models found for configured providers",
-										kind: "warn",
-									});
-									setStep("providers");
-								} else {
-									setStep("webSearch");
-								}
-							})
-							.catch((e) => {
-								setFeedback({
-									msg: `Failed to load models: ${(e as Error).message}`,
-									kind: "err",
-								});
-								setStep("providers");
-							});
+						continueFromProviders();
 						return;
 					}
-					setSelectedProvIdx(provCursor);
-					setInput("");
-					setFeedback(null);
-					setStep("providerInput");
+					beginProviderInput(provCursor);
 				}
 				return;
 			}
 			case "providerInput":
 				if (key.escape) {
+					event.preventDefault();
 					setStep("providers");
 					setFeedback(null);
 				}
@@ -310,23 +351,22 @@ export function WizardOverlay() {
 				}
 				if (key.return) {
 					if (wsCursor >= WS_PROVIDERS.length) {
-						setFeedback(null);
-						setStep("models");
+						skipWebSearch();
 						return;
 					}
-					setInput("");
-					setFeedback(null);
-					setStep("webSearchKey");
+					chooseWebSearch(wsCursor);
 				}
 				return;
 			case "webSearchKey":
 				if (key.escape) {
+					event.preventDefault();
 					setStep("webSearch");
 					setFeedback(null);
 				}
 				return;
 			case "firecrawlUrl":
 				if (key.escape) {
+					event.preventDefault();
 					setStep("models");
 					setFeedback(null);
 				}
@@ -354,20 +394,7 @@ export function WizardOverlay() {
 					return;
 				}
 				if (ch === " ") {
-					setSelectedModels((sel) => {
-						const idx = sel.indexOf(modelCursor);
-						if (idx >= 0) return sel.filter((i) => i !== modelCursor);
-						if (sel.length >= MAX_MODELS) {
-							setFeedback({
-								msg: `Maximum ${MAX_MODELS} models allowed (1 primary + ${MAX_MODELS - 1
-									} fallbacks)`,
-								kind: "warn",
-							});
-							return sel;
-						}
-						setFeedback(null);
-						return [...sel, modelCursor];
-					});
+					toggleModel(modelCursor);
 				}
 				return;
 			}
@@ -444,6 +471,10 @@ export function WizardOverlay() {
 					<Text dimColor> to begin, </Text>
 					<Text color="cyan" bold>n</Text>
 					<Text dimColor> to exit.</Text>
+				</Box>
+				<Box marginTop={1} gap={2}>
+					<Text color="cyan" bold onMouseClick={() => setStep("providers")}>[Begin]</Text>
+					<Text color="gray" onMouseClick={() => exit()}>[Exit]</Text>
 				</Box>
 			</Box>
 		);
@@ -548,7 +579,7 @@ export function WizardOverlay() {
 							const active = i === provCursor;
 							const configured = configuredIds.has(p.id);
 							return (
-								<Box key={p.id} gap={1}>
+								<Box key={p.id} gap={1} onMouseClick={() => beginProviderInput(i)}>
 									<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
 									<Text color={configured ? "green" : "white"}>
 										{configured ? "✓" : "☐"} {p.name}
@@ -559,7 +590,7 @@ export function WizardOverlay() {
 						})
 					)}
 					{!loadingProviders && (
-						<Box gap={1}>
+						<Box gap={1} onMouseClick={continueFromProviders}>
 							<Text color={provCursor === providers.length ? "cyan" : "gray"}>
 								{provCursor === providers.length ? "❯" : " "}
 							</Text>
@@ -585,7 +616,7 @@ export function WizardOverlay() {
 					{WS_PROVIDERS.map((ws, i) => {
 						const active = i === wsCursor;
 						return (
-							<Box key={ws.value} gap={1}>
+							<Box key={ws.value} gap={1} onMouseClick={() => chooseWebSearch(i)}>
 								<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
 								<Text color={active ? "cyan" : "white"} bold={active}>
 									{ws.label}
@@ -593,7 +624,7 @@ export function WizardOverlay() {
 							</Box>
 						);
 					})}
-					<Box gap={1}>
+					<Box gap={1} onMouseClick={skipWebSearch}>
 						<Text color={wsCursor === WS_PROVIDERS.length ? "cyan" : "gray"}>
 							{wsCursor === WS_PROVIDERS.length ? "❯" : " "}
 						</Text>
@@ -621,7 +652,7 @@ export function WizardOverlay() {
 						const active = i === modelCursor;
 						const rank = selectedModels.indexOf(i);
 						return (
-							<Box key={m.id} gap={1}>
+							<Box key={m.id} gap={1} onMouseClick={() => toggleModel(i)}>
 								<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
 								<Text color={rank >= 0 ? "green" : "white"}>
 									{rank >= 0 ? `①②③④`[rank] ?? "✓" : "☐"} {modelLabel(m)}
@@ -629,6 +660,9 @@ export function WizardOverlay() {
 							</Box>
 						);
 					})}
+				</Box>
+				<Box marginTop={1}>
+					<Text color="cyan" bold onMouseClick={() => void saveAgentModels()}>[Confirm models]</Text>
 				</Box>
 				{feedbackNode}
 			</Box>
@@ -646,7 +680,14 @@ export function WizardOverlay() {
 				{embedModels.map((m, i) => {
 					const active = i === embedCursor;
 					return (
-						<Box key={m.id} gap={1}>
+						<Box
+							key={m.id}
+							gap={1}
+							onMouseClick={() => {
+								setEmbedCursor(i);
+								void saveEmbed(i);
+							}}
+						>
 							<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
 							<Text color={active ? "cyan" : "white"} bold={active}>
 								{modelLabel(m)}
@@ -654,6 +695,9 @@ export function WizardOverlay() {
 						</Box>
 					);
 				})}
+			</Box>
+			<Box marginTop={1}>
+				<Text color="gray" onMouseClick={() => void finish()}>[Skip]</Text>
 			</Box>
 			{feedbackNode}
 		</Box>

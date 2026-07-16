@@ -39,7 +39,7 @@ On first run, `agenty` initializes its database, seeds preset providers and mode
 
 ## Run Modes
 
-Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `agenty-cli` (React Ink TUI plus resource-management subcommands, embedding `agenty` for local use).
+Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `agenty-cli` (React OpenTUI terminal UI plus resource-management subcommands, embedding `agenty` for local use).
 
 | Mode | Command | Use case |
 | --- | --- | --- |
@@ -53,6 +53,8 @@ Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `a
 On first run, `agenty-cli` detects an uninitialized system and opens a setup wizard to configure provider API keys, web search, and default models.
 
 Common slash commands inside the TUI:
+
+The TUI supports mouse-wheel scrolling, clickable lists and actions, and mouse text selection with OSC52 clipboard copy when the terminal supports it.
 
 | Command | Purpose |
 | --- | --- |

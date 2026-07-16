@@ -15,9 +15,8 @@ limitations under the License.
 */
 
 import { useState } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
-import { Spinner } from "@inkjs/ui";
+import { useInput } from "../hooks/useInput";
+import { Box, Spinner, Text, TextInput } from "./ui";
 import type { ToastMsg } from "../state/store";
 
 const PLACEHOLDER = "type a message, or / for commands";
@@ -59,6 +58,7 @@ interface InputBoxProps {
 	reasoningActive: boolean;
 	abort: () => void;
 	toast: ToastMsg | null;
+	active?: boolean;
 }
 
 export function InputBox({
@@ -75,18 +75,23 @@ export function InputBox({
 	reasoningActive,
 	abort,
 	toast,
+	active = true,
 }: InputBoxProps) {
 	const [tabNonce, setTabNonce] = useState(0);
 
-	useInput((_input, key) => {
-		if (streaming) {
-			if (key.escape) abort();
-			return;
-		}
-		if (key.tab) {
-			if (onTab()) setTabNonce((n) => n + 1);
-		}
-	});
+	useInput(
+		(_input, key, event) => {
+			if (streaming) {
+				if (key.escape) abort();
+				return;
+			}
+			if (key.tab) {
+				event.preventDefault();
+				if (onTab()) setTabNonce((n) => n + 1);
+			}
+		},
+		{ isActive: active },
+	);
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
@@ -112,20 +117,26 @@ export function InputBox({
 				)}
 			</Box>
 
-			<Box flexDirection="row">
-				<Text color="cyan" bold>
-					{"> "}
-				</Text>
+			<Box flexDirection="row" height={1} overflow="hidden">
+				<Box width={2} flexShrink={0} height={1}>
+					<Text color="cyan" bold>
+						{"❯ "}
+					</Text>
+				</Box>
 				{streaming ? (
 					<Text dimColor>{PLACEHOLDER}</Text>
 				) : (
-					<TextInput
-						key={tabNonce}
-						value={value}
-						onChange={onChange}
-						onSubmit={onSubmit}
-						placeholder={PLACEHOLDER}
-					/>
+					<Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
+						<TextInput
+							key={tabNonce}
+							value={value}
+							onChange={onChange}
+							onSubmit={onSubmit}
+							placeholder={PLACEHOLDER}
+							focus={active}
+							keepFocus={active}
+						/>
+					</Box>
 				)}
 			</Box>
 

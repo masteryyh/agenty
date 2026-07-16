@@ -14,15 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { Box, Text, useInput } from "ink";
+import { useInput } from "../hooks/useInput";
+import { Box, Text } from "./ui";
 import { useAppStore } from "../state/store";
+import { useBottomDialogSize } from "./BottomDialog";
 
 function pad(s: string, w: number): string {
 	if (s.length >= w) return s;
 	return s + " ".repeat(w - s.length);
 }
 
+function trunc(s: string, width: number): string {
+	if (width <= 0) return "";
+	if (s.length <= width) return s;
+	if (width === 1) return "…";
+	return `${s.slice(0, width - 1)}…`;
+}
+
 export function StatusOverlay() {
+	const dialogSize = useBottomDialogSize();
 	const agent = useAppStore((s) => s.agent);
 	const model = useAppStore((s) => s.model);
 	const session = useAppStore((s) => s.session);
@@ -48,6 +58,8 @@ export function StatusOverlay() {
 		["Tokens", String(tokenConsumed)],
 		["CWD", session?.cwd ?? process.cwd()],
 	];
+	const keyWidth = Math.min(10, Math.max(Math.floor(dialogSize.width / 4), 7));
+	const valueWidth = Math.max(dialogSize.width - keyWidth - 1, 1);
 
 	return (
 		<Box flexDirection="column" flexGrow={1}>
@@ -57,8 +69,8 @@ export function StatusOverlay() {
 			<Box flexDirection="column" flexGrow={1}>
 				{rows.map(([k, v]) => (
 					<Box key={k} gap={1}>
-						<Text color="gray">{pad(k, 10)}</Text>
-						<Text color="white">{v}</Text>
+						<Text color="gray">{pad(k, keyWidth)}</Text>
+						<Text color="white">{trunc(v, valueWidth)}</Text>
 					</Box>
 				))}
 			</Box>

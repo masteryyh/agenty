@@ -40,6 +40,12 @@ jobs:
           node-version: lts/Krypton
           cache: pnpm
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck OpenTUI client
+        run: pnpm run cli:typecheck
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
