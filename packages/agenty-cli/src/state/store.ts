@@ -64,7 +64,6 @@ interface AppState {
 	agent: AgentDto | null;
 	model: ModelDto | null;
 	session: ChatSessionDto | null;
-	runtimeVersion: string;
 	overlay: OverlayKind;
 	toast: ToastMsg | null;
 
@@ -333,7 +332,6 @@ export const useAppStore = create<AppState>((set, get) => {
 			agent: prepared.agent,
 			model: prepared.model,
 			session: prepared.session,
-			runtimeVersion: get().runtimeVersion,
 			history,
 			tokenConsumed: prepared.session.tokenConsumed,
 			thinkingEnabled: parseThinking(opts.thinking).thinking,
@@ -350,7 +348,6 @@ export const useAppStore = create<AppState>((set, get) => {
 		agent: null,
 		model: null,
 		session: null,
-		runtimeVersion: "",
 		overlay: null,
 		toast: null,
 		thinkingEnabled: false,
@@ -381,9 +378,6 @@ export const useAppStore = create<AppState>((set, get) => {
 					opts.username,
 					opts.password,
 				);
-				const version = await client.checkVersion();
-				set({ runtimeVersion: version.version ?? "" });
-
 				const initialized = await client.isInitialized();
 				if (!initialized) {
 					// First run: hand off to the setup wizard before preparing a session.

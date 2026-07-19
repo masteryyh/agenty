@@ -1,19 +1,3 @@
-//! Self-extracting payload support for the agenty launcher.
-//!
-//! The shipped `agenty` binary is a single file laid out like a compressed
-//! Linux kernel image: the executable code comes first and two xz-compressed
-//! payloads (the CLI and the runtime) are appended after it, followed by a
-//! fixed-size footer carrying offsets, lengths and SHA3-256 digests:
-//!
-//! ```text
-//! [ bootstrap code ][ cli payload ][ runtime payload ][ footer (108 B) ]
-//! ```
-//!
-//! At startup the footer is read from the end of the current executable and
-//! each payload is verified against `~/.agenty/bin/<name>`: files whose
-//! SHA3-256 already matches are reused, everything else is decompressed to a
-//! temporary file, re-hashed and atomically renamed into place.
-
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, File};
@@ -23,30 +7,21 @@ use std::path::{Path, PathBuf};
 use liblzma::read::XzDecoder;
 use sha3::{Digest, Sha3_256};
 
-/// Magic trailer marking the payload footer, hex `cafebabe10136666`.
 pub const MAGIC: [u8; 8] = [0xca, 0xfe, 0xba, 0xbe, 0x10, 0x13, 0x66, 0x66];
 
-/// Payload footer format version.
 pub const FORMAT_VERSION: u32 = 1;
 
-/// Total footer size in bytes: two payload specs (8 + 8 + 32 each), the
-/// 4-byte format version and the 8-byte magic trailer.
 pub const FOOTER_SIZE: usize = 108;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
-/// Location and integrity data of one appended payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadSpec {
-    /// Absolute offset of the compressed payload inside the packed file.
     pub offset: u64,
-    /// Length of the compressed payload in bytes.
     pub len: u64,
-    /// SHA3-256 digest of the decompressed payload.
     pub sha3_256: [u8; 32],
 }
 
-/// Payload footer parsed from the end of the packed executable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Footer {
     pub cli: PayloadSpec,
@@ -54,7 +29,6 @@ pub struct Footer {
 }
 
 impl Footer {
-    /// Serializes the footer into its fixed 108-byte little-endian form.
     pub fn encode(&self) -> [u8; FOOTER_SIZE] {
         let mut out = [0u8; FOOTER_SIZE];
         out[0..8].copy_from_slice(&self.cli.offset.to_le_bytes());
@@ -68,13 +42,13 @@ impl Footer {
         out
     }
 
-    /// Parses a footer from its fixed 108-byte little-endian form.
     pub fn decode(bytes: &[u8; FOOTER_SIZE]) -> Result<Self> {
         if bytes[100..108] != MAGIC {
             return Err(BootstrapError::CorruptFooter(
                 "magic trailer not found; this binary carries no payloads".to_string(),
             ));
         }
+
         let mut version = [0u8; 4];
         version.copy_from_slice(&bytes[96..100]);
         if u32::from_le_bytes(version) != FORMAT_VERSION {
@@ -109,7 +83,6 @@ impl Footer {
     }
 }
 
-/// Reads and parses the payload footer from the end of `file`.
 pub fn read_footer(file: &mut File) -> Result<Footer> {
     let file_len = file.metadata()?.len();
     if file_len < FOOTER_SIZE as u64 {
@@ -117,17 +90,18 @@ pub fn read_footer(file: &mut File) -> Result<Footer> {
             "file is smaller than the payload footer".to_string(),
         ));
     }
+
     file.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
     let mut buf = [0u8; FOOTER_SIZE];
     file.read_exact(&mut buf)?;
     Footer::decode(&buf)
 }
 
-/// Computes the SHA3-256 digest of a file, streaming its contents.
-pub fn sha3_256_file(path: &Path) -> Result<[u8; 32]> {
+pub fn hash_file(path: &Path) -> Result<[u8; 32]> {
     let mut file = File::open(path)?;
     let mut hasher = Sha3_256::new();
     let mut buf = [0u8; COPY_BUFFER_SIZE];
+
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 {
@@ -138,32 +112,53 @@ pub fn sha3_256_file(path: &Path) -> Result<[u8; 32]> {
     Ok(hasher.finalize().into())
 }
 
-/// Outcome of ensuring one payload on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnsureOutcome {
-    /// The target file already matched the embedded digest and was kept.
     Reused,
-    /// The payload was decompressed and atomically installed.
     Installed,
 }
 
-/// Ensures `target` holds the decompressed payload described by `spec`.
-///
-/// An existing file whose SHA3-256 matches the embedded digest is reused
-/// (only its executable bit is refreshed). Otherwise the compressed payload
-/// section is read from `packed`, decompressed into a sibling temporary file
-/// while being hashed, verified against the embedded digest and atomically
-/// renamed over `target`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactIntegrity {
+    Missing,
+    Valid,
+    Invalid,
+}
+
+pub fn check_artifact_integrity(spec: &PayloadSpec, target: &Path) -> Result<ArtifactIntegrity> {
+    if !target.is_file() {
+        return Ok(ArtifactIntegrity::Missing);
+    }
+    if hash_file(target)? == spec.sha3_256 {
+        Ok(ArtifactIntegrity::Valid)
+    } else {
+        Ok(ArtifactIntegrity::Invalid)
+    }
+}
+
+pub fn reuse_artifact(target: &Path) -> Result<()> {
+    set_executable(target)
+}
+
 pub fn ensure_artifact<R: Read + Seek>(
     packed: &mut R,
     spec: &PayloadSpec,
     target: &Path,
 ) -> Result<EnsureOutcome> {
-    if target.is_file() && sha3_256_file(target)? == spec.sha3_256 {
-        set_executable(target)?;
+    if check_artifact_integrity(spec, target)? == ArtifactIntegrity::Valid {
+        reuse_artifact(target)?;
         return Ok(EnsureOutcome::Reused);
     }
 
+    install_artifact(packed, spec, target)?;
+    Ok(EnsureOutcome::Installed)
+}
+
+pub fn install_artifact<R: Read + Seek>(
+    packed: &mut R,
+    spec: &PayloadSpec,
+    target: &Path,
+) -> Result<()> {
     packed.seek(SeekFrom::Start(spec.offset))?;
     let section = packed.take(spec.len);
     let mut decoder = XzDecoder::new(section);
@@ -172,11 +167,13 @@ pub fn ensure_artifact<R: Read + Seek>(
         BootstrapError::Invalid(format!("target path has no parent: {}", target.display()))
     })?;
     fs::create_dir_all(dir)?;
+
     let temp = temp_path_for(target);
     let install = (|| -> Result<()> {
         let mut out = File::create(&temp)?;
         let mut hasher = Sha3_256::new();
         let mut buf = [0u8; COPY_BUFFER_SIZE];
+
         loop {
             let n = decoder.read(&mut buf).map_err(|e| {
                 BootstrapError::Invalid(format!(
@@ -209,16 +206,13 @@ pub fn ensure_artifact<R: Read + Seek>(
     if install.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    install?;
-    Ok(EnsureOutcome::Installed)
+    install
 }
 
-/// Returns the managed install directory for extracted artifacts.
 pub fn managed_bin_dir(home: &Path) -> PathBuf {
     home.join(".agenty").join("bin")
 }
 
-/// Returns the managed target paths of the CLI and the runtime.
 pub fn artifact_paths(home: &Path) -> (PathBuf, PathBuf) {
     let dir = managed_bin_dir(home);
     let ext = if cfg!(windows) { ".exe" } else { "" };
@@ -254,7 +248,6 @@ fn set_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Errors surfaced while reading or installing payloads.
 #[derive(Debug)]
 pub enum BootstrapError {
     Io(io::Error),
@@ -300,7 +293,6 @@ impl From<io::Error> for BootstrapError {
     }
 }
 
-/// Result alias used across the bootstrap module.
 pub type Result<T> = std::result::Result<T, BootstrapError>;
 
 #[cfg(test)]
@@ -308,15 +300,11 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    /// Golden footer bytes shared with `scripts/pack.test.ts`; both sides
-    /// assert the exact layout to lock the cross-language format.
-    const GOLDEN_FOOTER_HEX: &str = "88776655443322110807060504030201000102030405060708090a0b0c0d0e0f\
+    const GOLDEN_FOOTER_HEX: &str =
+        "88776655443322110807060504030201000102030405060708090a0b0c0d0e0f\
         101112131415161718191a1b1c1d1e1f1122334455667788010203040506070820212223242526\
         2728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f01000000cafebabe10136666";
 
-    /// xz stream produced by `@napi-rs/lzma` compressing
-    /// `"agenty napi-rs lzma interop probe\n".repeat(64)`, proving the
-    /// build-time (Bun) and run-time (Rust) xz implementations interoperate.
     const INTEROP_XZ_HEX: &str = "fd377a585a000004e6d6b4460200210116000000742fe5a3e0087f00355d003099c8db4efc244eb58cf58f4699c115ba2fbad7ad9c231199c49368b315728a5421d1340068b4b68fd6e65bef9dbfedfd1f52190000000000154019c351bd7ee70001518011000000e78fc45db1c467fb020000000004595a";
     const INTEROP_RAW_SHA3: &str =
         "9c1c4966ec1caebac758ba46d39a4a97934b039ff518675baf367f99a070816e";
@@ -409,7 +397,10 @@ mod tests {
     #[test]
     fn footer_golden_bytes() {
         let encoded = golden_footer().encode();
-        assert_eq!(hex(&encoded), GOLDEN_FOOTER_HEX.replace([' ', '\t', '\n'], ""));
+        assert_eq!(
+            hex(&encoded),
+            GOLDEN_FOOTER_HEX.replace([' ', '\t', '\n'], "")
+        );
         let golden = unhex(GOLDEN_FOOTER_HEX);
         assert_eq!(golden.len(), FOOTER_SIZE);
         let mut buf = [0u8; FOOTER_SIZE];
@@ -469,6 +460,46 @@ mod tests {
         let outcome = ensure_artifact(&mut packed, &spec, &target).unwrap();
         assert_eq!(outcome, EnsureOutcome::Installed);
         assert_eq!(fs::read(&target).unwrap(), payload);
+    }
+
+    #[test]
+    fn integrity_distinguishes_missing_valid_and_invalid_artifacts() {
+        let dir = temp_dir("integrity-states");
+        let payload = b"integrity payload".repeat(100);
+        let (mut packed, spec) = synthetic_packed(&dir, &payload);
+        let target = dir.join("cli");
+
+        assert_eq!(
+            check_artifact_integrity(&spec, &target).unwrap(),
+            ArtifactIntegrity::Missing
+        );
+        install_artifact(&mut packed, &spec, &target).unwrap();
+        assert_eq!(
+            check_artifact_integrity(&spec, &target).unwrap(),
+            ArtifactIntegrity::Valid
+        );
+        fs::write(&target, b"stale contents").unwrap();
+        assert_eq!(
+            check_artifact_integrity(&spec, &target).unwrap(),
+            ArtifactIntegrity::Invalid
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reusing_artifact_refreshes_executable_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir("reuse-permissions");
+        let target = dir.join("cli");
+        fs::write(&target, b"verified payload").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+
+        reuse_artifact(&target).unwrap();
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o111,
+            0o111
+        );
     }
 
     #[test]

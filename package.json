@@ -13,7 +13,7 @@
     "cli:typecheck": "pnpm --filter agenty-cli typecheck",
     "cli:clean": "pnpm --filter agenty-cli clean",
     "runtime:build": "turbo run build --filter=agenty-runtime",
-    "runtime:dev": "CGO_ENABLED=1 go run -tags=fts5 ./packages/agenty-runtime/cmd/main.go",
+    "runtime:dev": "cd packages/agenty-runtime && CGO_ENABLED=1 go run -tags=fts5 -ldflags \"-X github.com/masteryyh/agenty/pkg/version.Version=${AGENTY_VERSION:-dev}\" ./cmd/main.go",
     "runtime:tidyup": "cd packages/agenty-runtime && go fmt ./... && go vet ./... && go mod tidy",
     "runtime:clean": "pnpm --filter agenty-runtime clean",
     "bootstrap:build": "turbo run build --filter=agenty-bootstrap",

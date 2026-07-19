@@ -14,7 +14,6 @@ export interface AppSlice {
 	agent: AgentDto | null;
 	model: ModelDto | null;
 	session: ChatSessionDto | null;
-	runtimeVersion: string;
 	overlay: OverlayKind;
 	toast: ToastMsg | null;
 	thinkingEnabled: boolean;
@@ -42,7 +41,6 @@ export function useApp(): AppSlice {
 			agent: s.agent,
 			model: s.model,
 			session: s.session,
-			runtimeVersion: s.runtimeVersion,
 			overlay: s.overlay,
 			toast: s.toast,
 			thinkingEnabled: s.thinkingEnabled,

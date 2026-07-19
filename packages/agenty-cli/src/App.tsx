@@ -257,7 +257,7 @@ function ChatView() {
 	if (app.overlay === "skill") {
 		return (
 			<Box flexDirection="column" height={rows}>
-				<LogoHeader runtimeVersion={app.runtimeVersion} />
+				<LogoHeader />
 				<PanelBox height={Math.max(rows - LOGO_HEIGHT, 1)}>
 					<SkillOverlay />
 				</PanelBox>
@@ -282,7 +282,7 @@ function ChatView() {
 				history={chat.history}
 				current={chat.current}
 				height={messageHeight}
-				header={<LogoHeader runtimeVersion={app.runtimeVersion} />}
+				header={<LogoHeader />}
 				interactive={!hasPanelOverlay && paletteHeight === 0}
 			/>
 			<CommandPalette
