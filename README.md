@@ -29,26 +29,30 @@ chmod +x agenty
 sudo install -m 755 agenty /usr/local/bin/agenty
 ```
 
-Start the backend with its defaults (port `8080`, SQLite at `~/.agenty/agenty.db`, debug logging disabled):
+Start the interactive TUI:
 
 ```bash
 agenty
 ```
 
-On first run, `agenty` initializes its database, seeds preset providers and models, and creates the default agent. When you start `agenty-cli` against a fresh system, it detects the uninitialized state and opens a setup wizard to configure provider API keys, web search, and default models.
+On first run, the launcher verifies and extracts the bundled CLI and runtime into `~/.agenty/bin`, then starts the CLI, which forks the runtime on a random local port. The runtime initializes its database, seeds preset providers and models, and creates the default agent; the CLI detects the uninitialized state and opens a setup wizard to configure provider API keys, web search, and default models.
+
+To run only the HTTP backend standalone, execute `~/.agenty/bin/runtime` after the first launch. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled.
 
 ## Run Modes
 
-Agenty ships as two artifacts: the `agenty` Go binary (HTTP backend only) and `agenty-cli` (React OpenTUI terminal UI plus resource-management subcommands, embedding `agenty` for local use).
+Agenty ships as a single self-extracting artifact: the `agenty` launcher, a small Rust binary that carries the XZ-compressed `agenty-cli` (React OpenTUI terminal UI plus resource-management subcommands) and the `agenty` Go runtime (HTTP backend) appended after its own code, along with the SHA3-256 digests of both payloads.
+
+On startup the launcher checks `~/.agenty/bin/cli` and `~/.agenty/bin/runtime`: a file whose SHA3-256 matches the embedded digest is reused, while a missing or mismatched one is decompressed, verified, and atomically replaced. It then starts the CLI, which forks the runtime on a random local port. Set `AGENTY_BIN` only when you intentionally want the CLI to use an unmanaged runtime binary during development.
 
 | Mode | Command | Use case |
 | --- | --- | --- |
-| Local interactive mode | `agenty-cli` | Run the TUI; agenty-cli spawns an embedded `agenty` on a random local port and connects to it. |
-| Local interactive mode (dev) | `pnpm cli:dev` | Run the TUI from source; reuses the `agenty-runtime` binary or builds it via `make build` on first run. |
-| Local interactive mode with database | `agenty-cli --db /path/to/agenty.db` | Use an explicit SQLite database for the embedded server. |
-| Server mode | `agenty` | Run the HTTP backend service with default settings. |
-| Remote interactive mode | `agenty-cli --server http://host:8080` | Connect the TUI to a remote `agenty` server instead of spawning a local one. |
-| Resource-management CLI | `agenty-cli <subcommand>` | Initialize and manage agents, providers, models, settings, MCP servers, and global skills. See `agenty-cli --help`. |
+| Local interactive mode | `agenty` | Run the TUI; the launcher verifies or extracts `~/.agenty/bin/{cli,runtime}`, starts the CLI, and the CLI starts the runtime on a random local port. |
+| Local interactive mode (dev) | `pnpm cli:dev` | Build `agenty-runtime` through Turborepo, then run the TUI from source against the in-repository runtime. |
+| Local interactive mode with database | `agenty --db /path/to/agenty.db` | Use an explicit SQLite database for the local server. |
+| Server mode | `~/.agenty/bin/runtime` | Run the extracted HTTP backend service with default settings. |
+| Remote interactive mode | `agenty --server http://host:8080` | Connect the TUI to a remote `agenty` server instead of spawning a local one. |
+| Resource-management CLI | `agenty <subcommand>` | Initialize and manage agents, providers, models, settings, MCP servers, and global skills. See `agenty --help`. |
 
 On first run, `agenty-cli` detects an uninitialized system and opens a setup wizard to configure provider API keys, web search, and default models.
 
@@ -90,7 +94,7 @@ For example:
 agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
-`agenty-cli` passes `--db` and `--debug` through to its embedded backend in local mode. Its remote-client settings remain separate; see `agenty-cli --help` for `--server` and `--client-config`.
+The CLI passes `--db` and `--debug` through to its local backend in local mode. Its remote-client settings remain separate; see `agenty --help` for `--server` and `--client-config`.
 
 ## Database
 

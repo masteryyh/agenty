@@ -29,26 +29,30 @@ chmod +x agenty
 sudo install -m 755 agenty /usr/local/bin/agenty
 ```
 
-使用默认设置启动后端（端口 `8080`、SQLite 位于 `~/.agenty/agenty.db`、关闭 debug 日志）：
+启动交互式 TUI：
 
 ```bash
 agenty
 ```
 
-首次运行时，`agenty` 会初始化数据库、写入预置供应商和模型、创建默认 agent。当你在一个全新系统上启动 `agenty-cli` 时，它会检测到未初始化状态，并打开设置向导用于配置供应商 API key、web search 和默认模型。
+首次运行时，launcher 会校验并将内置的 CLI 与 runtime 释放到 `~/.agenty/bin`，随后启动 CLI，由 CLI 在随机本地端口 fork runtime。runtime 会初始化数据库、写入预置供应商和模型、创建默认 agent；CLI 检测到未初始化状态后会打开设置向导，用于配置供应商 API key、web search 和默认模型。
+
+如果只想单独运行 HTTP 后端，可在首次启动后执行 `~/.agenty/bin/runtime`，其默认端口为 `8080`、SQLite 位于 `~/.agenty/agenty.db`、关闭 debug 日志。
 
 ## 运行模式
 
-Agenty 由两个产物组成：`agenty` Go 二进制（仅提供 HTTP 后端）和 `agenty-cli`（React OpenTUI 终端界面与资源管理子命令，本地使用时会内嵌 `agenty` 二进制）。
+Agenty 以单一自解压产物发布：`agenty` launcher，一个小型 Rust 二进制，自身代码之后追加了 XZ 压缩的 `agenty-cli`（React OpenTUI 终端界面与资源管理子命令）和 `agenty` Go runtime（HTTP 后端），并内置两个 payload 解压内容的 SHA3-256 摘要。
+
+启动时 launcher 会检查 `~/.agenty/bin/cli` 和 `~/.agenty/bin/runtime`：SHA3-256 与内置摘要一致的文件直接复用；缺失或不一致的文件会重新解压、校验并原子替换。之后 launcher 启动 CLI，由 CLI 在随机本地端口 fork runtime。仅在开发阶段明确需要 CLI 使用非托管 runtime 时设置 `AGENTY_BIN`。
 
 | 模式 | 命令 | 使用场景 |
 | --- | --- | --- |
-| 本地交互模式 | `agenty-cli` | 运行 TUI；agenty-cli 会在随机本地端口启动一个内嵌的 `agenty` 子进程并连接它。 |
-| 本地交互模式（开发） | `pnpm cli:dev` | 从源码运行 TUI；复用 `agenty-runtime` 二进制，缺失时首次会自动执行 `make build`。 |
-| 指定数据库的本地交互模式 | `agenty-cli --db /path/to/agenty.db` | 为内嵌 server 指定 SQLite 数据库。 |
-| Server 模式 | `agenty` | 使用默认设置运行 HTTP 后端服务。 |
-| 远程交互模式 | `agenty-cli --server http://host:8080` | 将 TUI 连接到远程 `agenty` server，而不是启动本地 server。 |
-| 资源管理 CLI | `agenty-cli <子命令>` | 初始化并管理 agents、providers、models、settings、MCP servers 和全局 skills。详见 `agenty-cli --help`。 |
+| 本地交互模式 | `agenty` | 运行 TUI；launcher 校验或释放 `~/.agenty/bin/{cli,runtime}` 并启动 CLI，CLI 再在随机本地端口启动 runtime。 |
+| 本地交互模式（开发） | `pnpm cli:dev` | 通过 Turborepo 构建 `agenty-runtime`，再从源码运行 TUI 并直接使用仓库内的 runtime。 |
+| 指定数据库的本地交互模式 | `agenty --db /path/to/agenty.db` | 为本地 server 指定 SQLite 数据库。 |
+| Server 模式 | `~/.agenty/bin/runtime` | 使用默认设置运行释放出的 HTTP 后端服务。 |
+| 远程交互模式 | `agenty --server http://host:8080` | 将 TUI 连接到远程 `agenty` server，而不是启动本地 server。 |
+| 资源管理 CLI | `agenty <子命令>` | 初始化并管理 agents、providers、models、settings、MCP servers 和全局 skills。详见 `agenty --help`。 |
 
 首次运行时，`agenty-cli` 会检测到未初始化状态，并打开设置向导用于配置供应商 API key、web search 和默认模型。
 
@@ -90,7 +94,7 @@ Go 后端不再读取或创建配置文件，运行参数统一通过 CLI flags 
 agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
-`agenty-cli` 在本地模式下会把 `--db` 和 `--debug` 透传给内嵌后端。远程客户端设置保持独立，`--server` 和 `--client-config` 详见 `agenty-cli --help`。
+CLI 在本地模式下会把 `--db` 和 `--debug` 透传给本地后端。远程客户端设置保持独立，`--server` 和 `--client-config` 详见 `agenty --help`。
 
 ## 数据库
 

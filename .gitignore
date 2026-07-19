@@ -50,9 +50,12 @@ docs/
 
 # Node / pnpm
 node_modules/
-apps/cli/dist/
-apps/cli/src/_embedded/agenty-bin
-apps/cli/bun.lockb
+packages/agenty-cli/dist/
+packages/agenty-cli/bun.lockb
+
+# Rust bootstrap
+packages/agenty-bootstrap/target/
+packages/agenty-bootstrap/dist/
 
 # Coding Agents
 .reasonix

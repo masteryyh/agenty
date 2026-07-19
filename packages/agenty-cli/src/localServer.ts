@@ -14,12 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { existsSync, mkdirSync, chmodSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-
-import agentyBinUrl from "./_embedded/agenty-bin" with { type: "file" };
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 export interface LocalServer {
 	url: string;
@@ -31,77 +29,66 @@ export interface LocalServerOptions {
 	debug?: boolean;
 }
 
-const RUNTIME_DIR = join(import.meta.dir, "../../../packages/agenty-runtime");
-const DEV_BINARY = join(RUNTIME_DIR, "bin/agenty");
+/**
+ * Runtime path installed and maintained by the agenty launcher
+ * (`packages/agenty-bootstrap`). Kept in sync with `artifact_paths` in
+ * `packages/agenty-bootstrap/src/lib.rs`.
+ */
+export const MANAGED_RUNTIME_PATH = join(
+	homedir(),
+	".agenty",
+	"bin",
+	process.platform === "win32" ? "runtime.exe" : "runtime",
+);
 
-function embeddedPath(): string {
-	return agentyBinUrl.startsWith("/") ? agentyBinUrl : join(import.meta.dir, agentyBinUrl);
+/**
+ * Runtime built inside this repository. Only resolvable when the CLI runs
+ * from a source checkout; standalone builds never carry this path.
+ */
+const REPO_RUNTIME_PATH = resolve(import.meta.dir, "../../agenty-runtime/bin/agenty");
+
+export interface RuntimePathCandidates {
+	envBin?: string;
+	repoBin: string;
+	managedBin: string;
 }
 
-function isCompiledBinary(): boolean {
-	return agentyBinUrl.startsWith("/$bunfs");
-}
-
-async function isRealBinary(path: string): Promise<boolean> {
-	try {
-		const f = Bun.file(path);
-		return (await f.exists()) && f.size > 1_000_000;
-	} catch {
-		return false;
+/**
+ * Picks the agenty runtime binary by priority: an explicit `AGENTY_BIN`
+ * override, the in-repository build used for development, then the managed
+ * path installed by the launcher.
+ */
+export function pickRuntimePath(
+	candidates: RuntimePathCandidates,
+	exists: (path: string) => boolean,
+): string | null {
+	if (candidates.envBin && exists(candidates.envBin)) {
+		return candidates.envBin;
 	}
+	if (exists(candidates.repoBin)) {
+		return candidates.repoBin;
+	}
+	if (exists(candidates.managedBin)) {
+		return candidates.managedBin;
+	}
+	return null;
 }
 
-async function extractEmbedded(): Promise<string> {
-	const src = embeddedPath();
-	const blob = Bun.file(src);
-	const size = blob.size;
-	if (size < 1_000_000) {
+function resolveAgentyBinary(): string {
+	const bin = pickRuntimePath(
+		{
+			envBin: process.env.AGENTY_BIN,
+			repoBin: REPO_RUNTIME_PATH,
+			managedBin: MANAGED_RUNTIME_PATH,
+		},
+		existsSync,
+	);
+	if (!bin) {
 		throw new Error(
-			"embedded agenty binary is missing or too small; rebuild with `pnpm cli:build`",
+			"agenty runtime not found; start through the agenty launcher, set AGENTY_BIN, or build packages/agenty-runtime first",
 		);
 	}
-	const cacheDir = join(tmpdir(), "agenty-cli");
-	mkdirSync(cacheDir, { recursive: true });
-	const name = src.split("/").pop() ?? `agenty-server-${size}`;
-	const cachePath = join(cacheDir, name);
-	const cached = Bun.file(cachePath);
-	if (!(await cached.exists()) || cached.size !== size) {
-		await Bun.write(cachePath, blob);
-		chmodSync(cachePath, 0o755);
-	}
-	return cachePath;
-}
-
-async function buildGoBinary(): Promise<string> {
-	if (!existsSync(join(RUNTIME_DIR, "Makefile"))) {
-		throw new Error("agenty binary not found. Run `make build` or set AGENTY_BIN.");
-	}
-	process.stderr.write("agenty binary not found; building with `make build`…\n");
-	const build = Bun.spawn(["make", "build"], {
-		cwd: RUNTIME_DIR,
-		stdout: "inherit",
-		stderr: "inherit",
-	});
-	const code = await build.exited;
-	if (code !== 0) throw new Error(`\`make build\` failed with exit code ${code}`);
-	if (!existsSync(DEV_BINARY)) throw new Error("`make build` did not produce bin/agenty");
-	return DEV_BINARY;
-}
-
-async function resolveAgentyBinary(): Promise<string> {
-	const envBin = process.env.AGENTY_BIN;
-	if (envBin && existsSync(envBin)) return envBin;
-
-	if (isCompiledBinary()) {
-		return await extractEmbedded();
-	}
-
-	// dev mode: src/_embedded/agenty-bin (kept in sync by ensure-embedded.ts)
-	if (await isRealBinary(embeddedPath())) return embeddedPath();
-	if (existsSync(DEV_BINARY)) return DEV_BINARY;
-	const which = Bun.which("agenty");
-	if (typeof which === "string" && which !== "" && existsSync(which)) return which;
-	return await buildGoBinary();
+	return bin;
 }
 
 function pickFreePort(): Promise<number> {
@@ -128,16 +115,15 @@ async function waitForHealth(url: string, timeoutMs = 20000): Promise<void> {
 		try {
 			const resp = await fetch(`${url}/api/v1/system/version`);
 			if (resp.ok) return;
-		} catch {
-			// server not ready yet
-		}
+		} catch {}
+
 		await Bun.sleep(300);
 	}
 	throw new Error(`local agenty server did not become healthy at ${url}`);
 }
 
 export async function startLocalServer(options: LocalServerOptions = {}): Promise<LocalServer> {
-	const bin = await resolveAgentyBinary();
+	const bin = resolveAgentyBinary();
 	const port = await pickFreePort();
 	const args = [bin, "--port", String(port)];
 	if (options.databasePath) {

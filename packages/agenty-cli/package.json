@@ -7,8 +7,8 @@
     "bun": ">=1.3.0"
   },
   "scripts": {
-    "dev": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
-    "start": "bun run scripts/ensure-embedded.ts && bun run src/index.tsx",
+    "dev": "bun run src/index.tsx",
+    "start": "bun run src/index.tsx",
     "build": "bun run scripts/build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",

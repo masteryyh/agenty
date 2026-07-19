@@ -114,8 +114,8 @@ export function App() {
 				<Text color="red">{app.initError}</Text>
 				<Text dimColor>
 					{app.opts.localMode
-						? "The embedded agenty server failed to start. Make sure `make build` succeeded and the configured database is reachable. Press Ctrl+C to exit."
-						: "Check that the agenty server is running (agenty) and that agenty-client.yaml points to the right URL. Press Ctrl+C to exit."}
+						? "The embedded agenty server failed to start. Make sure the runtime is executable and the configured database is reachable. Press Ctrl+C to exit."
+						: "Check that the agenty server is running and that agenty-client.yaml points to the right URL. Press Ctrl+C to exit."}
 				</Text>
 			</Box>
 		);

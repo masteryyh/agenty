@@ -11,6 +11,16 @@
       "cache": false,
       "env": ["OS", "ARCH", "OPENTUI_LIBC", "AGENTY_CLI_VERSION"]
     },
+    "agenty-bootstrap#build": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["OS", "ARCH"],
+      "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
+      "outputs": ["dist/**"]
+    },
+    "agenty-bootstrap#test": {
+      "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+    },
     "test": {
       "dependsOn": ["^build"]
     },
