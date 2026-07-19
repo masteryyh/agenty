@@ -24,6 +24,9 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "clean": {
+      "cache": false
+    },
     "typecheck": {}
   }
 }

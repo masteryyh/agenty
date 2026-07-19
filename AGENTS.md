@@ -60,9 +60,10 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 - The repository is a pnpm workspace (`pnpm-workspace.yaml`: `packages/*`) orchestrated by Turborepo (`turbo.json`).
 - Responsibility split: pnpm owns workspace resolution and dependency install; Turborepo owns task orchestration and caching; Bun is only invoked inside a package to run and bundle the CLI, and must not manage the workspace.
 - Do not add an npm `workspaces` field to the root `package.json`; it would make Bun try to take over workspace resolution and conflict with pnpm.
-- `turbo run build` builds in topological order: `agenty-runtime` (Go, via its package build script), then `agenty-cli` (Bun standalone compile), then `agenty-bootstrap` (cargo release build plus payload packing). The cross-package edges are the `workspace:*` dependencies declared in each downstream package.
+- `turbo run build` builds in topological order: `agenty-runtime` (Go, via its package build script), then `agenty-cli` (Bun standalone compile), then `agenty-bootstrap` (cargo release build plus payload packing). The cross-package edges are the `workspace:*` dependencies declared in each downstream package. After turbo build, the final bootstrap binary (with embedded CLI and runtime) is copied into the root `dist/` directory.
 - The `agenty-cli` and `agenty-bootstrap` builds set `cache: false` in `turbo.json` because their outputs are large single executables; the `agenty-runtime` Go build is cached.
 - Go build and test require the `fts5` build tag (already wired in `packages/agenty-runtime/package.json`).
+- Root `package.json` scripts provide unified commands: `pnpm build` (full build with output collection), `pnpm test` (run all tests), `pnpm dev` (start CLI + runtime locally), `pnpm clean` (remove all build artifacts), and `pnpm deepclean` (clean + remove `node_modules`). Module-prefixed commands (`cli:`, `runtime:`, `bootstrap:`) scope to individual packages.
 
 ## Go Conventions
 
@@ -117,7 +118,7 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 - `packages/agenty-cli/` is a pnpm workspace package (name `agenty-cli`) executed with Bun.
 - React OpenTUI UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, `tui`, and `consts`.
 - OpenTUI includes native libraries. `packages/agenty-cli/scripts/build.ts` maps `OS` and `ARCH` to an explicit Bun compile target; Linux builds also set `OPENTUI_LIBC` to `glibc` or `musl` (default `glibc`). Keep the release matrix and Turborepo build environment in sync with those inputs.
-- Root scripts delegate through Turborepo: `pnpm build`/`pnpm test`/`pnpm typecheck` run `turbo run <task>`; `pnpm cli:build` filters to the CLI while preserving its upstream runtime build dependency, `pnpm cli:typecheck` runs the CLI package typecheck directly, and `pnpm bootstrap:build`/`pnpm bootstrap:test` filter to the launcher while building the CLI and runtime first.
+- Root scripts delegate through Turborepo: `pnpm build` runs `turbo run build` then copies the final bootstrap binary into root `dist/`; `pnpm test` runs `turbo run test`; `pnpm clean` runs `turbo run clean` then removes root `dist/`. Module-prefixed commands: `pnpm cli:build`/`cli:dev`/`cli:typecheck`/`cli:lint`/`cli:clean`, `pnpm runtime:build`/`runtime:dev`/`runtime:tidyup`/`runtime:clean`, `pnpm bootstrap:build`/`bootstrap:test`/`bootstrap:clean`.
 - `pnpm cli:dev` builds the runtime via Turborepo and then runs the CLI with `pnpm --filter agenty-cli dev` attached directly to the user's terminal. The TUI must never run as a turbo task: turbo's task UI pipes stdio, so terminal capability handshakes (OSC/DECRPM queries and replies) never reach the renderer and the screen stays blank.
 - CLI API types and UI state should preserve the backend API contract rather than duplicating backend business rules.
 
