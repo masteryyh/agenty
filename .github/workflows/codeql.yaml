@@ -49,7 +49,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: go, javascript-typescript
+          languages: go, javascript-typescript, rust
           queries: security-extended,security-and-quality
 
       - name: Build Go code for CodeQL

@@ -102,10 +102,18 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/agenty-bootstrap
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build runtime and CLI
+      - name: Build runtime, CLI and bootstrap
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
@@ -120,8 +128,23 @@ jobs:
           export AGENTY_CLI_VERSION="${tag}"
 
           pnpm run cli:typecheck
-          pnpm run runtime:build
-          pnpm run cli:build
+          pnpm run bootstrap:build
+
+      - name: Verify static linkage
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          artifact="packages/agenty-bootstrap/dist/agenty-${{ matrix.os }}-${{ matrix.arch }}"
+          if [[ "${{ matrix.goos }}" == "darwin" ]]; then
+            linked="$(otool -L "$artifact")"
+          else
+            linked="$(ldd "$artifact")"
+          fi
+          echo "$linked"
+          if echo "$linked" | grep -qi lzma; then
+            echo "::error::artifact dynamically links liblzma"
+            exit 1
+          fi
 
       - name: Package
         shell: bash
@@ -129,7 +152,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           mkdir -p dist
           tar -czf "dist/agenty_${tag}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" \
-            "apps/cli/dist/agenty-cli-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.bin_ext }}"
+            "packages/agenty-bootstrap/dist/agenty-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.bin_ext }}"
 
       - name: Upload release package
         uses: actions/upload-artifact@v7

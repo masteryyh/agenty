@@ -7,12 +7,14 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "cli:build": "turbo run build --filter=agenty-cli",
-    "cli:dev": "pnpm --filter agenty-cli dev",
+    "cli:dev": "turbo run build --filter=agenty-runtime && pnpm --filter agenty-cli dev",
     "cli:typecheck": "pnpm --filter agenty-cli typecheck",
-    "runtime:build": "turbo run build --filter=agenty-runtime"
+    "runtime:build": "turbo run build --filter=agenty-runtime",
+    "bootstrap:build": "turbo run build --filter=agenty-bootstrap",
+    "bootstrap:test": "turbo run test --filter=agenty-bootstrap"
   },
   "packageManager": "pnpm@11.1.3",
   "devDependencies": {
-    "turbo": "^2"
+    "turbo": "^2.10.5"
   }
 }

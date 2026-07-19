@@ -4,15 +4,15 @@
 
 Agenty is an AI agent application written primarily in Go 1.26. The Go binary is an HTTP server, while `agenty-cli` provides local interactive and remote client modes. Core capabilities include chat sessions, model/provider management, tool calling, agentic looping, MCP integration, skills, memory, and searchable knowledge.
 
-The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository is a pnpm + Turborepo monorepo: the Go backend lives in `packages/agenty-runtime/`, and a TypeScript terminal client lives in `apps/cli/`, built with Bun, React, OpenTUI, Zustand, and pnpm.
+The Go backend uses Gin, GORM, SQLite/PostgreSQL, embedded SQL schema files, provider adapters, and a tool registry. The repository is a pnpm + Turborepo monorepo: the Go backend lives in `packages/agenty-runtime/`, a TypeScript terminal client lives in `packages/agenty-cli/`, and a small Rust self-extracting launcher lives in `packages/agenty-bootstrap/`.
 
 ## Project Structure
 
-The repository is a pnpm + Turborepo monorepo with two workspaces: `apps/cli` (TypeScript CLI) and `packages/agenty-runtime` (Go backend). Go paths below (`cmd/`, `pkg/...`) are relative to `packages/agenty-runtime/`.
+The repository is a pnpm + Turborepo monorepo with three workspaces: `packages/agenty-cli` (TypeScript CLI), `packages/agenty-runtime` (Go backend) and `packages/agenty-bootstrap` (Rust launcher). Go paths below (`cmd/`, `pkg/...`) are relative to `packages/agenty-runtime/`.
 
-- `packages/agenty-runtime/`: Go HTTP backend (Go module `github.com/masteryyh/agenty`). Built via its own `Makefile` (`make build` → `bin/agenty`) and consumed by `apps/cli` as an embedded binary.
+- `packages/agenty-runtime/`: Go HTTP backend (Go module `github.com/masteryyh/agenty`). Built via its package `build` script (`pnpm --filter agenty-runtime build` → `bin/agenty`) and packed into the launcher by `packages/agenty-bootstrap`.
 - `cmd/`: Go application entrypoint. `cmd/main.go` delegates to `pkg/cli/cmd`.
-- `apps/cli/`: TypeScript/React OpenTUI terminal UI — the primary Agenty TUI. In local mode it embeds the `agenty` binary and starts it with `--port` on a random port; in remote mode it connects to an existing server.
+- `packages/agenty-cli/`: TypeScript/React OpenTUI terminal UI — the primary Agenty TUI. In local mode it forks the runtime with `--port` on a random port; in remote mode it connects to an existing server.
   - `src/api/`: HTTP client and API DTOs for the CLI.
   - `src/commands/`: Slash command registry and parsing.
   - `src/components/`: OpenTUI React components (chat, overlays, setup wizard).
@@ -20,8 +20,12 @@ The repository is a pnpm + Turborepo monorepo with two workspaces: `apps/cli` (T
   - `src/tui/`: OpenTUI renderer lifecycle context.
   - `src/hooks/`: CLI interaction hooks.
   - `src/state/`: Zustand application state.
-  - `src/localServer.ts`: embedded-server lifecycle (binary discovery, port pick, health check, fork `agenty --port <port>`).
-  - `scripts/`: Bun build scripts (bundles the CLI and embeds `bin/agenty` into `dist/`).
+  - `src/localServer.ts`: local-server lifecycle (runtime path resolution, port pick, health check, fork `agenty --port <port>`). The runtime path resolves by priority: `AGENTY_BIN` override, the in-repository build for development, then the launcher-managed `~/.agenty/bin/runtime[.exe]`.
+  - `scripts/`: Bun build scripts (map `OS`/`ARCH` to a Bun compile target and bundle the CLI into `dist/`).
+- `packages/agenty-bootstrap/`: Rust self-extracting launcher that produces the final `agenty-<os>-<arch>` binary, laid out like a compressed Linux kernel image: `[ bootstrap stub ][ xz-compressed CLI ][ xz-compressed runtime ][ 108-byte footer ]`. The footer trailer (magic `cafebabe10136666`, format version, payload offsets/lengths, SHA3-256 digests of the decompressed payloads) is appended at build time; payloads are compressed in memory and appended directly, with no intermediate archive files.
+  - `src/lib.rs`: payload module — footer encode/decode, streaming SHA3-256, and `ensure_artifact`, which reuses a matching `~/.agenty/bin/{cli,runtime}[.exe]` or decompresses, verifies and atomically installs a fresh one.
+  - `src/main.rs`: thin entry — reads the footer from the current executable, ensures both artifacts, then hands over to the CLI (Unix `exec`, Windows spawn-and-wait) with all arguments forwarded.
+  - `scripts/`: Bun packing scripts (`pack.ts` plus the shared `footer.ts`/`target.ts` helpers) that locate the CLI/runtime binaries, compute SHA3-256 digests, xz-compress in memory and append payloads plus footer to the compiled stub.
 - `pkg/cli/`: Go launch layer for the `agenty` backend binary. `pkg/cli/cmd/` handles server startup flags, version output, and exit codes; all interactive and resource-management client behavior lives in `agenty-cli`. `pkg/cli/theme/` is reused by the logger. The legacy Go TUI, local/client modes, and direct resource subcommands have been removed.
 - `pkg/chat/`: Chat/session orchestration and agentic loop support.
 - `pkg/config/`: Server runtime defaults, database configuration types, validation, and SQLite path resolution. The Go binary does not load a configuration file.
@@ -40,29 +44,28 @@ The repository is a pnpm + Turborepo monorepo with two workspaces: `apps/cli` (T
 - `pkg/tools/`: Tool interface, registry, todo manager, and built-in tools.
 - `pkg/utils/`: Shared utilities such as pagination, response helpers, safe goroutines, signal context, logging, and terminal wrapping.
 - `pkg/version/`: Version data.
-- `turbo.json`: Turborepo task pipeline (`build`, `test`, `typecheck`). `apps/cli` declares a `workspace:*` dependency on `agenty-runtime` so Turborepo builds the Go binary first via `^build`.
-- `package.json`, `pnpm-workspace.yaml`: Root workspace and Turborepo orchestration. Go build/test/vet/fmt targets live in `packages/agenty-runtime/Makefile`.
+- `turbo.json`: Turborepo task pipeline (`build`, `test`, `typecheck`). Cross-package `workspace:*` dependencies let Turborepo build `agenty-runtime`, then `agenty-cli`, then `agenty-bootstrap` via `^build`.
+- `package.json`, `pnpm-workspace.yaml`: Root workspace and Turborepo orchestration. Go build/test/vet/fmt targets live in `packages/agenty-runtime/package.json`.
 
 Project-local `.agents/skills` instructions are intentionally absent. Product-level skills remain part of Agenty runtime functionality under packages such as `pkg/skill`, `pkg/routes/skill.go`, `pkg/services`, and `pkg/tools/builtin`.
 
 ## Runtime Modes
 
-- Running `agenty` always starts the Gin HTTP backend. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled; `--port`, `--db`, and `--debug` override those defaults.
-- Local interactive mode runs `agenty-cli`, which forks an embedded `agenty` subprocess on a random port and connects to it over HTTP.
+- Running the packed `agenty` launcher verifies and extracts the bundled CLI and runtime into `~/.agenty/bin` (skipping files whose SHA3-256 already matches), then starts the CLI; the CLI forks the extracted runtime on a random port and connects to it over HTTP.
+- Running the bare `agenty` Go binary always starts the Gin HTTP backend. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled; `--port`, `--db`, and `--debug` override those defaults.
 - Remote client mode belongs to `agenty-cli` and connects to an existing backend through its `--server` option or client configuration.
 
 ## Monorepo And Build Orchestration
 
-- The repository is a pnpm workspace (`pnpm-workspace.yaml`: `apps/*`, `packages/*`) orchestrated by Turborepo (`turbo.json`).
+- The repository is a pnpm workspace (`pnpm-workspace.yaml`: `packages/*`) orchestrated by Turborepo (`turbo.json`).
 - Responsibility split: pnpm owns workspace resolution and dependency install; Turborepo owns task orchestration and caching; Bun is only invoked inside a package to run and bundle the CLI, and must not manage the workspace.
 - Do not add an npm `workspaces` field to the root `package.json`; it would make Bun try to take over workspace resolution and conflict with pnpm.
-- `turbo run build` builds in topological order: `agenty-runtime` (Go, via `make build`) then `agenty-cli` (Bun compile embedding the Go binary). The cross-package edge is the `agenty-runtime` `workspace:*` dependency in `apps/cli/package.json`.
-- The `agenty-cli` build sets `cache: false` in `turbo.json` because its output is a large single executable; the `agenty-runtime` Go build is cached.
-- Go build and test require the `fts5` build tag (already wired in `packages/agenty-runtime/Makefile`).
+- `turbo run build` builds in topological order: `agenty-runtime` (Go, via its package build script), then `agenty-cli` (Bun standalone compile), then `agenty-bootstrap` (cargo release build plus payload packing). The cross-package edges are the `workspace:*` dependencies declared in each downstream package.
+- The `agenty-cli` and `agenty-bootstrap` builds set `cache: false` in `turbo.json` because their outputs are large single executables; the `agenty-runtime` Go build is cached.
+- Go build and test require the `fts5` build tag (already wired in `packages/agenty-runtime/package.json`).
 
 ## Go Conventions
 
-- New Go source files use the repository Apache 2.0 license header.
 - Use Go 1.26 syntax and standard Go formatting.
 - Use `any` instead of `interface{}`.
 - Use built-in `min` and `max` for simple comparisons and clamping.
@@ -111,11 +114,21 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 
 ## TypeScript CLI Conventions
 
-- `apps/cli/` is a pnpm workspace package (name `agenty-cli`) executed with Bun.
+- `packages/agenty-cli/` is a pnpm workspace package (name `agenty-cli`) executed with Bun.
 - React OpenTUI UI code is organized by `api`, `commands`, `components`, `hooks`, `state`, `tui`, and `consts`.
-- OpenTUI includes native libraries. `apps/cli/scripts/build.ts` maps `OS` and `ARCH` to an explicit Bun compile target; Linux builds also set `OPENTUI_LIBC` to `glibc` or `musl` (default `glibc`). Keep the release matrix and Turborepo build environment in sync with those inputs.
-- Root scripts delegate through Turborepo: `pnpm build`/`pnpm test`/`pnpm typecheck` run `turbo run <task>`; `pnpm cli:typecheck` and `pnpm cli:build` filter to the CLI.
+- OpenTUI includes native libraries. `packages/agenty-cli/scripts/build.ts` maps `OS` and `ARCH` to an explicit Bun compile target; Linux builds also set `OPENTUI_LIBC` to `glibc` or `musl` (default `glibc`). Keep the release matrix and Turborepo build environment in sync with those inputs.
+- Root scripts delegate through Turborepo: `pnpm build`/`pnpm test`/`pnpm typecheck` run `turbo run <task>`; `pnpm cli:build` filters to the CLI while preserving its upstream runtime build dependency, `pnpm cli:typecheck` runs the CLI package typecheck directly, and `pnpm bootstrap:build`/`pnpm bootstrap:test` filter to the launcher while building the CLI and runtime first.
+- `pnpm cli:dev` builds the runtime via Turborepo and then runs the CLI with `pnpm --filter agenty-cli dev` attached directly to the user's terminal. The TUI must never run as a turbo task: turbo's task UI pipes stdio, so terminal capability handshakes (OSC/DECRPM queries and replies) never reach the renderer and the screen stays blank.
 - CLI API types and UI state should preserve the backend API contract rather than duplicating backend business rules.
+
+## Rust Bootstrap Conventions
+
+- `packages/agenty-bootstrap/` is a cargo package wrapped in a pnpm workspace package (name `agenty-bootstrap`); cargo owns compilation, Bun owns packing, Turborepo owns orchestration.
+- Payload decompression uses the `liblzma` crate with `default-features = false, features = ["static"]`: liblzma is compiled from vendored C sources and statically linked, so the shipped binary must never depend on a host liblzma. Keep the `bindgen` feature off to avoid a libclang build dependency, and verify linkage with `ldd`/`otool -L` when touching dependencies.
+- Payload integrity uses SHA3-256 (`sha3` crate at runtime, `Bun.CryptoHasher("sha3-256")` at pack time) computed over the decompressed bytes, never the compressed payload.
+- The footer layout in `src/lib.rs` and `scripts/footer.ts` is a single contract: any change must update both sides plus the shared golden-bytes tests (`src/lib.rs` tests and `scripts/footer.test.ts`) and bump `FORMAT_VERSION`.
+- Build-time compression uses `@napi-rs/lzma` (liblzma bindings) and payloads are appended to the stub in memory; do not write intermediate `.xz` archives to disk.
+- Because payloads are appended after the executable image, code signing must always happen after packing; signing first and packing later invalidates the signature.
 
 ## Response Marker
 
