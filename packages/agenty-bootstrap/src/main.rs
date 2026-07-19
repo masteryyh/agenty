@@ -63,7 +63,7 @@ fn ensure_with_progress(
     name: &str,
     progress: &ProgressLog,
 ) -> Result<()> {
-    progress.child(format!("checking {name} binary integrity"));
+    progress.child(format!("checking {name} binary integrity..."));
     match check_artifact_integrity(spec, target)? {
         ArtifactIntegrity::Valid => {
             reuse_artifact(target)?;

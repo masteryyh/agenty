@@ -4,7 +4,7 @@ import { resolve, join } from "node:path";
 import { resolveArch, resolveBunTarget, resolveOpenTUILibc, resolveOS } from "./target";
 
 const PKG = resolve(import.meta.dir, "..");
-const DIST = join(PKG, "dist");
+const DIST = join(PKG, "bin");
 
 const os = resolveOS();
 const arch = resolveArch();

@@ -142,7 +142,7 @@ fn render_lines(entries: &[Entry], frame: usize, spinning: bool) -> Vec<String> 
                 format!("{} {message}", SPINNER_FRAMES[frame % SPINNER_FRAMES.len()])
             }
             Entry::Parent(message) => format!("  {message}"),
-            Entry::Child(message) => format!("  \x1b[2m{message}\x1b[0m"),
+            Entry::Child(message) => format!("    \x1b[2m{message}\x1b[0m"),
         })
         .collect()
 }

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "turbo run build && mkdir -p dist && cp packages/agenty-bootstrap/dist/* dist/ 2>/dev/null || true",
+    "build": "turbo run build && mkdir -p dist && cp packages/agenty-bootstrap/bin/* dist/ 2>/dev/null || true",
     "test": "turbo run test",
     "dev": "pnpm cli:dev",
     "clean": "rm -rf dist && turbo run clean",
