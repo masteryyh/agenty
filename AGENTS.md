@@ -66,7 +66,6 @@ Project-local `.agents/skills` instructions are intentionally absent. Product-le
 
 ## Go Conventions
 
-- New Go source files use the repository Apache 2.0 license header.
 - Use Go 1.26 syntax and standard Go formatting.
 - Use `any` instead of `interface{}`.
 - Use built-in `min` and `max` for simple comparisons and clamping.
