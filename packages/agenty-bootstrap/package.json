@@ -9,7 +9,7 @@
   "scripts": {
     "build": "cargo build --release && bun run scripts/pack.ts",
     "test": "cargo test && bun test",
-    "clean": "cargo clean && rm -rf dist"
+    "clean": "cargo clean && rm -rf dist bin"
   },
   "dependencies": {
     "@napi-rs/lzma": "1.5.1"

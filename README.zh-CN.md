@@ -43,7 +43,7 @@ agenty
 
 Agenty 以单一自解压产物发布：`agenty` launcher，一个小型 Rust 二进制，自身代码之后追加了 XZ 压缩的 `agenty-cli`（React OpenTUI 终端界面与资源管理子命令）和 `agenty` Go runtime（HTTP 后端），并内置两个 payload 解压内容的 SHA3-256 摘要。
 
-启动时 launcher 会检查 `~/.agenty/bin/cli` 和 `~/.agenty/bin/runtime`：SHA3-256 与内置摘要一致的文件直接复用；缺失或不一致的文件会重新解压、校验并原子替换。之后 launcher 启动 CLI，由 CLI 在随机本地端口 fork runtime。仅在开发阶段明确需要 CLI 使用非托管 runtime 时设置 `AGENTY_BIN`。
+启动时 launcher 会通过 spinner 展示当前 bootstrap 阶段，并检查 `~/.agenty/bin/cli` 和 `~/.agenty/bin/runtime`：SHA3-256 与内置摘要一致的文件直接复用；缺失或不一致的文件会重新解压、校验并原子替换。之后 launcher 启动 CLI，由 CLI 在随机本地端口 fork runtime。仅在开发阶段明确需要 CLI 使用非托管 runtime 时设置 `AGENTY_BIN`。
 
 | 模式 | 命令 | 使用场景 |
 | --- | --- | --- |
@@ -95,6 +95,24 @@ agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
 CLI 在本地模式下会把 `--db` 和 `--debug` 透传给本地后端。远程客户端设置保持独立，`--server` 和 `--client-config` 详见 `agenty --help`。
+
+## 构建配置
+
+先把受版本控制的根 `.env.example` 复制为被 Git 忽略的 `.env`，导出变量后再构建：
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+pnpm build
+```
+
+```dotenv
+AGENTY_VERSION=0.1.0
+```
+
+CLI、runtime 和 bootstrap 构建都会读取导出的 `AGENTY_VERSION`，缺失时回退为 `dev`。实际 `.env` 不会提交到 Git。Release CI 会生成并加载根 `.env`，再把 runtime 专用的 `GOOS`、`GOARCH`、编译器和输出路径直接传给构建命令。Turbo 会把这些导出的变量纳入构建哈希。
 
 ## 数据库
 

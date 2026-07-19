@@ -117,17 +117,22 @@ jobs:
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
-          export GOOS="${{ matrix.goos }}"
-          export GOARCH="${{ matrix.arch }}"
-          export PACKAGE_DIR="bin/${{ matrix.os }}_${{ matrix.arch }}"
-          export BIN_NAME="agenty${{ matrix.bin_ext }}"
-          export VERSION="${tag}"
-          export OS="${{ matrix.os }}"
-          export ARCH="${{ matrix.arch }}"
-          export OPENTUI_LIBC="${{ matrix.opentui_libc }}"
-          export AGENTY_CLI_VERSION="${tag}"
+          printf 'AGENTY_VERSION=%s\n' "${tag}" > .env
+          set -a
+          source .env
+          set +a
 
           pnpm run cli:typecheck
+          CGO_ENABLED=1 \
+          GOOS="${{ matrix.goos }}" \
+          GOARCH="${{ matrix.arch }}" \
+          CC="" \
+          CXX="" \
+          PACKAGE_DIR="bin/${{ matrix.os }}_${{ matrix.arch }}" \
+          BIN_NAME="agenty${{ matrix.bin_ext }}" \
+          OS="${{ matrix.os }}" \
+          ARCH="${{ matrix.arch }}" \
+          OPENTUI_LIBC="${{ matrix.opentui_libc }}" \
           pnpm run bootstrap:build
 
       - name: Verify static linkage

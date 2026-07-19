@@ -26,8 +26,8 @@ import { resolveArch, resolveOS, type TargetArch, type TargetOS } from "./target
 const PKG = resolve(import.meta.dir, "..");
 const REPO = resolve(PKG, "../..");
 const RUNTIME_BIN_DIR = join(REPO, "packages/agenty-runtime/bin");
-const CLI_DIST_DIR = join(REPO, "packages/agenty-cli/dist");
-const DIST = join(PKG, "dist");
+const CLI_DIST_DIR = join(REPO, "packages/agenty-cli/bin");
+const DIST = join(PKG, "bin");
 
 function findAgentyBinary(dir: string): string | null {
 	let names: string[];

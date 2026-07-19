@@ -43,7 +43,7 @@ To run only the HTTP backend standalone, execute `~/.agenty/bin/runtime` after t
 
 Agenty ships as a single self-extracting artifact: the `agenty` launcher, a small Rust binary that carries the XZ-compressed `agenty-cli` (React OpenTUI terminal UI plus resource-management subcommands) and the `agenty` Go runtime (HTTP backend) appended after its own code, along with the SHA3-256 digests of both payloads.
 
-On startup the launcher checks `~/.agenty/bin/cli` and `~/.agenty/bin/runtime`: a file whose SHA3-256 matches the embedded digest is reused, while a missing or mismatched one is decompressed, verified, and atomically replaced. It then starts the CLI, which forks the runtime on a random local port. Set `AGENTY_BIN` only when you intentionally want the CLI to use an unmanaged runtime binary during development.
+On startup the launcher shows the current bootstrap stage with a spinner. It checks `~/.agenty/bin/cli` and `~/.agenty/bin/runtime`: a file whose SHA3-256 matches the embedded digest is reused, while a missing or mismatched one is decompressed, verified, and atomically replaced. It then starts the CLI, which forks the runtime on a random local port. Set `AGENTY_BIN` only when you intentionally want the CLI to use an unmanaged runtime binary during development.
 
 | Mode | Command | Use case |
 | --- | --- | --- |
@@ -95,6 +95,24 @@ agenty --port 9090 --db /srv/agenty/agenty.db --debug
 ```
 
 The CLI passes `--db` and `--debug` through to its local backend in local mode. Its remote-client settings remain separate; see `agenty --help` for `--server` and `--client-config`.
+
+## Build configuration
+
+Copy the tracked root `.env.example` to the ignored `.env`, export it, then run the build:
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+pnpm build
+```
+
+```dotenv
+AGENTY_VERSION=0.1.0
+```
+
+CLI, runtime, and bootstrap builds all consume the exported `AGENTY_VERSION`; they fall back to `dev` when it is absent. Actual `.env` files are never committed. Release CI creates and sources the root `.env`, then passes runtime-specific `GOOS`, `GOARCH`, compiler, and output variables directly on the build command. Turbo hashes the exported variables as build inputs.
 
 ## Database
 

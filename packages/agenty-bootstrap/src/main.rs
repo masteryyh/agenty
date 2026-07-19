@@ -1,7 +1,13 @@
+mod progress;
+
 use std::fs::File;
 use std::path::Path;
 
-use agenty_bootstrap::{artifact_paths, ensure_artifact, read_footer, BootstrapError, Result};
+use agenty_bootstrap::{
+    artifact_paths, check_artifact_integrity, install_artifact, read_footer, reuse_artifact,
+    ArtifactIntegrity, BootstrapError, PayloadSpec, Result,
+};
+use progress::ProgressLog;
 
 fn main() {
     std::process::exit(run());
@@ -18,6 +24,9 @@ fn run() -> i32 {
 }
 
 fn bootstrap() -> Result<i32> {
+    let progress = ProgressLog::new();
+    progress.parent(format!("starting agenty {}...", agenty_version()));
+
     let exe = std::env::current_exe()?;
     let mut file = File::open(&exe)?;
     let footer = read_footer(&mut file)?;
@@ -27,15 +36,49 @@ fn bootstrap() -> Result<i32> {
     })?;
     let (cli, runtime) = artifact_paths(&home);
 
-    ensure_artifact(&mut file, &footer.cli, &cli)?;
-    ensure_artifact(&mut file, &footer.runtime, &runtime)?;
+    if !cli.is_file() && !runtime.is_file() {
+        progress.parent("local binary not found, extracting...");
+        install_artifact(&mut file, &footer.cli, &cli)?;
+        install_artifact(&mut file, &footer.runtime, &runtime)?;
+    } else {
+        progress.parent("checking local binary integrity...");
+        ensure_with_progress(&mut file, &footer.cli, &cli, "cli", &progress)?;
+        ensure_with_progress(&mut file, &footer.runtime, &runtime, "runtime", &progress)?;
+    }
 
+    progress.finish();
     launch(&cli)
 }
 
-/// Replaces the current process with the CLI on Unix so signals, exit codes
-/// and the controlling terminal behave exactly as if the CLI was started
-/// directly; on Windows spawns the CLI and forwards its exit code.
+fn agenty_version() -> &'static str {
+    option_env!("AGENTY_VERSION")
+        .filter(|version| !version.trim().is_empty())
+        .unwrap_or("dev")
+}
+
+fn ensure_with_progress(
+    packed: &mut File,
+    spec: &PayloadSpec,
+    target: &Path,
+    name: &str,
+    progress: &ProgressLog,
+) -> Result<()> {
+    progress.child(format!("checking {name} binary integrity..."));
+    match check_artifact_integrity(spec, target)? {
+        ArtifactIntegrity::Valid => {
+            reuse_artifact(target)?;
+            progress.child(format!(
+                "{name} integrity check passed, skipping extraction."
+            ));
+        }
+        ArtifactIntegrity::Missing | ArtifactIntegrity::Invalid => {
+            progress.child(format!("{name} integrity check failed, extracting..."));
+            install_artifact(packed, spec, target)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn launch(cli: &Path) -> Result<i32> {
     use std::os::unix::process::CommandExt;

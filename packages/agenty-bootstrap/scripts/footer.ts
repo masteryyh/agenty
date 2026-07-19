@@ -1,21 +1,10 @@
-/**
- * Payload footer format shared with the Rust bootstrap (`src/lib.rs`).
- *
- * The footer is a fixed 108-byte little-endian trailer appended after the
- * two compressed payloads; `footer.test.ts` and the Rust golden-bytes test
- * assert the exact same layout to lock the cross-language contract.
- */
-
 export const MAGIC = [0xca, 0xfe, 0xba, 0xbe, 0x10, 0x13, 0x66, 0x66] as const;
 export const FORMAT_VERSION = 1;
 export const FOOTER_SIZE = 108;
 
 export interface PayloadSpec {
-	/** Absolute offset of the compressed payload inside the packed file. */
 	offset: bigint;
-	/** Length of the compressed payload in bytes. */
 	len: bigint;
-	/** SHA3-256 digest of the decompressed payload. */
 	sha3_256: Uint8Array;
 }
 

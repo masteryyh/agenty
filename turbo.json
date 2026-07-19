@@ -4,17 +4,17 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["bin/**", "dist/**"],
-      "env": ["GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME", "VERSION"]
+      "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"]
     },
     "agenty-cli#build": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["OS", "ARCH", "OPENTUI_LIBC", "AGENTY_CLI_VERSION"]
+      "env": ["AGENTY_VERSION", "OS", "ARCH", "OPENTUI_LIBC"]
     },
     "agenty-bootstrap#build": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["OS", "ARCH"],
+      "env": ["AGENTY_VERSION", "OS", "ARCH"],
       "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
       "outputs": ["dist/**"]
     },
@@ -23,6 +23,9 @@
     },
     "test": {
       "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false
     },
     "typecheck": {}
   }
