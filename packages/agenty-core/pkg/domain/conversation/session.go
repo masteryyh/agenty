@@ -9,6 +9,7 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
+
 var (
 	ErrModelNotConfigured = errors.New("conversation: model is not configured")
 	ErrRoundNotFound      = errors.New("conversation: round not found")
@@ -67,7 +68,7 @@ func (s *Session) SetCwd(cwd *string) {
 }
 
 func (s *Session) StartRound() (uuid.UUID, error) {
-	if s.CurrentModel == nil {
+	if s.CurrentModel == nil || s.CurrentModel.IsZero() {
 		return uuid.Nil, ErrModelNotConfigured
 	}
 
@@ -109,8 +110,8 @@ func (s *Session) AppendMessage(roundID uuid.UUID, role Role, content Content, m
 	}
 	s.record(MessageAppended{
 		SessionID: s.ID,
-		Message: msg,
-		At: msg.CreatedAt,
+		Message:   msg,
+		At:        msg.CreatedAt,
 	})
 	return msg, nil
 }

@@ -31,26 +31,37 @@ func TestContentRoundTrip(t *testing.T) {
 		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(original))
 	}
 
-	if _, ok := decoded[0].(TextBlock); !ok {
+	if block, ok := decoded[0].(TextBlock); !ok {
 		t.Errorf("block 0 = %T, want TextBlock", decoded[0])
+	} else if block.Text != "hello" {
+		t.Errorf("text = %q, want hello", block.Text)
 	}
-	if _, ok := decoded[1].(ThinkingBlock); !ok {
+	if block, ok := decoded[1].(ThinkingBlock); !ok {
 		t.Errorf("block 1 = %T, want ThinkingBlock", decoded[1])
+	} else if block.Thinking != "let me think" || block.Signature != "sig123" || string(block.Extra) != `{"provider":"anthropic"}` {
+		t.Errorf("thinking block = %+v", block)
 	}
-	if _, ok := decoded[2].(ToolUseBlock); !ok {
+	if block, ok := decoded[2].(ToolUseBlock); !ok {
 		t.Errorf("block 2 = %T, want ToolUseBlock", decoded[2])
+	} else if block.ID != "call_1" || block.Name != "read_file" || string(block.Input) != `{"path":"/tmp/x"}` {
+		t.Errorf("tool use block = %+v", block)
 	}
 	if tr, ok := decoded[3].(ToolResultBlock); !ok {
 		t.Errorf("block 3 = %T, want ToolResultBlock", decoded[3])
 	} else {
+		if tr.ToolUseID != "call_1" {
+			t.Errorf("tool use id = %q, want call_1", tr.ToolUseID)
+		}
 		if len(tr.Content) != 1 {
 			t.Errorf("nested content length = %d, want 1", len(tr.Content))
 		} else if _, ok := tr.Content[0].(TextBlock); !ok {
 			t.Errorf("nested block = %T, want TextBlock", tr.Content[0])
 		}
 	}
-	if _, ok := decoded[4].(ImageBlock); !ok {
+	if block, ok := decoded[4].(ImageBlock); !ok {
 		t.Errorf("block 4 = %T, want ImageBlock", decoded[4])
+	} else if block.MimeType != "image/png" || block.Data != "aGVsbG8=" {
+		t.Errorf("image block = %+v", block)
 	}
 
 	// Re-marshaling the decoded content must reproduce the original bytes.

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +149,7 @@ func TestProjectionList(t *testing.T) {
 	agentA := mustSlug("agent-a")
 	agentB := mustSlug("agent-b")
 
+	baseTime := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
 		agent := agentA
 		if i%2 == 0 {
@@ -156,8 +159,8 @@ func TestProjectionList(t *testing.T) {
 			ID:        shared.NewID(),
 			Title:     "session",
 			AgentSlug: agent,
-			CreatedAt: time.Now().UTC().Add(time.Duration(i) * time.Second),
-			UpdatedAt: time.Now().UTC().Add(time.Duration(i) * time.Second),
+			CreatedAt: baseTime,
+			UpdatedAt: baseTime.Add(time.Duration(i) * time.Second),
 		}
 		if err := repo.upsertSession(ctx, sum); err != nil {
 			t.Fatal(err)
@@ -191,6 +194,17 @@ func TestProjectionList(t *testing.T) {
 	}
 	if len(limited) != 2 {
 		t.Errorf("List limited returned %d, want 2", len(limited))
+	}
+	if limited[0].UpdatedAt.Before(limited[1].UpdatedAt) {
+		t.Errorf("results are not sorted by updatedAt descending: %v then %v", limited[0].UpdatedAt, limited[1].UpdatedAt)
+	}
+
+	offset, err := repo.listSessions(ctx, conversation.ListQuery{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("List offset: %v", err)
+	}
+	if len(offset) != 2 || offset[0].UpdatedAt != all[2].UpdatedAt || offset[1].UpdatedAt != all[3].UpdatedAt {
+		t.Errorf("offset results = %+v, want rows 2 and 3", offset)
 	}
 }
 
@@ -279,6 +293,60 @@ func TestTranscriptAppendIsAppendOnly(t *testing.T) {
 	}
 	if len(loaded) != 2 {
 		t.Fatalf("loaded %d events, want 2", len(loaded))
+	}
+}
+
+func TestTranscriptLoadsLargeMessage(t *testing.T) {
+	t.Parallel()
+
+	repo := newTranscriptOnlyRepo(t)
+	sessionID := shared.NewID()
+	roundID := shared.NewID()
+	createdAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	largeText := strings.Repeat("x", 128*1024)
+	events := []shared.Event{
+		conversation.SessionStarted{SessionID: sessionID, Agent: mustSlug("coder"), Model: defaultModel(), At: createdAt},
+		conversation.RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: defaultModel(), At: createdAt},
+		conversation.MessageAppended{SessionID: sessionID, Message: conversation.Message{ID: shared.NewID(), RoundID: roundID, Role: conversation.RoleUser, Content: conversation.Text(largeText), CreatedAt: createdAt}, At: createdAt},
+	}
+	if err := repo.appendTranscript(sessionID, createdAt, 1, events); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.loadTranscript(sessionID, createdAt)
+	if err != nil {
+		t.Fatalf("loadTranscript: %v", err)
+	}
+	messageEvent, ok := loaded[2].(conversation.MessageAppended)
+	if !ok {
+		t.Fatalf("event 2 = %T, want MessageAppended", loaded[2])
+	}
+	block, ok := messageEvent.Message.Content[0].(conversation.TextBlock)
+	if !ok || block.Text != largeText {
+		t.Errorf("large message did not round-trip: type %T, length %d", messageEvent.Message.Content[0], len(block.Text))
+	}
+}
+
+func TestTranscriptReportsCorruptLine(t *testing.T) {
+	t.Parallel()
+
+	repo := newTranscriptOnlyRepo(t)
+	sessionID := shared.NewID()
+	createdAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	path := repo.pathFor(sessionID, createdAt)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := shared.EncodeEvent(1, conversation.SessionStarted{SessionID: sessionID, Agent: mustSlug("coder"), Model: defaultModel(), At: createdAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append(append(valid, '\n'), []byte("{broken\n")...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.loadTranscript(sessionID, createdAt)
+	if err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Errorf("loadTranscript error = %v, want line 2 context", err)
 	}
 }
 
@@ -385,6 +453,27 @@ func TestConversationSaveAndLoad(t *testing.T) {
 	}
 	if loaded.Title == nil || *loaded.Title != "greeting" {
 		t.Errorf("loaded title = %v, want greeting", loaded.Title)
+	}
+}
+
+func TestConversationSaveWithCanceledContextHasNoSideEffects(t *testing.T) {
+	repo := newConversationRepo(t)
+	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ThinkingOff, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := repo.Save(ctx, session); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Save error = %v, want context.Canceled", err)
+	}
+	exists, err := repo.transcriptExists(session.ID, session.CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Error("Save wrote a transcript for an already-canceled context")
+	}
+	if _, err := repo.Load(t.Context(), session.ID); err != ErrConversationNotFound {
+		t.Errorf("Load error = %v, want ErrConversationNotFound", err)
 	}
 }
 

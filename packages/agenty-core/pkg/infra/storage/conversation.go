@@ -2,10 +2,12 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -53,6 +55,10 @@ func (r *ConversationRepository) Load(ctx context.Context, id uuid.UUID) (*conve
 }
 
 func (r *ConversationRepository) Save(ctx context.Context, session *conversation.Session) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	pending := session.PendingEvents()
 	if len(pending) == 0 {
 		return nil
@@ -282,12 +288,23 @@ func (r *ConversationRepository) loadTranscript(sessionID uuid.UUID, createdAt t
 	defer f.Close()
 
 	var events []shared.Event
-	scanner := bufio.NewScanner(f)
+	reader := bufio.NewReader(f)
 	lineNo := 0
-	for scanner.Scan() {
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) == 0 && readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, readErr
+		}
 		lineNo++
-		line := scanner.Bytes()
+		line = bytes.TrimSuffix(line, []byte{'\n'})
+		line = bytes.TrimSuffix(line, []byte{'\r'})
 		if len(line) == 0 {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
 			continue
 		}
 		e, err := conversation.DecodeEventLine(line)
@@ -295,9 +312,12 @@ func (r *ConversationRepository) loadTranscript(sessionID uuid.UUID, createdAt t
 			return nil, fmt.Errorf("transcript: line %d: %w", lineNo, err)
 		}
 		events = append(events, e)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, readErr
+		}
 	}
 	return events, nil
 }

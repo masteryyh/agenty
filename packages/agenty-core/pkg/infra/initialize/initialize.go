@@ -2,6 +2,7 @@ package initialize
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
@@ -18,10 +19,14 @@ type Repositories struct {
 	Conversation *storage.ConversationRepository
 	Agent        *storage.AgentRepository
 	Catalog      *storage.CatalogRepository
+	db           *sql.DB
 }
 
 func (r *Repositories) Close() error {
-	return storage.CloseDB()
+	if r.db == nil {
+		return nil
+	}
+	return r.db.Close()
 }
 
 func OpenRepositories(ctx context.Context) (*Repositories, error) {
@@ -39,5 +44,6 @@ func OpenRepositories(ctx context.Context) (*Repositories, error) {
 		Conversation: storage.NewConversationRepository(db, paths.SessionsDir),
 		Agent:        storage.NewAgentRepository(paths.AgentsDir),
 		Catalog:      storage.NewCatalogRepository(paths.ProvidersDir),
+		db:           db,
 	}, nil
 }

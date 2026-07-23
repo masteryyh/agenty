@@ -154,9 +154,29 @@ func (r *CatalogRepository) Save(ctx context.Context, provider *catalog.Provider
 
 func (r *CatalogRepository) Delete(ctx context.Context, slug shared.Slug) error {
 	providerDir := filepath.Join(r.providersDir, slug.String())
-	err := os.RemoveAll(providerDir)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(providerDir); err != nil {
+		if os.IsNotExist(err) {
+			return ErrProviderNotFound
+		}
+		return err
+	}
+	if err := os.RemoveAll(providerDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *CatalogRepository) DeleteModel(ctx context.Context, providerSlug, modelSlug shared.Slug) error {
+	modelPath := filepath.Join(r.providersDir, providerSlug.String(), "models", modelSlug.String()+".json")
+	if err := os.Remove(modelPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	providerDir := filepath.Join(r.providersDir, providerSlug.String())
+	if _, derr := os.Stat(providerDir); os.IsNotExist(derr) {
 		return ErrProviderNotFound
 	}
-	return err
+	return catalog.ErrModelNotFound
 }

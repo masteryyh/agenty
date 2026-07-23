@@ -134,6 +134,9 @@ func TestCatalogDelete(t *testing.T) {
 	if err != ErrProviderNotFound {
 		t.Errorf("Get after Delete = %v, want ErrProviderNotFound", err)
 	}
+	if err := repo.Delete(ctx, provider.Slug); err != ErrProviderNotFound {
+		t.Errorf("Delete missing provider = %v, want ErrProviderNotFound", err)
+	}
 }
 
 func TestCatalogGetReturnsNotFoundWhenMissing(t *testing.T) {
@@ -141,5 +144,45 @@ func TestCatalogGetReturnsNotFoundWhenMissing(t *testing.T) {
 	_, err := repo.Get(context.Background(), mustSlug("unknown"))
 	if err != ErrProviderNotFound {
 		t.Errorf("Get() = %v, want ErrProviderNotFound", err)
+	}
+}
+
+func TestCatalogDeleteModel(t *testing.T) {
+	repo := newCatalogRepo(t)
+	ctx := context.Background()
+
+	provider, _ := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
+	now := time.Now().UTC()
+	provider.Models = []catalog.Model{
+		{Slug: mustSlug("claude-opus-4-8"), Name: "Opus", CreatedAt: now, UpdatedAt: now},
+		{Slug: mustSlug("claude-haiku-4-5"), Name: "Haiku", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteModel(ctx, provider.Slug, mustSlug("claude-haiku-4-5")); err != nil {
+		t.Fatalf("DeleteModel: %v", err)
+	}
+
+	loaded, err := repo.Get(ctx, provider.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Models) != 1 {
+		t.Fatalf("loaded %d models, want 1 after delete", len(loaded.Models))
+	}
+	if loaded.Models[0].Slug != mustSlug("claude-opus-4-8") {
+		t.Errorf("remaining model = %s, want claude-opus-4-8", loaded.Models[0].Slug)
+	}
+
+	// Deleting the same model again surfaces model-not-found, not a silent no-op.
+	if err := repo.DeleteModel(ctx, provider.Slug, mustSlug("claude-haiku-4-5")); err != catalog.ErrModelNotFound {
+		t.Errorf("DeleteModel missing model = %v, want catalog.ErrModelNotFound", err)
+	}
+
+	// Deleting from a missing provider surfaces provider-not-found.
+	if err := repo.DeleteModel(ctx, mustSlug("nope"), mustSlug("x")); err != ErrProviderNotFound {
+		t.Errorf("DeleteModel missing provider = %v, want ErrProviderNotFound", err)
 	}
 }

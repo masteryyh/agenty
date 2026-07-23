@@ -5,41 +5,41 @@ import (
 	"testing"
 )
 
-func TestOpenDB(t *testing.T) {
-	defer CloseDB()
+func TestOpenDBInitializesSchema(t *testing.T) {
+	t.Parallel()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db1, err := OpenDB(dbPath)
+	db, err := OpenDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 
-	// Second call ignores path and returns the same instance.
-	db2, err := OpenDB(dbPath + "-ignored")
+	wantColumns := map[string]bool{
+		"id": false, "title": false, "agent_slug": false,
+		"last_provider_slug": false, "last_model_slug": false,
+		"context_window": false, "last_thinking_effort": false,
+		"created_at": false, "updated_at": false,
+	}
+	rows, err := db.Query("SELECT name FROM pragma_table_info('sessions')")
 	if err != nil {
-		t.Fatalf("second OpenDB: %v", err)
+		t.Fatal(err)
 	}
-	if db1 != db2 {
-		t.Error("OpenDB should return the same instance on subsequent calls")
+	defer rows.Close()
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := wantColumns[column]; ok {
+			wantColumns[column] = true
+		}
 	}
-	if GetDB() != db1 {
-		t.Error("GetDB should return the singleton")
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
-
-	// Schema initialized on first open.
-	var name string
-	if err := db1.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'").Scan(&name); err != nil {
-		t.Fatalf("query sessions table: %v", err)
-	}
-	if name != "sessions" {
-		t.Errorf("sessions table not created, got name=%q", name)
-	}
-
-	var column string
-	if err := db1.QueryRow("SELECT name FROM pragma_table_info('sessions') WHERE name = 'context_window'").Scan(&column); err != nil {
-		t.Fatalf("query context_window column: %v", err)
-	}
-	if column != "context_window" {
-		t.Errorf("context column = %q, want context_window", column)
+	for column, found := range wantColumns {
+		if !found {
+			t.Errorf("sessions column %q not found", column)
+		}
 	}
 }
