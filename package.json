@@ -11,6 +11,8 @@
     "core:build": "turbo run build --filter=agenty-core",
     "core:test": "turbo run test --filter=agenty-core",
     "core:test:integration": "pnpm --filter agenty-core test:integration",
+    "core:test:e2e": "pnpm --filter agenty-core test:e2e",
+    "core:test:e2e:race": "pnpm --filter agenty-core test:e2e:race",
     "core:test:race": "pnpm --filter agenty-core test:race",
     "core:test:repeat": "pnpm --filter agenty-core test:repeat",
     "core:tidyup": "cd packages/agenty-core && go fmt ./... && go vet ./... && go mod tidy",

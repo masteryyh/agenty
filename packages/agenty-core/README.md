@@ -161,14 +161,16 @@ Run module-scoped commands from the repository root:
 pnpm core:build             # compile all agenty-core packages
 pnpm core:test              # all tests except integration and e2e build tags
 pnpm core:test:integration  # default suite plus integration-tagged tests
+pnpm core:test:e2e          # real-binary stdio workflows in isolated processes
+pnpm core:test:e2e:race     # e2e harness and core binary with race detection
 pnpm core:test:race         # default suite with the race detector
 pnpm core:test:repeat       # shuffled repeated run for isolation checks
 pnpm core:tidyup            # go fmt, go vet, and go mod tidy
 pnpm core:clean             # remove Go build and test caches for the module
 ```
 
-There is intentionally no local service command yet. Future end-to-end tests must use
-the `e2e` build tag so they stay outside the default `core:test` suite.
+There is intentionally no local service command yet. End-to-end tests use the `e2e`
+build tag so they stay outside the default `core:test` suite.
 
 ## Testing
 
@@ -176,6 +178,11 @@ The default suite covers domain behavior, application services with in-memory
 repository fakes, protocol framing, configuration, and isolated storage adapter
 contracts. Full repository wiring and RPC-to-disk paths use the `integration`
 build tag.
+
+The `test/e2e` package builds `cmd` once, launches the real binary over stdio, and gives
+each parallel test process its own `AGENTY_DATA_DIR`. It covers public Agent,
+Provider/Model, Session, JSON-RPC, chunking, startup, restart persistence, and process
+isolation contracts without accessing the user's data directory.
 
 All filesystem and SQLite tests use per-test temporary directories. Tests that
 change `AGENTY_DATA_DIR` are not parallelized because environment variables are

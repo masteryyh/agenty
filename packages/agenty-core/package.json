@@ -6,6 +6,8 @@
     "build": "go build ./...",
     "test": "go test ./...",
     "test:integration": "go test -tags=integration ./...",
+    "test:e2e": "go test -tags=e2e -count=1 -parallel=8 ./test/e2e",
+    "test:e2e:race": "go test -race -tags=e2e -count=1 -parallel=4 ./test/e2e",
     "test:race": "go test -race -count=1 ./...",
     "test:repeat": "go test -shuffle=on -count=10 ./...",
     "vet": "go vet ./...",

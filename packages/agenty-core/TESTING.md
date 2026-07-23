@@ -12,6 +12,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config and storage | `t.TempDir()`, real files, and local SQLite | Config discovery, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
 | Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows | With `integration` |
+| Executable E2E | Real `cmd` subprocesses with isolated data directories | stdio JSON-RPC business workflows, startup failure, chunk registration, restart persistence, and parallel process isolation | With `e2e` |
 
 The `integration` build tag currently enables:
 
@@ -19,6 +20,10 @@ The `integration` build tag currently enables:
   lifecycle.
 - `pkg/infra/rpc/adapter/adapter_test.go` for full RPC adapter flows, including
   chunked input.
+
+The `e2e` build tag enables `test/e2e`. `TestMain` builds the core binary once; every
+test starts its own process with a unique `AGENTY_DATA_DIR`. The test-side client uses
+only the public NDJSON protocol and does not import core implementation packages.
 
 The suite intentionally skips pure DTOs, trivial struct construction, thin getters,
 and constructors that only assign fields. This includes `Agent.New`, `NewID`,
@@ -34,6 +39,8 @@ paths are also outside the unit-test scope.
 - Application tests use independent in-memory repository fakes.
 - Tests that set `AGENTY_DATA_DIR` are not parallel because environment variables are
   process-global.
+- E2E tests set `AGENTY_DATA_DIR` on each child process instead of mutating the test
+  runner's environment, so independent workflows use `t.Parallel()` safely.
 - Chunk expiration tests use `testing/synctest` instead of real-time waits.
 
 Run Go commands from `packages/agenty-core/`. The module's pnpm commands can be run
@@ -45,17 +52,21 @@ there directly. From the repository root, use the corresponding `pnpm core:*` co
 | --- | --- | --- |
 | `pnpm test` | `pnpm core:test` | All tests without `integration` or `e2e` build tags |
 | `pnpm test:integration` | `pnpm core:test:integration` | Default suite plus integration-tagged tests |
+| `pnpm test:e2e` | `pnpm core:test:e2e` | Real-binary E2E tests with up to eight parallel workflows |
+| `pnpm test:e2e:race` | `pnpm core:test:e2e:race` | Race-instrumented E2E harness and core binary |
 | `pnpm test:race` | `pnpm core:test:race` | Default suite with the race detector and no result-cache reuse |
 | `pnpm test:repeat` | `pnpm core:test:repeat` | Ten shuffled runs for isolation checks |
 
-Future end-to-end tests must use the `e2e` build tag so `pnpm core:test` remains the
-complete fast suite without complex integration or end-to-end environments.
+End-to-end tests use the `e2e` build tag so `pnpm core:test` remains the complete fast
+suite without complex integration or process environments.
 
 The corresponding Go commands are:
 
 ```sh
 go test ./...
 go test -tags=integration ./...
+go test -tags=e2e -count=1 -parallel=8 ./test/e2e
+go test -race -tags=e2e -count=1 -parallel=4 ./test/e2e
 go test -race -count=1 ./...
 go test -shuffle=on -count=10 ./...
 ```
@@ -94,8 +105,11 @@ The default suite snapshot verified on 2026-07-22 has 70.1% statement coverage.
 `pkg/application` at 76.4%. Coverage is reported as a snapshot because intentionally
 untested construction and wiring code lowers the module total.
 
-All current integration tests use local files and SQLite; they do not require network
-services or a separately managed database.
+All integration and E2E tests use local files and SQLite; they do not require network
+services or a separately managed database. E2E cases focus on observable process
+contracts. Exhaustive parser permutations, the physical 64 MiB line limit, and chunk
+assembler validation remain in the faster RPC tests instead of being duplicated with
+large subprocess payloads.
 
 Two implementation boundaries affect the tests:
 
