@@ -12,11 +12,13 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	"github.com/masteryyh/agenty-core/pkg/infra/config"
 )
 
 func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AGENTY_DATA_DIR", tmpDir)
+	config.ResetForTesting()
 
 	repos, err := OpenRepositories(context.Background())
 	if err != nil {

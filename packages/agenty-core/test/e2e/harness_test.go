@@ -82,16 +82,17 @@ type coreProcess struct {
 
 func startCore(t *testing.T) *coreProcess {
 	t.Helper()
-	return startCoreAt(t, t.TempDir())
+	dataDir := t.TempDir()
+	return startCoreAt(t, dataDir, coreEnv(dataDir))
 }
 
-func startCoreAt(t *testing.T, dataDir string) *coreProcess {
+func startCoreAt(t *testing.T, dataDir string, env []string) *coreProcess {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, coreBinary)
 	cmd.Dir = moduleRoot
-	cmd.Env = replaceEnv(os.Environ(), "AGENTY_DATA_DIR", dataDir)
+	cmd.Env = env
 	cmd.WaitDelay = 2 * time.Second
 
 	stdin, err := cmd.StdinPipe()
@@ -337,6 +338,15 @@ func replaceEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(result, prefix+value)
+}
+
+func coreEnv(dataDir string) []string {
+	env := replaceEnv(os.Environ(), "AGENTY_DATA_DIR", dataDir)
+	// Clear logging env so the child process is driven by its config file
+	// (InitializeDataDir seeds info/text defaults). Tests that need to
+	// exercise env overrides set these explicitly via replaceEnv.
+	env = replaceEnv(env, "AGENTY_LOG_LEVEL", "")
+	return replaceEnv(env, "AGENTY_LOG_FORMAT", "")
 }
 
 func requireSuccess(t *testing.T, response rpcResponse) json.RawMessage {

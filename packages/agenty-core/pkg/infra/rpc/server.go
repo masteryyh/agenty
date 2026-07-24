@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 )
 
@@ -28,7 +27,7 @@ func NewServer(d *Dispatcher, in io.Reader, out io.Writer) *Server {
 		dispatcher:   d,
 		in:           in,
 		out:          out,
-		logger:       slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		logger:       slog.Default(),
 		maxLineBytes: defaultMaxLineBytes,
 	}
 }
@@ -94,7 +93,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			return err
 		case ev := <-events:
 			if ev.tooLarge {
-				s.write(response{
+				s.write(ctx, response{
 					JSONRPC: "2.0",
 					ID:      json.RawMessage("null"),
 					Error:   MessageTooLarge(s.maxLineBytes),
@@ -111,7 +110,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) {
 	if len(trimmed) > 0 && trimmed[0] == '[' {
 		var batch []json.RawMessage
 		if err := json.Unmarshal(trimmed, &batch); err != nil {
-			s.write(response{
+			s.write(ctx, response{
 				JSONRPC: "2.0",
 				ID:      json.RawMessage("null"),
 				Error:   ParseError("rpc: parse error: " + err.Error()),
@@ -124,7 +123,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) {
 
 	resp, respond := s.handleSingle(ctx, line)
 	if respond {
-		s.write(resp)
+		s.write(ctx, resp)
 	}
 }
 
@@ -184,7 +183,7 @@ func validRequestID(id json.RawMessage) bool {
 
 func (s *Server) handleBatch(ctx context.Context, batch []json.RawMessage) {
 	if len(batch) == 0 {
-		s.write(response{
+		s.write(ctx, response{
 			JSONRPC: "2.0",
 			ID:      json.RawMessage("null"),
 			Error:   InvalidRequest("rpc: empty batch"),
@@ -203,31 +202,39 @@ func (s *Server) handleBatch(ctx context.Context, batch []json.RawMessage) {
 	if len(responses) == 0 {
 		return
 	}
-	s.writeBatch(responses)
+	s.writeBatch(ctx, responses)
 }
 
-func (s *Server) write(resp response) {
+func (s *Server) write(ctx context.Context, resp response) {
 	data, err := json.Marshal(resp)
 	if err != nil {
-		s.logger.Error("rpc: failed to encode response", "error", err)
+		s.logger.ErrorContext(ctx, "failed to encode RPC response", "error", err)
 		return
 	}
+	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, _ = s.out.Write(data)
-	_, _ = s.out.Write([]byte("\n"))
+	if n, err := s.out.Write(data); err != nil {
+		s.logger.ErrorContext(ctx, "failed to write RPC response", "error", err)
+	} else if n != len(data) {
+		s.logger.ErrorContext(ctx, "failed to write RPC response", "error", io.ErrShortWrite)
+	}
 }
 
-func (s *Server) writeBatch(resps []response) {
+func (s *Server) writeBatch(ctx context.Context, resps []response) {
 	data, err := json.Marshal(resps)
 	if err != nil {
-		s.logger.Error("rpc: failed to encode batch response", "error", err)
+		s.logger.ErrorContext(ctx, "failed to encode RPC batch response", "error", err)
 		return
 	}
+	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, _ = s.out.Write(data)
-	_, _ = s.out.Write([]byte("\n"))
+	if n, err := s.out.Write(data); err != nil {
+		s.logger.ErrorContext(ctx, "failed to write RPC batch response", "error", err)
+	} else if n != len(data) {
+		s.logger.ErrorContext(ctx, "failed to write RPC batch response", "error", io.ErrShortWrite)
+	}
 }
 
 func readLine(r *bufio.Reader, max int) (line []byte, tooLarge bool, err error) {

@@ -4,9 +4,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	json "github.com/bytedance/sonic"
 	"github.com/spf13/viper"
+)
+
+const (
+	EnvDataDir   = "AGENTY_DATA_DIR"
+	EnvLogLevel  = "AGENTY_LOG_LEVEL"
+	EnvLogFormat = "AGENTY_LOG_FORMAT"
 )
 
 var (
@@ -55,9 +62,20 @@ func Load() (*Config, *Paths, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, nil, err
 	}
+	applyEnvOverrides(&cfg, os.Getenv)
 
 	paths.ConfigFile = file
 	return &cfg, paths, nil
+}
+
+func applyEnvOverrides(cfg *Config, getenv func(string) string) {
+	if v := getenv(EnvLogLevel); strings.TrimSpace(v) != "" {
+		cfg.Logging.Level = v
+	}
+
+	if v := getenv(EnvLogFormat); strings.TrimSpace(v) != "" {
+		cfg.Logging.Format = v
+	}
 }
 
 func InitializeDataDir() error {
@@ -105,6 +123,8 @@ func validateConfigFile(file, format string) error {
 func writeDefaultConfig(file string) error {
 	v := viper.New()
 	v.Set("version", 1)
+	v.Set("logging.level", "info")
+	v.Set("logging.format", "text")
 
 	data, err := json.MarshalIndent(v.AllSettings(), "", "  ")
 	if err != nil {
@@ -126,7 +146,7 @@ func findConfigFile(dataDir string) (file, format string, err error) {
 }
 
 func ResolvePaths() (*Paths, error) {
-	dataDir := os.Getenv("AGENTY_DATA_DIR")
+	dataDir := os.Getenv(EnvDataDir)
 	if dataDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

@@ -10,7 +10,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and thinking validation | Yes |
 | Application | In-memory repository fakes | Agent, Provider, and Session use cases, validation, partial updates, error mapping, and pending-event lifecycle | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
-| Config and storage | `t.TempDir()`, real files, and local SQLite | Config discovery, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
+| Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
 | Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows | With `integration` |
 | Executable E2E | Real `cmd` subprocesses with isolated data directories | stdio JSON-RPC business workflows, startup failure, chunk registration, restart persistence, and parallel process isolation | With `e2e` |
 
@@ -37,10 +37,14 @@ paths are also outside the unit-test scope.
 - Filesystem and SQLite tests use per-test temporary directories and do not access the
   user's `~/.agenty` directory.
 - Application tests use independent in-memory repository fakes.
-- Tests that set `AGENTY_DATA_DIR` are not parallel because environment variables are
-  process-global.
-- E2E tests set `AGENTY_DATA_DIR` on each child process instead of mutating the test
-  runner's environment, so independent workflows use `t.Parallel()` safely.
+- Tests that set `AGENTY_DATA_DIR`, `AGENTY_LOG_LEVEL`, or `AGENTY_LOG_FORMAT` are not
+  parallel because environment variables are process-global.
+- E2E tests set the data directory on each child process and clear the logging
+  environment variables so the child is driven by its config file (seeded with
+  info/text defaults). They do not mutate the test runner's environment, so
+  independent workflows use `t.Parallel()` safely and write logs only inside
+  their isolated data directory. Tests that exercise env overrides set those
+  variables explicitly on the child.
 - Chunk expiration tests use `testing/synctest` instead of real-time waits.
 
 Run Go commands from `packages/agenty-core/`. The module's pnpm commands can be run

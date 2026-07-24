@@ -25,7 +25,7 @@ func TestStartupRejectsMalformedExistingConfig(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, coreBinary)
 	cmd.Dir = moduleRoot
-	cmd.Env = replaceEnv(os.Environ(), "AGENTY_DATA_DIR", dataDir)
+	cmd.Env = coreEnv(dataDir)
 	cmd.Stdin = strings.NewReader("")
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
@@ -40,7 +40,18 @@ func TestStartupRejectsMalformedExistingConfig(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("startup stdout = %q, want empty", stdout.String())
 	}
-	if diagnostics := stderr.String(); !strings.Contains(diagnostics, "agenty-core: failed to open repositories:") || !strings.Contains(diagnostics, "existing config file is malformed") {
-		t.Fatalf("startup stderr = %q", diagnostics)
+	// A malformed config fails config.Init before logging can initialize, so
+	// the bootstrap diagnostics land on stderr (stdout stays a clean JSON-RPC
+	// stream) and no log file is created.
+	if text := stderr.String(); !strings.Contains(text, "failed to initialize config") || !strings.Contains(text, "existing config file is malformed") {
+		t.Fatalf("startup stderr = %q, want config init failure diagnostics", text)
+	}
+
+	logFiles, err := filepath.Glob(filepath.Join(dataDir, "logs", "*", "*", "*", "core.log"))
+	if err != nil {
+		t.Fatalf("glob startup log: %v", err)
+	}
+	if len(logFiles) != 0 {
+		t.Fatalf("startup log files = %v, want none (logging never initialized)", logFiles)
 	}
 }

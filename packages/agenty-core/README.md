@@ -16,6 +16,7 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Providers | `~/.agenty/providers/<slug>/provider.json` | Catalog aggregate |
 | Models | `~/.agenty/providers/<slug>/models/<model-slug>.json` | Catalog aggregate member |
 | Agents | `~/.agenty/agents/<slug>.json` | Agent aggregate |
+| Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
 summary projection that can be rebuilt by replaying the JSONL transcript. Its current
@@ -50,8 +51,9 @@ filesystem + SQLite storage model.
 
 ```
 pkg/infra/
-├── config/             Load ~/.agenty/config.json and resolve data-dir paths
+├── config/             Load config file + env overrides into a merged singleton; resolve data-dir paths
 ├── initialize/         OpenRepositories: one-call setup of all stores
+├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── agent.go        AgentRepository (agent JSON files)
@@ -97,8 +99,33 @@ stdin, one response per line on stdout. Each line must be a single compact JSON
 value produced by `json.Marshal` (no `MarshalIndent`); unescaped control bytes
 or multi-line JSON would split one message across lines and corrupt framing.
 Notifications (requests without an `id`) produce no response; batches (arrays)
-produce a single array response. Diagnostics go to stderr so stdout stays a
-clean JSON-RPC stream. The server shuts down on stdin EOF, SIGINT or SIGTERM.
+produce a single array response. Diagnostics go to the core log file so stdout
+stays a clean JSON-RPC stream. The server shuts down on stdin EOF, SIGINT or
+SIGTERM. stderr is reserved for failures that prevent the log file itself from
+being initialized or closed.
+
+### Logging
+
+`agenty-core` uses the standard library `slog` package. Logs are appended to the
+file for the process start date under
+`~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log`. When `AGENTY_DATA_DIR` is set, the
+`logs` directory moves under that data directory as well.
+
+`AGENTY_LOG_LEVEL` / `logging.level` accept `debug`, `info`, `warn`, or `error`
+and default to `info`. `AGENTY_LOG_FORMAT` / `logging.format` accept `text` or
+`jsonl` and default to `text`. Both can be set in the `logging` section of the
+config file or via the `AGENTY_LOG_LEVEL` / `AGENTY_LOG_FORMAT` environment
+variables; environment values take precedence over the file when set, so they
+serve as temporary overrides without editing the file, while an empty or
+whitespace-only environment value falls back to the file value. JSONL mode uses
+`slog.JSONHandler` and writes one JSON object per line to `core.jsonl`; text
+mode uses `slog.TextHandler`. Values are case-insensitive, surrounding
+whitespace is ignored, and an unsupported value fails startup.
+
+The config file and environment are merged once into a process-wide
+`config.Manager` singleton during startup; `logging`, `initialize`, and other
+modules read from this single source instead of parsing environment variables
+or paths independently.
 
 An inbound line exceeding 64 MiB is not fatal: the server discards it, replies
 with `-32003` message too large (`id: null`, `data.maxLineBytes`), and keeps

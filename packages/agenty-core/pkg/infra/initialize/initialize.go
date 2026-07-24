@@ -9,10 +9,11 @@ import (
 )
 
 func DataDir() (*config.Paths, error) {
-	if err := config.InitializeDataDir(); err != nil {
+	mgr, err := config.Init()
+	if err != nil {
 		return nil, err
 	}
-	return config.ResolvePaths()
+	return mgr.Paths(), nil
 }
 
 type Repositories struct {

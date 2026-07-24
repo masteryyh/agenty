@@ -14,7 +14,7 @@ func TestStatePersistsAcrossProcessRestart(t *testing.T) {
 	t.Parallel()
 	dataDir := t.TempDir()
 
-	first := startCoreAt(t, dataDir)
+	first := startCoreAt(t, dataDir, coreEnv(dataDir))
 	requireSuccess(t, first.Call(t, "agent.create", map[string]any{
 		"slug": "persistent-agent", "name": "Persistent Agent",
 	}))
@@ -63,7 +63,7 @@ func TestStatePersistsAcrossProcessRestart(t *testing.T) {
 		}
 	}
 
-	second := startCoreAt(t, dataDir)
+	second := startCoreAt(t, dataDir, coreEnv(dataDir))
 	agent := decodeResult[agentView](t, second.Call(t, "agent.get", map[string]any{"slug": "persistent-agent"}))
 	provider := decodeResult[providerView](t, second.Call(t, "provider.get", map[string]any{"slug": "persistent-provider"}))
 	reloaded := decodeResult[sessionView](t, second.Call(t, "session.get", map[string]any{"id": session.ID}))
