@@ -9,7 +9,7 @@ func TestSessionLifecycleAndListing(t *testing.T) {
 	core := startCore(t)
 
 	primary := createSession(t, core, "coder", "openai", "gpt-5")
-	if primary.ID == "" || primary.AgentSlug != "coder" || primary.CurrentThinkingEffort != "off" {
+	if primary.ID == "" || primary.AgentSlug != "coder" || primary.CurrentReasoningEffort != "off" {
 		t.Fatalf("created session = %+v", primary)
 	}
 	if primary.CurrentModel == nil || primary.CurrentModel.ProviderSlug != "openai" || primary.CurrentModel.ModelSlug != "gpt-5" {
@@ -30,11 +30,11 @@ func TestSessionLifecycleAndListing(t *testing.T) {
 		t.Fatalf("updated session model = %+v", modeled)
 	}
 
-	thoughtful := decodeResult[sessionView](t, core.Call(t, "session.setThinkingEffort", map[string]any{
-		"id": primary.ID, "thinkingEffort": "high",
+	reasoning := decodeResult[sessionView](t, core.Call(t, "session.setReasoningEffort", map[string]any{
+		"id": primary.ID, "reasoningEffort": "high",
 	}))
-	if thoughtful.CurrentThinkingEffort != "high" {
-		t.Fatalf("thinking effort = %q", thoughtful.CurrentThinkingEffort)
+	if reasoning.CurrentReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q", reasoning.CurrentReasoningEffort)
 	}
 
 	working := decodeResult[sessionView](t, core.Call(t, "session.setCwd", map[string]any{
@@ -60,7 +60,7 @@ func TestSessionLifecycleAndListing(t *testing.T) {
 	}
 
 	got := decodeResult[sessionView](t, core.Call(t, "session.get", map[string]any{"id": primary.ID}))
-	if got.Title == nil || *got.Title != "Investigate the runtime" || got.CurrentThinkingEffort != "high" {
+	if got.Title == nil || *got.Title != "Investigate the runtime" || got.CurrentReasoningEffort != "high" {
 		t.Fatalf("reloaded session = %+v", got)
 	}
 

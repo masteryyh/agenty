@@ -12,7 +12,7 @@ type BlockType string
 
 const (
 	BlockText       BlockType = "text"
-	BlockThinking   BlockType = "thinking"
+	BlockReasoning  BlockType = "reasoning"
 	BlockToolUse    BlockType = "tool_use"
 	BlockToolResult BlockType = "tool_result"
 	BlockImage      BlockType = "image"
@@ -40,23 +40,23 @@ func (b TextBlock) MarshalJSON() ([]byte, error) {
 	}{Type: BlockText, alias: alias(b)})
 }
 
-type ThinkingBlock struct {
-	Thinking  string         `json:"thinking"`
+type ReasoningBlock struct {
+	Reasoning string         `json:"reasoning"`
 	Signature string         `json:"signature,omitempty"`
 	Redacted  bool           `json:"redacted,omitempty"`
 	Extra     shared.RawJSON `json:"extra,omitempty"`
 }
 
-func (ThinkingBlock) BlockType() BlockType {
-	return BlockThinking
+func (ReasoningBlock) BlockType() BlockType {
+	return BlockReasoning
 }
 
-func (b ThinkingBlock) MarshalJSON() ([]byte, error) {
-	type alias ThinkingBlock
+func (b ReasoningBlock) MarshalJSON() ([]byte, error) {
+	type alias ReasoningBlock
 	return json.Marshal(struct {
 		Type BlockType `json:"type"`
 		alias
-	}{Type: BlockThinking, alias: alias(b)})
+	}{Type: BlockReasoning, alias: alias(b)})
 }
 
 type ToolUseBlock struct {
@@ -141,8 +141,8 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 				return err
 			}
 			block = b
-		case BlockThinking:
-			var b ThinkingBlock
+		case BlockReasoning:
+			var b ReasoningBlock
 			if err := json.Unmarshal(raw, &b); err != nil {
 				return err
 			}

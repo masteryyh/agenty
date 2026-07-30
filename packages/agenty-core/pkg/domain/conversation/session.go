@@ -18,30 +18,30 @@ var (
 )
 
 type Session struct {
-	ID                    uuid.UUID             `json:"id"`
-	AgentSlug             shared.Slug           `json:"agentSlug"`
-	Title                 *string               `json:"title,omitempty"`
-	Cwd                   *string               `json:"cwd,omitempty"`
-	CurrentModel          *shared.ModelRef      `json:"currentModel,omitempty"`
-	ContextWindow         int64                 `json:"contextWindow"`
-	CurrentThinkingEffort shared.ThinkingEffort `json:"currentThinkingEffort,omitempty"`
-	Rounds                []Round               `json:"rounds"`
-	CreatedAt             time.Time             `json:"createdAt"`
-	UpdatedAt             time.Time             `json:"updatedAt"`
+	ID                     uuid.UUID              `json:"id"`
+	AgentSlug              shared.Slug            `json:"agentSlug"`
+	Title                  *string                `json:"title,omitempty"`
+	Cwd                    *string                `json:"cwd,omitempty"`
+	CurrentModel           *shared.ModelRef       `json:"currentModel,omitempty"`
+	ContextWindow          int64                  `json:"contextWindow"`
+	CurrentReasoningEffort shared.ReasoningEffort `json:"currentReasoningEffort,omitempty"`
+	Rounds                 []Round                `json:"rounds"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	UpdatedAt              time.Time              `json:"updatedAt"`
 
 	pending []shared.Event
 }
 
-func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ThinkingEffort, cwd *string) *Session {
+func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
 	s := &Session{}
 	s.record(SessionStarted{
-		SessionID:      shared.NewID(),
-		Agent:          agentSlug,
-		Model:          model,
-		ContextWindow:  contextWindow,
-		ThinkingEffort: effort,
-		Cwd:            cloneString(cwd),
-		At:             now(),
+		SessionID:       shared.NewID(),
+		Agent:           agentSlug,
+		Model:           model,
+		ContextWindow:   contextWindow,
+		ReasoningEffort: effort,
+		Cwd:             cloneString(cwd),
+		At:              now(),
 	})
 	return s
 }
@@ -55,11 +55,11 @@ func (s *Session) SetModel(model shared.ModelRef, contextWindow int64) {
 	})
 }
 
-func (s *Session) SetThinkingEffort(effort shared.ThinkingEffort) {
-	s.record(SessionThinkingEffortSet{
-		SessionID:      s.ID,
-		ThinkingEffort: effort,
-		At:             now(),
+func (s *Session) SetReasoningEffort(effort shared.ReasoningEffort) {
+	s.record(SessionReasoningEffortSet{
+		SessionID:       s.ID,
+		ReasoningEffort: effort,
+		At:              now(),
 	})
 }
 
@@ -74,14 +74,14 @@ func (s *Session) StartRound() (uuid.UUID, error) {
 
 	id := shared.NewID()
 	s.record(RoundStarted{
-		SessionID:      s.ID,
-		RoundID:        id,
-		Sequence:       len(s.Rounds) + 1,
-		Model:          *s.CurrentModel,
-		ContextWindow:  s.ContextWindow,
-		ThinkingEffort: s.CurrentThinkingEffort,
-		Cwd:            s.Cwd,
-		At:             now(),
+		SessionID:       s.ID,
+		RoundID:         id,
+		Sequence:        len(s.Rounds) + 1,
+		Model:           *s.CurrentModel,
+		ContextWindow:   s.ContextWindow,
+		ReasoningEffort: s.CurrentReasoningEffort,
+		Cwd:             s.Cwd,
+		At:              now(),
 	})
 	return id, nil
 }
@@ -180,7 +180,7 @@ func (s *Session) apply(e shared.Event) {
 		s.AgentSlug = ev.Agent
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
-		s.CurrentThinkingEffort = ev.ThinkingEffort
+		s.CurrentReasoningEffort = ev.ReasoningEffort
 		s.Cwd = cloneString(ev.Cwd)
 		s.CreatedAt = ev.At
 		s.UpdatedAt = ev.At
@@ -188,8 +188,8 @@ func (s *Session) apply(e shared.Event) {
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
 		s.UpdatedAt = ev.At
-	case SessionThinkingEffortSet:
-		s.CurrentThinkingEffort = ev.ThinkingEffort
+	case SessionReasoningEffortSet:
+		s.CurrentReasoningEffort = ev.ReasoningEffort
 		s.UpdatedAt = ev.At
 	case SessionCwdSet:
 		s.Cwd = cloneString(ev.Cwd)

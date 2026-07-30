@@ -21,7 +21,7 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
 summary projection that can be rebuilt by replaying the JSONL transcript. Its current
 configuration projection includes the selected model, its `context_window`, and the
-thinking effort.
+reasoning effort.
 
 ## Domain layer
 
@@ -31,18 +31,40 @@ and models).
 
 ```
 pkg/domain/
-├── shared/        Shared kernel: Slug, ModelRef, ThinkingEffort, Metadata, Event, ID
+├── shared/        Shared kernel: Slug, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session → Round → Message), content blocks, events
 ├── agent/         Agent aggregate
 └── catalog/       Provider aggregate (Provider → Model)
 ```
 
 The conversation transcript is event-sourced: each JSONL line is a domain event
-(`session_started`, `session_model_set`, `session_thinking_effort_set`,
+(`session_started`, `session_model_set`, `session_reasoning_effort_set`,
 `session_cwd_set`, `round_started`, `message_appended`, `round_ended`, ...), and a
 `Session` aggregate can be reconstructed with `conversation.ReplaySession`. A Session
 holds the current configuration for future rounds, while `RoundStarted` snapshots the
-model, context window, thinking effort, and working directory used by that round.
+model, context window, reasoning effort, and working directory used by that round.
+
+### Reasoning effort
+
+Agenty exposes exactly six provider-independent reasoning effort levels: `off`, `low`,
+`medium`, `high`, `xhigh`, and `max`. A model stores a `reasoningEffortMapping` object
+whose keys are provider-native effort names and whose values are Agenty effort levels:
+
+```json
+{
+  "reasoningEffortMapping": {
+    "none": "off",
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high"
+  }
+}
+```
+
+The mapping allows multiple native efforts to normalize to the same Agenty effort.
+A model whose mapping has no enabled effort does not support reasoning. Only the six
+Agenty levels above are valid mapping values; native effort names are provider-specific.
 
 ## Infrastructure layer
 
@@ -82,7 +104,7 @@ in-memory fakes without opening files or a database.
 - `ProviderService` — provider CRUD plus model sub-resource operations
   (`AddModel`/`RemoveModel`).
 - `SessionService` — session CRUD and configuration mutations
-  (`SetTitle`/`SetModel`/`SetThinkingEffort`/`SetCwd`).
+  (`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`).
 
 `application.Error` carries a `Code` (NotFound/AlreadyExists/Validation/Internal)
 that the interface layer maps to a structured JSON-RPC error code.
@@ -139,7 +161,7 @@ Methods follow a `resource.action` naming:
 | --- | --- |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setThinkingEffort`, `session.setCwd` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
 ### Chunked uploads

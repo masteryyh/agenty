@@ -9,15 +9,15 @@ func TestAgentLifecycle(t *testing.T) {
 	core := startCore(t)
 
 	created := decodeResult[agentView](t, core.Call(t, "agent.create", map[string]any{
-		"slug":                  "coder",
-		"name":                  "Code Assistant",
-		"description":           "Builds and reviews code",
-		"soul":                  "Prefer clear, verified changes.",
-		"defaultModel":          map[string]any{"providerSlug": "openai", "modelSlug": "gpt-5"},
-		"defaultContextWindow":  200000,
-		"defaultThinkingEffort": "high",
-		"isDefault":             true,
-		"metadata":              map[string]any{"team": "platform"},
+		"slug":                   "coder",
+		"name":                   "Code Assistant",
+		"description":            "Builds and reviews code",
+		"soul":                   "Prefer clear, verified changes.",
+		"defaultModel":           map[string]any{"providerSlug": "openai", "modelSlug": "gpt-5"},
+		"defaultContextWindow":   200000,
+		"defaultReasoningEffort": "high",
+		"isDefault":              true,
+		"metadata":               map[string]any{"team": "platform"},
 	}))
 	if created.Slug != "coder" || created.Name != "Code Assistant" {
 		t.Fatalf("created agent = %+v", created)
@@ -25,7 +25,7 @@ func TestAgentLifecycle(t *testing.T) {
 	if created.DefaultModel == nil || created.DefaultModel.ProviderSlug != "openai" || created.DefaultModel.ModelSlug != "gpt-5" {
 		t.Fatalf("created default model = %+v", created.DefaultModel)
 	}
-	if created.DefaultContextWindow != 200000 || created.DefaultThinkingEffort != "high" || !created.IsDefault {
+	if created.DefaultContextWindow != 200000 || created.DefaultReasoningEffort != "high" || !created.IsDefault {
 		t.Fatalf("created defaults = %+v", created)
 	}
 	if created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {

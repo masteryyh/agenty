@@ -11,11 +11,6 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
 
-// SessionService implements session CRUD and configuration use-cases on top of
-// a ConversationRepository. Sessions are event-sourced: every mutation loads
-// the aggregate, applies a domain method that records pending events, saves
-// (appending events to the transcript and refreshing the projection), then
-// clears the pending buffer.
 type SessionService struct {
 	repo sessionRepository
 }
@@ -31,16 +26,13 @@ func NewSessionService(repo sessionRepository) *SessionService {
 	return &SessionService{repo: repo}
 }
 
-// SessionCreateInput carries the fields for starting a session. AgentSlug and
-// the provider/model pair are required so a session always begins with a
-// configured model (the conversation domain requires one to start a round).
 type SessionCreateInput struct {
-	AgentSlug      string                `json:"agentSlug"`
-	ProviderSlug   string                `json:"providerSlug"`
-	ModelSlug      string                `json:"modelSlug"`
-	ContextWindow  int64                 `json:"contextWindow,omitempty"`
-	ThinkingEffort shared.ThinkingEffort `json:"thinkingEffort,omitempty"`
-	Cwd            *string               `json:"cwd,omitempty"`
+	AgentSlug       string                 `json:"agentSlug"`
+	ProviderSlug    string                 `json:"providerSlug"`
+	ModelSlug       string                 `json:"modelSlug"`
+	ContextWindow   int64                  `json:"contextWindow,omitempty"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
+	Cwd             *string                `json:"cwd,omitempty"`
 }
 
 func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*conversation.Session, error) {
@@ -57,12 +49,12 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 		return nil, Validation(err.Error())
 	}
 
-	effort := in.ThinkingEffort
+	effort := in.ReasoningEffort
 	if effort == "" {
-		effort = shared.ThinkingOff
+		effort = shared.ReasoningOff
 	}
 	if !effort.Valid() {
-		return nil, Validation("invalid thinking effort: " + string(effort))
+		return nil, Validation("invalid reasoning effort: " + string(effort))
 	}
 
 	session := conversation.StartSession(
@@ -84,6 +76,7 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 	if err != nil {
 		return nil, Validation("invalid session id: " + err.Error())
 	}
+
 	sess, err := s.repo.Load(ctx, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrConversationNotFound) {
@@ -94,7 +87,6 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 	return sess, nil
 }
 
-// SessionListQuery filters and paginates the session listing.
 type SessionListQuery struct {
 	AgentSlug string
 	Limit     int
@@ -110,6 +102,7 @@ func (s *SessionService) List(ctx context.Context, q SessionListQuery) ([]conver
 		}
 		agentSlug = &sv
 	}
+
 	sums, err := s.repo.List(ctx, conversation.ListQuery{AgentSlug: agentSlug, Limit: q.Limit, Offset: q.Offset})
 	if err != nil {
 		return nil, Internal("failed to list sessions: " + err.Error())
@@ -122,6 +115,7 @@ func (s *SessionService) Delete(ctx context.Context, idStr string) error {
 	if err != nil {
 		return Validation("invalid session id: " + err.Error())
 	}
+
 	if err := s.repo.Delete(ctx, id); err != nil {
 		if errors.Is(err, storage.ErrConversationNotFound) {
 			return NotFound("session " + idStr + " not found")
@@ -157,19 +151,18 @@ func (s *SessionService) SetModel(ctx context.Context, idStr, providerSlug, mode
 	return s.saveUpdated(ctx, sess)
 }
 
-func (s *SessionService) SetThinkingEffort(ctx context.Context, idStr string, effort shared.ThinkingEffort) (*conversation.Session, error) {
+func (s *SessionService) SetReasoningEffort(ctx context.Context, idStr string, effort shared.ReasoningEffort) (*conversation.Session, error) {
 	sess, err := s.loadForUpdate(ctx, idStr)
 	if err != nil {
 		return nil, err
 	}
 	if !effort.Valid() {
-		return nil, Validation("invalid thinking effort: " + string(effort))
+		return nil, Validation("invalid reasoning effort: " + string(effort))
 	}
-	sess.SetThinkingEffort(effort)
+	sess.SetReasoningEffort(effort)
 	return s.saveUpdated(ctx, sess)
 }
 
-// SetCwd sets or clears the session working directory. A nil cwd clears it.
 func (s *SessionService) SetCwd(ctx context.Context, idStr string, cwd *string) (*conversation.Session, error) {
 	sess, err := s.loadForUpdate(ctx, idStr)
 	if err != nil {

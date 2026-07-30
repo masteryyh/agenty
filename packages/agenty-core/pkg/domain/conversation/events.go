@@ -11,24 +11,24 @@ import (
 )
 
 const (
-	EventSessionStarted           = "session_started"
-	EventSessionModelSet          = "session_model_set"
-	EventSessionThinkingEffortSet = "session_thinking_effort_set"
-	EventSessionCwdSet            = "session_cwd_set"
-	EventRoundStarted             = "round_started"
-	EventMessageAppended          = "message_appended"
-	EventRoundEnded               = "round_ended"
-	EventSessionTitleSet          = "session_title_set"
+	EventSessionStarted            = "session_started"
+	EventSessionModelSet           = "session_model_set"
+	EventSessionReasoningEffortSet = "session_reasoning_effort_set"
+	EventSessionCwdSet             = "session_cwd_set"
+	EventRoundStarted              = "round_started"
+	EventMessageAppended           = "message_appended"
+	EventRoundEnded                = "round_ended"
+	EventSessionTitleSet           = "session_title_set"
 )
 
 type SessionStarted struct {
-	SessionID      uuid.UUID             `json:"sessionId"`
-	Agent          shared.Slug           `json:"agent"`
-	Model          shared.ModelRef       `json:"model"`
-	ContextWindow  int64                 `json:"contextWindow"`
-	ThinkingEffort shared.ThinkingEffort `json:"thinkingEffort,omitempty"`
-	Cwd            *string               `json:"cwd,omitempty"`
-	At             time.Time             `json:"occurredAt"`
+	SessionID       uuid.UUID              `json:"sessionId"`
+	Agent           shared.Slug            `json:"agent"`
+	Model           shared.ModelRef        `json:"model"`
+	ContextWindow   int64                  `json:"contextWindow"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
+	Cwd             *string                `json:"cwd,omitempty"`
+	At              time.Time              `json:"occurredAt"`
 }
 
 func (SessionStarted) EventType() string {
@@ -54,17 +54,17 @@ func (e SessionModelSet) OccurredAt() time.Time {
 	return e.At
 }
 
-type SessionThinkingEffortSet struct {
-	SessionID      uuid.UUID             `json:"sessionId"`
-	ThinkingEffort shared.ThinkingEffort `json:"thinkingEffort"`
-	At             time.Time             `json:"occurredAt"`
+type SessionReasoningEffortSet struct {
+	SessionID       uuid.UUID              `json:"sessionId"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort"`
+	At              time.Time              `json:"occurredAt"`
 }
 
-func (SessionThinkingEffortSet) EventType() string {
-	return EventSessionThinkingEffortSet
+func (SessionReasoningEffortSet) EventType() string {
+	return EventSessionReasoningEffortSet
 }
 
-func (e SessionThinkingEffortSet) OccurredAt() time.Time {
+func (e SessionReasoningEffortSet) OccurredAt() time.Time {
 	return e.At
 }
 
@@ -83,14 +83,14 @@ func (e SessionCwdSet) OccurredAt() time.Time {
 }
 
 type RoundStarted struct {
-	SessionID      uuid.UUID             `json:"sessionId"`
-	RoundID        uuid.UUID             `json:"roundId"`
-	Sequence       int                   `json:"sequence"`
-	Model          shared.ModelRef       `json:"model"`
-	ContextWindow  int64                 `json:"contextWindow"`
-	ThinkingEffort shared.ThinkingEffort `json:"thinkingEffort,omitempty"`
-	Cwd            *string               `json:"cwd,omitempty"`
-	At             time.Time             `json:"occurredAt"`
+	SessionID       uuid.UUID              `json:"sessionId"`
+	RoundID         uuid.UUID              `json:"roundId"`
+	Sequence        int                    `json:"sequence"`
+	Model           shared.ModelRef        `json:"model"`
+	ContextWindow   int64                  `json:"contextWindow"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
+	Cwd             *string                `json:"cwd,omitempty"`
+	At              time.Time              `json:"occurredAt"`
 }
 
 func (RoundStarted) EventType() string {
@@ -152,8 +152,8 @@ func DecodeEvent(env shared.Envelope) (shared.Event, error) {
 		return decodePayload[SessionStarted](env.Payload)
 	case EventSessionModelSet:
 		return decodePayload[SessionModelSet](env.Payload)
-	case EventSessionThinkingEffortSet:
-		return decodePayload[SessionThinkingEffortSet](env.Payload)
+	case EventSessionReasoningEffortSet:
+		return decodePayload[SessionReasoningEffortSet](env.Payload)
 	case EventSessionCwdSet:
 		return decodePayload[SessionCwdSet](env.Payload)
 	case EventRoundStarted:

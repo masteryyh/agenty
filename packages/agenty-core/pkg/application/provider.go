@@ -10,8 +10,6 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
 
-// ProviderService implements provider (and provider-scoped model) CRUD
-// use-cases on top of a CatalogRepository.
 type ProviderService struct {
 	repo providerRepository
 }
@@ -28,7 +26,6 @@ func NewProviderService(repo providerRepository) *ProviderService {
 	return &ProviderService{repo: repo}
 }
 
-// ProviderInput carries the mutable fields for creating a provider.
 type ProviderInput struct {
 	Name     string          `json:"name"`
 	Type     catalog.APIType `json:"type"`
@@ -57,6 +54,7 @@ func (s *ProviderService) Create(ctx context.Context, slug string, in ProviderIn
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	p.BaseURL = in.BaseURL
 	p.APIKey = in.APIKey
 	p.Metadata = in.Metadata
@@ -72,6 +70,7 @@ func (s *ProviderService) Get(ctx context.Context, slug string) (*catalog.Provid
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	p, err := s.repo.Get(ctx, slugVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
@@ -90,7 +89,6 @@ func (s *ProviderService) List(ctx context.Context) ([]*catalog.Provider, error)
 	return providers, nil
 }
 
-// ProviderUpdate is a partial update: only non-nil fields are applied.
 type ProviderUpdate struct {
 	Name     *string          `json:"name,omitempty"`
 	Type     *catalog.APIType `json:"type,omitempty"`
@@ -104,6 +102,7 @@ func (s *ProviderService) Update(ctx context.Context, slug string, upd ProviderU
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	p, err := s.repo.Get(ctx, slugVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
@@ -143,6 +142,7 @@ func (s *ProviderService) Delete(ctx context.Context, slug string) error {
 	if err != nil {
 		return Validation(err.Error())
 	}
+
 	if err := s.repo.Delete(ctx, slugVal); err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
 			return NotFound("provider " + slug + " not found")
@@ -152,27 +152,34 @@ func (s *ProviderService) Delete(ctx context.Context, slug string) error {
 	return nil
 }
 
-// ModelInput carries the fields for adding a model to a provider.
 type ModelInput struct {
-	Name            string                  `json:"name"`
-	ContextWindow   int                     `json:"contextWindow,omitempty"`
-	MultiModal      bool                    `json:"multiModal,omitempty"`
-	Embedding       bool                    `json:"embedding,omitempty"`
-	Light           bool                    `json:"light,omitempty"`
-	ThinkingEfforts []shared.ThinkingEffort `json:"thinkingEfforts,omitempty"`
-	IsDefault       bool                    `json:"isDefault,omitempty"`
+	Name                   string                            `json:"name"`
+	ContextWindow          int                               `json:"contextWindow,omitempty"`
+	MultiModal             bool                              `json:"multiModal,omitempty"`
+	Embedding              bool                              `json:"embedding,omitempty"`
+	Light                  bool                              `json:"light,omitempty"`
+	ReasoningEffortMapping map[string]shared.ReasoningEffort `json:"reasoningEffortMapping,omitempty"`
+	IsDefault              bool                              `json:"isDefault,omitempty"`
 }
 
-// AddModel adds or replaces a model under the provider and persists the whole
-// provider aggregate.
 func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug string, in ModelInput) (*catalog.Provider, error) {
 	ps, err := shared.NewSlug(providerSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	ms, err := shared.NewSlug(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
+	}
+
+	for nativeEffort, agentyEffort := range in.ReasoningEffortMapping {
+		if nativeEffort == "" {
+			return nil, Validation("reasoning effort mapping contains an empty native effort")
+		}
+		if !agentyEffort.Valid() {
+			return nil, Validation("invalid agenty reasoning effort: " + string(agentyEffort))
+		}
 	}
 
 	p, err := s.repo.Get(ctx, ps)
@@ -185,16 +192,16 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 
 	now := time.Now().UTC()
 	p.AddModel(catalog.Model{
-		Slug:            ms,
-		Name:            in.Name,
-		ContextWindow:   in.ContextWindow,
-		MultiModal:      in.MultiModal,
-		Embedding:       in.Embedding,
-		Light:           in.Light,
-		ThinkingEfforts: in.ThinkingEfforts,
-		IsDefault:       in.IsDefault,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Slug:                   ms,
+		Name:                   in.Name,
+		ContextWindow:          in.ContextWindow,
+		MultiModal:             in.MultiModal,
+		Embedding:              in.Embedding,
+		Light:                  in.Light,
+		ReasoningEffortMapping: in.ReasoningEffortMapping,
+		IsDefault:              in.IsDefault,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	})
 	p.UpdatedAt = now
 
@@ -204,13 +211,12 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 	return p, nil
 }
 
-// RemoveModel deletes a model from a provider and returns the updated
-// provider aggregate.
 func (s *ProviderService) RemoveModel(ctx context.Context, providerSlug, modelSlug string) (*catalog.Provider, error) {
 	ps, err := shared.NewSlug(providerSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	ms, err := shared.NewSlug(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())

@@ -120,9 +120,9 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	p, err := providerSvc.AddModel(ctx, "anthropic", "claude-opus-4-8", application.ModelInput{
 		Name:          "Claude Opus 4.8",
 		ContextWindow: 200_000,
-		ThinkingEfforts: []shared.ThinkingEffort{
-			shared.ThinkingLow,
-			shared.ThinkingHigh,
+		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
+			"low":  shared.ReasoningLow,
+			"high": shared.ReasoningHigh,
 		},
 	})
 	if err != nil {
@@ -130,6 +130,9 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	}
 	if len(p.Models) != 1 {
 		t.Fatalf("provider has %d models, want 1", len(p.Models))
+	}
+	if effort, ok := p.Models[0].MapReasoningEffort("high"); !ok || effort != shared.ReasoningHigh {
+		t.Errorf("mapped high effort = %q, %v; want high, true", effort, ok)
 	}
 
 	// AddModel is upsert: re-adding the same slug replaces.
@@ -172,6 +175,33 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	_, err = providerSvc.RemoveModel(ctx, "anthropic", "claude-opus-4-8")
 	if code := appErrorCode(err); code != application.CodeNotFound {
 		t.Errorf("remove missing code = %v, want not_found", code)
+	}
+}
+
+func TestProviderAddModelRejectsInvalidReasoningEffortMapping(t *testing.T) {
+	_, providerSvc, _ := newServices(t)
+	ctx := t.Context()
+	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		mapping map[string]shared.ReasoningEffort
+	}{
+		{name: "empty native effort", mapping: map[string]shared.ReasoningEffort{"": shared.ReasoningLow}},
+		{name: "invalid agenty effort", mapping: map[string]shared.ReasoningEffort{"minimal": "minimal"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := providerSvc.AddModel(ctx, "openai", "gpt-5", application.ModelInput{
+				Name:                   "GPT-5",
+				ReasoningEffortMapping: tt.mapping,
+			})
+			if code := appErrorCode(err); code != application.CodeValidation {
+				t.Errorf("code = %v, want validation", code)
+			}
+		})
 	}
 }
 

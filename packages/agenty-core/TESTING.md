@@ -7,7 +7,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 
 | Area | Environment | Covered behavior | Default suite |
 | --- | --- | --- | --- |
-| Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and thinking validation | Yes |
+| Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and reasoning effort mapping validation | Yes |
 | Application | In-memory repository fakes | Agent, Provider, and Session use cases, validation, partial updates, error mapping, and pending-event lifecycle | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |

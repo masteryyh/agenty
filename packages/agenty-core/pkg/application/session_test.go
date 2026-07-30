@@ -27,12 +27,12 @@ func TestSessionCreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	sess, err := sessionSvc.Create(ctx, application.SessionCreateInput{
-		AgentSlug:      "coder",
-		ProviderSlug:   "anthropic",
-		ModelSlug:      "claude-opus-4-8",
-		ContextWindow:  200_000,
-		ThinkingEffort: shared.ThinkingHigh,
-		Cwd:            ptr("/tmp/work"),
+		AgentSlug:       "coder",
+		ProviderSlug:    "anthropic",
+		ModelSlug:       "claude-opus-4-8",
+		ContextWindow:   200_000,
+		ReasoningEffort: shared.ReasoningHigh,
+		Cwd:             ptr("/tmp/work"),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -54,8 +54,8 @@ func TestSessionCreateAndGet(t *testing.T) {
 	if got.ID != sess.ID {
 		t.Errorf("id = %v, want %v", got.ID, sess.ID)
 	}
-	if got.CurrentThinkingEffort != shared.ThinkingHigh {
-		t.Errorf("thinking effort = %s, want high", got.CurrentThinkingEffort)
+	if got.CurrentReasoningEffort != shared.ReasoningHigh {
+		t.Errorf("reasoning effort = %s, want high", got.CurrentReasoningEffort)
 	}
 }
 
@@ -67,7 +67,7 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 		{name: "agent slug", input: application.SessionCreateInput{AgentSlug: "Bad Slug", ProviderSlug: "anthropic", ModelSlug: "claude-opus"}},
 		{name: "provider slug", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "Bad Slug", ModelSlug: "claude-opus"}},
 		{name: "model slug", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "Bad Slug"}},
-		{name: "thinking effort", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "claude-opus", ThinkingEffort: "extreme"}},
+		{name: "reasoning effort", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "claude-opus", ReasoningEffort: "extreme"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestSessionCreateDefaultsThinkingOff(t *testing.T) {
+func TestSessionCreateDefaultsReasoningOff(t *testing.T) {
 	_, _, sessionSvc := newServices(t)
 	sess, err := sessionSvc.Create(t.Context(), application.SessionCreateInput{
 		AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "claude-opus",
@@ -89,8 +89,8 @@ func TestSessionCreateDefaultsThinkingOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.CurrentThinkingEffort != shared.ThinkingOff {
-		t.Errorf("thinking effort = %q, want off", sess.CurrentThinkingEffort)
+	if sess.CurrentReasoningEffort != shared.ReasoningOff {
+		t.Errorf("reasoning effort = %q, want off", sess.CurrentReasoningEffort)
 	}
 }
 
@@ -168,13 +168,13 @@ func TestSessionSetModel(t *testing.T) {
 	}
 }
 
-func TestSessionSetThinkingEffortAndCwd(t *testing.T) {
+func TestSessionSetReasoningEffortAndCwd(t *testing.T) {
 	_, _, sessionSvc := newServices(t)
 	ctx := context.Background()
 	id := newSession(t, sessionSvc, "coder")
 
-	if _, err := sessionSvc.SetThinkingEffort(ctx, id, shared.ThinkingMax); err != nil {
-		t.Fatalf("SetThinkingEffort: %v", err)
+	if _, err := sessionSvc.SetReasoningEffort(ctx, id, shared.ReasoningMax); err != nil {
+		t.Fatalf("SetReasoningEffort: %v", err)
 	}
 	if _, err := sessionSvc.SetCwd(ctx, id, ptr("/repo")); err != nil {
 		t.Fatalf("SetCwd: %v", err)
@@ -183,8 +183,8 @@ func TestSessionSetThinkingEffortAndCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CurrentThinkingEffort != shared.ThinkingMax {
-		t.Errorf("thinking effort = %s, want max", got.CurrentThinkingEffort)
+	if got.CurrentReasoningEffort != shared.ReasoningMax {
+		t.Errorf("reasoning effort = %s, want max", got.CurrentReasoningEffort)
 	}
 	if got.Cwd == nil || *got.Cwd != "/repo" {
 		t.Errorf("cwd = %v, want /repo", got.Cwd)
@@ -202,8 +202,8 @@ func TestSessionSetThinkingEffortAndCwd(t *testing.T) {
 		t.Errorf("cwd = %v, want nil after clear", got.Cwd)
 	}
 
-	if _, err := sessionSvc.SetThinkingEffort(ctx, id, "extreme"); appErrorCode(err) != application.CodeValidation {
-		t.Errorf("invalid thinking effort error = %v, want validation", err)
+	if _, err := sessionSvc.SetReasoningEffort(ctx, id, "extreme"); appErrorCode(err) != application.CodeValidation {
+		t.Errorf("invalid reasoning effort error = %v, want validation", err)
 	}
 }
 

@@ -23,7 +23,13 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 		t.Errorf("model name = %q, want B", got.Name)
 	}
 
-	p.AddModel(Model{Slug: "model-b", Name: "B2", ThinkingEfforts: []shared.ThinkingEffort{shared.ThinkingHigh}})
+	p.AddModel(Model{
+		Slug: "model-b",
+		Name: "B2",
+		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
+			"high": shared.ReasoningHigh,
+		},
+	})
 	if len(p.Models) != 2 {
 		t.Fatalf("models = %d, want 2 after upsert", len(p.Models))
 	}
@@ -31,7 +37,7 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "B2" || !got.SupportsThinking() || !got.SupportsEffort(shared.ThinkingHigh) {
+	if got.Name != "B2" || !got.SupportsReasoning() || !got.SupportsReasoningEffort(shared.ReasoningHigh) {
 		t.Errorf("upserted model = %+v", got)
 	}
 

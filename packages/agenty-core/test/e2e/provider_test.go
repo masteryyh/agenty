@@ -36,16 +36,22 @@ func TestProviderAndModelLifecycle(t *testing.T) {
 	}
 
 	withModel := decodeResult[providerView](t, core.Call(t, "provider.addModel", map[string]any{
-		"providerSlug":    "openai",
-		"modelSlug":       "gpt-5",
-		"name":            "GPT-5",
-		"contextWindow":   200000,
-		"multiModal":      true,
-		"thinkingEfforts": []string{"low", "high"},
-		"isDefault":       true,
+		"providerSlug":  "openai",
+		"modelSlug":     "gpt-5",
+		"name":          "GPT-5",
+		"contextWindow": 200000,
+		"multiModal":    true,
+		"reasoningEffortMapping": map[string]string{
+			"minimal": "low",
+			"high":    "high",
+		},
+		"isDefault": true,
 	}))
 	if len(withModel.Models) != 1 || withModel.Models[0].Slug != "gpt-5" || !withModel.Models[0].IsDefault {
 		t.Fatalf("provider models = %+v", withModel.Models)
+	}
+	if withModel.Models[0].ReasoningEffortMapping["minimal"] != "low" {
+		t.Fatalf("reasoning effort mapping = %+v", withModel.Models[0].ReasoningEffortMapping)
 	}
 
 	upserted := decodeResult[providerView](t, core.Call(t, "provider.addModel", map[string]any{

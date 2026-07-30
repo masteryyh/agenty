@@ -65,7 +65,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	}
 	a.DefaultModel = &modelRef
 	a.DefaultContextWindow = 200_000
-	a.DefaultThinkingEffort = shared.ThinkingHigh
+	a.DefaultReasoningEffort = shared.ReasoningHigh
 	if err := repos.Agent.Save(ctx, a); err != nil {
 		t.Fatalf("Save agent: %v", err)
 	}
@@ -84,13 +84,13 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	if loadedAgent.DefaultModel == nil || *loadedAgent.DefaultModel != modelRef {
 		t.Errorf("loaded default model = %v, want %v", loadedAgent.DefaultModel, modelRef)
 	}
-	if loadedAgent.DefaultContextWindow != 200_000 || loadedAgent.DefaultThinkingEffort != shared.ThinkingHigh {
+	if loadedAgent.DefaultContextWindow != 200_000 || loadedAgent.DefaultReasoningEffort != shared.ReasoningHigh {
 		t.Errorf("loaded default session config = %+v", loadedAgent)
 	}
 
 	// Conversation flow: the application layer resolves the agent's default
 	// configuration before constructing a session.
-	session := conversation.StartSession(loadedAgent.Slug, *loadedAgent.DefaultModel, loadedAgent.DefaultContextWindow, loadedAgent.DefaultThinkingEffort, nil)
+	session := conversation.StartSession(loadedAgent.Slug, *loadedAgent.DefaultModel, loadedAgent.DefaultContextWindow, loadedAgent.DefaultReasoningEffort, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)

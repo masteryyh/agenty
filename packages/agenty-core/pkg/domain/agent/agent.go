@@ -7,17 +7,17 @@ import (
 )
 
 type Agent struct {
-	Slug                  shared.Slug           `json:"slug"`
-	Name                  string                `json:"name"`
-	Description           string                `json:"description,omitempty"`
-	Soul                  string                `json:"soul"`
-	DefaultModel          *shared.ModelRef      `json:"defaultModel,omitempty"`
-	DefaultContextWindow  int64                 `json:"defaultContextWindow"`
-	DefaultThinkingEffort shared.ThinkingEffort `json:"defaultThinkingEffort,omitempty"`
-	IsDefault             bool                  `json:"isDefault"`
-	Metadata              shared.Metadata       `json:"metadata,omitempty"`
-	CreatedAt             time.Time             `json:"createdAt"`
-	UpdatedAt             time.Time             `json:"updatedAt"`
+	Slug                   shared.Slug            `json:"slug"`
+	Name                   string                 `json:"name"`
+	Description            string                 `json:"description,omitempty"`
+	Soul                   string                 `json:"soul"`
+	DefaultModel           *shared.ModelRef       `json:"defaultModel,omitempty"`
+	DefaultContextWindow   int64                  `json:"defaultContextWindow"`
+	DefaultReasoningEffort shared.ReasoningEffort `json:"defaultReasoningEffort,omitempty"`
+	IsDefault              bool                   `json:"isDefault"`
+	Metadata               shared.Metadata        `json:"metadata,omitempty"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	UpdatedAt              time.Time              `json:"updatedAt"`
 }
 
 func New(slug, name string) (*Agent, error) {

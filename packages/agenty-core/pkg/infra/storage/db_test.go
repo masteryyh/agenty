@@ -17,7 +17,7 @@ func TestOpenDBInitializesSchema(t *testing.T) {
 	wantColumns := map[string]bool{
 		"id": false, "title": false, "agent_slug": false,
 		"last_provider_slug": false, "last_model_slug": false,
-		"context_window": false, "last_thinking_effort": false,
+		"context_window": false, "last_reasoning_effort": false,
 		"created_at": false, "updated_at": false,
 	}
 	rows, err := db.Query("SELECT name FROM pragma_table_info('sessions')")

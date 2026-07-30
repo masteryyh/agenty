@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"sort"
 	"testing"
@@ -155,7 +156,7 @@ func cloneProvider(p *catalog.Provider) *catalog.Provider {
 	copy := *p
 	copy.Models = slices.Clone(p.Models)
 	for i := range copy.Models {
-		copy.Models[i].ThinkingEfforts = slices.Clone(copy.Models[i].ThinkingEfforts)
+		copy.Models[i].ReasoningEffortMapping = maps.Clone(copy.Models[i].ReasoningEffortMapping)
 	}
 	copy.Metadata = cloneMetadata(p.Metadata)
 	return &copy

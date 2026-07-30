@@ -2,9 +2,12 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -30,10 +33,10 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		Slug:          mustSlug("claude-opus-4-8"),
 		Name:          "Claude Opus 4.8",
 		ContextWindow: 200000,
-		ThinkingEfforts: []shared.ThinkingEffort{
-			shared.ThinkingLow,
-			shared.ThinkingMedium,
-			shared.ThinkingHigh,
+		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
+			"low":    shared.ReasoningLow,
+			"medium": shared.ReasoningMedium,
+			"high":   shared.ReasoningHigh,
 		},
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -50,6 +53,17 @@ func TestCatalogSaveAndGet(t *testing.T) {
 
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatalf("Save: %v", err)
+	}
+	modelData, err := os.ReadFile(filepath.Join(repo.providersDir, provider.Slug.String(), "models", model1.Slug.String()+".json"))
+	if err != nil {
+		t.Fatalf("read model file: %v", err)
+	}
+	var persistedModel map[string]shared.RawJSON
+	if err := json.Unmarshal(modelData, &persistedModel); err != nil {
+		t.Fatalf("decode model file: %v", err)
+	}
+	if _, ok := persistedModel["reasoningEffortMapping"]; !ok {
+		t.Errorf("persisted model keys = %v, want reasoningEffortMapping", persistedModel)
 	}
 
 	loaded, err := repo.Get(ctx, provider.Slug)
@@ -83,11 +97,16 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	if gotHaiku == nil {
 		t.Error("claude-haiku-4-5 not found in loaded models")
 	}
-	if gotOpus != nil && !gotOpus.SupportsThinking() {
-		t.Errorf("opus SupportsThinking = %v, want true", gotOpus.SupportsThinking())
+	if gotOpus != nil && !gotOpus.SupportsReasoning() {
+		t.Errorf("opus SupportsReasoning = %v, want true", gotOpus.SupportsReasoning())
 	}
-	if gotHaiku != nil && gotHaiku.SupportsThinking() {
-		t.Errorf("haiku SupportsThinking = %v, want false", gotHaiku.SupportsThinking())
+	if gotHaiku != nil && gotHaiku.SupportsReasoning() {
+		t.Errorf("haiku SupportsReasoning = %v, want false", gotHaiku.SupportsReasoning())
+	}
+	if gotOpus != nil {
+		if effort, ok := gotOpus.MapReasoningEffort("medium"); !ok || effort != shared.ReasoningMedium {
+			t.Errorf("mapped medium effort = %q, %v; want medium, true", effort, ok)
+		}
 	}
 	if gotHaiku != nil && !gotHaiku.Light {
 		t.Errorf("haiku Light = %v, want true", gotHaiku.Light)

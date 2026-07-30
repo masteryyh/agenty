@@ -7,7 +7,7 @@
 
 | 范围 | 测试环境 | 覆盖行为 | 默认运行 |
 | --- | --- | --- | --- |
-| Domain | 仅内存值 | 聚合不变量、Session 状态转换与 replay、event 和 content 序列化、Provider model 生命周期、slug 和 thinking 校验 | 是 |
+| Domain | 仅内存值 | 聚合不变量、Session 状态转换与 replay、event 和 content 序列化、Provider model 生命周期、slug 和 reasoning effort 映射校验 | 是 |
 | Application | 内存 repository fake | Agent、Provider 和 Session 用例、输入校验、partial update、错误映射和 pending event 生命周期 | 是 |
 | RPC | buffer、fake handler 和合成时间 | JSON-RPC/NDJSON framing、notification、batch、非法请求、单行限制、chunk 组装与清理 | 是 |
 | Config、logging 与 storage | `t.TempDir()`、真实文件和本地 SQLite | 配置文件与 env override 合并、单例 Manager、日志等级/格式/路径选择、JSON repository、append-only transcript、SQLite projection 和 schema 初始化 | 是 |

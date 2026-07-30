@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	last_provider_slug TEXT NOT NULL DEFAULT '',
 	last_model_slug TEXT NOT NULL DEFAULT '',
 	context_window INTEGER NOT NULL DEFAULT 0,
-	last_thinking_effort TEXT NOT NULL DEFAULT '',
+	last_reasoning_effort TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );

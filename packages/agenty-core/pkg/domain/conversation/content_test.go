@@ -11,7 +11,7 @@ import (
 func TestContentRoundTrip(t *testing.T) {
 	original := Content{
 		TextBlock{Text: "hello"},
-		ThinkingBlock{Thinking: "let me think", Signature: "sig123", Extra: shared.RawJSON(`{"provider":"anthropic"}`)},
+		ReasoningBlock{Reasoning: "analyze the request", Signature: "sig123", Extra: shared.RawJSON(`{"provider":"anthropic"}`)},
 		ToolUseBlock{ID: "call_1", Name: "read_file", Input: shared.RawJSON(`{"path":"/tmp/x"}`)},
 		ToolResultBlock{ToolUseID: "call_1", Content: Content{TextBlock{Text: "file contents"}}},
 		ImageBlock{MimeType: "image/png", Data: "aGVsbG8="},
@@ -36,10 +36,10 @@ func TestContentRoundTrip(t *testing.T) {
 	} else if block.Text != "hello" {
 		t.Errorf("text = %q, want hello", block.Text)
 	}
-	if block, ok := decoded[1].(ThinkingBlock); !ok {
-		t.Errorf("block 1 = %T, want ThinkingBlock", decoded[1])
-	} else if block.Thinking != "let me think" || block.Signature != "sig123" || string(block.Extra) != `{"provider":"anthropic"}` {
-		t.Errorf("thinking block = %+v", block)
+	if block, ok := decoded[1].(ReasoningBlock); !ok {
+		t.Errorf("block 1 = %T, want ReasoningBlock", decoded[1])
+	} else if block.Reasoning != "analyze the request" || block.Signature != "sig123" || string(block.Extra) != `{"provider":"anthropic"}` {
+		t.Errorf("reasoning block = %+v", block)
 	}
 	if block, ok := decoded[2].(ToolUseBlock); !ok {
 		t.Errorf("block 2 = %T, want ToolUseBlock", decoded[2])

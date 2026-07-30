@@ -22,11 +22,11 @@ func TestEventEnvelopeRoundTrip(t *testing.T) {
 		name  string
 		event shared.Event
 	}{
-		{name: "session started", event: SessionStarted{SessionID: sessionID, Agent: "coder", Model: model, ContextWindow: 200_000, ThinkingEffort: shared.ThinkingHigh, Cwd: &cwd, At: at}},
+		{name: "session started", event: SessionStarted{SessionID: sessionID, Agent: "coder", Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
 		{name: "model set", event: SessionModelSet{SessionID: sessionID, Model: model, ContextWindow: 200_000, At: at}},
-		{name: "thinking effort set", event: SessionThinkingEffortSet{SessionID: sessionID, ThinkingEffort: shared.ThinkingHigh, At: at}},
+		{name: "reasoning effort set", event: SessionReasoningEffortSet{SessionID: sessionID, ReasoningEffort: shared.ReasoningHigh, At: at}},
 		{name: "cwd cleared", event: SessionCwdSet{SessionID: sessionID, Cwd: nil, At: at}},
-		{name: "round started", event: RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: model, ContextWindow: 200_000, ThinkingEffort: shared.ThinkingHigh, Cwd: &cwd, At: at}},
+		{name: "round started", event: RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
 		{name: "message appended", event: MessageAppended{SessionID: sessionID, Message: Message{ID: shared.NewID(), RoundID: roundID, Role: RoleAssistant, Content: Text("hi"), Model: &model, Usage: &TokenUsage{Input: 10, Output: 20, Total: 30}, CreatedAt: at}, At: at}},
 		{name: "round failed", event: RoundEnded{SessionID: sessionID, RoundID: roundID, Status: RoundFailed, Usage: TokenUsage{Input: 10, Output: 20, Total: 30}, Error: &errMessage, At: at}},
 		{name: "title set", event: SessionTitleSet{SessionID: sessionID, Title: "greeting", At: at}},

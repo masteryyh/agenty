@@ -60,15 +60,15 @@ func TestProjectionUpsertAndGet(t *testing.T) {
 	repo := newConversationRepo(t)
 
 	sum := conversation.SessionSummary{
-		ID:                 shared.NewID(),
-		Title:              "test session",
-		AgentSlug:          mustSlug("coder"),
-		LastProviderSlug:   mustSlug("anthropic"),
-		LastModelSlug:      mustSlug("claude-opus"),
-		ContextWindow:      1024,
-		LastThinkingEffort: shared.ThinkingHigh,
-		CreatedAt:          time.Now().UTC().Truncate(time.Second),
-		UpdatedAt:          time.Now().UTC().Truncate(time.Second),
+		ID:                  shared.NewID(),
+		Title:               "test session",
+		AgentSlug:           mustSlug("coder"),
+		LastProviderSlug:    mustSlug("anthropic"),
+		LastModelSlug:       mustSlug("claude-opus"),
+		ContextWindow:       1024,
+		LastReasoningEffort: shared.ReasoningHigh,
+		CreatedAt:           time.Now().UTC().Truncate(time.Second),
+		UpdatedAt:           time.Now().UTC().Truncate(time.Second),
 	}
 
 	ctx := context.Background()
@@ -93,8 +93,8 @@ func TestProjectionUpsertAndGet(t *testing.T) {
 	if got.ContextWindow != sum.ContextWindow {
 		t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, sum.ContextWindow)
 	}
-	if got.LastThinkingEffort != sum.LastThinkingEffort {
-		t.Errorf("LastThinkingEffort = %q, want %q", got.LastThinkingEffort, sum.LastThinkingEffort)
+	if got.LastReasoningEffort != sum.LastReasoningEffort {
+		t.Errorf("LastReasoningEffort = %q, want %q", got.LastReasoningEffort, sum.LastReasoningEffort)
 	}
 }
 
@@ -241,8 +241,8 @@ func TestTranscriptAppendAndLoad(t *testing.T) {
 	agentSlug := mustSlug("coder")
 
 	events := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: agentSlug, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ThinkingEffort: shared.ThinkingOff, At: createdAt},
-		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ThinkingEffort: shared.ThinkingOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Agent: agentSlug, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
+		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 
 	if err := repo.appendTranscript(sessionID, createdAt, 1, events); err != nil {
@@ -274,10 +274,10 @@ func TestTranscriptAppendIsAppendOnly(t *testing.T) {
 	agentSlug := mustSlug("coder")
 
 	first := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: agentSlug, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ThinkingEffort: shared.ThinkingOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Agent: agentSlug, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 	second := []shared.Event{
-		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ThinkingEffort: shared.ThinkingOff, At: createdAt},
+		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 
 	if err := repo.appendTranscript(sessionID, createdAt, 1, first); err != nil {
@@ -365,7 +365,7 @@ func TestTranscriptDelete(t *testing.T) {
 	sessionID := shared.NewID()
 	createdAt := time.Now().UTC()
 	events := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: mustSlug("coder"), Model: defaultModel(), ContextWindow: 200_000, ThinkingEffort: shared.ThinkingOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Agent: mustSlug("coder"), Model: defaultModel(), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 
 	if err := repo.appendTranscript(sessionID, createdAt, 1, events); err != nil {
@@ -413,7 +413,7 @@ func TestConversationSaveAndLoad(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session, add a round and messages.
-	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ThinkingOff, nil)
+	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -458,7 +458,7 @@ func TestConversationSaveAndLoad(t *testing.T) {
 
 func TestConversationSaveWithCanceledContextHasNoSideEffects(t *testing.T) {
 	repo := newConversationRepo(t)
-	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ThinkingOff, nil)
+	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -481,7 +481,7 @@ func TestConversationSaveAppendsEvents(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
 
-	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ThinkingOff, nil)
+	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
 	if err := repo.Save(ctx, session); err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestConversationList(t *testing.T) {
 		if i == 2 {
 			agent = agentB
 		}
-		s := conversation.StartSession(agent, defaultModel(), 200_000, shared.ThinkingOff, nil)
+		s := conversation.StartSession(agent, defaultModel(), 200_000, shared.ReasoningOff, nil)
 		if err := repo.Save(ctx, s); err != nil {
 			t.Fatal(err)
 		}
@@ -549,7 +549,7 @@ func TestConversationDelete(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
 
-	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ThinkingOff, nil)
+	session := conversation.StartSession(mustSlug("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
 	if err := repo.Save(ctx, session); err != nil {
 		t.Fatal(err)
 	}

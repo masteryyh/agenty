@@ -19,28 +19,28 @@ type modelRefView struct {
 }
 
 type agentView struct {
-	Slug                  string         `json:"slug"`
-	Name                  string         `json:"name"`
-	Description           string         `json:"description"`
-	Soul                  string         `json:"soul"`
-	DefaultModel          *modelRefView  `json:"defaultModel"`
-	DefaultContextWindow  int64          `json:"defaultContextWindow"`
-	DefaultThinkingEffort string         `json:"defaultThinkingEffort"`
-	IsDefault             bool           `json:"isDefault"`
-	Metadata              map[string]any `json:"metadata"`
-	CreatedAt             time.Time      `json:"createdAt"`
-	UpdatedAt             time.Time      `json:"updatedAt"`
+	Slug                   string         `json:"slug"`
+	Name                   string         `json:"name"`
+	Description            string         `json:"description"`
+	Soul                   string         `json:"soul"`
+	DefaultModel           *modelRefView  `json:"defaultModel"`
+	DefaultContextWindow   int64          `json:"defaultContextWindow"`
+	DefaultReasoningEffort string         `json:"defaultReasoningEffort"`
+	IsDefault              bool           `json:"isDefault"`
+	Metadata               map[string]any `json:"metadata"`
+	CreatedAt              time.Time      `json:"createdAt"`
+	UpdatedAt              time.Time      `json:"updatedAt"`
 }
 
 type modelView struct {
-	Slug            string   `json:"slug"`
-	Name            string   `json:"name"`
-	ContextWindow   int      `json:"contextWindow"`
-	MultiModal      bool     `json:"multiModal"`
-	Embedding       bool     `json:"embedding"`
-	Light           bool     `json:"light"`
-	ThinkingEfforts []string `json:"thinkingEfforts"`
-	IsDefault       bool     `json:"isDefault"`
+	Slug                   string            `json:"slug"`
+	Name                   string            `json:"name"`
+	ContextWindow          int               `json:"contextWindow"`
+	MultiModal             bool              `json:"multiModal"`
+	Embedding              bool              `json:"embedding"`
+	Light                  bool              `json:"light"`
+	ReasoningEffortMapping map[string]string `json:"reasoningEffortMapping"`
+	IsDefault              bool              `json:"isDefault"`
 }
 
 type providerView struct {
@@ -54,23 +54,23 @@ type providerView struct {
 }
 
 type sessionView struct {
-	ID                    string        `json:"id"`
-	AgentSlug             string        `json:"agentSlug"`
-	Title                 *string       `json:"title"`
-	Cwd                   *string       `json:"cwd"`
-	CurrentModel          *modelRefView `json:"currentModel"`
-	ContextWindow         int64         `json:"contextWindow"`
-	CurrentThinkingEffort string        `json:"currentThinkingEffort"`
-	CreatedAt             time.Time     `json:"createdAt"`
-	UpdatedAt             time.Time     `json:"updatedAt"`
+	ID                     string        `json:"id"`
+	AgentSlug              string        `json:"agentSlug"`
+	Title                  *string       `json:"title"`
+	Cwd                    *string       `json:"cwd"`
+	CurrentModel           *modelRefView `json:"currentModel"`
+	ContextWindow          int64         `json:"contextWindow"`
+	CurrentReasoningEffort string        `json:"currentReasoningEffort"`
+	CreatedAt              time.Time     `json:"createdAt"`
+	UpdatedAt              time.Time     `json:"updatedAt"`
 }
 
 type sessionSummaryView struct {
-	ID                 string `json:"id"`
-	Title              string `json:"title"`
-	AgentSlug          string `json:"agentSlug"`
-	LastProviderSlug   string `json:"lastProviderSlug"`
-	LastModelSlug      string `json:"lastModelSlug"`
-	ContextWindow      int64  `json:"contextWindow"`
-	LastThinkingEffort string `json:"lastThinkingEffort"`
+	ID                  string `json:"id"`
+	Title               string `json:"title"`
+	AgentSlug           string `json:"agentSlug"`
+	LastProviderSlug    string `json:"lastProviderSlug"`
+	LastModelSlug       string `json:"lastModelSlug"`
+	ContextWindow       int64  `json:"contextWindow"`
+	LastReasoningEffort string `json:"lastReasoningEffort"`
 }

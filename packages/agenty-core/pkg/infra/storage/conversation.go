@@ -111,7 +111,7 @@ func (r *ConversationRepository) Delete(ctx context.Context, id uuid.UUID) error
 
 func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversation.SessionSummary) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_thinking_effort, created_at, updated_at)
+		INSERT INTO sessions (id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
@@ -119,7 +119,7 @@ func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversa
 			last_provider_slug = excluded.last_provider_slug,
 			last_model_slug = excluded.last_model_slug,
 			context_window = excluded.context_window,
-			last_thinking_effort = excluded.last_thinking_effort,
+			last_reasoning_effort = excluded.last_reasoning_effort,
 			updated_at = excluded.updated_at
 	`,
 		sum.ID.String(),
@@ -128,7 +128,7 @@ func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversa
 		sum.LastProviderSlug.String(),
 		sum.LastModelSlug.String(),
 		sum.ContextWindow,
-		sum.LastThinkingEffort,
+		sum.LastReasoningEffort,
 		sum.CreatedAt.Format(time.RFC3339),
 		sum.UpdatedAt.Format(time.RFC3339),
 	)
@@ -140,7 +140,7 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 	var idStr, agentStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_thinking_effort, created_at, updated_at
+		SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at
 		FROM sessions WHERE id = ?
 	`, id.String()).Scan(&idStr, &sum.Title, &agentStr, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr)
 
@@ -164,7 +164,7 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 			return conversation.SessionSummary{}, err
 		}
 	}
-	sum.LastThinkingEffort = shared.ThinkingEffort(effortStr)
+	sum.LastReasoningEffort = shared.ReasoningEffort(effortStr)
 	if sum.CreatedAt, err = time.Parse(time.RFC3339, createdStr); err != nil {
 		return conversation.SessionSummary{}, err
 	}
@@ -176,7 +176,7 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 }
 
 func (r *ConversationRepository) listSessions(ctx context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error) {
-	q := "SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_thinking_effort, created_at, updated_at FROM sessions"
+	q := "SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at FROM sessions"
 	args := []any{}
 
 	if query.AgentSlug != nil {
@@ -226,7 +226,7 @@ func (r *ConversationRepository) listSessions(ctx context.Context, query convers
 				return nil, err
 			}
 		}
-		sum.LastThinkingEffort = shared.ThinkingEffort(effortStr)
+		sum.LastReasoningEffort = shared.ReasoningEffort(effortStr)
 		if sum.CreatedAt, err = time.Parse(time.RFC3339, createdStr); err != nil {
 			return nil, err
 		}

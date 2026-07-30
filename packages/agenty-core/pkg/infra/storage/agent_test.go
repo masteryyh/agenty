@@ -26,7 +26,7 @@ func TestAgentSaveAndGet(t *testing.T) {
 	model := shared.NewModelRef(mustSlug("anthropic"), mustSlug("claude-opus"))
 	a.DefaultModel = &model
 	a.DefaultContextWindow = 200_000
-	a.DefaultThinkingEffort = shared.ThinkingHigh
+	a.DefaultReasoningEffort = shared.ReasoningHigh
 
 	if err := repo.Save(ctx, a); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -52,8 +52,8 @@ func TestAgentSaveAndGet(t *testing.T) {
 	if loaded.DefaultContextWindow != 200_000 {
 		t.Errorf("default context window = %d, want 200000", loaded.DefaultContextWindow)
 	}
-	if loaded.DefaultThinkingEffort != shared.ThinkingHigh {
-		t.Errorf("default thinking effort = %q, want high", loaded.DefaultThinkingEffort)
+	if loaded.DefaultReasoningEffort != shared.ReasoningHigh {
+		t.Errorf("default reasoning effort = %q, want high", loaded.DefaultReasoningEffort)
 	}
 }
 

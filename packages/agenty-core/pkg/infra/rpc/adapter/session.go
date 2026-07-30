@@ -17,7 +17,7 @@ func RegisterSessionHandlers(d *rpc.Dispatcher, svc *application.SessionService)
 	d.Register("session.delete", sessionDelete(svc))
 	d.Register("session.setTitle", sessionSetTitle(svc))
 	d.Register("session.setModel", sessionSetModel(svc))
-	d.Register("session.setThinkingEffort", sessionSetThinkingEffort(svc))
+	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
 }
 
@@ -111,18 +111,18 @@ func sessionSetModel(svc *application.SessionService) rpc.Handler {
 	}
 }
 
-type sessionSetThinkingEffortParams struct {
-	ID             string                `json:"id"`
-	ThinkingEffort shared.ThinkingEffort `json:"thinkingEffort"`
+type sessionSetReasoningEffortParams struct {
+	ID              string                 `json:"id"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort"`
 }
 
-func sessionSetThinkingEffort(svc *application.SessionService) rpc.Handler {
+func sessionSetReasoningEffort(svc *application.SessionService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p sessionSetThinkingEffortParams
+		var p sessionSetReasoningEffortParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.SetThinkingEffort(ctx, p.ID, p.ThinkingEffort))
+		return wrap(svc.SetReasoningEffort(ctx, p.ID, p.ReasoningEffort))
 	}
 }
 

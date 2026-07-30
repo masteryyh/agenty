@@ -13,11 +13,11 @@ func TestAgentCreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	a, err := agentSvc.Create(ctx, "coder", application.AgentInput{
-		Name:                  "Code Assistant",
-		Soul:                  "You are a coder.",
-		DefaultContextWindow:  200_000,
-		DefaultThinkingEffort: shared.ThinkingHigh,
-		IsDefault:             true,
+		Name:                   "Code Assistant",
+		Soul:                   "You are a coder.",
+		DefaultContextWindow:   200_000,
+		DefaultReasoningEffort: shared.ReasoningHigh,
+		IsDefault:              true,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -36,8 +36,19 @@ func TestAgentCreateAndGet(t *testing.T) {
 	if got.DefaultContextWindow != 200_000 {
 		t.Errorf("context window = %d, want 200000", got.DefaultContextWindow)
 	}
-	if got.DefaultThinkingEffort != shared.ThinkingHigh {
-		t.Errorf("thinking effort = %s, want high", got.DefaultThinkingEffort)
+	if got.DefaultReasoningEffort != shared.ReasoningHigh {
+		t.Errorf("reasoning effort = %s, want high", got.DefaultReasoningEffort)
+	}
+}
+
+func TestAgentCreateRejectsInvalidReasoningEffort(t *testing.T) {
+	agentSvc, _, _ := newServices(t)
+	_, err := agentSvc.Create(t.Context(), "coder", application.AgentInput{
+		Name:                   "Coder",
+		DefaultReasoningEffort: "minimal",
+	})
+	if code := appErrorCode(err); code != application.CodeValidation {
+		t.Errorf("code = %v, want validation", code)
 	}
 }
 
@@ -87,14 +98,14 @@ func TestAgentUpdate(t *testing.T) {
 	model := shared.NewModelRef("anthropic", "claude-opus-4-8")
 
 	if _, err := agentSvc.Create(ctx, "coder", application.AgentInput{
-		Name:                  "Old",
-		Description:           "old description",
-		Soul:                  "old soul",
-		DefaultModel:          &model,
-		DefaultContextWindow:  200_000,
-		DefaultThinkingEffort: shared.ThinkingHigh,
-		IsDefault:             true,
-		Metadata:              shared.Metadata{"team": "platform"},
+		Name:                   "Old",
+		Description:            "old description",
+		Soul:                   "old soul",
+		DefaultModel:           &model,
+		DefaultContextWindow:   200_000,
+		DefaultReasoningEffort: shared.ReasoningHigh,
+		IsDefault:              true,
+		Metadata:               shared.Metadata{"team": "platform"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +126,7 @@ func TestAgentUpdate(t *testing.T) {
 	if updated.Soul != "old soul" || updated.DefaultModel == nil || *updated.DefaultModel != model {
 		t.Errorf("unset fields changed: %+v", updated)
 	}
-	if updated.DefaultContextWindow != 200_000 || updated.DefaultThinkingEffort != shared.ThinkingHigh || !updated.IsDefault {
+	if updated.DefaultContextWindow != 200_000 || updated.DefaultReasoningEffort != shared.ReasoningHigh || !updated.IsDefault {
 		t.Errorf("unset defaults changed: %+v", updated)
 	}
 	if updated.Metadata["team"] != "platform" {
@@ -128,6 +139,19 @@ func TestAgentUpdate(t *testing.T) {
 	}
 	if reloaded.Name != "New Name" || reloaded.Description != "" {
 		t.Errorf("persisted agent = %+v", reloaded)
+	}
+}
+
+func TestAgentUpdateRejectsInvalidReasoningEffort(t *testing.T) {
+	agentSvc, _, _ := newServices(t)
+	if _, err := agentSvc.Create(t.Context(), "coder", application.AgentInput{Name: "Coder"}); err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := shared.ReasoningEffort("minimal")
+	_, err := agentSvc.Update(t.Context(), "coder", application.AgentUpdate{DefaultReasoningEffort: &invalid})
+	if code := appErrorCode(err); code != application.CodeValidation {
+		t.Errorf("code = %v, want validation", code)
 	}
 }
 

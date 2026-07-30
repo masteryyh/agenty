@@ -17,7 +17,7 @@ func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	cwd1 := "/workspace/one"
 	cwd2 := "/workspace/two"
 
-	session := StartSession("coder", model1, 200_000, shared.ThinkingHigh, &cwd1)
+	session := StartSession("coder", model1, 200_000, shared.ReasoningHigh, &cwd1)
 	cwd1 = "/mutated/by/caller"
 	round1, err := session.StartRound()
 	if err != nil {
@@ -25,7 +25,7 @@ func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	}
 
 	session.SetModel(model2, 128_000)
-	session.SetThinkingEffort(shared.ThinkingLow)
+	session.SetReasoningEffort(shared.ReasoningLow)
 	session.SetCwd(&cwd2)
 	cwd2 = "/also/mutated"
 	round2, err := session.StartRound()
@@ -44,8 +44,8 @@ func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	if replayed.CurrentModel == nil || *replayed.CurrentModel != model2 || replayed.ContextWindow != 128_000 {
 		t.Errorf("replayed model configuration = %+v, %d", replayed.CurrentModel, replayed.ContextWindow)
 	}
-	if replayed.Cwd == nil || *replayed.Cwd != "/workspace/two" || replayed.CurrentThinkingEffort != shared.ThinkingLow {
-		t.Errorf("replayed execution configuration = cwd %v, thinking %q", replayed.Cwd, replayed.CurrentThinkingEffort)
+	if replayed.Cwd == nil || *replayed.Cwd != "/workspace/two" || replayed.CurrentReasoningEffort != shared.ReasoningLow {
+		t.Errorf("replayed execution configuration = cwd %v, reasoning %q", replayed.Cwd, replayed.CurrentReasoningEffort)
 	}
 }
 
@@ -53,7 +53,7 @@ func TestSessionLifecycleAndReplay(t *testing.T) {
 	t.Parallel()
 
 	model := shared.NewModelRef("anthropic", "claude-opus-4")
-	session := StartSession("coder", model, 200_000, shared.ThinkingHigh, nil)
+	session := StartSession("coder", model, 200_000, shared.ReasoningHigh, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestSessionRejectsInvalidTransitions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			session := StartSession("coder", model, 200_000, shared.ThinkingOff, nil)
+			session := StartSession("coder", model, 200_000, shared.ReasoningOff, nil)
 			roundID, err := session.StartRound()
 			if err != nil {
 				t.Fatal(err)
@@ -152,7 +152,7 @@ func TestSessionCompleteRoundTerminalStatuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 200_000, shared.ThinkingOff, nil)
+			session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 200_000, shared.ReasoningOff, nil)
 			roundID, err := session.StartRound()
 			if err != nil {
 				t.Fatal(err)
@@ -179,7 +179,7 @@ func TestSessionRequiresConfiguredModelAndTerminalStatus(t *testing.T) {
 		session *Session
 	}{
 		{name: "nil model", session: &Session{}},
-		{name: "zero model", session: StartSession("coder", shared.ModelRef{}, 0, shared.ThinkingOff, nil)},
+		{name: "zero model", session: StartSession("coder", shared.ModelRef{}, 0, shared.ReasoningOff, nil)},
 	}
 	for _, tt := range modelTests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,7 +190,7 @@ func TestSessionRequiresConfiguredModelAndTerminalStatus(t *testing.T) {
 		})
 	}
 
-	session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 0, shared.ThinkingOff, nil)
+	session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 0, shared.ReasoningOff, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestSessionRequiresConfiguredModelAndTerminalStatus(t *testing.T) {
 func TestSessionClearPending(t *testing.T) {
 	t.Parallel()
 
-	session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 0, shared.ThinkingOff, nil)
+	session := StartSession("coder", shared.NewModelRef("anthropic", "claude-opus"), 0, shared.ReasoningOff, nil)
 	if len(session.PendingEvents()) != 1 {
 		t.Fatalf("pending events = %d, want 1", len(session.PendingEvents()))
 	}

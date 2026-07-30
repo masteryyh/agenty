@@ -26,17 +26,15 @@ func NewAgentService(repo agentRepository) *AgentService {
 	return &AgentService{repo: repo}
 }
 
-// AgentInput carries the mutable fields for creating an agent. Slug is the
-// identity and is passed separately to Create.
 type AgentInput struct {
-	Name                  string                `json:"name"`
-	Description           string                `json:"description,omitempty"`
-	Soul                  string                `json:"soul,omitempty"`
-	DefaultModel          *shared.ModelRef      `json:"defaultModel,omitempty"`
-	DefaultContextWindow  int64                 `json:"defaultContextWindow,omitempty"`
-	DefaultThinkingEffort shared.ThinkingEffort `json:"defaultThinkingEffort,omitempty"`
-	IsDefault             bool                  `json:"isDefault,omitempty"`
-	Metadata              shared.Metadata       `json:"metadata,omitempty"`
+	Name                   string                 `json:"name"`
+	Description            string                 `json:"description,omitempty"`
+	Soul                   string                 `json:"soul,omitempty"`
+	DefaultModel           *shared.ModelRef       `json:"defaultModel,omitempty"`
+	DefaultContextWindow   int64                  `json:"defaultContextWindow,omitempty"`
+	DefaultReasoningEffort shared.ReasoningEffort `json:"defaultReasoningEffort,omitempty"`
+	IsDefault              bool                   `json:"isDefault,omitempty"`
+	Metadata               shared.Metadata        `json:"metadata,omitempty"`
 }
 
 func (s *AgentService) Create(ctx context.Context, slug string, in AgentInput) (*agent.Agent, error) {
@@ -56,11 +54,16 @@ func (s *AgentService) Create(ctx context.Context, slug string, in AgentInput) (
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
+	if in.DefaultReasoningEffort != "" && !in.DefaultReasoningEffort.Valid() {
+		return nil, Validation("invalid reasoning effort: " + string(in.DefaultReasoningEffort))
+	}
+
 	a.Description = in.Description
 	a.Soul = in.Soul
 	a.DefaultModel = in.DefaultModel
 	a.DefaultContextWindow = in.DefaultContextWindow
-	a.DefaultThinkingEffort = in.DefaultThinkingEffort
+	a.DefaultReasoningEffort = in.DefaultReasoningEffort
 	a.IsDefault = in.IsDefault
 	a.Metadata = in.Metadata
 
@@ -93,16 +96,15 @@ func (s *AgentService) List(ctx context.Context) ([]*agent.Agent, error) {
 	return agents, nil
 }
 
-// AgentUpdate is a partial update: only non-nil fields are applied.
 type AgentUpdate struct {
-	Name                  *string                `json:"name,omitempty"`
-	Description           *string                `json:"description,omitempty"`
-	Soul                  *string                `json:"soul,omitempty"`
-	DefaultModel          *shared.ModelRef       `json:"defaultModel,omitempty"`
-	DefaultContextWindow  *int64                 `json:"defaultContextWindow,omitempty"`
-	DefaultThinkingEffort *shared.ThinkingEffort `json:"defaultThinkingEffort,omitempty"`
-	IsDefault             *bool                  `json:"isDefault,omitempty"`
-	Metadata              *shared.Metadata       `json:"metadata,omitempty"`
+	Name                   *string                 `json:"name,omitempty"`
+	Description            *string                 `json:"description,omitempty"`
+	Soul                   *string                 `json:"soul,omitempty"`
+	DefaultModel           *shared.ModelRef        `json:"defaultModel,omitempty"`
+	DefaultContextWindow   *int64                  `json:"defaultContextWindow,omitempty"`
+	DefaultReasoningEffort *shared.ReasoningEffort `json:"defaultReasoningEffort,omitempty"`
+	IsDefault              *bool                   `json:"isDefault,omitempty"`
+	Metadata               *shared.Metadata        `json:"metadata,omitempty"`
 }
 
 func (s *AgentService) Update(ctx context.Context, slug string, upd AgentUpdate) (*agent.Agent, error) {
@@ -133,8 +135,11 @@ func (s *AgentService) Update(ctx context.Context, slug string, upd AgentUpdate)
 	if upd.DefaultContextWindow != nil {
 		a.DefaultContextWindow = *upd.DefaultContextWindow
 	}
-	if upd.DefaultThinkingEffort != nil {
-		a.DefaultThinkingEffort = *upd.DefaultThinkingEffort
+	if upd.DefaultReasoningEffort != nil {
+		if *upd.DefaultReasoningEffort != "" && !upd.DefaultReasoningEffort.Valid() {
+			return nil, Validation("invalid reasoning effort: " + string(*upd.DefaultReasoningEffort))
+		}
+		a.DefaultReasoningEffort = *upd.DefaultReasoningEffort
 	}
 	if upd.IsDefault != nil {
 		a.IsDefault = *upd.IsDefault
