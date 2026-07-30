@@ -1,5 +1,7 @@
 # agenty-core
 
+[English](README.md) | [简体中文](README-CN.md)
+
 The next-generation core runtime for Agenty, being built from scratch to replace
 `agenty-runtime`. It is designed around a local-first storage model (filesystem +
 SQLite) and a Domain-Driven Design (DDD) domain layer.
