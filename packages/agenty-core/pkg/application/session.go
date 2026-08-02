@@ -147,6 +147,7 @@ func (s *SessionService) SetModel(ctx context.Context, idStr, providerSlug, mode
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
+
 	sess.SetModel(shared.NewModelRef(ps, ms), contextWindow)
 	return s.saveUpdated(ctx, sess)
 }
@@ -159,6 +160,7 @@ func (s *SessionService) SetReasoningEffort(ctx context.Context, idStr string, e
 	if !effort.Valid() {
 		return nil, Validation("invalid reasoning effort: " + string(effort))
 	}
+
 	sess.SetReasoningEffort(effort)
 	return s.saveUpdated(ctx, sess)
 }
@@ -177,6 +179,7 @@ func (s *SessionService) loadForUpdate(ctx context.Context, idStr string) (*conv
 	if err != nil {
 		return nil, Validation("invalid session id: " + err.Error())
 	}
+
 	sess, err := s.repo.Load(ctx, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrConversationNotFound) {
