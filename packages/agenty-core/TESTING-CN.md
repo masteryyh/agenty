@@ -69,6 +69,17 @@ go test -race -count=1 ./...
 go test -shuffle=on -count=10 ./...
 ```
 
+LLM 真实集成用例读取以下环境变量：
+
+- `OPENAI_API_KEY`，可选 `OPENAI_BASE_URL`、`OPENAI_RESPONSES_MODEL` 和
+  `OPENAI_CHAT_MODEL`。
+- `ANTHROPIC_API_KEY`，可选 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_MODEL`。
+- `GEMINI_API_KEY`，可选 `GEMINI_BASE_URL` 和 `GEMINI_MODEL`。
+
+每个 Provider 子测试都会验证 `Invoke` 和 `Stream`。缺少 API Key 时通过 `t.Skip`
+显示提示并跳过，不会导致 integration suite 失败。请求/响应转换测试仍属于默认离线
+suite，完全不需要凭证。
+
 开发时可以定向运行 package 或单个测试：
 
 ```sh
@@ -103,9 +114,10 @@ go tool cover -html=coverage.out
 `pkg/application` 为 76.4%。模块总覆盖率包含有意不测试的简单构造和 wiring 代码，
 因此这里只记录快照。
 
-当前 integration 和 E2E 测试全部使用本地文件和 SQLite，不需要网络服务或单独维护的
-数据库。E2E 用例聚焦可观察的进程 contract；穷举 parser 变体、真实 64 MiB 单行限制和
-chunk assembler 输入校验继续由更快的 RPC 测试覆盖，不在子进程中用大 payload 重复。
+Storage/RPC integration 测试和全部 E2E 测试使用本地文件与 SQLite。可选 LLM integration
+用例是唯一会访问外部服务的测试，并且只在环境中存在对应 Provider API Key 时执行。
+E2E 用例聚焦可观察的进程 contract；穷举 parser 变体、真实 64 MiB 单行限制和 chunk
+assembler 输入校验继续由更快的 RPC 测试覆盖，不在子进程中用大 payload 重复。
 
 测试涉及两个实现边界：
 

@@ -75,6 +75,17 @@ go test -race -count=1 ./...
 go test -shuffle=on -count=10 ./...
 ```
 
+The live LLM integration cases use the following environment variables:
+
+- `OPENAI_API_KEY`, optionally `OPENAI_BASE_URL`, `OPENAI_RESPONSES_MODEL`, and
+  `OPENAI_CHAT_MODEL`.
+- `ANTHROPIC_API_KEY`, optionally `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL`.
+- `GEMINI_API_KEY`, optionally `GEMINI_BASE_URL` and `GEMINI_MODEL`.
+
+Each provider subtest calls both `Invoke` and `Stream`. A missing API key produces a
+visible `t.Skip` message and does not fail the integration suite. Request/response
+conversion tests remain in the default offline suite and never require credentials.
+
 Run a package or one test while developing:
 
 ```sh
@@ -109,11 +120,12 @@ The default suite snapshot verified on 2026-07-22 has 70.1% statement coverage.
 `pkg/application` at 76.4%. Coverage is reported as a snapshot because intentionally
 untested construction and wiring code lowers the module total.
 
-All integration and E2E tests use local files and SQLite; they do not require network
-services or a separately managed database. E2E cases focus on observable process
-contracts. Exhaustive parser permutations, the physical 64 MiB line limit, and chunk
-assembler validation remain in the faster RPC tests instead of being duplicated with
-large subprocess payloads.
+Storage/RPC integration tests and all E2E tests use local files and SQLite. Optional
+LLM integration cases are the only tests that access external services, and only when
+their provider API key is present. E2E cases focus on observable process contracts.
+Exhaustive parser permutations, the physical 64 MiB line limit, and chunk assembler
+validation remain in the faster RPC tests instead of being duplicated with large
+subprocess payloads.
 
 Two implementation boundaries affect the tests:
 

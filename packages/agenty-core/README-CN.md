@@ -73,6 +73,7 @@ Agenty 对外提供且仅提供六个与 provider 无关的 reasoning effort 等
 pkg/infra/
 ├── config/             将配置文件和 env override 合并到单例中；解析 data-dir 路径
 ├── initialize/         OpenRepositories：一次性初始化所有 stores
+├── llm/                OpenAI、Anthropic、Google GenAI 的统一 SDK 调用器
 ├── logging/            slog 初始化、环境配置解析和按日生成日志路径
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
@@ -207,7 +208,9 @@ pnpm core:clean             # 清理该模块的 Go build 和 test caches
 
 默认 suite 覆盖 domain behavior、使用内存 repository fakes 的 application services、
 protocol framing、配置和隔离的 storage adapter contracts。完整 repository 装配和
-RPC-to-disk 路径使用 `integration` build tag。
+RPC-to-disk 路径使用 `integration` build tag。同一 build tag 还会启用可选的 LLM SDK
+真实集成测试；测试直接读取环境中的 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 和
+`GEMINI_API_KEY`，未配置对应 Key 时会提示并跳过，不计为失败。
 
 `test/e2e` package 只构建一次 `cmd`，通过 stdio 启动真实 binary，并为每个并行测试
 进程分配独立的 `AGENTY_DATA_DIR`。它覆盖公开的 Agent、Provider/Model、Session、
@@ -222,5 +225,6 @@ JSON-RPC、chunking、startup、restart persistence 和 process isolation contra
 
 ## 状态
 
-领域层、基础设施层、应用层和 stdio JSON-RPC 接口层均已实现。目前尚未实现基于该 core
-的 HTTP API 和 CLI 集成。
+领域层、基础设施层、应用层和 stdio JSON-RPC 接口层均已实现。基础设施层还提供
+OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google GenAI 的统一
+非流式/流式 SDK 调用器。目前尚未实现基于该 core 的 HTTP API 和 CLI 集成。

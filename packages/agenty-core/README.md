@@ -77,6 +77,7 @@ filesystem + SQLite storage model.
 pkg/infra/
 ├── config/             Load config file + env overrides into a merged singleton; resolve data-dir paths
 ├── initialize/         OpenRepositories: one-call setup of all stores
+├── llm/                Unified SDK callers for OpenAI, Anthropic, and Google GenAI
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
@@ -228,7 +229,9 @@ build tag so they stay outside the default `core:test` suite.
 The default suite covers domain behavior, application services with in-memory
 repository fakes, protocol framing, configuration, and isolated storage adapter
 contracts. Full repository wiring and RPC-to-disk paths use the `integration`
-build tag.
+build tag. The same tag enables optional live LLM SDK tests. They read
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` from the environment
+and report a skip, rather than a failure, when a key is absent.
 
 The `test/e2e` package builds `cmd` once, launches the real binary over stdio, and gives
 each parallel test process its own `AGENTY_DATA_DIR`. It covers public Agent,
@@ -245,5 +248,6 @@ See [TESTING.md](./TESTING.md) for the full testing strategy and command guide, 
 ## Status
 
 The domain, infrastructure, application and stdio JSON-RPC interface layers are
-implemented. The HTTP API and CLI integration against this core are not yet
-implemented.
+implemented. Infrastructure also provides unified non-streaming and streaming SDK
+callers for OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Google
+GenAI. The HTTP API and CLI integration against this core are not yet implemented.
