@@ -51,7 +51,7 @@ func NewCaller(ctx context.Context, provider catalog.Provider, model catalog.Mod
 	case catalog.APIOpenAI:
 		client := newOpenAIClient(provider, config)
 		return &openAIResponsesCaller{client: &client, model: model}, nil
-	case catalog.APIOpenAILegacy:
+	case catalog.APIOpenAICompletions:
 		client := newOpenAIClient(provider, config)
 		return &openAIChatCaller{client: &client, model: model}, nil
 	case catalog.APIAnthropic:

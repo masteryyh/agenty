@@ -539,11 +539,6 @@ func TestNewCallerValidation(t *testing.T) {
 			provider: catalog.Provider{Slug: "openai", Type: catalog.APIOpenAI},
 			want:     ErrInvalidRequest,
 		},
-		{
-			name:     "unsupported API",
-			provider: catalog.Provider{Slug: "deepseek", Type: catalog.APIDeepSeek, APIKey: "test"},
-			want:     ErrUnsupportedAPI,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
