@@ -36,11 +36,12 @@ func TestProviderAndModelLifecycle(t *testing.T) {
 	}
 
 	withModel := decodeResult[providerView](t, core.Call(t, "provider.addModel", map[string]any{
-		"providerSlug":  "openai",
-		"modelSlug":     "gpt-5",
-		"name":          "GPT-5",
-		"contextWindow": 200000,
-		"multiModal":    true,
+		"providerSlug":    "openai",
+		"modelSlug":       "gpt-5",
+		"name":            "GPT-5",
+		"contextWindow":   200000,
+		"maxOutputTokens": 65536,
+		"multiModal":      true,
 		"reasoningEffortMapping": map[string]string{
 			"minimal": "low",
 			"high":    "high",
@@ -53,13 +54,17 @@ func TestProviderAndModelLifecycle(t *testing.T) {
 	if withModel.Models[0].ReasoningEffortMapping["minimal"] != "low" {
 		t.Fatalf("reasoning effort mapping = %+v", withModel.Models[0].ReasoningEffortMapping)
 	}
+	if withModel.Models[0].MaxOutputTokens != 65536 {
+		t.Fatalf("max output tokens = %d, want 65536", withModel.Models[0].MaxOutputTokens)
+	}
 
 	upserted := decodeResult[providerView](t, core.Call(t, "provider.addModel", map[string]any{
-		"providerSlug":  "openai",
-		"modelSlug":     "gpt-5",
-		"name":          "GPT-5 Updated",
-		"contextWindow": 256000,
-		"light":         true,
+		"providerSlug":    "openai",
+		"modelSlug":       "gpt-5",
+		"name":            "GPT-5 Updated",
+		"contextWindow":   256000,
+		"maxOutputTokens": 32768,
+		"light":           true,
 	}))
 	if len(upserted.Models) != 1 || upserted.Models[0].Name != "GPT-5 Updated" || upserted.Models[0].ContextWindow != 256000 {
 		t.Fatalf("upserted models = %+v", upserted.Models)

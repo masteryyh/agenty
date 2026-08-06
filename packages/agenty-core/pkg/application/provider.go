@@ -155,6 +155,7 @@ func (s *ProviderService) Delete(ctx context.Context, slug string) error {
 type ModelInput struct {
 	Name                   string                            `json:"name"`
 	ContextWindow          int                               `json:"contextWindow,omitempty"`
+	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
 	MultiModal             bool                              `json:"multiModal,omitempty"`
 	Embedding              bool                              `json:"embedding,omitempty"`
 	Light                  bool                              `json:"light,omitempty"`
@@ -171,6 +172,9 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 	ms, err := shared.NewSlug(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
+	}
+	if in.MaxOutputTokens <= 0 {
+		return nil, Validation("max output tokens must be greater than zero")
 	}
 
 	for nativeEffort, agentyEffort := range in.ReasoningEffortMapping {
@@ -195,6 +199,7 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 		Slug:                   ms,
 		Name:                   in.Name,
 		ContextWindow:          in.ContextWindow,
+		MaxOutputTokens:        in.MaxOutputTokens,
 		MultiModal:             in.MultiModal,
 		Embedding:              in.Embedding,
 		Light:                  in.Light,

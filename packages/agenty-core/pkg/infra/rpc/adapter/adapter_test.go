@@ -13,14 +13,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
+	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
 
 func newDispatcher(t *testing.T) *rpc.Dispatcher {
+	return newDispatcherWithCaller(t, &adapterTestCaller{})
+}
+
+func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatcher {
 	t.Helper()
 	dir := t.TempDir()
 	agentRepo := storage.NewAgentRepository(filepath.Join(dir, "agents"))
@@ -31,9 +39,77 @@ func newDispatcher(t *testing.T) *rpc.Dispatcher {
 	}
 	t.Cleanup(func() { db.Close() })
 	convRepo := storage.NewConversationRepository(db, filepath.Join(dir, "sessions"))
+	execution, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
+		Sessions: convRepo,
+		Agents:   agentRepo,
+		Catalog:  catalogRepo,
+		Tools:    agentloop.NewRegistry(),
+		NewCaller: func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+			return caller, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("create execution engine: %v", err)
+	}
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := execution.Shutdown(shutdownCtx); err != nil {
+			t.Errorf("shutdown execution engine: %v", err)
+		}
+	})
+	sessionService := application.NewSessionService(
+		convRepo,
+		application.WithSessionExecutionState(execution),
+	)
 	d := rpc.NewDispatcher()
-	adapter.RegisterAll(d, application.NewAgentService(agentRepo), application.NewProviderService(catalogRepo), application.NewSessionService(convRepo))
+	adapter.RegisterAll(
+		d,
+		application.NewAgentService(agentRepo),
+		application.NewProviderService(catalogRepo),
+		sessionService,
+		execution,
+	)
 	return d
+}
+
+type adapterTestCaller struct{}
+
+func (*adapterTestCaller) Invoke(context.Context, agentloop.Request) (*agentloop.Response, error) {
+	return &agentloop.Response{
+		Content:    conversation.Text("completed"),
+		StopReason: agentloop.StopReasonEndTurn,
+	}, nil
+}
+
+func (*adapterTestCaller) Stream(
+	context.Context,
+	agentloop.Request,
+	agentloop.StreamHandler,
+) (*agentloop.Response, error) {
+	return nil, fmt.Errorf("unexpected stream invocation")
+}
+
+type blockingAdapterCaller struct {
+	started chan struct{}
+}
+
+func (caller *blockingAdapterCaller) Invoke(
+	ctx context.Context,
+	_ agentloop.Request,
+) (*agentloop.Response, error) {
+	close(caller.started)
+	<-ctx.Done()
+
+	return nil, ctx.Err()
+}
+
+func (*blockingAdapterCaller) Stream(
+	context.Context,
+	agentloop.Request,
+	agentloop.StreamHandler,
+) (*agentloop.Response, error) {
+	return nil, fmt.Errorf("unexpected stream invocation")
 }
 
 func request(id int, method string, params any) string {
@@ -123,10 +199,11 @@ func TestAdapterProviderAddModel(t *testing.T) {
 		"slug": "anthropic", "name": "Anthropic", "type": "anthropic",
 	}))
 	resp := call(t, d, request(2, "provider.addModel", map[string]any{
-		"providerSlug":  "anthropic",
-		"modelSlug":     "claude-opus-4-8",
-		"name":          "Claude Opus 4.8",
-		"contextWindow": 200000,
+		"providerSlug":    "anthropic",
+		"modelSlug":       "claude-opus-4-8",
+		"name":            "Claude Opus 4.8",
+		"contextWindow":   200000,
+		"maxOutputTokens": 32000,
 	}))
 	if errCode(resp) != 0 {
 		t.Fatalf("addModel error: %+v", resp["error"])
@@ -135,6 +212,10 @@ func TestAdapterProviderAddModel(t *testing.T) {
 	models := result["models"].([]any)
 	if len(models) != 1 {
 		t.Errorf("models = %d, want 1", len(models))
+	}
+	model := models[0].(map[string]any)
+	if model["maxOutputTokens"] != float64(32000) {
+		t.Errorf("maxOutputTokens = %v, want 32000", model["maxOutputTokens"])
 	}
 }
 
@@ -179,6 +260,156 @@ func TestAdapterSessionList(t *testing.T) {
 	result := resp["result"].([]any)
 	if len(result) != 3 {
 		t.Errorf("list returned %d, want 3", len(result))
+	}
+}
+
+func TestAdapterSessionStartCompletesRound(t *testing.T) {
+	d := newDispatcher(t)
+	id := createExecutableSession(t, d)
+
+	started := call(t, d, request(10, "session.start", map[string]any{
+		"id": id,
+		"content": []map[string]any{{
+			"type": "text",
+			"text": "hello",
+		}},
+	}))
+	if errCode(started) != 0 {
+		t.Fatalf("start error: %+v", started["error"])
+	}
+	startResult := started["result"].(map[string]any)
+	if startResult["sessionId"] != id || startResult["status"] != "running" {
+		t.Fatalf("start result = %+v", startResult)
+	}
+
+	round := waitForAdapterRoundStatus(t, d, id, "completed")
+	messages := round["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want 2", len(messages))
+	}
+	assistant := messages[1].(map[string]any)
+	if assistant["role"] != "assistant" {
+		t.Fatalf("assistant message = %+v", assistant)
+	}
+}
+
+func TestAdapterSessionStopCancelsRound(t *testing.T) {
+	caller := &blockingAdapterCaller{started: make(chan struct{})}
+	d := newDispatcherWithCaller(t, caller)
+	id := createExecutableSession(t, d)
+
+	started := call(t, d, request(10, "session.start", map[string]any{
+		"id": id,
+		"content": []map[string]any{{
+			"type": "text",
+			"text": "wait",
+		}},
+	}))
+	if errCode(started) != 0 {
+		t.Fatalf("start error: %+v", started["error"])
+	}
+	select {
+	case <-caller.started:
+	case <-time.After(time.Second):
+		t.Fatal("LLM caller did not start")
+	}
+
+	duplicate := call(t, d, request(11, "session.start", map[string]any{
+		"id": id,
+		"content": []map[string]any{{
+			"type": "text",
+			"text": "again",
+		}},
+	}))
+	if code := errCode(duplicate); code != rpc.ErrCodeAlreadyExists {
+		t.Fatalf("duplicate start code = %d, want %d", code, rpc.ErrCodeAlreadyExists)
+	}
+
+	stopped := call(t, d, request(12, "session.stop", map[string]any{"id": id}))
+	if errCode(stopped) != 0 {
+		t.Fatalf("stop error: %+v", stopped["error"])
+	}
+	stopResult := stopped["result"].(map[string]any)
+	if stopResult["sessionId"] != id || stopResult["stopRequested"] != true {
+		t.Fatalf("stop result = %+v", stopResult)
+	}
+
+	waitForAdapterRoundStatus(t, d, id, "cancelled")
+	secondStop := call(t, d, request(13, "session.stop", map[string]any{"id": id}))
+	if code := errCode(secondStop); code != rpc.ErrCodeNotFound {
+		t.Fatalf("second stop code = %d, want %d", code, rpc.ErrCodeNotFound)
+	}
+}
+
+func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
+	t.Helper()
+
+	createAgent := call(t, d, request(1, "agent.create", map[string]any{
+		"slug": "coder",
+		"name": "Coder",
+		"soul": "Complete the task.",
+	}))
+	if errCode(createAgent) != 0 {
+		t.Fatalf("create agent error: %+v", createAgent["error"])
+	}
+	createProvider := call(t, d, request(2, "provider.create", map[string]any{
+		"slug":   "openai",
+		"name":   "OpenAI",
+		"type":   "openai_completions",
+		"apiKey": "test-key",
+	}))
+	if errCode(createProvider) != 0 {
+		t.Fatalf("create provider error: %+v", createProvider["error"])
+	}
+	addModel := call(t, d, request(3, "provider.addModel", map[string]any{
+		"providerSlug":    "openai",
+		"modelSlug":       "gpt-test",
+		"name":            "GPT Test",
+		"contextWindow":   128000,
+		"maxOutputTokens": 100000,
+	}))
+	if errCode(addModel) != 0 {
+		t.Fatalf("add model error: %+v", addModel["error"])
+	}
+	created := call(t, d, request(4, "session.create", map[string]any{
+		"agentSlug":     "coder",
+		"providerSlug":  "openai",
+		"modelSlug":     "gpt-test",
+		"contextWindow": 128000,
+	}))
+	if errCode(created) != 0 {
+		t.Fatalf("create session error: %+v", created["error"])
+	}
+
+	return created["result"].(map[string]any)["id"].(string)
+}
+
+func waitForAdapterRoundStatus(
+	t *testing.T,
+	d *rpc.Dispatcher,
+	sessionID string,
+	want string,
+) map[string]any {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		response := call(t, d, request(20, "session.get", map[string]any{"id": sessionID}))
+		if errCode(response) != 0 {
+			t.Fatalf("get session error: %+v", response["error"])
+		}
+		session := response["result"].(map[string]any)
+		rounds := session["rounds"].([]any)
+		if len(rounds) == 1 {
+			round := rounds[0].(map[string]any)
+			if round["status"] == want {
+				return round
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session %s did not reach round status %q", sessionID, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

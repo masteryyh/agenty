@@ -20,7 +20,7 @@ type openAIResponsesCaller struct {
 	model  catalog.Model
 }
 
-func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request Request) (*Response, error) {
+func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -36,9 +36,9 @@ func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request Request
 
 func (caller *openAIResponsesCaller) Stream(
 	ctx context.Context,
-	request Request,
-	handler StreamHandler,
-) (*Response, error) {
+	request modelRequest,
+	handler modelStreamHandler,
+) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -47,36 +47,36 @@ func (caller *openAIResponsesCaller) Stream(
 	stream := caller.client.Responses.NewStreaming(ctx, params)
 	defer stream.Close()
 
-	var final *Response
+	var final *modelResponse
 	for stream.Next() {
 		switch event := stream.Current().AsAny().(type) {
 		case responses.ResponseTextDeltaEvent:
-			err = emit(handler, StreamEvent{
-				Type: StreamEventTextDelta, Index: int(event.OutputIndex), Delta: event.Delta,
+			err = emit(handler, modelStreamEvent{
+				Type: modelStreamEventTextDelta, Index: int(event.OutputIndex), Delta: event.Delta,
 			})
 		case responses.ResponseReasoningSummaryTextDeltaEvent:
-			err = emit(handler, StreamEvent{
-				Type: StreamEventReasoningDelta, Index: int(event.OutputIndex), Delta: event.Delta,
+			err = emit(handler, modelStreamEvent{
+				Type: modelStreamEventReasoningDelta, Index: int(event.OutputIndex), Delta: event.Delta,
 			})
 		case responses.ResponseReasoningTextDeltaEvent:
-			err = emit(handler, StreamEvent{
-				Type: StreamEventReasoningDelta, Index: int(event.OutputIndex), Delta: event.Delta,
+			err = emit(handler, modelStreamEvent{
+				Type: modelStreamEventReasoningDelta, Index: int(event.OutputIndex), Delta: event.Delta,
 			})
 		case responses.ResponseFunctionCallArgumentsDeltaEvent:
-			err = emit(handler, StreamEvent{
-				Type: StreamEventToolInputDelta, Index: int(event.OutputIndex), Delta: event.Delta,
+			err = emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolInputDelta, Index: int(event.OutputIndex), Delta: event.Delta,
 			})
 		case responses.ResponseOutputItemAddedEvent:
 			if item, ok := event.Item.AsAny().(responses.ResponseFunctionToolCall); ok {
-				err = emit(handler, StreamEvent{
-					Type: StreamEventToolUseStart, Index: int(event.OutputIndex),
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: item.Name,
 				})
 			}
 		case responses.ResponseOutputItemDoneEvent:
 			if item, ok := event.Item.AsAny().(responses.ResponseFunctionToolCall); ok {
-				err = emit(handler, StreamEvent{
-					Type: StreamEventToolUseDone, Index: int(event.OutputIndex),
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: item.Name,
 					ToolInput: shared.RawJSON(item.Arguments),
 				})
@@ -94,14 +94,14 @@ func (caller *openAIResponsesCaller) Stream(
 	if final == nil {
 		return nil, fmt.Errorf("llm: OpenAI Responses stream ended without a completed response")
 	}
-	if err := emit(handler, StreamEvent{Type: StreamEventCompleted, Response: final}); err != nil {
+	if err := emit(handler, modelStreamEvent{Type: modelStreamEventCompleted, Response: final}); err != nil {
 		return nil, err
 	}
 
 	return final, nil
 }
 
-func (caller *openAIResponsesCaller) params(request Request) (responses.ResponseNewParams, error) {
+func (caller *openAIResponsesCaller) params(request modelRequest) (responses.ResponseNewParams, error) {
 	if err := validateRequest(request); err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -156,7 +156,7 @@ func (caller *openAIResponsesCaller) params(request Request) (responses.Response
 	return params, nil
 }
 
-func openAIResponsesToolDefinition(tool ToolDefinition) (responses.ToolUnionParam, error) {
+func openAIResponsesToolDefinition(tool modelToolDefinition) (responses.ToolUnionParam, error) {
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return responses.ToolUnionParam{}, fmt.Errorf("llm: convert OpenAI Responses tool %q schema: %w", tool.Name, err)
@@ -239,7 +239,7 @@ func openAIResponsesMessage(message conversation.Message) (responses.ResponseInp
 	return items, nil
 }
 
-func openAIResponsesResponse(result *responses.Response) (*Response, error) {
+func openAIResponsesResponse(result *responses.Response) (*modelResponse, error) {
 	content := make(conversation.Content, 0, len(result.Output))
 	hasToolUse := false
 	for _, output := range result.Output {
@@ -277,16 +277,16 @@ func openAIResponsesResponse(result *responses.Response) (*Response, error) {
 		}
 	}
 
-	stopReason := StopReasonEndTurn
+	stopReason := modelStopReasonEndTurn
 	if hasToolUse {
-		stopReason = StopReasonToolUse
+		stopReason = modelStopReasonToolUse
 	} else if result.Status == responses.ResponseStatusIncomplete && result.IncompleteDetails.Reason == "max_output_tokens" {
-		stopReason = StopReasonMaxTokens
+		stopReason = modelStopReasonMaxTokens
 	} else if result.Status == responses.ResponseStatusFailed {
-		stopReason = StopReasonError
+		stopReason = modelStopReasonError
 	}
 
-	return &Response{
+	return &modelResponse{
 		ID: result.ID, Model: string(result.Model), Content: content, StopReason: stopReason,
 		Usage: conversation.TokenUsage{
 			Input: result.Usage.InputTokens, Output: result.Usage.OutputTokens,
@@ -310,25 +310,25 @@ type openAIResponsesStreamEvent struct {
 	} `json:"item"`
 }
 
-func emitOpenAIResponsesEvent(handler StreamHandler, event openAIResponsesStreamEvent) error {
+func emitOpenAIResponsesEvent(handler modelStreamHandler, event openAIResponsesStreamEvent) error {
 	switch event.Type {
 	case "response.output_text.delta":
-		return emit(handler, StreamEvent{Type: StreamEventTextDelta, Index: event.OutputIndex, Delta: event.Delta})
+		return emit(handler, modelStreamEvent{Type: modelStreamEventTextDelta, Index: event.OutputIndex, Delta: event.Delta})
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-		return emit(handler, StreamEvent{Type: StreamEventReasoningDelta, Index: event.OutputIndex, Delta: event.Delta})
+		return emit(handler, modelStreamEvent{Type: modelStreamEventReasoningDelta, Index: event.OutputIndex, Delta: event.Delta})
 	case "response.output_item.added":
 		if event.Item.Type == "function_call" {
-			return emit(handler, StreamEvent{
-				Type: StreamEventToolUseStart, Index: event.OutputIndex,
+			return emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolUseStart, Index: event.OutputIndex,
 				ToolUseID: event.Item.CallID, ToolName: event.Item.Name,
 			})
 		}
 	case "response.function_call_arguments.delta":
-		return emit(handler, StreamEvent{Type: StreamEventToolInputDelta, Index: event.OutputIndex, Delta: event.Delta})
+		return emit(handler, modelStreamEvent{Type: modelStreamEventToolInputDelta, Index: event.OutputIndex, Delta: event.Delta})
 	case "response.output_item.done":
 		if event.Item.Type == "function_call" {
-			return emit(handler, StreamEvent{
-				Type: StreamEventToolUseDone, Index: event.OutputIndex,
+			return emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolUseDone, Index: event.OutputIndex,
 				ToolUseID: event.Item.CallID, ToolName: event.Item.Name,
 				ToolInput: shared.RawJSON(event.Item.Arguments),
 			})

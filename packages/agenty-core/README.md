@@ -68,6 +68,24 @@ The mapping allows multiple native efforts to normalize to the same Agenty effor
 A model whose mapping has no enabled effort does not support reasoning. Only the six
 Agenty levels above are valid mapping values; native effort names are provider-specific.
 
+## Agent-loop runtime
+
+`pkg/agentloop/` is the dedicated Agent runtime module. It owns the provider-neutral
+model-calling contract, tool contract, JSON Schema, thread-safe tool registry, and the
+`Engine` that manages multiple sessions. Different sessions can run concurrently, one
+session permits one active round, and `Engine` owns cancellation and shutdown for all
+active rounds.
+
+Each loop resolves the Agent system prompt, rebuilds the complete conversation history,
+converts it through the selected provider adapter, invokes the LLM, persists the
+assistant response, and repeats when tool calls are returned. A model stores its own
+`maxOutputTokens`; each invocation defaults to
+`min(65536, model.maxOutputTokens)`. The loop currently permits at most 20 LLM/tool
+iterations. The shared registry implements the `ToolRuntime` port, executes one tool
+batch concurrently, and returns results in call order. Production currently registers
+no tools; future built-ins belong in `pkg/agentloop/builtin/` and are registered
+explicitly by `cmd/main.go`.
+
 ## Infrastructure layer
 
 The infrastructure layer (`pkg/infra/`) implements the domain repositories using the
@@ -77,7 +95,7 @@ filesystem + SQLite storage model.
 pkg/infra/
 ├── config/             Load config file + env overrides into a merged singleton; resolve data-dir paths
 ├── initialize/         OpenRepositories: one-call setup of all stores
-├── llm/                Unified SDK callers for OpenAI, Anthropic, and Google GenAI
+├── llm/                Provider SDK adapters implementing the agentloop caller contract
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
@@ -164,8 +182,16 @@ Methods follow a `resource.action` naming:
 | --- | --- |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`session.start` accepts `{id, content}` and returns the persisted round's identifiers
+and `running` status immediately; the engine continues the full agent turn
+asynchronously. `session.stop`
+accepts `{id}` and requests cancellation. Clients observe the terminal `completed`,
+`failed`, or `cancelled` round through `session.get`. Starting a second round for the
+same session, or deleting that session while it is running, returns `already exists`.
+Different sessions can run in parallel.
 
 ### Chunked uploads
 
@@ -235,8 +261,9 @@ and report a skip, rather than a failure, when a key is absent.
 
 The `test/e2e` package builds `cmd` once, launches the real binary over stdio, and gives
 each parallel test process its own `AGENTY_DATA_DIR`. It covers public Agent,
-Provider/Model, Session, JSON-RPC, chunking, startup, restart persistence, and process
-isolation contracts without accessing the user's data directory.
+Provider/Model, Session, agent-loop start/stop and parallel execution, JSON-RPC,
+chunking, startup, restart persistence, and process isolation contracts without
+accessing the user's data directory.
 
 All filesystem and SQLite tests use per-test temporary directories. Tests that
 change `AGENTY_DATA_DIR` are not parallelized because environment variables are
@@ -247,7 +274,9 @@ See [TESTING.md](./TESTING.md) for the full testing strategy and command guide, 
 
 ## Status
 
-The domain, infrastructure, application and stdio JSON-RPC interface layers are
-implemented. Infrastructure also provides unified non-streaming and streaming SDK
+The domain, agent-loop runtime, infrastructure, application and stdio JSON-RPC interface
+layers are implemented. Infrastructure also provides unified non-streaming and streaming SDK
 callers for OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Google
-GenAI. The HTTP API and CLI integration against this core are not yet implemented.
+GenAI. The execution engine currently uses the non-streaming caller; streaming agent
+turn delivery, built-in tools, the HTTP API, and CLI integration against this core are
+not yet implemented.

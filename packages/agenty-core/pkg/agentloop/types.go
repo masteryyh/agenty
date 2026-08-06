@@ -1,4 +1,4 @@
-package llm
+package agentloop
 
 import (
 	"context"

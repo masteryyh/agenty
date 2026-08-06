@@ -10,6 +10,7 @@ type Model struct {
 	Slug                   shared.Slug                       `json:"slug"`
 	Name                   string                            `json:"name"`
 	ContextWindow          int                               `json:"contextWindow"`
+	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
 	MultiModal             bool                              `json:"multiModal"`
 	Embedding              bool                              `json:"embedding"`
 	Light                  bool                              `json:"light"`

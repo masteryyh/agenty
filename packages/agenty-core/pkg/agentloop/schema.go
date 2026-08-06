@@ -1,4 +1,4 @@
-package llm
+package agentloop
 
 import (
 	"bytes"
@@ -147,7 +147,7 @@ func (properties JSONSchemaAdditionalProperties) value() (any, error) {
 	return nil, invalidRequest("additionalProperties must contain a boolean or a schema")
 }
 
-func toolSchemaMap(schema JSONSchema) (map[string]any, error) {
+func ToolSchemaMap(schema JSONSchema) (map[string]any, error) {
 	if schema.Type == "" {
 		schema.Type = JSONSchemaTypeObject
 	}

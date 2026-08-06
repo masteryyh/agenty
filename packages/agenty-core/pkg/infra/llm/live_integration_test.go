@@ -29,7 +29,7 @@ func TestLiveProviders(t *testing.T) {
 			modelEnv: "OPENAI_RESPONSES_MODEL", defaultModel: "gpt-5-mini",
 		},
 		{
-			name: "OpenAI Chat Completions", apiType: catalog.APIOpenAILegacy, providerSlug: "openai-legacy",
+			name: "OpenAI Chat Completions", apiType: catalog.APIOpenAICompletions, providerSlug: "openai-completions",
 			keyEnv: "OPENAI_API_KEY", baseURLEnv: "OPENAI_BASE_URL",
 			modelEnv: "OPENAI_CHAT_MODEL", defaultModel: "gpt-4.1-mini",
 		},
@@ -68,7 +68,7 @@ func TestLiveProviders(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create caller: %v", err)
 			}
-			request := Request{
+			request := modelRequest{
 				Messages: []conversation.Message{{
 					Role:    conversation.RoleUser,
 					Content: conversation.Text("Reply with exactly OK."),
@@ -88,8 +88,8 @@ func TestLiveProviders(t *testing.T) {
 
 			t.Run("stream", func(t *testing.T) {
 				completed := false
-				response, err := caller.Stream(ctx, request, func(event StreamEvent) error {
-					if event.Type == StreamEventCompleted {
+				response, err := caller.Stream(ctx, request, func(event modelStreamEvent) error {
+					if event.Type == modelStreamEventCompleted {
 						completed = true
 					}
 					return nil

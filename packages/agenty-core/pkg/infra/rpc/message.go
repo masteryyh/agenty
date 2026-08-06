@@ -52,9 +52,6 @@ func InternalError(message string) *Error {
 	return &Error{Code: ErrCodeInternalError, Message: message}
 }
 
-// MessageTooLarge reports that an inbound line exceeded the per-line byte cap.
-// The cap is echoed in data so the sender knows the limit and can switch to
-// the chunked upload protocol instead of giving up.
 func MessageTooLarge(max int) *Error {
 	return NewError(ErrCodeMessageTooLarge, "rpc: message too large", map[string]any{"maxLineBytes": max})
 }

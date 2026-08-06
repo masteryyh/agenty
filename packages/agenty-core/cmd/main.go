@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
+	"github.com/masteryyh/agenty-core/pkg/infra/llm"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
@@ -56,11 +60,42 @@ func run() (exitCode int) {
 
 	slog.InfoContext(ctx, "agenty-core started", "dataDir", config.Get().Paths().DataDir)
 
+	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
+		Sessions: repos.Conversation,
+		Agents:   repos.Agent,
+		Catalog:  repos.Catalog,
+		Tools:    agentloop.NewRegistry(),
+		NewCaller: func(
+			callerCtx context.Context,
+			provider catalog.Provider,
+			model catalog.Model,
+		) (agentloop.Caller, error) {
+			return llm.NewCaller(callerCtx, provider, model)
+		},
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to initialize execution engine", "error", err)
+		return 1
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+		if err := execution.Shutdown(shutdownCtx); err != nil {
+			slog.ErrorContext(shutdownCtx, "failed to stop execution engine", "error", err)
+			exitCode = 1
+		}
+	}()
+
+	sessionService := application.NewSessionService(
+		repos.Conversation,
+		application.WithSessionExecutionState(execution),
+	)
 	disp := rpc.NewDispatcher()
 	adapter.RegisterAll(disp,
 		application.NewAgentService(repos.Agent),
 		application.NewProviderService(repos.Catalog),
-		application.NewSessionService(repos.Conversation),
+		sessionService,
+		execution,
 	)
 
 	asm := rpc.NewChunkAssembler(disp)

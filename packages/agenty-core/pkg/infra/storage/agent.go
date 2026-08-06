@@ -12,7 +12,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-var ErrAgentNotFound = errors.New("storage: agent not found")
+var ErrAgentNotFound = agent.ErrNotFound
 
 type AgentRepository struct {
 	agentsDir string

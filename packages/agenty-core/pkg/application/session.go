@@ -12,7 +12,20 @@ import (
 )
 
 type SessionService struct {
-	repo sessionRepository
+	repo           sessionRepository
+	executionState sessionExecutionState
+}
+
+type sessionExecutionState interface {
+	ExecuteSessionIfIdle(sessionID uuid.UUID, execute func() error) (bool, error)
+}
+
+type SessionServiceOption func(*SessionService)
+
+func WithSessionExecutionState(state sessionExecutionState) SessionServiceOption {
+	return func(service *SessionService) {
+		service.executionState = state
+	}
 }
 
 type sessionRepository interface {
@@ -22,8 +35,13 @@ type sessionRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-func NewSessionService(repo sessionRepository) *SessionService {
-	return &SessionService{repo: repo}
+func NewSessionService(repo sessionRepository, options ...SessionServiceOption) *SessionService {
+	service := &SessionService{repo: repo}
+	for _, option := range options {
+		option(service)
+	}
+
+	return service
 }
 
 type SessionCreateInput struct {
@@ -115,13 +133,28 @@ func (s *SessionService) Delete(ctx context.Context, idStr string) error {
 	if err != nil {
 		return Validation("invalid session id: " + err.Error())
 	}
-
-	if err := s.repo.Delete(ctx, id); err != nil {
-		if errors.Is(err, storage.ErrConversationNotFound) {
-			return NotFound("session " + idStr + " not found")
+	deleteSession := func() error {
+		if err := s.repo.Delete(ctx, id); err != nil {
+			if errors.Is(err, storage.ErrConversationNotFound) {
+				return NotFound("session " + idStr + " not found")
+			}
+			return Internal("failed to delete session: " + err.Error())
 		}
-		return Internal("failed to delete session: " + err.Error())
+
+		return nil
 	}
+	if s.executionState == nil {
+		return deleteSession()
+	}
+
+	executed, err := s.executionState.ExecuteSessionIfIdle(id, deleteSession)
+	if err != nil {
+		return err
+	}
+	if !executed {
+		return AlreadyExists("session " + idStr + " is running")
+	}
+
 	return nil
 }
 

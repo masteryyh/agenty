@@ -1,4 +1,4 @@
-package llm
+package agentloop
 
 import (
 	"errors"
@@ -88,7 +88,7 @@ func TestJSONSchemaToMapPreservesRecursiveKeywords(t *testing.T) {
 		AdditionalProperties: AllowAdditionalProperties(false),
 	}
 
-	converted, err := toolSchemaMap(schema)
+	converted, err := ToolSchemaMap(schema)
 	if err != nil {
 		t.Fatalf("convert schema: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestToolSchemaMapDefaultsAndValidatesType(t *testing.T) {
 		t.Parallel()
 
 		schema := JSONSchema{Description: "parameters"}
-		converted, err := toolSchemaMap(schema)
+		converted, err := ToolSchemaMap(schema)
 		if err != nil {
 			t.Fatalf("toolSchemaMap() error: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestToolSchemaMapDefaultsAndValidatesType(t *testing.T) {
 		t.Run(string(schemaType), func(t *testing.T) {
 			t.Parallel()
 
-			_, err := toolSchemaMap(JSONSchema{Type: schemaType})
+			_, err := ToolSchemaMap(JSONSchema{Type: schemaType})
 			if !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("toolSchemaMap() error = %v, want ErrInvalidRequest", err)
 			}

@@ -18,7 +18,7 @@ type googleCaller struct {
 	model  catalog.Model
 }
 
-func (caller *googleCaller) Invoke(ctx context.Context, request Request) (*Response, error) {
+func (caller *googleCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
 	contents, config, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -34,9 +34,9 @@ func (caller *googleCaller) Invoke(ctx context.Context, request Request) (*Respo
 
 func (caller *googleCaller) Stream(
 	ctx context.Context,
-	request Request,
-	handler StreamHandler,
-) (*Response, error) {
+	request modelRequest,
+	handler modelStreamHandler,
+) (*modelResponse, error) {
 	contents, config, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -65,14 +65,14 @@ func (caller *googleCaller) Stream(
 	if err != nil {
 		return nil, err
 	}
-	if err := emit(handler, StreamEvent{Type: StreamEventCompleted, Response: final}); err != nil {
+	if err := emit(handler, modelStreamEvent{Type: modelStreamEventCompleted, Response: final}); err != nil {
 		return nil, err
 	}
 
 	return final, nil
 }
 
-func (caller *googleCaller) params(request Request) ([]*genai.Content, *genai.GenerateContentConfig, error) {
+func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *genai.GenerateContentConfig, error) {
 	if err := validateRequest(request); err != nil {
 		return nil, nil, err
 	}
@@ -138,7 +138,7 @@ func (caller *googleCaller) params(request Request) ([]*genai.Content, *genai.Ge
 	return contents, config, nil
 }
 
-func googleToolDefinition(tool ToolDefinition) (*genai.FunctionDeclaration, error) {
+func googleToolDefinition(tool modelToolDefinition) (*genai.FunctionDeclaration, error) {
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("llm: convert Google tool %q schema: %w", tool.Name, err)
@@ -257,7 +257,7 @@ func googleThinkingLevel(effort string) (genai.ThinkingLevel, error) {
 	}
 }
 
-func googleResponse(result *genai.GenerateContentResponse) (*Response, error) {
+func googleResponse(result *genai.GenerateContentResponse) (*modelResponse, error) {
 	if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
 		return nil, fmt.Errorf("llm: Google GenAI returned no candidates")
 	}
@@ -302,25 +302,25 @@ func googleResponse(result *genai.GenerateContentResponse) (*Response, error) {
 		usage.Total = int64(result.UsageMetadata.TotalTokenCount)
 	}
 
-	return &Response{
+	return &modelResponse{
 		ID: result.ResponseID, Model: result.ModelVersion, Content: content,
 		Usage: usage, StopReason: googleStopReason(candidate.FinishReason),
 	}, nil
 }
 
-func googleStopReason(reason genai.FinishReason) StopReason {
+func googleStopReason(reason genai.FinishReason) modelStopReason {
 	switch reason {
 	case genai.FinishReasonMaxTokens:
-		return StopReasonMaxTokens
+		return modelStopReasonMaxTokens
 	case genai.FinishReasonSafety, genai.FinishReasonBlocklist,
 		genai.FinishReasonProhibitedContent, genai.FinishReasonSPII:
-		return StopReasonContentFilter
+		return modelStopReasonContentFilter
 	default:
-		return StopReasonEndTurn
+		return modelStopReasonEndTurn
 	}
 }
 
-func emitGoogleChunk(handler StreamHandler, chunk *genai.GenerateContentResponse) error {
+func emitGoogleChunk(handler modelStreamHandler, chunk *genai.GenerateContentResponse) error {
 	if chunk == nil {
 		return nil
 	}
@@ -335,28 +335,28 @@ func emitGoogleChunk(handler StreamHandler, chunk *genai.GenerateContentResponse
 				if err != nil {
 					return err
 				}
-				if err := emit(handler, StreamEvent{
-					Type: StreamEventToolUseStart, Index: index,
+				if err := emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseStart, Index: index,
 					ToolUseID: part.FunctionCall.ID, ToolName: part.FunctionCall.Name,
 				}); err != nil {
 					return err
 				}
-				if err := emit(handler, StreamEvent{
-					Type: StreamEventToolUseDone, Index: index,
+				if err := emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseDone, Index: index,
 					ToolUseID: part.FunctionCall.ID, ToolName: part.FunctionCall.Name,
 					ToolInput: input,
 				}); err != nil {
 					return err
 				}
 			case part.Thought && part.Text != "":
-				if err := emit(handler, StreamEvent{
-					Type: StreamEventReasoningDelta, Index: index, Delta: part.Text,
+				if err := emit(handler, modelStreamEvent{
+					Type: modelStreamEventReasoningDelta, Index: index, Delta: part.Text,
 				}); err != nil {
 					return err
 				}
 			case part.Text != "":
-				if err := emit(handler, StreamEvent{
-					Type: StreamEventTextDelta, Index: index, Delta: part.Text,
+				if err := emit(handler, modelStreamEvent{
+					Type: modelStreamEventTextDelta, Index: index, Delta: part.Text,
 				}); err != nil {
 					return err
 				}

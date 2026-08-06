@@ -118,8 +118,9 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	}
 
 	p, err := providerSvc.AddModel(ctx, "anthropic", "claude-opus-4-8", application.ModelInput{
-		Name:          "Claude Opus 4.8",
-		ContextWindow: 200_000,
+		Name:            "Claude Opus 4.8",
+		ContextWindow:   200_000,
+		MaxOutputTokens: 32_000,
 		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
 			"low":  shared.ReasoningLow,
 			"high": shared.ReasoningHigh,
@@ -134,11 +135,15 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	if effort, ok := p.Models[0].MapReasoningEffort("high"); !ok || effort != shared.ReasoningHigh {
 		t.Errorf("mapped high effort = %q, %v; want high, true", effort, ok)
 	}
+	if p.Models[0].MaxOutputTokens != 32_000 {
+		t.Errorf("max output tokens = %d, want 32000", p.Models[0].MaxOutputTokens)
+	}
 
 	// AddModel is upsert: re-adding the same slug replaces.
 	if _, err := providerSvc.AddModel(ctx, "anthropic", "claude-opus-4-8", application.ModelInput{
-		Name:          "Claude Opus 4.8 Updated",
-		ContextWindow: 210_000,
+		Name:            "Claude Opus 4.8 Updated",
+		ContextWindow:   210_000,
+		MaxOutputTokens: 64_000,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +160,9 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 
 	// Add a second model, then remove the first.
 	if _, err := providerSvc.AddModel(ctx, "anthropic", "claude-haiku-4-5", application.ModelInput{
-		Name:  "Haiku",
-		Light: true,
+		Name:            "Haiku",
+		MaxOutputTokens: 8_000,
+		Light:           true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -196,12 +202,33 @@ func TestProviderAddModelRejectsInvalidReasoningEffortMapping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := providerSvc.AddModel(ctx, "openai", "gpt-5", application.ModelInput{
 				Name:                   "GPT-5",
+				MaxOutputTokens:        64_000,
 				ReasoningEffortMapping: tt.mapping,
 			})
 			if code := appErrorCode(err); code != application.CodeValidation {
 				t.Errorf("code = %v, want validation", code)
 			}
 		})
+	}
+}
+
+func TestProviderAddModelRejectsInvalidMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	_, providerSvc, _ := newServices(t)
+	ctx := t.Context()
+	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, maxOutputTokens := range []int64{0, -1} {
+		_, err := providerSvc.AddModel(ctx, "openai", "gpt-5", application.ModelInput{
+			Name:            "GPT-5",
+			MaxOutputTokens: maxOutputTokens,
+		})
+		if code := appErrorCode(err); code != application.CodeValidation {
+			t.Errorf("maxOutputTokens %d code = %v, want validation", maxOutputTokens, code)
+		}
 	}
 }
 
@@ -234,7 +261,7 @@ func TestProviderNotFoundPaths(t *testing.T) {
 		}},
 		{name: "delete", call: func() error { return providerSvc.Delete(t.Context(), "missing") }},
 		{name: "add model", call: func() error {
-			_, err := providerSvc.AddModel(t.Context(), "missing", "model", application.ModelInput{})
+			_, err := providerSvc.AddModel(t.Context(), "missing", "model", application.ModelInput{MaxOutputTokens: 1})
 			return err
 		}},
 		{name: "remove model", call: func() error { _, err := providerSvc.RemoveModel(t.Context(), "missing", "model"); return err }},

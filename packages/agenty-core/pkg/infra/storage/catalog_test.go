@@ -30,9 +30,10 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	provider.APIKey = "sk-ant-test"
 
 	model1 := catalog.Model{
-		Slug:          mustSlug("claude-opus-4-8"),
-		Name:          "Claude Opus 4.8",
-		ContextWindow: 200000,
+		Slug:            mustSlug("claude-opus-4-8"),
+		Name:            "Claude Opus 4.8",
+		ContextWindow:   200000,
+		MaxOutputTokens: 32000,
 		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
 			"low":    shared.ReasoningLow,
 			"medium": shared.ReasoningMedium,
@@ -42,12 +43,13 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		UpdatedAt: time.Now().UTC(),
 	}
 	model2 := catalog.Model{
-		Slug:          mustSlug("claude-haiku-4-5"),
-		Name:          "Claude Haiku 4.5",
-		ContextWindow: 200000,
-		Light:         true,
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		Slug:            mustSlug("claude-haiku-4-5"),
+		Name:            "Claude Haiku 4.5",
+		ContextWindow:   200000,
+		MaxOutputTokens: 8000,
+		Light:           true,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 	provider.Models = []catalog.Model{model1, model2}
 
@@ -64,6 +66,9 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	}
 	if _, ok := persistedModel["reasoningEffortMapping"]; !ok {
 		t.Errorf("persisted model keys = %v, want reasoningEffortMapping", persistedModel)
+	}
+	if _, ok := persistedModel["maxOutputTokens"]; !ok {
+		t.Errorf("persisted model keys = %v, want maxOutputTokens", persistedModel)
 	}
 
 	loaded, err := repo.Get(ctx, provider.Slug)
@@ -99,6 +104,9 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	}
 	if gotOpus != nil && !gotOpus.SupportsReasoning() {
 		t.Errorf("opus SupportsReasoning = %v, want true", gotOpus.SupportsReasoning())
+	}
+	if gotOpus != nil && gotOpus.MaxOutputTokens != 32000 {
+		t.Errorf("opus max output tokens = %d, want 32000", gotOpus.MaxOutputTokens)
 	}
 	if gotHaiku != nil && gotHaiku.SupportsReasoning() {
 		t.Errorf("haiku SupportsReasoning = %v, want false", gotHaiku.SupportsReasoning())

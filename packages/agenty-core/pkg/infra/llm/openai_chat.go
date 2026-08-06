@@ -18,7 +18,7 @@ type openAIChatCaller struct {
 	model  catalog.Model
 }
 
-func (caller *openAIChatCaller) Invoke(ctx context.Context, request Request) (*Response, error) {
+func (caller *openAIChatCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -34,9 +34,9 @@ func (caller *openAIChatCaller) Invoke(ctx context.Context, request Request) (*R
 
 func (caller *openAIChatCaller) Stream(
 	ctx context.Context,
-	request Request,
-	handler StreamHandler,
-) (*Response, error) {
+	request modelRequest,
+	handler modelStreamHandler,
+) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -53,24 +53,24 @@ func (caller *openAIChatCaller) Stream(
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
-				if err := emit(handler, StreamEvent{
-					Type: StreamEventTextDelta, Index: int(choice.Index), Delta: choice.Delta.Content,
+				if err := emit(handler, modelStreamEvent{
+					Type: modelStreamEventTextDelta, Index: int(choice.Index), Delta: choice.Delta.Content,
 				}); err != nil {
 					return nil, err
 				}
 			}
 			for _, toolCall := range choice.Delta.ToolCalls {
 				if toolCall.ID != "" || toolCall.Function.Name != "" {
-					if err := emit(handler, StreamEvent{
-						Type: StreamEventToolUseStart, Index: int(toolCall.Index),
+					if err := emit(handler, modelStreamEvent{
+						Type: modelStreamEventToolUseStart, Index: int(toolCall.Index),
 						ToolUseID: toolCall.ID, ToolName: toolCall.Function.Name,
 					}); err != nil {
 						return nil, err
 					}
 				}
 				if toolCall.Function.Arguments != "" {
-					if err := emit(handler, StreamEvent{
-						Type: StreamEventToolInputDelta, Index: int(toolCall.Index),
+					if err := emit(handler, modelStreamEvent{
+						Type: modelStreamEventToolInputDelta, Index: int(toolCall.Index),
 						Delta: toolCall.Function.Arguments,
 					}); err != nil {
 						return nil, err
@@ -92,21 +92,21 @@ func (caller *openAIChatCaller) Stream(
 		if !ok {
 			continue
 		}
-		if err := emit(handler, StreamEvent{
-			Type: StreamEventToolUseDone, Index: index,
+		if err := emit(handler, modelStreamEvent{
+			Type: modelStreamEventToolUseDone, Index: index,
 			ToolUseID: tool.ID, ToolName: tool.Name, ToolInput: tool.Input,
 		}); err != nil {
 			return nil, err
 		}
 	}
-	if err := emit(handler, StreamEvent{Type: StreamEventCompleted, Response: final}); err != nil {
+	if err := emit(handler, modelStreamEvent{Type: modelStreamEventCompleted, Response: final}); err != nil {
 		return nil, err
 	}
 
 	return final, nil
 }
 
-func (caller *openAIChatCaller) params(request Request) (openai.ChatCompletionNewParams, error) {
+func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatCompletionNewParams, error) {
 	if err := validateRequest(request); err != nil {
 		return openai.ChatCompletionNewParams{}, err
 	}
@@ -160,7 +160,7 @@ func (caller *openAIChatCaller) params(request Request) (openai.ChatCompletionNe
 	return params, nil
 }
 
-func openAIChatToolDefinition(tool ToolDefinition) (openai.ChatCompletionToolUnionParam, error) {
+func openAIChatToolDefinition(tool modelToolDefinition) (openai.ChatCompletionToolUnionParam, error) {
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return openai.ChatCompletionToolUnionParam{}, fmt.Errorf("llm: convert OpenAI Chat tool %q schema: %w", tool.Name, err)
@@ -239,7 +239,7 @@ func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMe
 	return []openai.ChatCompletionMessageParamUnion{assistant}, nil
 }
 
-func openAIChatResponse(result *openai.ChatCompletion) (*Response, error) {
+func openAIChatResponse(result *openai.ChatCompletion) (*modelResponse, error) {
 	if len(result.Choices) == 0 {
 		return nil, fmt.Errorf("llm: OpenAI Chat Completions returned no choices")
 	}
@@ -264,7 +264,7 @@ func openAIChatResponse(result *openai.ChatCompletion) (*Response, error) {
 		})
 	}
 
-	return &Response{
+	return &modelResponse{
 		ID: result.ID, Model: result.Model, Content: content,
 		StopReason: openAIChatStopReason(choice.FinishReason),
 		Usage: conversation.TokenUsage{
@@ -277,15 +277,15 @@ func openAIChatResponse(result *openai.ChatCompletion) (*Response, error) {
 	}, nil
 }
 
-func openAIChatStopReason(reason string) StopReason {
+func openAIChatStopReason(reason string) modelStopReason {
 	switch reason {
 	case "length":
-		return StopReasonMaxTokens
+		return modelStopReasonMaxTokens
 	case "tool_calls", "function_call":
-		return StopReasonToolUse
+		return modelStopReasonToolUse
 	case "content_filter":
-		return StopReasonContentFilter
+		return modelStopReasonContentFilter
 	default:
-		return StopReasonEndTurn
+		return modelStopReasonEndTurn
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-var ErrProviderNotFound = errors.New("storage: provider not found")
+var ErrProviderNotFound = catalog.ErrProviderNotFound
 
 type CatalogRepository struct {
 	providersDir string

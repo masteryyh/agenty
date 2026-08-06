@@ -13,7 +13,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-func validateRequest(request Request) error {
+func validateRequest(request modelRequest) error {
 	if request.MaxOutputTokens <= 0 {
 		return invalidRequest("max output tokens must be greater than zero")
 	}
@@ -58,7 +58,7 @@ func nativeReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) (
 	}
 }
 
-func systemPrompt(request Request) (string, error) {
+func systemPrompt(request modelRequest) (string, error) {
 	parts := make([]string, 0, 2)
 	if prompt := strings.TrimSpace(request.SystemPrompt); prompt != "" {
 		parts = append(parts, prompt)
@@ -121,7 +121,7 @@ func imageURL(block conversation.ImageBlock) (string, error) {
 	return fmt.Sprintf("data:%s;base64,%s", block.MimeType, block.Data), nil
 }
 
-func emit(handler StreamHandler, event StreamEvent) error {
+func emit(handler modelStreamHandler, event modelStreamEvent) error {
 	if handler == nil {
 		return nil
 	}

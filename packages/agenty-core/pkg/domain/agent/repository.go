@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
+
+var ErrNotFound = errors.New("agent: not found")
 
 type Repository interface {
 	Get(ctx context.Context, slug shared.Slug) (*Agent, error)

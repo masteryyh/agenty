@@ -18,7 +18,7 @@ type anthropicCaller struct {
 	model  catalog.Model
 }
 
-func (caller *anthropicCaller) Invoke(ctx context.Context, request Request) (*Response, error) {
+func (caller *anthropicCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -34,9 +34,9 @@ func (caller *anthropicCaller) Invoke(ctx context.Context, request Request) (*Re
 
 func (caller *anthropicCaller) Stream(
 	ctx context.Context,
-	request Request,
-	handler StreamHandler,
-) (*Response, error) {
+	request modelRequest,
+	handler modelStreamHandler,
+) (*modelResponse, error) {
 	params, err := caller.params(request)
 	if err != nil {
 		return nil, err
@@ -76,8 +76,8 @@ func (caller *anthropicCaller) Stream(
 		if !ok {
 			continue
 		}
-		if err := emit(handler, StreamEvent{
-			Type:      StreamEventToolUseDone,
+		if err := emit(handler, modelStreamEvent{
+			Type:      modelStreamEventToolUseDone,
 			Index:     index,
 			ToolUseID: tool.ID,
 			ToolName:  tool.Name,
@@ -86,14 +86,14 @@ func (caller *anthropicCaller) Stream(
 			return nil, err
 		}
 	}
-	if err := emit(handler, StreamEvent{Type: StreamEventCompleted, Response: final}); err != nil {
+	if err := emit(handler, modelStreamEvent{Type: modelStreamEventCompleted, Response: final}); err != nil {
 		return nil, err
 	}
 
 	return final, nil
 }
 
-func (caller *anthropicCaller) params(request Request) (anthropic.MessageNewParams, error) {
+func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNewParams, error) {
 	if err := validateRequest(request); err != nil {
 		return anthropic.MessageNewParams{}, err
 	}
@@ -152,7 +152,7 @@ func (caller *anthropicCaller) params(request Request) (anthropic.MessageNewPara
 	return params, nil
 }
 
-func anthropicToolDefinition(tool ToolDefinition) (anthropic.ToolUnionParam, error) {
+func anthropicToolDefinition(tool modelToolDefinition) (anthropic.ToolUnionParam, error) {
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return anthropic.ToolUnionParam{}, fmt.Errorf("llm: convert Anthropic tool %q schema: %w", tool.Name, err)
@@ -266,7 +266,7 @@ func anthropicToolResultContent(content conversation.Content) ([]anthropic.ToolR
 	return result, nil
 }
 
-func anthropicResponse(result *anthropic.Message) (*Response, error) {
+func anthropicResponse(result *anthropic.Message) (*modelResponse, error) {
 	content := make(conversation.Content, 0, len(result.Content))
 	for _, item := range result.Content {
 		switch item.Type {
@@ -305,22 +305,22 @@ func anthropicResponse(result *anthropic.Message) (*Response, error) {
 	}
 	usage.Total = usage.Input + usage.Output
 
-	return &Response{
+	return &modelResponse{
 		ID: result.ID, Model: string(result.Model), Content: content,
 		Usage: usage, StopReason: anthropicStopReason(string(result.StopReason)),
 	}, nil
 }
 
-func anthropicStopReason(reason string) StopReason {
+func anthropicStopReason(reason string) modelStopReason {
 	switch reason {
 	case "max_tokens", "model_context_window_exceeded":
-		return StopReasonMaxTokens
+		return modelStopReasonMaxTokens
 	case "tool_use":
-		return StopReasonToolUse
+		return modelStopReasonToolUse
 	case "refusal":
-		return StopReasonContentFilter
+		return modelStopReasonContentFilter
 	default:
-		return StopReasonEndTurn
+		return modelStopReasonEndTurn
 	}
 }
 
@@ -340,23 +340,23 @@ type anthropicStreamEvent struct {
 	} `json:"content_block"`
 }
 
-func emitAnthropicEvent(handler StreamHandler, event anthropicStreamEvent) error {
+func emitAnthropicEvent(handler modelStreamHandler, event anthropicStreamEvent) error {
 	switch event.Type {
 	case "content_block_start":
 		if event.ContentBlock.Type == "tool_use" {
-			return emit(handler, StreamEvent{
-				Type: StreamEventToolUseStart, Index: event.Index,
+			return emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolUseStart, Index: event.Index,
 				ToolUseID: event.ContentBlock.ID, ToolName: event.ContentBlock.Name,
 			})
 		}
 	case "content_block_delta":
 		switch event.Delta.Type {
 		case "text_delta":
-			return emit(handler, StreamEvent{Type: StreamEventTextDelta, Index: event.Index, Delta: event.Delta.Text})
+			return emit(handler, modelStreamEvent{Type: modelStreamEventTextDelta, Index: event.Index, Delta: event.Delta.Text})
 		case "thinking_delta":
-			return emit(handler, StreamEvent{Type: StreamEventReasoningDelta, Index: event.Index, Delta: event.Delta.Thinking})
+			return emit(handler, modelStreamEvent{Type: modelStreamEventReasoningDelta, Index: event.Index, Delta: event.Delta.Thinking})
 		case "input_json_delta":
-			return emit(handler, StreamEvent{Type: StreamEventToolInputDelta, Index: event.Index, Delta: event.Delta.PartialJSON})
+			return emit(handler, modelStreamEvent{Type: modelStreamEventToolInputDelta, Index: event.Index, Delta: event.Delta.PartialJSON})
 		}
 	}
 

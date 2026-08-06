@@ -196,14 +196,16 @@ func (s *Session) apply(e shared.Event) {
 		s.UpdatedAt = ev.At
 	case RoundStarted:
 		s.Rounds = append(s.Rounds, Round{
-			ID:        ev.RoundID,
-			SessionID: ev.SessionID,
-			Sequence:  ev.Sequence,
-			Status:    RoundRunning,
-			Model:     ev.Model,
-			Cwd:       cloneString(ev.Cwd),
-			Messages:  []Message{},
-			StartedAt: ev.At,
+			ID:              ev.RoundID,
+			SessionID:       ev.SessionID,
+			Sequence:        ev.Sequence,
+			Status:          RoundRunning,
+			Model:           ev.Model,
+			ContextWindow:   ev.ContextWindow,
+			ReasoningEffort: ev.ReasoningEffort,
+			Cwd:             cloneString(ev.Cwd),
+			Messages:        []Message{},
+			StartedAt:       ev.At,
 		})
 		s.UpdatedAt = ev.At
 	case MessageAppended:
@@ -214,6 +216,7 @@ func (s *Session) apply(e shared.Event) {
 	case RoundEnded:
 		if r, _, ok := s.findRound(ev.RoundID); ok {
 			r.Status = ev.Status
+			r.Usage = ev.Usage
 			r.Error = ev.Error
 			ended := ev.At
 			r.EndedAt = &ended

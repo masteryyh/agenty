@@ -8,11 +8,11 @@
 | 范围 | 测试环境 | 覆盖行为 | 默认运行 |
 | --- | --- | --- | --- |
 | Domain | 仅内存值 | 聚合不变量、Session 状态转换与 replay、event 和 content 序列化、Provider model 生命周期、slug 和 reasoning effort 映射校验 | 是 |
-| Application | 内存 repository fake | Agent、Provider 和 Session 用例、输入校验、partial update、错误映射和 pending event 生命周期 | 是 |
+| Application | 内存 repository fake | Agent、Provider 和 Session 用例；execution loop 完成、tool continuation、model 输出 token 上限、多 session 并行、取消、shutdown、输入校验、错误映射和 pending event 生命周期 | 是 |
 | RPC | buffer、fake handler 和合成时间 | JSON-RPC/NDJSON framing、notification、batch、非法请求、单行限制、chunk 组装与清理 | 是 |
 | Config、logging 与 storage | `t.TempDir()`、真实文件和本地 SQLite | 配置文件与 env override 合并、单例 Manager、日志等级/格式/路径选择、JSON repository、append-only transcript、SQLite projection 和 schema 初始化 | 是 |
-| 完整装配 | 隔离的文件系统和 SQLite 状态 | repository 初始化，以及 RPC 到 application 再到 storage 的完整流程 | 启用 `integration` 时 |
-| 可执行 E2E | 真实 `cmd` 子进程和独立数据目录 | stdio JSON-RPC 业务流程、启动失败、chunk 注册、重启持久化和并行进程隔离 | 启用 `e2e` 时 |
+| 完整装配 | 隔离的文件系统和 SQLite 状态 | repository 初始化，以及包括异步 session start/stop 在内的 RPC 到 application 再到 storage 完整流程 | 启用 `integration` 时 |
+| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录和本地 HTTP stub | stdio JSON-RPC 业务流程、agent loop 完成/取消、多 session 并行、上游请求转换、启动失败、chunk 注册、重启持久化和进程隔离 | 启用 `e2e` 时 |
 
 当前 `integration` 构建标签会启用：
 
@@ -39,6 +39,8 @@ core 内部实现包。
   文件（默认 info/text）驱动；不修改测试 runner 的环境，因此独立业务流程可以安全
   使用 `t.Parallel()`，日志也只会写入各自的隔离数据目录。需要验证 env override 的
   测试会在子进程上显式设置对应变量。
+- Agent loop E2E 使用本地 `httptest` HTTP server 作为 provider endpoint。执行环境必须
+  允许绑定 loopback 端口；沙箱若拒绝 `listen`，需要在允许绑定的环境复跑这些测试。
 - Chunk 过期测试使用 `testing/synctest`，不等待真实时间。
 
 Go 命令应在 `packages/agenty-core/` 下运行。模块 pnpm 命令可以在该目录直接运行；
@@ -118,6 +120,10 @@ Storage/RPC integration 测试和全部 E2E 测试使用本地文件与 SQLite�
 用例是唯一会访问外部服务的测试，并且只在环境中存在对应 Provider API Key 时执行。
 E2E 用例聚焦可观察的进程 contract；穷举 parser 变体、真实 64 MiB 单行限制和 chunk
 assembler 输入校验继续由更快的 RPC 测试覆盖，不在子进程中用大 payload 重复。
+
+Execution E2E 使用本地 OpenAI Chat Completions 兼容 stub，不访问外部 provider。测试验证
+65,536 默认输出 token 裁剪、完整 message/usage 持久化、多 session 并行、重复启动拒绝、
+stop 驱动的最终取消状态，以及公开 IPC 返回结构。
 
 测试涉及两个实现边界：
 

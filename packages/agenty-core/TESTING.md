@@ -8,11 +8,11 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | Area | Environment | Covered behavior | Default suite |
 | --- | --- | --- | --- |
 | Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and reasoning effort mapping validation | Yes |
-| Application | In-memory repository fakes | Agent, Provider, and Session use cases, validation, partial updates, error mapping, and pending-event lifecycle | Yes |
+| Application | In-memory repository fakes | Agent, Provider, and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
-| Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows | With `integration` |
-| Executable E2E | Real `cmd` subprocesses with isolated data directories | stdio JSON-RPC business workflows, startup failure, chunk registration, restart persistence, and parallel process isolation | With `e2e` |
+| Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows, including asynchronous session start/stop | With `integration` |
+| Executable E2E | Real `cmd` subprocesses with isolated data directories and local HTTP stubs | stdio JSON-RPC business workflows, agent-loop completion/cancellation, parallel sessions, upstream request conversion, startup failure, chunk registration, restart persistence, and process isolation | With `e2e` |
 
 The `integration` build tag currently enables:
 
@@ -45,6 +45,9 @@ paths are also outside the unit-test scope.
   independent workflows use `t.Parallel()` safely and write logs only inside
   their isolated data directory. Tests that exercise env overrides set those
   variables explicitly on the child.
+- Agent-loop E2E tests use local `httptest` HTTP servers as provider endpoints. Their
+  environment must allow loopback port binding; a sandbox that rejects `listen` must
+  rerun those tests in an allowed environment.
 - Chunk expiration tests use `testing/synctest` instead of real-time waits.
 
 Run Go commands from `packages/agenty-core/`. The module's pnpm commands can be run
@@ -126,6 +129,11 @@ their provider API key is present. E2E cases focus on observable process contrac
 Exhaustive parser permutations, the physical 64 MiB line limit, and chunk assembler
 validation remain in the faster RPC tests instead of being duplicated with large
 subprocess payloads.
+
+The execution E2E cases use a local OpenAI Chat Completions-compatible stub, not an
+external provider. They verify the 65,536 default output-token clamp, complete message
+and usage persistence, concurrent sessions, duplicate-start rejection, stop-driven
+terminal cancellation, and the public IPC result shapes.
 
 Two implementation boundaries affect the tests:
 

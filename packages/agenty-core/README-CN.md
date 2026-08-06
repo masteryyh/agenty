@@ -65,6 +65,21 @@ Agenty 对外提供且仅提供六个与 provider 无关的 reasoning effort 等
 的模型不支持 reasoning。只有上述六个 Agenty 等级可以作为映射值；原生 effort 名称
 由 provider 自行定义。
 
+## Agent loop 运行时
+
+`pkg/agentloop/` 是独立的 Agent 运行时模块。它拥有 provider-neutral 的模型调用
+contract、tool contract、JSON Schema、线程安全的 tool registry，以及统一管理多个
+session 的 `Engine`。不同 session 可以并行执行，同一 session 只允许一个 active round；
+`Engine` 统一管理所有运行中 round 的取消和 shutdown。
+
+每次 loop 会解析 Agent system prompt，重建完整会话历史，通过选定 provider adapter
+转换上游数据结构，调用 LLM、持久化 assistant 响应，并在返回 tool calls 时继续循环。
+每个 model 自行保存 `maxOutputTokens`，单次调用默认使用
+`min(65536, model.maxOutputTokens)`。当前单个 round 最多执行 20 次 LLM/tool 迭代。
+共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
+调用顺序返回。生产装配目前不注册任何工具；未来内置工具归入
+`pkg/agentloop/builtin/`，由 `cmd/main.go` 显式注册。
+
 ## 基础设施层
 
 基础设施层（`pkg/infra/`）基于文件系统 + SQLite 存储模型实现领域 repositories。
@@ -73,7 +88,7 @@ Agenty 对外提供且仅提供六个与 provider 无关的 reasoning effort 等
 pkg/infra/
 ├── config/             将配置文件和 env override 合并到单例中；解析 data-dir 路径
 ├── initialize/         OpenRepositories：一次性初始化所有 stores
-├── llm/                OpenAI、Anthropic、Google GenAI 的统一 SDK 调用器
+├── llm/                实现 agentloop caller contract 的 provider SDK adapters
 ├── logging/            slog 初始化、环境配置解析和按日生成日志路径
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
@@ -149,8 +164,14 @@ Methods 使用 `resource.action` 命名：
 | --- | --- |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
+`running` 状态，完整 agent turn 由引擎异步继续执行。`session.stop` 接收 `{id}` 并请求
+取消；client 通过 `session.get`
+观察最终的 `completed`、`failed` 或 `cancelled` round。同一 session 重复启动，或在运行
+期间删除该 session，会返回 `already exists`；不同 sessions 可以并行运行。
 
 ### 分块上传
 
@@ -214,8 +235,8 @@ RPC-to-disk 路径使用 `integration` build tag。同一 build tag 还会启用
 
 `test/e2e` package 只构建一次 `cmd`，通过 stdio 启动真实 binary，并为每个并行测试
 进程分配独立的 `AGENTY_DATA_DIR`。它覆盖公开的 Agent、Provider/Model、Session、
-JSON-RPC、chunking、startup、restart persistence 和 process isolation contracts，
-不会访问用户的数据目录。
+agent loop 启停与并行执行、JSON-RPC、chunking、startup、restart persistence 和
+process isolation contracts，不会访问用户的数据目录。
 
 所有文件系统和 SQLite 测试都使用每个测试独立的临时目录。修改 `AGENTY_DATA_DIR` 的
 测试不会并行运行，因为环境变量属于进程级全局状态。
@@ -225,6 +246,8 @@ JSON-RPC、chunking、startup、restart persistence 和 process isolation contra
 
 ## 状态
 
-领域层、基础设施层、应用层和 stdio JSON-RPC 接口层均已实现。基础设施层还提供
+领域层、agent loop 运行时、基础设施层、应用层和 stdio JSON-RPC 接口层均已实现。
+基础设施层还提供
 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google GenAI 的统一
-非流式/流式 SDK 调用器。目前尚未实现基于该 core 的 HTTP API 和 CLI 集成。
+非流式/流式 SDK 调用器。执行引擎当前使用非流式 caller；尚未实现 streaming agent turn
+传输、内置工具、基于该 core 的 HTTP API 和 CLI 集成。

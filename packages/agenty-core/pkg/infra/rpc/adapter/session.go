@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 )
 
-// RegisterSessionHandlers registers session.* methods on d.
-func RegisterSessionHandlers(d *rpc.Dispatcher, svc *application.SessionService) {
+func RegisterSessionHandlers(
+	d *rpc.Dispatcher,
+	svc *application.SessionService,
+	execution *agentloop.Engine,
+) {
 	d.Register("session.create", sessionCreate(svc))
 	d.Register("session.get", sessionGet(svc))
 	d.Register("session.list", sessionList(svc))
@@ -19,9 +24,10 @@ func RegisterSessionHandlers(d *rpc.Dispatcher, svc *application.SessionService)
 	d.Register("session.setModel", sessionSetModel(svc))
 	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
+	d.Register("session.start", sessionStart(execution))
+	d.Register("session.stop", sessionStop(execution))
 }
 
-// idParams identifies a session by its UUID.
 type idParams struct {
 	ID string `json:"id"`
 }
@@ -138,5 +144,30 @@ func sessionSetCwd(svc *application.SessionService) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(svc.SetCwd(ctx, p.ID, p.Cwd))
+	}
+}
+
+type sessionStartParams struct {
+	ID      string               `json:"id"`
+	Content conversation.Content `json:"content"`
+}
+
+func sessionStart(execution *agentloop.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p sessionStartParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.Start(ctx, p.ID, p.Content))
+	}
+}
+
+func sessionStop(execution *agentloop.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p idParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.Stop(ctx, p.ID))
 	}
 }

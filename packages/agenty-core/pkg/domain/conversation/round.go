@@ -28,14 +28,17 @@ func (s RoundStatus) Terminal() bool {
 }
 
 type Round struct {
-	ID        uuid.UUID       `json:"id"`
-	SessionID uuid.UUID       `json:"sessionId"`
-	Sequence  int             `json:"sequence"`
-	Status    RoundStatus     `json:"status"`
-	Model     shared.ModelRef `json:"model"`
-	Cwd       *string         `json:"cwd,omitempty"`
-	Messages  []Message       `json:"messages"`
-	Error     *string         `json:"error,omitempty"`
-	StartedAt time.Time       `json:"startedAt"`
-	EndedAt   *time.Time      `json:"endedAt,omitempty"`
+	ID              uuid.UUID              `json:"id"`
+	SessionID       uuid.UUID              `json:"sessionId"`
+	Sequence        int                    `json:"sequence"`
+	Status          RoundStatus            `json:"status"`
+	Model           shared.ModelRef        `json:"model"`
+	ContextWindow   int64                  `json:"contextWindow"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
+	Cwd             *string                `json:"cwd,omitempty"`
+	Messages        []Message              `json:"messages"`
+	Usage           TokenUsage             `json:"usage"`
+	Error           *string                `json:"error,omitempty"`
+	StartedAt       time.Time              `json:"startedAt"`
+	EndedAt         *time.Time             `json:"endedAt,omitempty"`
 }

@@ -36,6 +36,7 @@ type modelView struct {
 	Slug                   string            `json:"slug"`
 	Name                   string            `json:"name"`
 	ContextWindow          int               `json:"contextWindow"`
+	MaxOutputTokens        int64             `json:"maxOutputTokens"`
 	MultiModal             bool              `json:"multiModal"`
 	Embedding              bool              `json:"embedding"`
 	Light                  bool              `json:"light"`
@@ -61,8 +62,58 @@ type sessionView struct {
 	CurrentModel           *modelRefView `json:"currentModel"`
 	ContextWindow          int64         `json:"contextWindow"`
 	CurrentReasoningEffort string        `json:"currentReasoningEffort"`
+	Rounds                 []roundView   `json:"rounds"`
 	CreatedAt              time.Time     `json:"createdAt"`
 	UpdatedAt              time.Time     `json:"updatedAt"`
+}
+
+type tokenUsageView struct {
+	Input      int64 `json:"input"`
+	Output     int64 `json:"output"`
+	CachedRead int64 `json:"cachedRead"`
+	CacheWrite int64 `json:"cacheWrite"`
+	Reasoning  int64 `json:"reasoning"`
+	Total      int64 `json:"total"`
+}
+
+type contentBlockView struct {
+	Type      string `json:"type"`
+	Text      string `json:"text"`
+	ToolUseID string `json:"toolUseId"`
+	IsError   bool   `json:"isError"`
+}
+
+type messageView struct {
+	ID      string             `json:"id"`
+	RoundID string             `json:"roundId"`
+	Role    string             `json:"role"`
+	Content []contentBlockView `json:"content"`
+	Usage   *tokenUsageView    `json:"usage"`
+}
+
+type roundView struct {
+	ID              string         `json:"id"`
+	SessionID       string         `json:"sessionId"`
+	Sequence        int            `json:"sequence"`
+	Status          string         `json:"status"`
+	Model           modelRefView   `json:"model"`
+	ContextWindow   int64          `json:"contextWindow"`
+	ReasoningEffort string         `json:"reasoningEffort"`
+	Messages        []messageView  `json:"messages"`
+	Usage           tokenUsageView `json:"usage"`
+	Error           *string        `json:"error"`
+}
+
+type executionStartView struct {
+	SessionID string `json:"sessionId"`
+	RoundID   string `json:"roundId"`
+	Status    string `json:"status"`
+}
+
+type executionStopView struct {
+	SessionID     string `json:"sessionId"`
+	RoundID       string `json:"roundId"`
+	StopRequested bool   `json:"stopRequested"`
 }
 
 type sessionSummaryView struct {

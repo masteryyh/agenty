@@ -22,7 +22,7 @@ func TestStatePersistsAcrossProcessRestart(t *testing.T) {
 		"slug": "persistent-provider", "name": "Persistent Provider", "type": "openai",
 	}))
 	requireSuccess(t, first.Call(t, "provider.addModel", map[string]any{
-		"providerSlug": "persistent-provider", "modelSlug": "persistent-model", "name": "Persistent Model",
+		"providerSlug": "persistent-provider", "modelSlug": "persistent-model", "name": "Persistent Model", "maxOutputTokens": 8192,
 	}))
 	session := createSession(t, first, "persistent-agent", "persistent-provider", "persistent-model")
 	requireSuccess(t, first.Call(t, "session.setTitle", map[string]any{

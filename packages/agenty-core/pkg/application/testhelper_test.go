@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -163,11 +164,15 @@ func cloneProvider(p *catalog.Provider) *catalog.Provider {
 }
 
 type sessionRepositoryFake struct {
-	events    map[uuid.UUID][]shared.Event
-	loadErr   error
-	saveErr   error
-	listErr   error
-	deleteErr error
+	mu            sync.RWMutex
+	events        map[uuid.UUID][]shared.Event
+	loadErr       error
+	saveErr       error
+	listErr       error
+	deleteErr     error
+	loadAttempted chan struct{}
+	deleteStarted chan struct{}
+	deleteRelease chan struct{}
 }
 
 func newSessionRepositoryFake() *sessionRepositoryFake {
@@ -175,6 +180,13 @@ func newSessionRepositoryFake() *sessionRepositoryFake {
 }
 
 func (r *sessionRepositoryFake) Load(_ context.Context, id uuid.UUID) (*conversation.Session, error) {
+	if r.loadAttempted != nil {
+		close(r.loadAttempted)
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.loadErr != nil {
 		return nil, r.loadErr
 	}
@@ -186,6 +198,9 @@ func (r *sessionRepositoryFake) Load(_ context.Context, id uuid.UUID) (*conversa
 }
 
 func (r *sessionRepositoryFake) Save(_ context.Context, session *conversation.Session) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.saveErr != nil {
 		return r.saveErr
 	}
@@ -194,6 +209,9 @@ func (r *sessionRepositoryFake) Save(_ context.Context, session *conversation.Se
 }
 
 func (r *sessionRepositoryFake) List(_ context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
@@ -216,6 +234,15 @@ func (r *sessionRepositoryFake) List(_ context.Context, query conversation.ListQ
 }
 
 func (r *sessionRepositoryFake) Delete(_ context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.deleteStarted != nil {
+		close(r.deleteStarted)
+	}
+	if r.deleteRelease != nil {
+		<-r.deleteRelease
+	}
 	if r.deleteErr != nil {
 		return r.deleteErr
 	}

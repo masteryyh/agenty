@@ -50,9 +50,10 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.AddModel(catalog.Model{
-		Slug:          mustSlug("claude-opus-4-8"),
-		Name:          "Claude Opus 4.8",
-		ContextWindow: 200_000,
+		Slug:            mustSlug("claude-opus-4-8"),
+		Name:            "Claude Opus 4.8",
+		ContextWindow:   200_000,
+		MaxOutputTokens: 32_000,
 	})
 	if err := repos.Catalog.Save(ctx, provider); err != nil {
 		t.Fatalf("Save provider: %v", err)

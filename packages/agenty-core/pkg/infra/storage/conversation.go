@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,7 +21,7 @@ import (
 )
 
 var (
-	ErrConversationNotFound = errors.New("storage: session not found")
+	ErrConversationNotFound = conversation.ErrSessionNotFound
 
 	errTranscriptNotFound = errors.New("storage: transcript miss")
 )
@@ -28,6 +29,7 @@ var (
 type ConversationRepository struct {
 	db          *sql.DB
 	sessionsDir string
+	mu          sync.RWMutex
 }
 
 func NewConversationRepository(db *sql.DB, sessionsDir string) *ConversationRepository {
@@ -35,6 +37,9 @@ func NewConversationRepository(db *sql.DB, sessionsDir string) *ConversationRepo
 }
 
 func (r *ConversationRepository) Load(ctx context.Context, id uuid.UUID) (*conversation.Session, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	sum, err := r.getSession(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -55,6 +60,9 @@ func (r *ConversationRepository) Load(ctx context.Context, id uuid.UUID) (*conve
 }
 
 func (r *ConversationRepository) Save(ctx context.Context, session *conversation.Session) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -82,7 +90,11 @@ func (r *ConversationRepository) Save(ctx context.Context, session *conversation
 		return err
 	}
 
-	sum := session.Summary()
+	events, err := r.loadTranscript(session.ID, session.CreatedAt)
+	if err != nil {
+		return err
+	}
+	sum := conversation.ReplaySession(events).Summary()
 	if err := r.upsertSession(ctx, sum); err != nil {
 		return err
 	}
@@ -91,10 +103,16 @@ func (r *ConversationRepository) Save(ctx context.Context, session *conversation
 }
 
 func (r *ConversationRepository) List(ctx context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	return r.listSessions(ctx, query)
 }
 
 func (r *ConversationRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	sum, err := r.getSession(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

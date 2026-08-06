@@ -33,10 +33,10 @@ func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := session.Rounds[0]; got.ID != round1 || got.Model != model1 || got.Cwd == nil || *got.Cwd != "/workspace/one" {
+	if got := session.Rounds[0]; got.ID != round1 || got.Model != model1 || got.ContextWindow != 200_000 || got.ReasoningEffort != shared.ReasoningHigh || got.Cwd == nil || *got.Cwd != "/workspace/one" {
 		t.Errorf("first round snapshot = %+v", got)
 	}
-	if got := session.Rounds[1]; got.ID != round2 || got.Model != model2 || got.Cwd == nil || *got.Cwd != "/workspace/two" {
+	if got := session.Rounds[1]; got.ID != round2 || got.Model != model2 || got.ContextWindow != 128_000 || got.ReasoningEffort != shared.ReasoningLow || got.Cwd == nil || *got.Cwd != "/workspace/two" {
 		t.Errorf("second round snapshot = %+v", got)
 	}
 
@@ -77,6 +77,9 @@ func TestSessionLifecycleAndReplay(t *testing.T) {
 	round := replayed.Rounds[0]
 	if round.Status != RoundCompleted || len(round.Messages) != 2 || round.EndedAt == nil {
 		t.Errorf("replayed round = %+v", round)
+	}
+	if round.Usage != *usage {
+		t.Errorf("round usage = %+v, want %+v", round.Usage, *usage)
 	}
 	if round.Messages[1].Usage == nil || *round.Messages[1].Usage != *usage || round.Messages[1].Model == nil || *round.Messages[1].Model != model {
 		t.Errorf("assistant message metadata = %+v", round.Messages[1])

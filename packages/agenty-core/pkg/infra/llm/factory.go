@@ -12,6 +12,7 @@ import (
 	openaioption "github.com/openai/openai-go/v3/option"
 	"google.golang.org/genai"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 )
 
@@ -32,7 +33,12 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-func NewCaller(ctx context.Context, provider catalog.Provider, model catalog.Model, options ...Option) (Caller, error) {
+func NewCaller(
+	ctx context.Context,
+	provider catalog.Provider,
+	model catalog.Model,
+	options ...Option,
+) (agentloop.Caller, error) {
 	config := factoryConfig{}
 	for _, option := range options {
 		if err := option(&config); err != nil {

@@ -2,11 +2,14 @@ package conversation
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
+
+var ErrSessionNotFound = errors.New("conversation: session not found")
 
 // ListQuery filters and paginates a session listing built from the projection.
 type ListQuery struct {

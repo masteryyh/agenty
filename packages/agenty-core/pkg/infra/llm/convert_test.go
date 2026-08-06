@@ -57,10 +57,10 @@ func TestNativeReasoningEffort(t *testing.T) {
 func TestProviderRequestConversions(t *testing.T) {
 	t.Parallel()
 
-	request := Request{
+	request := modelRequest{
 		SystemPrompt:    "Be concise.",
 		Messages:        []conversation.Message{{Role: conversation.RoleUser, Content: conversation.Text("hello")}},
-		Tools:           []ToolDefinition{testTool()},
+		Tools:           []modelToolDefinition{testTool()},
 		MaxOutputTokens: 128,
 		ReasoningEffort: shared.ReasoningHigh,
 	}
@@ -250,9 +250,9 @@ func TestToolDefinitionConversionsRejectNonObjectSchema(t *testing.T) {
 	t.Parallel()
 
 	tool := testTool()
-	tool.InputSchema = JSONSchema{
-		Type:  JSONSchemaTypeArray,
-		Items: &JSONSchema{Type: JSONSchemaTypeString},
+	tool.InputSchema = toolJSONSchema{
+		Type:  toolJSONSchemaTypeArray,
+		Items: &toolJSONSchema{Type: toolJSONSchemaTypeString},
 	}
 	tests := []struct {
 		name    string
@@ -319,7 +319,7 @@ func TestProviderResponseConversions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("convert response: %v", err)
 		}
-		assertResponse(t, response, StopReasonToolUse, 3, 15)
+		assertResponse(t, response, modelStopReasonToolUse, 3, 15)
 		tool := response.Content[2].(conversation.ToolUseBlock)
 		if string(tool.Input) != `{"q":"x"}` {
 			t.Errorf("tool input = %s", tool.Input)
@@ -340,7 +340,7 @@ func TestProviderResponseConversions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("convert response: %v", err)
 		}
-		assertResponse(t, response, StopReasonToolUse, 1, 12)
+		assertResponse(t, response, modelStopReasonToolUse, 1, 12)
 	})
 
 	t.Run("Anthropic Messages", func(t *testing.T) {
@@ -361,7 +361,7 @@ func TestProviderResponseConversions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("convert response: %v", err)
 		}
-		assertResponse(t, response, StopReasonToolUse, 3, 15)
+		assertResponse(t, response, modelStopReasonToolUse, 3, 15)
 	})
 
 	t.Run("Google GenAI", func(t *testing.T) {
@@ -387,7 +387,7 @@ func TestProviderResponseConversions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("convert response: %v", err)
 		}
-		assertResponse(t, response, StopReasonEndTurn, 3, 14)
+		assertResponse(t, response, modelStopReasonEndTurn, 3, 14)
 	})
 }
 
@@ -484,35 +484,35 @@ func TestStreamEventConversions(t *testing.T) {
 
 	tests := []struct {
 		name string
-		run  func(StreamHandler) error
-		want StreamEvent
+		run  func(modelStreamHandler) error
+		want modelStreamEvent
 	}{
 		{
 			name: "OpenAI text delta",
-			run: func(handler StreamHandler) error {
+			run: func(handler modelStreamHandler) error {
 				return emitOpenAIResponsesEvent(handler, openAIResponsesStreamEvent{
 					Type: "response.output_text.delta", OutputIndex: 2, Delta: "hello",
 				})
 			},
-			want: StreamEvent{Type: StreamEventTextDelta, Index: 2, Delta: "hello"},
+			want: modelStreamEvent{Type: modelStreamEventTextDelta, Index: 2, Delta: "hello"},
 		},
 		{
 			name: "Anthropic tool JSON delta",
-			run: func(handler StreamHandler) error {
+			run: func(handler modelStreamHandler) error {
 				event := anthropicStreamEvent{Type: "content_block_delta", Index: 1}
 				event.Delta.Type = "input_json_delta"
 				event.Delta.PartialJSON = `{"q"`
 				return emitAnthropicEvent(handler, event)
 			},
-			want: StreamEvent{Type: StreamEventToolInputDelta, Index: 1, Delta: `{"q"`},
+			want: modelStreamEvent{Type: modelStreamEventToolInputDelta, Index: 1, Delta: `{"q"`},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var got StreamEvent
-			if err := tt.run(func(event StreamEvent) error {
+			var got modelStreamEvent
+			if err := tt.run(func(event modelStreamEvent) error {
 				got = event
 				return nil
 			}); err != nil {
@@ -561,16 +561,16 @@ func testModel() catalog.Model {
 	}
 }
 
-func testTool() ToolDefinition {
-	return ToolDefinition{
+func testTool() modelToolDefinition {
+	return modelToolDefinition{
 		Name: "lookup", Description: "Look up a value",
-		InputSchema: JSONSchema{
-			Type: JSONSchemaTypeObject,
-			Properties: map[string]JSONSchema{
-				"q": {Type: JSONSchemaTypeString},
+		InputSchema: toolJSONSchema{
+			Type: toolJSONSchemaTypeObject,
+			Properties: map[string]toolJSONSchema{
+				"q": {Type: toolJSONSchemaTypeString},
 			},
 			Required:             []string{"q"},
-			AdditionalProperties: AllowAdditionalProperties(false),
+			AdditionalProperties: allowAdditionalProperties(false),
 		},
 		Strict: true,
 	}
@@ -597,7 +597,7 @@ func mustUnmarshal(t *testing.T, data string, target any) {
 	}
 }
 
-func assertResponse(t *testing.T, response *Response, reason StopReason, contentLength int, total int64) {
+func assertResponse(t *testing.T, response *modelResponse, reason modelStopReason, contentLength int, total int64) {
 	t.Helper()
 	if response.StopReason != reason {
 		t.Errorf("stop reason = %q, want %q", response.StopReason, reason)
