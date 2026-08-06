@@ -62,3 +62,6 @@ packages/agenty-bootstrap/dist/
 .reasonix
 .codex
 .remember
+
+# macOS
+**/.DS_Store
