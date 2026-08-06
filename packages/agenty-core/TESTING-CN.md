@@ -12,7 +12,7 @@
 | RPC | buffer、fake handler 和合成时间 | JSON-RPC/NDJSON framing、notification、batch、非法请求、单行限制、chunk 组装与清理 | 是 |
 | Config、logging 与 storage | `t.TempDir()`、真实文件和本地 SQLite | 配置文件与 env override 合并、单例 Manager、日志等级/格式/路径选择、JSON repository、append-only transcript、SQLite projection 和 schema 初始化 | 是 |
 | 完整装配 | 隔离的文件系统和 SQLite 状态 | repository 初始化，以及包括异步 session start/stop 在内的 RPC 到 application 再到 storage 完整流程 | 启用 `integration` 时 |
-| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录和本地 HTTP stub | stdio JSON-RPC 业务流程、agent loop 完成/取消、多 session 并行、上游请求转换、启动失败、chunk 注册、重启持久化和进程隔离 | 启用 `e2e` 时 |
+| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录、typed IPC client、本地 provider fixtures 和可选真实上游 | 完整用户旅程、全部 26 个公开 RPC methods、四类 provider 协议、连续多轮、完成/失败/取消、同通道并发、运行中退出、重启持久化和 stdio 协议边界 | 启用 `e2e` 时 |
 
 当前 `integration` 构建标签会启用：
 
@@ -20,8 +20,9 @@
 - `pkg/infra/rpc/adapter/adapter_test.go`，验证完整 RPC adapter 流程，其中包括分块输入。
 
 `e2e` build tag 会启用 `test/e2e`。`TestMain` 只构建一次 core 二进制，每个测试使用
-唯一的 `AGENTY_DATA_DIR` 启动自己的进程。测试 client 只使用公开 NDJSON 协议，不导入
-core 内部实现包。
+唯一的 `AGENTY_DATA_DIR` 启动自己的进程。测试侧 typed client 使用公开 NDJSON 协议，
+支持并发 request ID 路由、notification、batch 和 chunk，不导入 core 内部实现包；
+`blackbox_test.go` 会持续检查这一依赖边界。
 
 测试套件有意跳过纯 DTO、简单结构体构造、薄 getter，以及只做字段赋值的构造器，
 包括 `Agent.New`、`NewID`、`ModelRef.String` 和 `TokenUsage.Add`。命令装配和会终止
@@ -37,10 +38,14 @@ core 内部实现包。
   运行，因为环境变量是进程级状态。
 - E2E 测试把数据目录设置到各自子进程的环境中，并清空日志环境变量，使子进程由配置
   文件（默认 info/text）驱动；不修改测试 runner 的环境，因此独立业务流程可以安全
-  使用 `t.Parallel()`，日志也只会写入各自的隔离数据目录。需要验证 env override 的
-  测试会在子进程上显式设置对应变量。
-- Agent loop E2E 使用本地 `httptest` HTTP server 作为 provider endpoint。执行环境必须
-  允许绑定 loopback 端口；沙箱若拒绝 `listen`，需要在允许绑定的环境复跑这些测试。
+  使用 `t.Parallel()`，日志也只会写入各自的隔离数据目录。
+- Agent loop E2E 使用本地 `httptest` HTTP server 分别模拟 OpenAI Responses、OpenAI Chat
+  Completions、Anthropic Messages 和 Google GenAI。执行环境必须允许绑定 loopback 端口；
+  沙箱若拒绝 `listen`，需要在允许绑定的环境复跑相同命令。
+- `TestLiveProviderConversationsThroughIPC` 使用同一 typed client 通过真实 core 子进程发起
+  可选真实上游对话。每个 provider 独立检查对应 API Key；Key 未设置或只包含空白时用
+  `t.Skip` 跳过该子测试，其他已配置 provider 继续运行。已设置但无效的 Key 会正常失败，
+  不会被当作“未配置”静默跳过。
 - Chunk 过期测试使用 `testing/synctest`，不等待真实时间。
 
 Go 命令应在 `packages/agenty-core/` 下运行。模块 pnpm 命令可以在该目录直接运行；
@@ -71,16 +76,17 @@ go test -race -count=1 ./...
 go test -shuffle=on -count=10 ./...
 ```
 
-LLM 真实集成用例读取以下环境变量：
+LLM 真实 integration 和可选 live E2E 用例读取以下环境变量：
 
 - `OPENAI_API_KEY`，可选 `OPENAI_BASE_URL`、`OPENAI_RESPONSES_MODEL` 和
   `OPENAI_CHAT_MODEL`。
 - `ANTHROPIC_API_KEY`，可选 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_MODEL`。
 - `GEMINI_API_KEY`，可选 `GEMINI_BASE_URL` 和 `GEMINI_MODEL`。
 
-每个 Provider 子测试都会验证 `Invoke` 和 `Stream`。缺少 API Key 时通过 `t.Skip`
-显示提示并跳过，不会导致 integration suite 失败。请求/响应转换测试仍属于默认离线
-suite，完全不需要凭证。
+Integration 中的每个 Provider 子测试都会验证 `Invoke` 和 `Stream`；live E2E 则通过
+stdio IPC 运行一个真实非流式 conversation。两者都在缺少对应 API Key 时通过 `t.Skip`
+显示提示并跳过，不会导致 suite 失败。请求/响应转换测试和本地 provider fixture E2E
+仍完全离线，不需要凭证。
 
 开发时可以定向运行 package 或单个测试：
 
@@ -117,13 +123,21 @@ go tool cover -html=coverage.out
 因此这里只记录快照。
 
 Storage/RPC integration 测试和全部 E2E 测试使用本地文件与 SQLite。可选 LLM integration
-用例是唯一会访问外部服务的测试，并且只在环境中存在对应 Provider API Key 时执行。
-E2E 用例聚焦可观察的进程 contract；穷举 parser 变体、真实 64 MiB 单行限制和 chunk
-assembler 输入校验继续由更快的 RPC 测试覆盖，不在子进程中用大 payload 重复。
+和 `TestLiveProviderConversationsThroughIPC` 会访问外部服务，并且只在环境中存在对应
+Provider API Key 时执行。其余 E2E 用例使用本地 provider fixtures。E2E 聚焦可观察的进程
+contract；穷举 parser 变体、真实 64 MiB 单行限制和 chunk assembler 输入校验继续由更快的
+RPC 测试覆盖，不在子进程中用大 payload 重复。
 
-Execution E2E 使用本地 OpenAI Chat Completions 兼容 stub，不访问外部 provider。测试验证
-65,536 默认输出 token 裁剪、完整 message/usage 持久化、多 session 并行、重复启动拒绝、
-stop 驱动的最终取消状态，以及公开 IPC 返回结构。
+E2E system 将 core 视为由 stdin、stdout、stderr、退出码和公开 provider HTTP 请求组成的
+黑箱。完整用户旅程通过 typed client 创建和修改 Agent、Provider/Model 与 Session，跨进程
+连续执行多轮会话，再通过 IPC 查询持久化结果；不会断言 SQLite、JSONL 或 repository 的
+物理布局。Provider fixtures 覆盖 OpenAI Responses、OpenAI Chat Completions、Anthropic
+Messages 和 Google GenAI，并验证 65,536 输出 token 裁剪、上游失败、同一 IPC client 的
+并发 session、重复启动/运行中删除拒绝、stop 取消和运行中进程退出后的恢复状态。
+
+当前 26 个公开 methods 由用户旅程统一覆盖：Agent 5 个、Provider 7 个、Session 10 个和
+Chunk 4 个。Notification、batch、精确 request ID、malformed JSON 恢复、末行无换行、stdin
+EOF 和启动失败保留为进程级协议场景；穷举 parser 和 chunk 非法输入仍由低层 RPC 测试负责。
 
 测试涉及两个实现边界：
 

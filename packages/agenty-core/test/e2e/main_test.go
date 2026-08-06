@@ -29,21 +29,27 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "e2e: create build directory:", err)
 		os.Exit(1)
 	}
-	name := "agenty-core"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	coreBinary = filepath.Join(buildDir, name)
+	coreBinary = filepath.Join(buildDir, executableName("agenty-core"))
 
 	args := []string{"build"}
 	if raceEnabled {
 		args = append(args, "-race")
 	}
-	args = append(args, "-o", coreBinary, "./cmd")
+	args = append(
+		args,
+		"-o",
+		coreBinary,
+		"./cmd",
+	)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = moduleRoot
 	if output, buildErr := cmd.CombinedOutput(); buildErr != nil {
-		fmt.Fprintf(os.Stderr, "e2e: build agenty-core: %v\n%s", buildErr, output)
+		fmt.Fprintf(
+			os.Stderr,
+			"e2e: build agenty-core: %v\n%s",
+			buildErr,
+			output,
+		)
 		_ = os.RemoveAll(buildDir)
 		os.Exit(1)
 	}
@@ -54,4 +60,11 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	os.Exit(code)
+}
+
+func executableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
