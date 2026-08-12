@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/agentloop/builtin"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
@@ -59,12 +60,17 @@ func run() (exitCode int) {
 	}()
 
 	slog.InfoContext(ctx, "agenty-core started", "dataDir", config.Get().Paths().DataDir)
+	toolRegistry := agentloop.NewRegistry()
+	if err := builtin.RegisterAll(toolRegistry); err != nil {
+		slog.ErrorContext(ctx, "failed to register built-in tools", "error", err)
+		return 1
+	}
 
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
 		Agents:   repos.Agent,
 		Catalog:  repos.Catalog,
-		Tools:    agentloop.NewRegistry(),
+		Tools:    toolRegistry,
 		NewCaller: func(
 			callerCtx context.Context,
 			provider catalog.Provider,

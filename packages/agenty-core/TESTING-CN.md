@@ -9,10 +9,11 @@
 | --- | --- | --- | --- |
 | Domain | 仅内存值 | 聚合不变量、Session 状态转换与 replay、event 和 content 序列化、Provider model 生命周期、slug 和 reasoning effort 映射校验 | 是 |
 | Application | 内存 repository fake | Agent、Provider 和 Session 用例；execution loop 完成、tool continuation、model 输出 token 上限、多 session 并行、取消、shutdown、输入校验、错误映射和 pending event 生命周期 | 是 |
+| 内置工具 | `t.TempDir()` 和真实文件系统操作 | 注册、相对路径解析、范围读取、创建/覆盖、精确 patch、单文件删除、正则搜索、递归 glob、目录列表、输出限制和错误路径 | 是 |
 | RPC | buffer、fake handler 和合成时间 | JSON-RPC/NDJSON framing、notification、batch、非法请求、单行限制、chunk 组装与清理 | 是 |
 | Config、logging 与 storage | `t.TempDir()`、真实文件和本地 SQLite | 配置文件与 env override 合并、单例 Manager、日志等级/格式/路径选择、JSON repository、append-only transcript、SQLite projection 和 schema 初始化 | 是 |
 | 完整装配 | 隔离的文件系统和 SQLite 状态 | repository 初始化，以及包括异步 session start/stop 在内的 RPC 到 application 再到 storage 完整流程 | 启用 `integration` 时 |
-| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录、typed IPC client、本地 provider fixtures 和可选真实上游 | 完整用户旅程、全部 26 个公开 RPC methods、四类 provider 协议、连续多轮、完成/失败/取消、同通道并发、运行中退出、重启持久化和 stdio 协议边界 | 启用 `e2e` 时 |
+| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录、typed IPC client、本地 provider fixtures 和可选真实上游 | 完整用户旅程、全部 26 个公开 RPC methods、四类 provider 协议、内置工具 definitions、连续多轮、完成/失败/取消、同通道并发、运行中退出、重启持久化和 stdio 协议边界 | 启用 `e2e` 时 |
 
 当前 `integration` 构建标签会启用：
 

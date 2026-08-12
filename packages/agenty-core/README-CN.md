@@ -77,8 +77,9 @@ session 的 `Engine`。不同 session 可以并行执行，同一 session 只允
 每个 model 自行保存 `maxOutputTokens`，单次调用默认使用
 `min(65536, model.maxOutputTokens)`。当前单个 round 最多执行 20 次 LLM/tool 迭代。
 共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
-调用顺序返回。生产装配目前不注册任何工具；未来内置工具归入
-`pkg/agentloop/builtin/`，由 `cmd/main.go` 显式注册。
+调用顺序返回。`pkg/agentloop/builtin/` 提供生产环境文件系统工具 `read_file`、
+`write_file`、`patch_file`、`delete_file`、`grep`、`glob` 和 `ls`，由 `cmd/main.go`
+显式注册。相对路径基于该 round 捕获的 session 工作目录解析，绝对路径保持有效。
 
 ## 基础设施层
 
@@ -250,4 +251,4 @@ process isolation contracts，不会访问用户的数据目录。
 基础设施层还提供
 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google GenAI 的统一
 非流式/流式 SDK 调用器。执行引擎当前使用非流式 caller；尚未实现 streaming agent turn
-传输、内置工具、基于该 core 的 HTTP API 和 CLI 集成。
+传输、命令和 todo 工具、基于该 core 的 HTTP API 和 CLI 集成。

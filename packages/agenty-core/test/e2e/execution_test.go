@@ -5,6 +5,7 @@ package e2e_test
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -74,6 +75,18 @@ func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 					request.Path,
 					tt.apiType,
 				)
+			}
+			wantTools := []string{
+				"delete_file",
+				"glob",
+				"grep",
+				"ls",
+				"patch_file",
+				"read_file",
+				"write_file",
+			}
+			if names := providerToolNames(request, tt.apiType); !slices.Equal(names, wantTools) {
+				t.Errorf("provider tools = %q, want %q", names, wantTools)
 			}
 		})
 	}

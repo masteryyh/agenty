@@ -9,10 +9,11 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | --- | --- | --- | --- |
 | Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and reasoning effort mapping validation | Yes |
 | Application | In-memory repository fakes | Agent, Provider, and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
+| Built-in tools | `t.TempDir()` and real filesystem operations | Registration, relative path resolution, ranged reads, create/overwrite, exact patching, safe single-file deletion, regular-expression search, recursive globbing, directory listing, output limits, and error paths | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
 | Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows, including asynchronous session start/stop | With `integration` |
-| Executable E2E | Real `cmd` subprocesses, isolated data directories, a typed IPC client, local provider fixtures, and optional live upstreams | Complete client journeys, all 26 public RPC methods, four provider protocols, multi-turn conversations, completion/failure/cancellation, same-channel concurrency, shutdown during execution, restart persistence, and stdio boundaries | With `e2e` |
+| Executable E2E | Real `cmd` subprocesses, isolated data directories, a typed IPC client, local provider fixtures, and optional live upstreams | Complete client journeys, all 26 public RPC methods, four provider protocols, built-in tool definitions, multi-turn conversations, completion/failure/cancellation, same-channel concurrency, shutdown during execution, restart persistence, and stdio boundaries | With `e2e` |
 
 The `integration` build tag currently enables:
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -134,4 +135,33 @@ func requestMatchesAPI(request providerRequest, apiType string) bool {
 	default:
 		return false
 	}
+}
+
+func providerToolNames(request providerRequest, apiType string) []string {
+	tools, _ := request.Body["tools"].([]any)
+	names := []string{}
+	for _, rawTool := range tools {
+		tool, _ := rawTool.(map[string]any)
+		switch apiType {
+		case "openai", "anthropic":
+			if name, ok := tool["name"].(string); ok {
+				names = append(names, name)
+			}
+		case "openai_completions":
+			function, _ := tool["function"].(map[string]any)
+			if name, ok := function["name"].(string); ok {
+				names = append(names, name)
+			}
+		case "gemini":
+			declarations, _ := tool["functionDeclarations"].([]any)
+			for _, rawDeclaration := range declarations {
+				declaration, _ := rawDeclaration.(map[string]any)
+				if name, ok := declaration["name"].(string); ok {
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }

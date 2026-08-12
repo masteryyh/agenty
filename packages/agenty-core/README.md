@@ -82,9 +82,10 @@ assistant response, and repeats when tool calls are returned. A model stores its
 `maxOutputTokens`; each invocation defaults to
 `min(65536, model.maxOutputTokens)`. The loop currently permits at most 20 LLM/tool
 iterations. The shared registry implements the `ToolRuntime` port, executes one tool
-batch concurrently, and returns results in call order. Production currently registers
-no tools; future built-ins belong in `pkg/agentloop/builtin/` and are registered
-explicitly by `cmd/main.go`.
+batch concurrently, and returns results in call order. `pkg/agentloop/builtin/` provides
+the production filesystem tools `read_file`, `write_file`, `patch_file`, `delete_file`,
+`grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly. Relative paths resolve
+from the round's captured session working directory, while absolute paths remain valid.
 
 ## Infrastructure layer
 
@@ -278,5 +279,5 @@ The domain, agent-loop runtime, infrastructure, application and stdio JSON-RPC i
 layers are implemented. Infrastructure also provides unified non-streaming and streaming SDK
 callers for OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Google
 GenAI. The execution engine currently uses the non-streaming caller; streaming agent
-turn delivery, built-in tools, the HTTP API, and CLI integration against this core are
-not yet implemented.
+turn delivery, command and todo tools, the HTTP API, and CLI integration against this
+core are not yet implemented.
