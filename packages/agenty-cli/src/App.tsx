@@ -9,7 +9,6 @@ import { CommandPalette } from "./components/CommandPalette";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
 import { MessageList } from "./components/MessageList";
-import { PanelBox } from "./components/PanelBox";
 import { ProviderOverlay } from "./components/ProviderOverlay";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
