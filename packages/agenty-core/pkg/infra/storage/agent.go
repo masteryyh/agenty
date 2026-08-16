@@ -40,15 +40,15 @@ func (r *AgentRepository) Get(ctx context.Context, slug shared.Slug) (*agent.Age
 }
 
 func (r *AgentRepository) List(ctx context.Context) ([]*agent.Agent, error) {
+	agents := make([]*agent.Agent, 0)
 	entries, err := os.ReadDir(r.agentsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return agents, nil
 		}
 		return nil, err
 	}
 
-	var agents []*agent.Agent
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue

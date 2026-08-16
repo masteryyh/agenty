@@ -34,16 +34,16 @@ fn bootstrap() -> Result<i32> {
     let home = dirs::home_dir().ok_or_else(|| {
         BootstrapError::Invalid("cannot locate the current user's home directory".to_string())
     })?;
-    let (cli, runtime) = artifact_paths(&home);
+    let (cli, core) = artifact_paths(&home);
 
-    if !cli.is_file() && !runtime.is_file() {
+    if !cli.is_file() && !core.is_file() {
         progress.parent("local binary not found, extracting...");
         install_artifact(&mut file, &footer.cli, &cli)?;
-        install_artifact(&mut file, &footer.runtime, &runtime)?;
+        install_artifact(&mut file, &footer.core, &core)?;
     } else {
         progress.parent("checking local binary integrity...");
         ensure_with_progress(&mut file, &footer.cli, &cli, "cli", &progress)?;
-        ensure_with_progress(&mut file, &footer.runtime, &runtime, "runtime", &progress)?;
+        ensure_with_progress(&mut file, &footer.core, &core, "core", &progress)?;
     }
 
     progress.finish();

@@ -1,547 +1,398 @@
-import { StreamEventType } from "./types";
+import type { StdioRPCClient } from "../core/rpc";
 import type {
-	AgentDto,
-	CreateAgentDto,
-	ChatDto,
-	ChatSessionDto,
-	CreateMCPServerDto,
-	CreateModelDto,
-	CreateModelProviderDto,
-	MCPServerDto,
-	ModelDto,
-	ModelProviderDto,
-	SkillDto,
-	SkillContentResult,
-	StreamEvent,
-	SystemConfigDto,
-	UpdateAgentDto,
-	UpdateMCPServerDto,
-	UpdateModelDto,
-	UpdateModelProviderDto,
-	UpdateSystemConfigDto,
-	VersionDto,
-	GenericResponse,
-	PagedResponse,
+    AgentDto,
+    ChatMessageDto,
+    ChatSessionDto,
+    ContentBlock,
+    CoreModelDto,
+    CreateAgentDto,
+    CreateModelDto,
+    CreateModelProviderDto,
+    ExecutionStart,
+    InitializeCompleteInput,
+    ModelDto,
+    ModelProviderDto,
+    PagedResponse,
+    ReasoningEffort,
+    RoundDto,
+    SessionEvent,
+    SessionSummaryDto,
+    UpdateAgentDto,
+    UpdateModelDto,
+    UpdateModelProviderDto,
 } from "./types";
 
 export interface PreparedSession {
-	agent: AgentDto;
-	model: ModelDto;
-	session: ChatSessionDto;
+    agent: AgentDto;
+    model: ModelDto;
+    session: ChatSessionDto;
 }
 
 export class AgentyClient {
-	private readonly baseURL: string;
-	private readonly authHeader?: string;
+    constructor(private readonly rpc: StdioRPCClient) {}
 
-	constructor(baseURL: string, username?: string, password?: string) {
-		this.baseURL = baseURL.replace(/\/+$/, "");
-		if (username && password) {
-			this.authHeader = `Basic ${btoa(`${username}:${password}`)}`;
-		}
-	}
+    onSessionEvent(listener: (event: SessionEvent) => void): () => void {
+        return this.rpc.onNotification<SessionEvent | null | undefined>("session.event", (event) => {
+            if (event) {
+                listener(normalizeSessionEvent(event));
+            }
+        });
+    }
 
-	private headers(extra?: Record<string, string>): Record<string, string> {
-		const h: Record<string, string> = { ...extra };
-		if (this.authHeader) {
-			h["Authorization"] = this.authHeader;
-		}
-		return h;
-	}
+    onClose(listener: (reason: Error) => void): () => void {
+        return this.rpc.onClose(listener);
+    }
 
-	private async request<T>(
-		method: string,
-		path: string,
-		body?: unknown,
-	): Promise<T> {
-		const init: RequestInit = {
-			method,
-			headers: this.headers(
-				body !== undefined ? { "Content-Type": "application/json" } : {},
-			),
-		};
-		if (body !== undefined) {
-			init.body = JSON.stringify(body);
-		}
+    async isInitialized(): Promise<boolean> {
+        const result = await this.rpc.call<{ initialized?: boolean } | null>("initialize.already");
+        return result?.initialized === true;
+    }
 
-		const resp = await fetch(this.baseURL + path, init);
-		const text = await resp.text();
-		let parsed: GenericResponse<T>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<T>;
-		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from ${path}: ${text.slice(0, 200)}`,
-			);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
-		if (parsed.data === undefined || parsed.data === null) {
-			throw new Error(`API error: empty data from ${path}`);
-		}
-		return parsed.data;
-	}
+    async completeInitialization(input: InitializeCompleteInput): Promise<{ initialized: boolean }> {
+        const result = await this.rpc.call<{ initialized?: boolean } | null>("initialize.complete", input);
+        return { initialized: result?.initialized === true };
+    }
 
-	async checkVersion(): Promise<VersionDto> {
-		return this.request<VersionDto>("GET", "/api/v1/system/version");
-	}
+    async listAgents(): Promise<AgentDto[]> {
+        const agents = await this.rpc.call<Array<AgentDto | null> | null>("agent.list");
+        return (agents ?? []).filter((agent): agent is AgentDto => agent !== null);
+    }
 
-	async listAgents(): Promise<AgentDto[]> {
-		const page = await this.request<PagedResponse<AgentDto>>(
-			"GET",
-			"/api/v1/agents?page=1&pageSize=100",
-		);
-		return page.data ?? [];
-	}
+    async listAgentsPage(page = 1, pageSize = 100): Promise<PagedResponse<AgentDto>> {
+        return paginate(await this.listAgents(), page, pageSize);
+    }
 
-	async listAgentsPage(page = 1, pageSize = 100): Promise<PagedResponse<AgentDto>> {
-		return this.request<PagedResponse<AgentDto>>(
-			"GET",
-			`/api/v1/agents?page=${page}&pageSize=${pageSize}`,
-		);
-	}
+    async resolveAgent(reference?: string): Promise<AgentDto> {
+        const agents = await this.listAgents();
+        if (agents.length === 0) {
+            throw new Error("no agents available; run `agenty init` first");
+        }
+        if (!reference) {
+            return agents.find((agent) => agent.isDefault) ?? agents[0];
+        }
+        const lower = reference.toLowerCase();
+        const matched = agents.find((agent) => agent.slug === reference) ??
+            agents.find((agent) => agent.name.toLowerCase() === lower);
+        if (!matched) {
+            throw new Error(`agent not found: ${reference}`);
+        }
+        return matched;
+    }
 
-	async resolveAgent(ref?: string): Promise<AgentDto> {
-		const agents = await this.listAgents();
-		if (agents.length === 0) {
-			throw new Error("no agents available; run `agenty init` on the server first");
-		}
-		if (ref) {
-			const lower = ref.toLowerCase();
-			const matched = agents.find((a) => a.id === ref) ??
-				agents.find((a) => a.name.toLowerCase() === lower);
-			if (!matched) {
-				throw new Error(`agent not found: ${ref}`);
-			}
-			return matched;
-		}
-		return agents.find((a) => a.isDefault) ?? agents[0];
-	}
+    async createAgent(input: CreateAgentDto): Promise<AgentDto> {
+        const agent = await this.rpc.call<AgentDto | null>("agent.create", input);
+        if (!agent) {
+            throw new Error("core returned an empty agent");
+        }
+        return agent;
+    }
 
-	async getDefaultModel(): Promise<ModelDto> {
-		return this.request<ModelDto>("GET", "/api/v1/models/default");
-	}
+    async updateAgent(slug: string, input: UpdateAgentDto): Promise<AgentDto> {
+        const agent = await this.rpc.call<AgentDto | null>("agent.update", { slug, ...input });
+        if (!agent) {
+            throw new Error(`core returned an empty agent for ${slug}`);
+        }
+        return agent;
+    }
 
-	async listModels(): Promise<ModelDto[]> {
-		const page = await this.request<PagedResponse<ModelDto>>(
-			"GET",
-			"/api/v1/models?page=1&pageSize=200",
-		);
-		return page.data ?? [];
-	}
+    async deleteAgent(slug: string): Promise<void> {
+        await this.rpc.call("agent.delete", { slug });
+    }
 
-	async listModelsPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelDto>> {
-		return this.request<PagedResponse<ModelDto>>(
-			"GET",
-			`/api/v1/models?page=${page}&pageSize=${pageSize}`,
-		);
-	}
+    async listProviders(): Promise<ModelProviderDto[]> {
+        const providers = await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list");
+        return (providers ?? [])
+            .filter((provider): provider is ModelProviderDto => provider !== null)
+            .map(normalizeProvider);
+    }
 
-	async createModel(dto: CreateModelDto): Promise<ModelDto> {
-		return this.request<ModelDto>("POST", "/api/v1/models", dto);
-	}
+    async listProvidersPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelProviderDto>> {
+        return paginate(await this.listProviders(), page, pageSize);
+    }
 
-	async updateModel(id: string, dto: UpdateModelDto): Promise<void> {
-		return this.requestWithoutData("PUT", `/api/v1/models/${id}`, dto);
-	}
+    async createProvider(input: CreateModelProviderDto): Promise<ModelProviderDto> {
+        const provider = await this.rpc.call<ModelProviderDto | null>("provider.create", input);
+        if (!provider) {
+            throw new Error("core returned an empty provider");
+        }
+        return normalizeProvider(provider);
+    }
 
-	async deleteModel(id: string): Promise<void> {
-		return this.requestWithoutData("DELETE", `/api/v1/models/${id}`);
-	}
+    async updateProvider(slug: string, input: UpdateModelProviderDto): Promise<ModelProviderDto> {
+        const provider = await this.rpc.call<ModelProviderDto | null>("provider.update", { slug, ...input });
+        if (!provider) {
+            throw new Error(`core returned an empty provider for ${slug}`);
+        }
+        return normalizeProvider(provider);
+    }
 
-	async resolveModel(ref?: string): Promise<ModelDto> {
-		if (!ref) {
-			return this.getDefaultModel();
-		}
+    async deleteProvider(slug: string): Promise<void> {
+        await this.rpc.call("provider.delete", { slug });
+    }
 
-		const models = await this.listModels();
-		const lower = ref.toLowerCase();
-		const matched =
-			models.find((m) => m.id === ref) ??
-			models.find((m) => m.code.toLowerCase() === lower) ??
-			models.find((m) => m.name.toLowerCase() === lower) ??
-			models.find((m) => {
-				const provider = m.provider?.name?.toLowerCase();
-				return provider ? `${provider}/${m.name}`.toLowerCase() === lower : false;
-			});
-		if (!matched) {
-			throw new Error(`model not found: ${ref}`);
-		}
-		if (matched.embeddingModel) {
-			throw new Error(`model ${ref} is not a chat model`);
-		}
-		return matched;
-	}
+    async listModels(): Promise<ModelDto[]> {
+        const providers = await this.listProviders();
+        return providers.flatMap((provider) => provider.models.map((model) => projectModel(provider, model)));
+    }
 
-	async createAgent(dto: CreateAgentDto): Promise<AgentDto> {
-		return this.request<AgentDto>("POST", "/api/v1/agents", dto);
-	}
+    async listModelsPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelDto>> {
+        return paginate(await this.listModels(), page, pageSize);
+    }
 
-	async updateAgent(id: string, dto: UpdateAgentDto): Promise<void> {
-		return this.requestWithoutData("PUT", `/api/v1/agents/${id}`, dto);
-	}
+    async getDefaultModel(): Promise<ModelDto> {
+        const models = await this.listModels();
+        const model = models.find((candidate) => candidate.isDefault) ?? models[0];
+        if (!model) {
+            throw new Error("no model available");
+        }
+        return model;
+    }
 
-	async deleteAgent(id: string): Promise<void> {
-		return this.requestWithoutData("DELETE", `/api/v1/agents/${id}`);
-	}
+    async resolveModel(reference?: string): Promise<ModelDto> {
+        if (!reference) {
+            return this.getDefaultModel();
+        }
+        const models = await this.listModels();
+        const lower = reference.toLowerCase();
+        const matches = models.filter((model) =>
+            model.slug === reference ||
+            model.name.toLowerCase() === lower ||
+            `${model.providerSlug}/${model.slug}`.toLowerCase() === lower ||
+            `${model.providerName}/${model.name}`.toLowerCase() === lower,
+        );
+        if (matches.length !== 1) {
+            throw new Error(matches.length === 0 ? `model not found: ${reference}` : `model reference is ambiguous: ${reference}`);
+        }
+        return matches[0];
+    }
 
-	async getLastSessionByAgent(
-		agentId: string,
-	): Promise<ChatSessionDto | null> {
-		try {
-			return await this.request<ChatSessionDto>(
-				"GET",
-				`/api/v1/chats/session/last/${agentId}`,
-			);
-		} catch {
-			return null;
-		}
-	}
+    async createModel(input: CreateModelDto): Promise<ModelDto> {
+        const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", input);
+        return findProjectedModel(provider, input.modelSlug);
+    }
 
-	async createSession(agentId: string): Promise<ChatSessionDto> {
-		return this.request<ChatSessionDto>("POST", "/api/v1/chats/session", {
-			agentId,
-		});
-	}
+    async updateModel(providerSlug: string, modelSlug: string, input: UpdateModelDto): Promise<ModelDto> {
+        const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", {
+            providerSlug,
+            modelSlug,
+            ...input,
+        });
+        return findProjectedModel(provider, modelSlug);
+    }
 
-	async listProviders(page = 1, pageSize = 100): Promise<ModelProviderDto[]> {
-		const result = await this.request<PagedResponse<ModelProviderDto>>(
-			"GET",
-			`/api/v1/providers?page=${page}&pageSize=${pageSize}`,
-		);
-		return result.data ?? [];
-	}
+    async deleteModel(providerSlug: string, modelSlug: string): Promise<void> {
+        await this.rpc.call("provider.removeModel", { providerSlug, modelSlug });
+    }
 
-	async listProvidersPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelProviderDto>> {
-		return this.request<PagedResponse<ModelProviderDto>>(
-			"GET",
-			`/api/v1/providers?page=${page}&pageSize=${pageSize}`,
-		);
-	}
+    async createSession(agentSlug: string, model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
+            agentSlug,
+            providerSlug: model.providerSlug,
+            modelSlug: model.slug,
+            contextWindow: model.contextWindow,
+            reasoningEffort: effort,
+        });
+        return requireSession(session, "session.create");
+    }
 
-	async createProvider(
-		dto: CreateModelProviderDto,
-	): Promise<ModelProviderDto> {
-		return this.request<ModelProviderDto>("POST", "/api/v1/providers", dto);
-	}
+    async getSession(id: string): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.get", { id });
+        return requireSession(session, `session.get ${id}`);
+    }
 
-	async updateProvider(
-		id: string,
-		dto: UpdateModelProviderDto,
-	): Promise<ModelProviderDto> {
-		return this.request<ModelProviderDto>("PUT", `/api/v1/providers/${id}`, dto);
-	}
+    async listSessionSummaries(agentSlug?: string): Promise<SessionSummaryDto[]> {
+        const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>(
+            "session.list",
+            agentSlug ? { agentSlug } : {},
+        );
+        return (summaries ?? []).filter((summary): summary is SessionSummaryDto => summary !== null);
+    }
 
-	async deleteProvider(id: string): Promise<void> {
-		return this.requestWithoutData("DELETE", `/api/v1/providers/${id}`);
-	}
+    async listSessions(agentSlug?: string): Promise<ChatSessionDto[]> {
+        const summaries = await this.listSessionSummaries(agentSlug);
+        return Promise.all(summaries.map((session) => this.getSession(session.id)));
+    }
 
-	async listMcpServers(page = 1, pageSize = 100): Promise<MCPServerDto[]> {
-		const result = await this.request<PagedResponse<MCPServerDto>>(
-			"GET",
-			`/api/v1/mcp/servers?page=${page}&pageSize=${pageSize}`,
-		);
-		return result.data ?? [];
-	}
+    async getLastSessionByAgent(agentSlug: string): Promise<ChatSessionDto | null> {
+        const sessions = await this.listSessionSummaries(agentSlug);
+        return sessions.length > 0 ? this.getSession(sessions[0].id) : null;
+    }
 
-	async listMcpServersPage(page = 1, pageSize = 100): Promise<PagedResponse<MCPServerDto>> {
-		return this.request<PagedResponse<MCPServerDto>>(
-			"GET",
-			`/api/v1/mcp/servers?page=${page}&pageSize=${pageSize}`,
-		);
-	}
+    async getLastSession(): Promise<ChatSessionDto | null> {
+        const sessions = await this.listSessionSummaries();
+        return sessions.length > 0 ? this.getSession(sessions[0].id) : null;
+    }
 
-	async createMcpServer(
-		dto: CreateMCPServerDto,
-	): Promise<MCPServerDto> {
-		return this.request<MCPServerDto>("POST", "/api/v1/mcp/servers", dto);
-	}
+    async setSessionModel(id: string, model: ModelDto): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.setModel", {
+            id,
+            providerSlug: model.providerSlug,
+            modelSlug: model.slug,
+            contextWindow: model.contextWindow,
+        });
+        return requireSession(session, `session.setModel ${id}`);
+    }
 
-	async updateMcpServer(
-		id: string,
-		dto: UpdateMCPServerDto,
-	): Promise<MCPServerDto> {
-		return this.request<MCPServerDto>("PUT", `/api/v1/mcp/servers/${id}`, dto);
-	}
+    async setSessionReasoningEffort(id: string, reasoningEffort: ReasoningEffort): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.setReasoningEffort", { id, reasoningEffort });
+        return requireSession(session, `session.setReasoningEffort ${id}`);
+    }
 
-	async deleteMcpServer(id: string): Promise<void> {
-		return this.requestWithoutData("DELETE", `/api/v1/mcp/servers/${id}`);
-	}
+    async setSessionCwd(id: string, cwd: string | null): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.setCwd", { id, cwd });
+        return requireSession(session, `session.setCwd ${id}`);
+    }
 
-	async rescanGlobalSkills(): Promise<void> {
-		return this.requestWithoutData("POST", "/api/v1/skills/rescan");
-	}
+    startSession(id: string, text: string): Promise<ExecutionStart> {
+        return this.rpc.call("session.start", { id, content: [{ type: "text", text }] });
+    }
 
-	private async requestWithoutData(method: string, path: string, body?: unknown): Promise<void> {
-		const init: RequestInit = {
-			method,
-			headers: this.headers(body !== undefined ? { "Content-Type": "application/json" } : {}),
-		};
-		if (body !== undefined) {
-			init.body = JSON.stringify(body);
-		}
+    async stopSession(id: string): Promise<void> {
+        await this.rpc.call("session.stop", { id });
+    }
 
-		const resp = await fetch(this.baseURL + path, init);
-		const text = await resp.text();
-		let parsed: GenericResponse<unknown>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<unknown>;
-		} catch {
-			throw new Error(`HTTP ${resp.status}: failed to parse response from ${path}`);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
-	}
+    async prepareSession(options: {
+        agentRef?: string;
+        modelRef?: string;
+        newSession: boolean;
+        reasoningEffort?: ReasoningEffort;
+    }): Promise<PreparedSession> {
+        const agent = await this.resolveAgent(options.agentRef);
+        const requestedModel = options.modelRef ? await this.resolveModel(options.modelRef) : undefined;
+        let session = options.newSession ? null : await this.getLastSessionByAgent(agent.slug);
+        if (!session) {
+            const model = requestedModel ?? await this.resolveAgentModel(agent);
+            session = await this.createSession(
+                agent.slug,
+                model,
+                options.reasoningEffort ?? agent.defaultReasoningEffort ?? "off",
+            );
+            return { agent, model, session };
+        }
 
-	async connectMcpServer(id: string): Promise<MCPServerDto> {
-		return this.request<MCPServerDto>(
-			"POST",
-			`/api/v1/mcp/servers/${id}/connect`,
-		);
-	}
+        if (requestedModel) {
+            const matchesCurrent = session.currentModel?.providerSlug === requestedModel.providerSlug &&
+                session.currentModel.modelSlug === requestedModel.slug;
+            if (!matchesCurrent) {
+                session = await this.setSessionModel(session.id, requestedModel);
+            }
+            return { agent, model: requestedModel, session };
+        }
 
-	async disconnectMcpServer(id: string): Promise<MCPServerDto> {
-		return this.request<MCPServerDto>(
-			"POST",
-			`/api/v1/mcp/servers/${id}/disconnect`,
-		);
-	}
+        if (session.currentModel) {
+            const model = await this.resolveModel(
+                `${session.currentModel.providerSlug}/${session.currentModel.modelSlug}`,
+            );
+            return { agent, model, session };
+        }
 
-	async getConfig(): Promise<SystemConfigDto> {
-		return this.request<SystemConfigDto>(
-			"GET",
-			"/api/v1/system/config",
-		);
-	}
+        const model = await this.resolveAgentModel(agent);
+        session = await this.setSessionModel(session.id, model);
+        return { agent, model, session };
+    }
 
-	async updateConfig(
-		dto: UpdateSystemConfigDto,
-	): Promise<SystemConfigDto> {
-		return this.request<SystemConfigDto>(
-			"PUT",
-			"/api/v1/system/config",
-			dto,
-		);
-	}
+    private async resolveAgentModel(agent: AgentDto): Promise<ModelDto> {
+        if (agent.defaultModel) {
+            return this.resolveModel(`${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}`);
+        }
+        return this.getDefaultModel();
+    }
+}
 
-	async isInitialized(): Promise<boolean> {
-		const config = await this.getConfig();
-		return !!config.initialized;
-	}
+function projectModel(provider: ModelProviderDto, model: CoreModelDto): ModelDto {
+    return {
+        ...model,
+        providerSlug: provider.slug,
+        providerName: provider.name,
+    };
+}
 
-	async setInitialized(): Promise<void> {
-		await this.updateConfig({ initialized: true });
-	}
+function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
+    return {
+        ...provider,
+        models: Array.isArray(provider.models)
+            ? provider.models.filter((model): model is CoreModelDto => model !== null)
+            : [],
+    };
+}
 
-	async getLastSession(): Promise<ChatSessionDto | null> {
-		try {
-			return await this.request<ChatSessionDto>(
-				"GET",
-				"/api/v1/chats/session/last",
-			);
-		} catch {
-			return null;
-		}
-	}
+function normalizeContent(content: ChatMessageDto["content"] | null | undefined): ContentBlock[] {
+    if (!Array.isArray(content)) {
+        return [];
+    }
+    return content
+        .filter((block): block is ContentBlock => block !== null && typeof block === "object")
+        .map((block) => {
+            if (block?.type !== "tool_result") {
+                return block;
+            }
+            return {
+                ...block,
+                content: normalizeContent(block.content),
+            };
+        });
+}
 
-	async listSessions(page = 1, pageSize = 50): Promise<ChatSessionDto[]> {
-		const result = await this.request<PagedResponse<ChatSessionDto>>(
-			"GET",
-			`/api/v1/chats/sessions?page=${page}&pageSize=${pageSize}`,
-		);
-		return result.data ?? [];
-	}
+function normalizeMessage(message: ChatMessageDto | null | undefined): ChatMessageDto | undefined {
+    if (!message) {
+        return undefined;
+    }
+    return {
+        ...message,
+        content: normalizeContent(message.content),
+    };
+}
 
-	async getSession(sessionId: string): Promise<ChatSessionDto> {
-		return this.request<ChatSessionDto>(
-			"GET",
-			`/api/v1/chats/session/${sessionId}`,
-		);
-	}
+function normalizeSession(session: ChatSessionDto): ChatSessionDto {
+    const rounds: RoundDto[] = Array.isArray(session.rounds)
+        ? session.rounds.filter((round): round is RoundDto => round !== null)
+        : [];
+    return {
+        ...session,
+        rounds: rounds.map((round) => ({
+            ...round,
+            messages: Array.isArray(round.messages)
+                ? round.messages
+                    .filter((message): message is ChatMessageDto => message !== null)
+                    .map((message) => normalizeMessage(message)!)
+                : [],
+        })),
+    };
+}
 
-	async setSessionCwd(
-		sessionId: string,
-		cwd: string | null,
-		agentsMD?: string | null,
-	): Promise<void> {
-		const init: RequestInit = {
-			method: "PATCH",
-			headers: this.headers({ "Content-Type": "application/json" }),
-			body: JSON.stringify({ cwd, agentsMD: agentsMD ?? null }),
-		};
+function normalizeSessionEvent(event: SessionEvent): SessionEvent {
+    return {
+        ...event,
+        message: normalizeMessage(event.message),
+    };
+}
 
-		const resp = await fetch(
-			this.baseURL + `/api/v1/chats/session/${sessionId}/cwd`,
-			init,
-		);
-		const text = await resp.text();
-		let parsed: GenericResponse<unknown>;
-		try {
-			parsed = JSON.parse(text) as GenericResponse<unknown>;
-		} catch {
-			throw new Error(
-				`HTTP ${resp.status}: failed to parse response from /api/v1/chats/session/${sessionId}/cwd`,
-			);
-		}
-		if (parsed.code !== 200) {
-			throw new Error(`API error (${parsed.code}): ${parsed.message}`);
-		}
-	}
+function requireSession(session: ChatSessionDto | null, operation: string): ChatSessionDto {
+    if (!session) {
+        throw new Error(`core returned an empty session for ${operation}`);
+    }
+    return normalizeSession(session);
+}
 
-	async compactSessionForModel(
-		sessionId: string,
-		modelId: string,
-	): Promise<boolean> {
-		const result = await this.request<{ compacted: boolean }>(
-			"POST",
-			`/api/v1/chats/session/${sessionId}/compact`,
-			{ modelId },
-		);
-		return result.compacted;
-	}
+function findProjectedModel(provider: ModelProviderDto | null, modelSlug: string): ModelDto {
+    if (!provider) {
+        throw new Error("core returned an empty provider while adding a model");
+    }
+    const normalizedProvider = normalizeProvider(provider);
+    const model = normalizedProvider.models.find((candidate) => candidate.slug === modelSlug);
+    if (!model) {
+        throw new Error(`core did not return model ${normalizedProvider.slug}/${modelSlug}`);
+    }
+    return projectModel(normalizedProvider, model);
+}
 
-	async listSkills(sessionId?: string): Promise<SkillDto[]> {
-		const qs = sessionId ? `?sessionId=${sessionId}` : "";
-		return this.request<SkillDto[]>(
-			"GET",
-			`/api/v1/skills${qs}`,
-		);
-	}
-
-	async getSkillContent(name: string, sessionId?: string): Promise<SkillContentResult> {
-		const body: Record<string, string> = { name };
-		if (sessionId) body.sessionId = sessionId;
-		return this.request<SkillContentResult>(
-			"POST",
-			"/api/v1/skills/content",
-			body,
-		);
-	}
-
-	async prepareSession(opts: {
-		agentRef?: string;
-		modelRef?: string;
-		newSession: boolean;
-	}): Promise<PreparedSession> {
-		const agent = await this.resolveAgent(opts.agentRef);
-
-		let model: ModelDto | null = null;
-		if (opts.modelRef) {
-			model = await this.resolveModel(opts.modelRef);
-		} else {
-			const fromAgent = (agent.models ?? []).find((m) => !m.embeddingModel);
-			if (fromAgent) {
-				model = fromAgent;
-			} else {
-				try {
-					model = await this.getDefaultModel();
-				} catch {
-					const all = await this.listModels();
-					model = all.find((m) => !m.embeddingModel) ?? null;
-				}
-			}
-		}
-		if (!model) {
-			throw new Error("no chat model available; use /model to pick one");
-		}
-
-		let session: ChatSessionDto | null = null;
-		if (!opts.newSession) {
-			session = await this.getLastSession();
-			if (session && session.agentId !== agent.id) session = null;
-		}
-		if (!session) session = await this.createSession(agent.id);
-
-		return { agent, model, session };
-	}
-
-	async streamChat(
-		sessionId: string,
-		dto: ChatDto,
-		onEvent: (event: StreamEvent) => void,
-		signal?: AbortSignal,
-	): Promise<void> {
-		const resp = await fetch(
-			this.baseURL + `/api/v1/chats/stream?sessionId=${sessionId}`,
-			{
-				method: "POST",
-				headers: this.headers({
-					"Content-Type": "application/json",
-					Accept: "text/event-stream",
-				}),
-				body: JSON.stringify(dto),
-				signal,
-			},
-		);
-
-		if (!resp.ok || resp.body === null) {
-			const text = await resp.text().catch(() => "");
-			throw new Error(
-				`stream chat failed (status ${resp.status}): ${text.slice(0, 200)}`,
-			);
-		}
-
-		const reader = resp.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
-		let dataLines: string[] = [];
-
-		const dispatch = () => {
-			if (dataLines.length === 0) {
-				return;
-			}
-
-			const payload = dataLines.join("\n");
-			dataLines = [];
-			if (payload.trim() === "") {
-				return;
-			}
-
-			try {
-				const evt = JSON.parse(payload) as StreamEvent;
-				onEvent(evt);
-				if (evt.type === StreamEventType.Done) {
-					return true;
-				}
-			} catch (err) {
-				onEvent({
-					type: StreamEventType.Error,
-					error: `failed to parse SSE payload: ${(err as Error).message}`,
-				});
-			}
-			return false;
-		};
-
-		for (; ;) {
-			const { done, value } = await reader.read();
-			if (done) {
-				break;
-			}
-
-			buffer += decoder.decode(value, { stream: true });
-
-			let nlIndex: number;
-			while ((nlIndex = buffer.indexOf("\n")) !== -1) {
-				const line = buffer.slice(0, nlIndex).replace(/\r$/, "");
-				buffer = buffer.slice(nlIndex + 1);
-
-				if (line === "") {
-					const finished = dispatch();
-					if (finished) {
-						return;
-					}
-					continue;
-				}
-				if (line.startsWith(":")) {
-					continue;
-				}
-				if (line.startsWith("data:")) {
-					dataLines.push(line.slice(5).replace(/^ /, ""));
-				}
-			}
-		}
-		dispatch();
-	}
+function paginate<T>(data: T[] | null | undefined, page: number, pageSize: number): PagedResponse<T> {
+    const normalized = data ?? [];
+    const start = Math.max(0, (page - 1) * pageSize);
+    return {
+        total: normalized.length,
+        page,
+        pageSize,
+        data: normalized.slice(start, start + pageSize),
+    };
 }

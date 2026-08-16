@@ -66,6 +66,8 @@ func run() (exitCode int) {
 		return 1
 	}
 
+	disp := rpc.NewDispatcher()
+	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
 		Agents:   repos.Agent,
@@ -77,6 +79,9 @@ func run() (exitCode int) {
 			model catalog.Model,
 		) (agentloop.Caller, error) {
 			return llm.NewCaller(callerCtx, provider, model)
+		},
+		Events: func(eventCtx context.Context, event agentloop.SessionEvent) error {
+			return srv.Notify(eventCtx, "session.event", event)
 		},
 	})
 	if err != nil {
@@ -96,10 +101,13 @@ func run() (exitCode int) {
 		repos.Conversation,
 		application.WithSessionExecutionState(execution),
 	)
-	disp := rpc.NewDispatcher()
+	agentService := application.NewAgentService(repos.Agent)
+	providerService := application.NewProviderService(repos.Catalog)
+	initializeService := application.NewInitializeService(agentService, providerService, config.Get())
 	adapter.RegisterAll(disp,
-		application.NewAgentService(repos.Agent),
-		application.NewProviderService(repos.Catalog),
+		agentService,
+		providerService,
+		initializeService,
 		sessionService,
 		execution,
 	)
@@ -108,7 +116,6 @@ func run() (exitCode int) {
 	rpc.RegisterChunkHandlers(disp, asm)
 	asm.StartCleanup(ctx)
 
-	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
 	if err := srv.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.ErrorContext(ctx, "server stopped with an error", "error", err)
 		return 1

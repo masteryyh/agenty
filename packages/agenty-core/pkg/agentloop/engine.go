@@ -47,6 +47,7 @@ type Dependencies struct {
 	Catalog   ExecutionCatalogRepository
 	Tools     ToolRuntime
 	NewCaller CallerFactory
+	Events    SessionEventHandler
 }
 
 type StartResult struct {
@@ -74,6 +75,7 @@ type Engine struct {
 	catalog   ExecutionCatalogRepository
 	tools     ToolRuntime
 	newCaller CallerFactory
+	events    SessionEventHandler
 	logger    *slog.Logger
 	mu        sync.Mutex
 	active    map[uuid.UUID]*activeExecution
@@ -112,6 +114,7 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 		catalog:   dependencies.Catalog,
 		tools:     dependencies.Tools,
 		newCaller: dependencies.NewCaller,
+		events:    dependencies.Events,
 		logger:    slog.Default(),
 		active:    make(map[uuid.UUID]*activeExecution),
 		stopped:   make(chan struct{}),
@@ -260,6 +263,8 @@ type preparedExecution struct {
 	caller          Caller
 	systemPrompt    string
 	maxOutputTokens int64
+	userMessage     conversation.Message
+	eventSequence   uint64
 }
 
 func (engine *Engine) prepare(
@@ -321,7 +326,8 @@ func (engine *Engine) prepare(
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to start round", err)
 	}
-	if _, err := session.AppendUserMessage(roundID, content); err != nil {
+	userMessage, err := session.AppendUserMessage(roundID, content)
+	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to append user message", err)
 	}
 	if err := engine.sessions.Save(ctx, session); err != nil {
@@ -336,6 +342,7 @@ func (engine *Engine) prepare(
 		caller:          caller,
 		systemPrompt:    systemPrompt,
 		maxOutputTokens: min(DefaultMaxOutputTokens, model.MaxOutputTokens),
+		userMessage:     userMessage,
 	}, nil
 }
 
@@ -350,6 +357,22 @@ func (engine *Engine) run(
 	status := conversation.RoundCompleted
 	usage := conversation.TokenUsage{}
 	var runErr error
+
+	if err := engine.emit(ctx, prepared, SessionEvent{Type: SessionEventRoundStarted}); err != nil {
+		runErr = err
+		status = conversation.RoundFailed
+		engine.finish(ctx, prepared, status, usage, runErr)
+		return
+	}
+	if err := engine.emit(ctx, prepared, SessionEvent{
+		Type:    SessionEventMessageAppended,
+		Message: &prepared.userMessage,
+	}); err != nil {
+		runErr = err
+		status = conversation.RoundFailed
+		engine.finish(ctx, prepared, status, usage, runErr)
+		return
+	}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -380,13 +403,14 @@ func (engine *Engine) executeLoop(
 			return totalUsage, err
 		}
 
-		response, err := prepared.caller.Invoke(ctx, Request{
+		request := Request{
 			SystemPrompt:    prepared.systemPrompt,
 			Messages:        sessionMessages(prepared.session),
 			Tools:           engine.tools.Definitions(),
 			MaxOutputTokens: prepared.maxOutputTokens,
 			ReasoningEffort: prepared.session.Rounds[len(prepared.session.Rounds)-1].ReasoningEffort,
-		})
+		}
+		response, err := engine.call(ctx, prepared, iteration, request)
 		if err != nil {
 			return totalUsage, fmt.Errorf("invoke LLM at iteration %d: %w", iteration, err)
 		}
@@ -395,16 +419,24 @@ func (engine *Engine) executeLoop(
 		}
 
 		totalUsage = totalUsage.Add(response.Usage)
-		if _, err := prepared.session.AppendAssistantMessage(
+		message, err := prepared.session.AppendAssistantMessage(
 			prepared.roundID,
 			response.Content,
 			prepared.session.Rounds[len(prepared.session.Rounds)-1].Model,
 			&response.Usage,
-		); err != nil {
+		)
+		if err != nil {
 			return totalUsage, fmt.Errorf("append assistant message at iteration %d: %w", iteration, err)
 		}
 		if err := engine.saveProgress(ctx, prepared.session); err != nil {
 			return totalUsage, fmt.Errorf("save assistant message at iteration %d: %w", iteration, err)
+		}
+		if err := engine.emit(ctx, prepared, SessionEvent{
+			Type:      SessionEventMessageAppended,
+			Iteration: iteration,
+			Message:   &message,
+		}); err != nil {
+			return totalUsage, fmt.Errorf("emit assistant message at iteration %d: %w", iteration, err)
 		}
 
 		toolCalls := toolCalls(response.Content)
@@ -433,15 +465,57 @@ func (engine *Engine) executeLoop(
 		for _, result := range results {
 			content = append(content, result)
 		}
-		if _, err := prepared.session.AppendUserMessage(prepared.roundID, content); err != nil {
+		message, err = prepared.session.AppendUserMessage(prepared.roundID, content)
+		if err != nil {
 			return totalUsage, fmt.Errorf("append tool results at iteration %d: %w", iteration, err)
 		}
 		if err := engine.saveProgress(ctx, prepared.session); err != nil {
 			return totalUsage, fmt.Errorf("save tool results at iteration %d: %w", iteration, err)
 		}
+		if err := engine.emit(ctx, prepared, SessionEvent{
+			Type:      SessionEventMessageAppended,
+			Iteration: iteration,
+			Message:   &message,
+		}); err != nil {
+			return totalUsage, fmt.Errorf("emit tool results at iteration %d: %w", iteration, err)
+		}
 	}
 
 	return totalUsage, fmt.Errorf("agent loop exceeded %d iterations", maxAgentLoopIterations)
+}
+
+func (engine *Engine) call(
+	ctx context.Context,
+	prepared *preparedExecution,
+	iteration int,
+	request Request,
+) (*Response, error) {
+	if engine.events == nil {
+		return prepared.caller.Invoke(ctx, request)
+	}
+
+	return prepared.caller.Stream(ctx, request, func(stream StreamEvent) error {
+		return engine.emit(ctx, prepared, SessionEvent{
+			Type:      SessionEventModelStream,
+			Iteration: iteration,
+			Stream:    &stream,
+		})
+	})
+}
+
+func (engine *Engine) emit(
+	ctx context.Context,
+	prepared *preparedExecution,
+	event SessionEvent,
+) error {
+	if engine.events == nil {
+		return nil
+	}
+	prepared.eventSequence++
+	event.SessionID = prepared.session.ID
+	event.RoundID = prepared.roundID
+	event.Sequence = prepared.eventSequence
+	return engine.events(ctx, event)
 }
 
 func (engine *Engine) saveProgress(
@@ -487,6 +561,19 @@ func (engine *Engine) finish(
 		return
 	}
 	prepared.session.ClearPending()
+	if err := engine.emit(finishCtx, prepared, SessionEvent{
+		Type:   SessionEventRoundEnded,
+		Status: status,
+		Usage:  &usage,
+		Error:  errorMessage,
+	}); err != nil {
+		engine.logger.ErrorContext(finishCtx, "failed to emit completed agent round",
+			"sessionId", prepared.session.ID,
+			"roundId", prepared.roundID,
+			"status", status,
+			"error", err,
+		)
+	}
 }
 
 func (engine *Engine) release(

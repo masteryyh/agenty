@@ -56,11 +56,28 @@ func (caller *scriptedCaller) Invoke(ctx context.Context, request agentloop.Requ
 }
 
 func (caller *scriptedCaller) Stream(
-	context.Context,
-	agentloop.Request,
-	agentloop.StreamHandler,
+	ctx context.Context,
+	request agentloop.Request,
+	handler agentloop.StreamHandler,
 ) (*agentloop.Response, error) {
-	return nil, errors.New("unexpected stream invocation")
+	response, err := caller.Invoke(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if err := handler(agentloop.StreamEvent{
+		Type:  agentloop.StreamEventTextDelta,
+		Index: 0,
+		Delta: "streamed",
+	}); err != nil {
+		return nil, err
+	}
+	if err := handler(agentloop.StreamEvent{
+		Type:     agentloop.StreamEventCompleted,
+		Response: response,
+	}); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (caller *scriptedCaller) Requests() []agentloop.Request {
@@ -155,6 +172,14 @@ func (fixture *executionFixture) newEngine(
 	t *testing.T,
 	callerFactory agentloop.CallerFactory,
 ) *agentloop.Engine {
+	return fixture.newEngineWithEvents(t, callerFactory, nil)
+}
+
+func (fixture *executionFixture) newEngineWithEvents(
+	t *testing.T,
+	callerFactory agentloop.CallerFactory,
+	events agentloop.SessionEventHandler,
+) *agentloop.Engine {
 	t.Helper()
 
 	engine, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
@@ -163,6 +188,7 @@ func (fixture *executionFixture) newEngine(
 		Catalog:   fixture.catalog,
 		Tools:     fixture.registry,
 		NewCaller: callerFactory,
+		Events:    events,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +202,69 @@ func (fixture *executionFixture) newEngine(
 	})
 
 	return engine
+}
+
+func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	caller := &scriptedCaller{responses: []*agentloop.Response{{
+		Content:    conversation.Text("done"),
+		Usage:      conversation.TokenUsage{Input: 2, Output: 3, Total: 5},
+		StopReason: agentloop.StopReasonEndTurn,
+	}}}
+	events := make(chan agentloop.SessionEvent, 16)
+	engine := fixture.newEngineWithEvents(
+		t,
+		func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+			return caller, nil
+		},
+		func(_ context.Context, event agentloop.SessionEvent) error {
+			events <- event
+			return nil
+		},
+	)
+	session := fixture.createSession(t)
+	started, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	got := make([]agentloop.SessionEvent, 0, 6)
+	for len(got) < 6 {
+		select {
+		case event := <-events:
+			got = append(got, event)
+		case <-time.After(time.Second):
+			t.Fatalf("received %d events, want 6", len(got))
+		}
+	}
+	wantTypes := []agentloop.SessionEventType{
+		agentloop.SessionEventRoundStarted,
+		agentloop.SessionEventMessageAppended,
+		agentloop.SessionEventModelStream,
+		agentloop.SessionEventModelStream,
+		agentloop.SessionEventMessageAppended,
+		agentloop.SessionEventRoundEnded,
+	}
+	for i, event := range got {
+		if event.Type != wantTypes[i] {
+			t.Errorf("event %d type = %q, want %q", i, event.Type, wantTypes[i])
+		}
+		if event.Sequence != uint64(i+1) {
+			t.Errorf("event %d sequence = %d, want %d", i, event.Sequence, i+1)
+		}
+		if event.SessionID != session.ID || event.RoundID != started.RoundID {
+			t.Errorf("event %d scope = %s/%s", i, event.SessionID, event.RoundID)
+		}
+	}
+	if got[2].Stream == nil || got[2].Stream.Delta != "streamed" {
+		t.Fatalf("text delta event = %+v", got[2])
+	}
+	if got[5].Status != conversation.RoundCompleted || got[5].Usage == nil || got[5].Usage.Total != 5 {
+		t.Fatalf("terminal event = %+v", got[5])
+	}
 }
 
 func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {

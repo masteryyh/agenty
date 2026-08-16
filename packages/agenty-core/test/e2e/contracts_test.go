@@ -19,6 +19,8 @@ const (
 )
 
 var publicRPCMethods = []string{
+	"initialize.already",
+	"initialize.complete",
 	"agent.create",
 	"agent.get",
 	"agent.list",
@@ -61,6 +63,12 @@ type rpcResponse struct {
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
+type rpcNotification struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+}
+
 type RPCError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
@@ -74,6 +82,32 @@ func (e *RPCError) Error() string {
 type ModelRef struct {
 	ProviderSlug string `json:"providerSlug"`
 	ModelSlug    string `json:"modelSlug"`
+}
+
+type InitializeResult struct {
+	Initialized bool `json:"initialized"`
+}
+
+type SessionEvent struct {
+	Type      string       `json:"type"`
+	SessionID string       `json:"sessionId"`
+	RoundID   string       `json:"roundId"`
+	Sequence  uint64       `json:"sequence"`
+	Iteration int          `json:"iteration"`
+	Stream    *StreamEvent `json:"stream"`
+	Message   *Message     `json:"message"`
+	Status    string       `json:"status"`
+	Usage     *TokenUsage  `json:"usage"`
+	Error     *string      `json:"error"`
+}
+
+type StreamEvent struct {
+	Type      string          `json:"type"`
+	Index     int             `json:"index"`
+	Delta     string          `json:"delta"`
+	ToolUseID string          `json:"toolUseId"`
+	ToolName  string          `json:"toolName"`
+	ToolInput json.RawMessage `json:"toolInput"`
 }
 
 type Agent struct {
@@ -96,7 +130,6 @@ type Model struct {
 	ContextWindow          int               `json:"contextWindow"`
 	MaxOutputTokens        int64             `json:"maxOutputTokens"`
 	MultiModal             bool              `json:"multiModal"`
-	Embedding              bool              `json:"embedding"`
 	Light                  bool              `json:"light"`
 	ReasoningEffortMapping map[string]string `json:"reasoningEffortMapping"`
 	IsDefault              bool              `json:"isDefault"`
@@ -238,7 +271,6 @@ type ModelInput struct {
 	ContextWindow          int               `json:"contextWindow,omitempty"`
 	MaxOutputTokens        int64             `json:"maxOutputTokens"`
 	MultiModal             bool              `json:"multiModal,omitempty"`
-	Embedding              bool              `json:"embedding,omitempty"`
 	Light                  bool              `json:"light,omitempty"`
 	ReasoningEffortMapping map[string]string `json:"reasoningEffortMapping,omitempty"`
 	IsDefault              bool              `json:"isDefault,omitempty"`

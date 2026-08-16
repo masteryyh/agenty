@@ -18,6 +18,14 @@ func newCatalogRepo(t *testing.T) *CatalogRepository {
 	return NewCatalogRepository(filepath.Join(t.TempDir(), "providers"))
 }
 
+func mustCatalogModelID(value string) shared.ModelID {
+	modelID, err := shared.NewModelID(value)
+	if err != nil {
+		panic(err)
+	}
+	return modelID
+}
+
 func TestCatalogSaveAndGet(t *testing.T) {
 	repo := newCatalogRepo(t)
 	ctx := context.Background()
@@ -30,7 +38,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	provider.APIKey = "sk-ant-test"
 
 	model1 := catalog.Model{
-		Slug:            mustSlug("claude-opus-4-8"),
+		Slug:            mustCatalogModelID("org/claude-opus[fast]"),
 		Name:            "Claude Opus 4.8",
 		ContextWindow:   200000,
 		MaxOutputTokens: 32000,
@@ -43,7 +51,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		UpdatedAt: time.Now().UTC(),
 	}
 	model2 := catalog.Model{
-		Slug:            mustSlug("claude-haiku-4-5"),
+		Slug:            mustCatalogModelID("claude-haiku-4-5"),
 		Name:            "Claude Haiku 4.5",
 		ContextWindow:   200000,
 		MaxOutputTokens: 8000,
@@ -56,7 +64,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	modelData, err := os.ReadFile(filepath.Join(repo.providersDir, provider.Slug.String(), "models", model1.Slug.String()+".json"))
+	modelData, err := os.ReadFile(filepath.Join(repo.providersDir, provider.Slug.String(), "models", modelFileName(model1.Slug)))
 	if err != nil {
 		t.Fatalf("read model file: %v", err)
 	}
@@ -144,6 +152,21 @@ func TestCatalogList(t *testing.T) {
 	}
 }
 
+func TestCatalogListMissingDirectoryReturnsEmptySlice(t *testing.T) {
+	repo := newCatalogRepo(t)
+
+	providers, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if providers == nil {
+		t.Fatal("List returned nil, want an empty slice")
+	}
+	if len(providers) != 0 {
+		t.Fatalf("List returned %d providers, want zero", len(providers))
+	}
+}
+
 func TestCatalogDelete(t *testing.T) {
 	repo := newCatalogRepo(t)
 	ctx := context.Background()
@@ -181,14 +204,14 @@ func TestCatalogDeleteModel(t *testing.T) {
 	provider, _ := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
 	now := time.Now().UTC()
 	provider.Models = []catalog.Model{
-		{Slug: mustSlug("claude-opus-4-8"), Name: "Opus", CreatedAt: now, UpdatedAt: now},
-		{Slug: mustSlug("claude-haiku-4-5"), Name: "Haiku", CreatedAt: now, UpdatedAt: now},
+		{Slug: mustCatalogModelID("claude-opus-4-8"), Name: "Opus", CreatedAt: now, UpdatedAt: now},
+		{Slug: mustCatalogModelID("claude-haiku-4-5"), Name: "Haiku", CreatedAt: now, UpdatedAt: now},
 	}
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := repo.DeleteModel(ctx, provider.Slug, mustSlug("claude-haiku-4-5")); err != nil {
+	if err := repo.DeleteModel(ctx, provider.Slug, mustCatalogModelID("claude-haiku-4-5")); err != nil {
 		t.Fatalf("DeleteModel: %v", err)
 	}
 
@@ -199,17 +222,17 @@ func TestCatalogDeleteModel(t *testing.T) {
 	if len(loaded.Models) != 1 {
 		t.Fatalf("loaded %d models, want 1 after delete", len(loaded.Models))
 	}
-	if loaded.Models[0].Slug != mustSlug("claude-opus-4-8") {
+	if loaded.Models[0].Slug != mustCatalogModelID("claude-opus-4-8") {
 		t.Errorf("remaining model = %s, want claude-opus-4-8", loaded.Models[0].Slug)
 	}
 
 	// Deleting the same model again surfaces model-not-found, not a silent no-op.
-	if err := repo.DeleteModel(ctx, provider.Slug, mustSlug("claude-haiku-4-5")); err != catalog.ErrModelNotFound {
+	if err := repo.DeleteModel(ctx, provider.Slug, mustCatalogModelID("claude-haiku-4-5")); err != catalog.ErrModelNotFound {
 		t.Errorf("DeleteModel missing model = %v, want catalog.ErrModelNotFound", err)
 	}
 
 	// Deleting from a missing provider surfaces provider-not-found.
-	if err := repo.DeleteModel(ctx, mustSlug("nope"), mustSlug("x")); err != ErrProviderNotFound {
+	if err := repo.DeleteModel(ctx, mustSlug("nope"), mustCatalogModelID("x")); err != ErrProviderNotFound {
 		t.Errorf("DeleteModel missing provider = %v, want ErrProviderNotFound", err)
 	}
 }

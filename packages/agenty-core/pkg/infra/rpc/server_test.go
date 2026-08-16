@@ -106,6 +106,35 @@ func TestServerNotificationProducesNoResponse(t *testing.T) {
 	}
 }
 
+func TestServerNotifyWritesJSONRPCNotification(t *testing.T) {
+	srv, out := newTestServer(t, "", map[string]Handler{})
+	if err := srv.Notify(context.Background(), "session.event", map[string]any{
+		"sessionId": "session-1",
+		"sequence":  1,
+	}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	lines := outputLines(t, out)
+	if len(lines) != 1 {
+		t.Fatalf("output lines = %d, want 1", len(lines))
+	}
+	var got struct {
+		JSONRPC string         `json:"jsonrpc"`
+		Method  string         `json:"method"`
+		Params  map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(lines[0], &got); err != nil {
+		t.Fatalf("decode notification: %v", err)
+	}
+	if got.JSONRPC != "2.0" || got.Method != "session.event" {
+		t.Fatalf("notification = %+v", got)
+	}
+	if got.Params["sessionId"] != "session-1" || got.Params["sequence"] != float64(1) {
+		t.Fatalf("params = %+v", got.Params)
+	}
+}
+
 func TestServerMethodNotFound(t *testing.T) {
 	srv, out := newTestServer(t,
 		`{"jsonrpc":"2.0","id":2,"method":"nope"}`+"\n",

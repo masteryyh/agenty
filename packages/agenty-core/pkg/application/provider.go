@@ -19,7 +19,7 @@ type providerRepository interface {
 	List(ctx context.Context) ([]*catalog.Provider, error)
 	Save(ctx context.Context, provider *catalog.Provider) error
 	Delete(ctx context.Context, slug shared.Slug) error
-	DeleteModel(ctx context.Context, providerSlug, modelSlug shared.Slug) error
+	DeleteModel(ctx context.Context, providerSlug shared.Slug, modelSlug shared.ModelID) error
 }
 
 func NewProviderService(repo providerRepository) *ProviderService {
@@ -85,6 +85,9 @@ func (s *ProviderService) List(ctx context.Context) ([]*catalog.Provider, error)
 	providers, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, Internal("failed to list providers: " + err.Error())
+	}
+	if providers == nil {
+		providers = make([]*catalog.Provider, 0)
 	}
 	return providers, nil
 }
@@ -157,7 +160,6 @@ type ModelInput struct {
 	ContextWindow          int                               `json:"contextWindow,omitempty"`
 	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
 	MultiModal             bool                              `json:"multiModal,omitempty"`
-	Embedding              bool                              `json:"embedding,omitempty"`
 	Light                  bool                              `json:"light,omitempty"`
 	ReasoningEffortMapping map[string]shared.ReasoningEffort `json:"reasoningEffortMapping,omitempty"`
 	IsDefault              bool                              `json:"isDefault,omitempty"`
@@ -169,7 +171,7 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 		return nil, Validation(err.Error())
 	}
 
-	ms, err := shared.NewSlug(modelSlug)
+	ms, err := shared.NewModelID(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -201,7 +203,6 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 		ContextWindow:          in.ContextWindow,
 		MaxOutputTokens:        in.MaxOutputTokens,
 		MultiModal:             in.MultiModal,
-		Embedding:              in.Embedding,
 		Light:                  in.Light,
 		ReasoningEffortMapping: in.ReasoningEffortMapping,
 		IsDefault:              in.IsDefault,
@@ -222,7 +223,7 @@ func (s *ProviderService) RemoveModel(ctx context.Context, providerSlug, modelSl
 		return nil, Validation(err.Error())
 	}
 
-	ms, err := shared.NewSlug(modelSlug)
+	ms, err := shared.NewModelID(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}

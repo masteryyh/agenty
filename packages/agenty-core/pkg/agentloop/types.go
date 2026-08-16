@@ -3,6 +3,8 @@ package agentloop
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
@@ -63,6 +65,30 @@ type StreamEvent struct {
 }
 
 type StreamHandler func(StreamEvent) error
+
+type SessionEventType string
+
+const (
+	SessionEventRoundStarted    SessionEventType = "round_started"
+	SessionEventMessageAppended SessionEventType = "message_appended"
+	SessionEventModelStream     SessionEventType = "model_stream"
+	SessionEventRoundEnded      SessionEventType = "round_ended"
+)
+
+type SessionEvent struct {
+	Type      SessionEventType         `json:"type"`
+	SessionID uuid.UUID                `json:"sessionId"`
+	RoundID   uuid.UUID                `json:"roundId"`
+	Sequence  uint64                   `json:"sequence"`
+	Iteration int                      `json:"iteration,omitempty"`
+	Stream    *StreamEvent             `json:"stream,omitempty"`
+	Message   *conversation.Message    `json:"message,omitempty"`
+	Status    conversation.RoundStatus `json:"status,omitempty"`
+	Usage     *conversation.TokenUsage `json:"usage,omitempty"`
+	Error     *string                  `json:"error,omitempty"`
+}
+
+type SessionEventHandler func(ctx context.Context, event SessionEvent) error
 
 type Caller interface {
 	Invoke(ctx context.Context, request Request) (*Response, error)

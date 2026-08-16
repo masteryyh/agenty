@@ -13,7 +13,7 @@ type SessionSummary struct {
 	Title               string                 `json:"title"`
 	AgentSlug           shared.Slug            `json:"agentSlug"`
 	LastProviderSlug    shared.Slug            `json:"lastProviderSlug"`
-	LastModelSlug       shared.Slug            `json:"lastModelSlug"`
+	LastModelSlug       shared.ModelID         `json:"lastModelSlug"`
 	ContextWindow       int64                  `json:"contextWindow"`
 	LastReasoningEffort shared.ReasoningEffort `json:"lastReasoningEffort"`
 	CreatedAt           time.Time              `json:"createdAt"`

@@ -16,6 +16,21 @@ func newAgentyClient(process *coreProcess) *agentyClient {
 	return &agentyClient{rpc: newRPCClient(process)}
 }
 
+func (c *agentyClient) InitializeAlready(ctx context.Context) (InitializeResult, error) {
+	return callResult[InitializeResult](ctx, c.rpc, "initialize.already", struct{}{})
+}
+
+func (c *agentyClient) CompleteInitialization(
+	ctx context.Context,
+	agentSlug, providerSlug, modelSlug string,
+) (InitializeResult, error) {
+	return callResult[InitializeResult](ctx, c.rpc, "initialize.complete", map[string]any{
+		"agentSlug":    agentSlug,
+		"providerSlug": providerSlug,
+		"modelSlug":    modelSlug,
+	})
+}
+
 func (c *agentyClient) CreateAgent(ctx context.Context, input AgentCreateInput) (Agent, error) {
 	return callResult[Agent](
 		ctx,
@@ -288,6 +303,44 @@ func (c *agentyClient) WaitForRoundStatus(
 		case <-ctx.Done():
 			return Session{}, fmt.Errorf(
 				"session %s round %s did not reach %q: %w",
+				sessionID,
+				roundID,
+				want,
+				ctx.Err(),
+			)
+		}
+	}
+}
+
+func (c *agentyClient) WaitForRoundEvent(
+	ctx context.Context,
+	sessionID string,
+	roundID string,
+	want string,
+) (SessionEvent, error) {
+	var lastSequence uint64
+	for {
+		select {
+		case event := <-c.rpc.SessionEvents():
+			if event.SessionID != sessionID || event.RoundID != roundID {
+				continue
+			}
+			if event.Sequence != lastSequence+1 {
+				return SessionEvent{}, fmt.Errorf(
+					"session %s round %s event sequence = %d after %d",
+					sessionID,
+					roundID,
+					event.Sequence,
+					lastSequence,
+				)
+			}
+			lastSequence = event.Sequence
+			if event.Type == want {
+				return event, nil
+			}
+		case <-ctx.Done():
+			return SessionEvent{}, fmt.Errorf(
+				"session %s round %s did not emit %q: %w",
 				sessionID,
 				roundID,
 				want,

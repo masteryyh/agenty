@@ -62,7 +62,7 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	modelSlug, err := shared.NewSlug(in.ModelSlug)
+	modelSlug, err := shared.NewModelID(in.ModelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -125,6 +125,9 @@ func (s *SessionService) List(ctx context.Context, q SessionListQuery) ([]conver
 	if err != nil {
 		return nil, Internal("failed to list sessions: " + err.Error())
 	}
+	if sums == nil {
+		sums = make([]conversation.SessionSummary, 0)
+	}
 	return sums, nil
 }
 
@@ -176,7 +179,7 @@ func (s *SessionService) SetModel(ctx context.Context, idStr, providerSlug, mode
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	ms, err := shared.NewSlug(modelSlug)
+	ms, err := shared.NewModelID(modelSlug)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}

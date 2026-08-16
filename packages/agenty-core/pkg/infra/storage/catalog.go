@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -43,6 +44,9 @@ func (r *CatalogRepository) Get(ctx context.Context, slug shared.Slug) (*catalog
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+	if p.Models == nil {
+		p.Models = make([]catalog.Model, 0, len(entries))
+	}
 
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
@@ -65,15 +69,15 @@ func (r *CatalogRepository) Get(ctx context.Context, slug shared.Slug) (*catalog
 }
 
 func (r *CatalogRepository) List(ctx context.Context) ([]*catalog.Provider, error) {
+	providers := make([]*catalog.Provider, 0)
 	entries, err := os.ReadDir(r.providersDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return providers, nil
 		}
 		return nil, err
 	}
 
-	var providers []*catalog.Provider
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -143,7 +147,7 @@ func (r *CatalogRepository) Save(ctx context.Context, provider *catalog.Provider
 			return err
 		}
 
-		modelPath := filepath.Join(modelsDir, model.Slug.String()+".json")
+		modelPath := filepath.Join(modelsDir, modelFileName(model.Slug))
 		if err := os.WriteFile(modelPath, modelData, 0600); err != nil {
 			return err
 		}
@@ -166,8 +170,8 @@ func (r *CatalogRepository) Delete(ctx context.Context, slug shared.Slug) error 
 	return nil
 }
 
-func (r *CatalogRepository) DeleteModel(ctx context.Context, providerSlug, modelSlug shared.Slug) error {
-	modelPath := filepath.Join(r.providersDir, providerSlug.String(), "models", modelSlug.String()+".json")
+func (r *CatalogRepository) DeleteModel(ctx context.Context, providerSlug shared.Slug, modelSlug shared.ModelID) error {
+	modelPath := filepath.Join(r.providersDir, providerSlug.String(), "models", modelFileName(modelSlug))
 	if err := os.Remove(modelPath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
@@ -179,4 +183,8 @@ func (r *CatalogRepository) DeleteModel(ctx context.Context, providerSlug, model
 		return ErrProviderNotFound
 	}
 	return catalog.ErrModelNotFound
+}
+
+func modelFileName(modelID shared.ModelID) string {
+	return url.PathEscape(modelID.String()) + ".json"
 }

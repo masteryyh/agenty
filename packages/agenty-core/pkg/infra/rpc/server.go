@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -42,6 +43,17 @@ func (s *Server) SetMaxLineBytes(max int) {
 	if max > 0 {
 		s.maxLineBytes = max
 	}
+}
+
+func (s *Server) Notify(ctx context.Context, method string, params any) error {
+	if method == "" {
+		return errors.New("rpc: notification method must not be empty")
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("rpc: encode notification params: %w", err)
+	}
+	return s.writeValue(notification{JSONRPC: "2.0", Method: method, Params: raw})
 }
 
 type lineEvent struct {
@@ -206,35 +218,33 @@ func (s *Server) handleBatch(ctx context.Context, batch []json.RawMessage) {
 }
 
 func (s *Server) write(ctx context.Context, resp response) {
-	data, err := json.Marshal(resp)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to encode RPC response", "error", err)
-		return
-	}
-	data = append(data, '\n')
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if n, err := s.out.Write(data); err != nil {
+	if err := s.writeValue(resp); err != nil {
 		s.logger.ErrorContext(ctx, "failed to write RPC response", "error", err)
-	} else if n != len(data) {
-		s.logger.ErrorContext(ctx, "failed to write RPC response", "error", io.ErrShortWrite)
 	}
 }
 
 func (s *Server) writeBatch(ctx context.Context, resps []response) {
-	data, err := json.Marshal(resps)
+	if err := s.writeValue(resps); err != nil {
+		s.logger.ErrorContext(ctx, "failed to write RPC batch response", "error", err)
+	}
+}
+
+func (s *Server) writeValue(value any) error {
+	data, err := json.Marshal(value)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to encode RPC batch response", "error", err)
-		return
+		return fmt.Errorf("rpc: encode message: %w", err)
 	}
 	data = append(data, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if n, err := s.out.Write(data); err != nil {
-		s.logger.ErrorContext(ctx, "failed to write RPC batch response", "error", err)
-	} else if n != len(data) {
-		s.logger.ErrorContext(ctx, "failed to write RPC batch response", "error", io.ErrShortWrite)
+	n, err := s.out.Write(data)
+	if err != nil {
+		return err
 	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func readLine(r *bufio.Reader, max int) (line []byte, tooLarge bool, err error) {

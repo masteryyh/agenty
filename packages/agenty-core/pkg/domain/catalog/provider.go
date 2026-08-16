@@ -37,12 +37,13 @@ func NewProvider(slug, name string, apiType APIType) (*Provider, error) {
 		Slug:      s,
 		Name:      name,
 		Type:      apiType,
+		Models:    make([]Model, 0),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
 }
 
-func (p *Provider) Model(slug shared.Slug) (*Model, error) {
+func (p *Provider) Model(slug shared.ModelID) (*Model, error) {
 	for i := range p.Models {
 		if p.Models[i].Slug == slug {
 			return &p.Models[i], nil
@@ -61,7 +62,7 @@ func (p *Provider) AddModel(m Model) {
 	p.Models = append(p.Models, m)
 }
 
-func (p *Provider) RemoveModel(slug shared.Slug) {
+func (p *Provider) RemoveModel(slug shared.ModelID) {
 	for i := range p.Models {
 		if p.Models[i].Slug == slug {
 			p.Models = append(p.Models[:i], p.Models[i+1:]...)

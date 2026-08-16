@@ -22,6 +22,46 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 
 	firstProcess := startCoreAt(t, dataDir, coreEnv(dataDir))
 	first := newAgentyClient(firstProcess)
+	already, err := first.InitializeAlready(ctx)
+	requireNoError(t, err)
+	if already.Initialized {
+		t.Fatal("fresh data dir reported initialized")
+	}
+	_, err = first.CreateProvider(ctx, ProviderCreateInput{
+		Slug:     "setup-provider",
+		Name:     "Setup Provider",
+		Type:     "openai_completions",
+		BaseURL:  fixture.BaseURL("openai_completions"),
+		APIKey:   "test-key",
+		Metadata: map[string]any{"source": "initialize"},
+	})
+	requireNoError(t, err)
+	_, err = first.AddModel(ctx, ModelInput{
+		ProviderSlug:    "setup-provider",
+		ModelSlug:       "setup-model",
+		Name:            "Setup Model",
+		ContextWindow:   64_000,
+		MaxOutputTokens: 8_192,
+		IsDefault:       true,
+	})
+	requireNoError(t, err)
+	_, err = first.CreateAgent(ctx, AgentCreateInput{
+		Slug:                 "setup-agent",
+		Name:                 "Setup Agent",
+		DefaultModel:         &ModelRef{ProviderSlug: "setup-provider", ModelSlug: "setup-model"},
+		DefaultContextWindow: 64_000,
+		IsDefault:            true,
+	})
+	requireNoError(t, err)
+	already, err = first.CompleteInitialization(ctx, "setup-agent", "setup-provider", "setup-model")
+	requireNoError(t, err)
+	if !already.Initialized {
+		t.Fatal("completed initialization reported false")
+	}
+	_, err = first.DeleteProvider(ctx, "setup-provider")
+	requireNoError(t, err)
+	_, err = first.DeleteAgent(ctx, "setup-agent")
+	requireNoError(t, err)
 
 	createdAgent, err := first.CreateAgent(ctx, AgentCreateInput{
 		Slug:                   "daily-assistant",
@@ -161,6 +201,11 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		Text: "Prepare a release checklist.",
 	}})
 	requireNoError(t, err)
+	ended, err := first.WaitForRoundEvent(ctx, primary.ID, firstRound.RoundID, "round_ended")
+	requireNoError(t, err)
+	if ended.Status != "completed" || ended.Usage == nil || ended.Usage.Total != 5 {
+		t.Fatalf("round ended event = %+v", ended)
+	}
 	completed, err := first.WaitForRoundStatus(
 		ctx,
 		primary.ID,

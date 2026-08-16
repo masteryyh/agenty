@@ -51,6 +51,7 @@ docs/
 
 # Node / pnpm
 node_modules/
+.pnpm-store/
 packages/agenty-cli/dist/
 packages/agenty-cli/bun.lockb
 

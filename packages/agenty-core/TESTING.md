@@ -13,7 +13,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
 | Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows, including asynchronous session start/stop | With `integration` |
-| Executable E2E | Real `cmd` subprocesses, isolated data directories, a typed IPC client, local provider fixtures, and optional live upstreams | Complete client journeys, all 26 public RPC methods, four provider protocols, built-in tool definitions, multi-turn conversations, completion/failure/cancellation, same-channel concurrency, shutdown during execution, restart persistence, and stdio boundaries | With `e2e` |
+| Executable E2E | Real `cmd` subprocesses, isolated data directories, a typed IPC client, local provider fixtures, and optional live upstreams | Complete client journeys, all 28 public RPC methods, ordered session event notifications, four provider protocols, built-in tool definitions, multi-turn conversations, completion/failure/cancellation, same-channel concurrency, shutdown during execution, restart persistence, and stdio boundaries | With `e2e` |
 
 The `integration` build tag currently enables:
 
@@ -150,8 +150,8 @@ Chat Completions, Anthropic Messages, and Google GenAI. The scenarios verify the
 duplicate-start and running-delete rejection, stop-driven cancellation, and recovery
 after the process exits during execution.
 
-The journey exercises all 26 current public methods: 5 Agent, 7 Provider, 10 Session,
-and 4 Chunk methods. Notifications, batches, exact request IDs, malformed-JSON
+The journey exercises all 28 current public methods: 2 Initialize, 5 Agent, 7 Provider,
+10 Session, and 4 Chunk methods. Session events, batches, exact request IDs, malformed-JSON
 recovery, a final line without a newline, stdin EOF, and startup failure remain
 process-level protocol scenarios. Exhaustive parser and invalid-chunk permutations
 remain in the lower-level RPC suite.

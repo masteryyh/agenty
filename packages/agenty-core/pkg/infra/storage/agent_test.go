@@ -23,7 +23,11 @@ func TestAgentSaveAndGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.Soul = "You are a helpful coding assistant."
-	model := shared.NewModelRef(mustSlug("anthropic"), mustSlug("claude-opus"))
+	modelID, err := shared.NewModelID("claude-opus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := shared.NewModelRef(mustSlug("anthropic"), modelID)
 	a.DefaultModel = &model
 	a.DefaultContextWindow = 200_000
 	a.DefaultReasoningEffort = shared.ReasoningHigh
@@ -77,6 +81,21 @@ func TestAgentList(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Errorf("List returned %d agents, want 2", len(all))
+	}
+}
+
+func TestAgentListMissingDirectoryReturnsEmptySlice(t *testing.T) {
+	repo := newAgentRepo(t)
+
+	agents, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if agents == nil {
+		t.Fatal("List returned nil, want an empty slice")
+	}
+	if len(agents) != 0 {
+		t.Fatalf("List returned %d agents, want zero", len(agents))
 	}
 }
 

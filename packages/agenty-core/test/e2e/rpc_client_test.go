@@ -21,6 +21,7 @@ type rpcClient struct {
 	pending   map[string]chan rpcResponse
 	called    map[string]int
 	orphans   chan rpcResponse
+	events    chan SessionEvent
 	done      chan struct{}
 	routeErr  error
 }
@@ -31,10 +32,15 @@ func newRPCClient(process *coreProcess) *rpcClient {
 		pending: map[string]chan rpcResponse{},
 		called:  map[string]int{},
 		orphans: make(chan rpcResponse, 16),
+		events:  make(chan SessionEvent, 128),
 		done:    make(chan struct{}),
 	}
 	go client.routeResponses()
 	return client
+}
+
+func (c *rpcClient) SessionEvents() <-chan SessionEvent {
+	return c.events
 }
 
 func (c *rpcClient) Call(ctx context.Context, method string, params, result any) error {
@@ -181,10 +187,23 @@ func (c *rpcClient) routeResponses() {
 			return
 		}
 
-		responses, err := decodeResponseFrame(frame)
+		notification, responses, err := decodeRPCFrame(frame)
 		if err != nil {
 			c.setRouteError(err)
 			return
+		}
+		if notification != nil {
+			if notification.Method != "session.event" {
+				c.setRouteError(fmt.Errorf("unexpected RPC notification %q", notification.Method))
+				return
+			}
+			var event SessionEvent
+			if err := json.Unmarshal(notification.Params, &event); err != nil {
+				c.setRouteError(fmt.Errorf("decode session event: %w", err))
+				return
+			}
+			c.events <- event
+			continue
 		}
 		for _, response := range responses {
 			c.dispatchResponse(response)
@@ -192,20 +211,34 @@ func (c *rpcClient) routeResponses() {
 	}
 }
 
-func decodeResponseFrame(frame []byte) ([]rpcResponse, error) {
+func decodeRPCFrame(frame []byte) (*rpcNotification, []rpcResponse, error) {
 	responses := []rpcResponse{}
 	if len(frame) > 0 && frame[0] == '[' {
 		if err := json.Unmarshal(frame, &responses); err != nil {
-			return nil, fmt.Errorf("decode RPC batch response: %w", err)
+			return nil, nil, fmt.Errorf("decode RPC batch response: %w", err)
 		}
-		return responses, nil
+		return nil, responses, nil
+	}
+
+	var envelope struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(frame, &envelope); err != nil {
+		return nil, nil, fmt.Errorf("decode RPC frame: %w", err)
+	}
+	if envelope.Method != "" {
+		var notification rpcNotification
+		if err := json.Unmarshal(frame, &notification); err != nil {
+			return nil, nil, fmt.Errorf("decode RPC notification: %w", err)
+		}
+		return &notification, nil, nil
 	}
 
 	var response rpcResponse
 	if err := json.Unmarshal(frame, &response); err != nil {
-		return nil, fmt.Errorf("decode RPC response: %w", err)
+		return nil, nil, fmt.Errorf("decode RPC response: %w", err)
 	}
-	return append(responses, response), nil
+	return nil, append(responses, response), nil
 }
 
 func (c *rpcClient) dispatchResponse(response rpcResponse) {

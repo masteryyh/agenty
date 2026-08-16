@@ -93,6 +93,9 @@ func (s *AgentService) List(ctx context.Context) ([]*agent.Agent, error) {
 	if err != nil {
 		return nil, Internal("failed to list agents: " + err.Error())
 	}
+	if agents == nil {
+		agents = make([]*agent.Agent, 0)
+	}
 	return agents, nil
 }
 

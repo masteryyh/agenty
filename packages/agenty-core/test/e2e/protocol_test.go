@@ -114,6 +114,31 @@ func TestJSONRPCRequestIDsRoundTripExactly(t *testing.T) {
 	}
 }
 
+func TestRemovedInitializeSetMethodsAreNotRegistered(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+	process := startCore(t)
+	for id, method := range []string{
+		"initialize.set.provider",
+		"initialize.set.model",
+		"initialize.set.agent",
+		"initialize.set.completed",
+	} {
+		writeRequestFrame(t, ctx, process, rpcRequest{
+			JSONRPC: "2.0",
+			ID:      id + 1,
+			Method:  method,
+			Params:  struct{}{},
+		})
+		response := readSingleResponse(t, ctx, process)
+		if response.Error == nil || response.Error.Code != errMethodMissing {
+			t.Fatalf("%s response = %+v, want method not found", method, response)
+		}
+	}
+}
+
 func TestStdioProcessesFinalFrameWithoutNewlineAndExitsOnEOF(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := testContext(t)

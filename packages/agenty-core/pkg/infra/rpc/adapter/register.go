@@ -10,10 +10,12 @@ func RegisterAll(
 	d *rpc.Dispatcher,
 	agentSvc *application.AgentService,
 	providerSvc *application.ProviderService,
+	initializeSvc *application.InitializeService,
 	sessionSvc *application.SessionService,
 	execution *agentloop.Engine,
 ) {
 	RegisterAgentHandlers(d, agentSvc)
 	RegisterProviderHandlers(d, providerSvc)
+	RegisterInitializeHandlers(d, initializeSvc)
 	RegisterSessionHandlers(d, sessionSvc, execution)
 }

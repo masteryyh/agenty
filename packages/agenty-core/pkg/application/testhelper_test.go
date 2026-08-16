@@ -136,7 +136,7 @@ func (r *providerRepositoryFake) Delete(_ context.Context, slug shared.Slug) err
 	return nil
 }
 
-func (r *providerRepositoryFake) DeleteModel(_ context.Context, providerSlug, modelSlug shared.Slug) error {
+func (r *providerRepositoryFake) DeleteModel(_ context.Context, providerSlug shared.Slug, modelSlug shared.ModelID) error {
 	if r.deleteModelErr != nil {
 		return r.deleteModelErr
 	}

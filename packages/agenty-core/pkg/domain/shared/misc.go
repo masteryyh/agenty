@@ -13,11 +13,11 @@ func NewID() uuid.UUID {
 type Metadata map[string]any
 
 type ModelRef struct {
-	ProviderSlug Slug `json:"providerSlug"`
-	ModelSlug    Slug `json:"modelSlug"`
+	ProviderSlug Slug    `json:"providerSlug"`
+	ModelSlug    ModelID `json:"modelSlug"`
 }
 
-func NewModelRef(provider, model Slug) ModelRef {
+func NewModelRef(provider Slug, model ModelID) ModelRef {
 	return ModelRef{
 		ProviderSlug: provider,
 		ModelSlug:    model,

@@ -50,7 +50,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.AddModel(catalog.Model{
-		Slug:            mustSlug("claude-opus-4-8"),
+		Slug:            mustModelID("claude-opus-4-8"),
 		Name:            "Claude Opus 4.8",
 		ContextWindow:   200_000,
 		MaxOutputTokens: 32_000,
@@ -59,7 +59,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatalf("Save provider: %v", err)
 	}
 
-	modelRef := shared.NewModelRef(provider.Slug, mustSlug("claude-opus-4-8"))
+	modelRef := shared.NewModelRef(provider.Slug, mustModelID("claude-opus-4-8"))
 	a, err := agent.New("coder", "Code Assistant")
 	if err != nil {
 		t.Fatal(err)
@@ -146,4 +146,12 @@ func mustSlug(s string) shared.Slug {
 		panic(err)
 	}
 	return slug
+}
+
+func mustModelID(s string) shared.ModelID {
+	id, err := shared.NewModelID(s)
+	if err != nil {
+		panic(err)
+	}
+	return id
 }

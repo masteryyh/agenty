@@ -2,9 +2,8 @@
 
 [English](README.md) | [简体中文](README-CN.md)
 
-The next-generation core runtime for Agenty, being built from scratch to replace
-`agenty-runtime`. It is designed around a local-first storage model (filesystem +
-SQLite) and a Domain-Driven Design (DDD) domain layer.
+The core runtime for Agenty. It is designed around a local-first storage model
+(filesystem + SQLite) and a Domain-Driven Design (DDD) domain layer.
 
 ## Storage model
 
@@ -125,6 +124,8 @@ in-memory fakes without opening files or a database.
 - `AgentService` — agent CRUD (`Create`/`Get`/`List`/`Update`/`Delete`).
 - `ProviderService` — provider CRUD plus model sub-resource operations
   (`AddModel`/`RemoveModel`).
+- `InitializeService` — first-run state and completion validation; provider/model/agent data
+  is written through their regular services.
 - `SessionService` — session CRUD and configuration mutations
   (`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`).
 
@@ -181,6 +182,7 @@ Methods follow a `resource.action` naming:
 
 | Group | Methods |
 | --- | --- |
+| Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
@@ -188,9 +190,16 @@ Methods follow a `resource.action` naming:
 
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
 and `running` status immediately; the engine continues the full agent turn
-asynchronously. `session.stop`
-accepts `{id}` and requests cancellation. Clients observe the terminal `completed`,
-`failed`, or `cancelled` round through `session.get`. Starting a second round for the
+asynchronously. While it runs, core writes `session.event` JSON-RPC notifications with
+`round_started`, `message_appended`, `model_stream`, and `round_ended` event types.
+Every event carries `sessionId`, `roundId`, and a per-round monotonically increasing
+`sequence`; model events also carry the provider-neutral stream event and loop
+`iteration`. A notification may be written before the `session.start` response because
+the round starts concurrently, so clients must subscribe before issuing the request and
+route notifications independently from responses. `round_ended` carries the terminal
+`completed`, `failed`, or `cancelled` status, token usage, and an optional error.
+
+`session.stop` accepts `{id}` and requests cancellation. Starting a second round for the
 same session, or deleting that session while it is running, returns `already exists`.
 Different sessions can run in parallel.
 
