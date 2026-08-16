@@ -87,7 +87,17 @@ func TestContentUnmarshalNull(t *testing.T) {
 	if err := json.Unmarshal([]byte(`null`), &c); err != nil {
 		t.Fatalf("unmarshal null: %v", err)
 	}
-	if c != nil {
-		t.Errorf("expected nil content, got %v", c)
+	if c == nil || len(c) != 0 {
+		t.Errorf("expected empty content, got %v", c)
+	}
+}
+
+func TestContentNilMarshalsAsArray(t *testing.T) {
+	data, err := json.Marshal(Content(nil))
+	if err != nil {
+		t.Fatalf("marshal nil content: %v", err)
+	}
+	if string(data) != "[]" {
+		t.Fatalf("nil content = %s, want []", data)
 	}
 }

@@ -158,6 +158,25 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 		t.Errorf("model name = %s, want updated", p.Models[0].Name)
 	}
 
+	// Model IDs may include provider namespaces, underscores and variant markers.
+	const namespacedModelID = "org/model_name[v2]"
+	if _, err := providerSvc.AddModel(ctx, "anthropic", namespacedModelID, application.ModelInput{
+		Name:            "Namespaced model",
+		MaxOutputTokens: 16_384,
+	}); err != nil {
+		t.Fatalf("AddModel namespaced ID: %v", err)
+	}
+	p, err = providerSvc.Get(ctx, "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Model(mustModelIDForTest(namespacedModelID)); err != nil {
+		t.Fatalf("namespaced model lookup: %v", err)
+	}
+	if _, err := providerSvc.RemoveModel(ctx, "anthropic", namespacedModelID); err != nil {
+		t.Fatalf("RemoveModel namespaced ID: %v", err)
+	}
+
 	// Add a second model, then remove the first.
 	if _, err := providerSvc.AddModel(ctx, "anthropic", "claude-haiku-4-5", application.ModelInput{
 		Name:            "Haiku",
@@ -182,6 +201,14 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	if code := appErrorCode(err); code != application.CodeNotFound {
 		t.Errorf("remove missing code = %v, want not_found", code)
 	}
+}
+
+func mustModelIDForTest(value string) shared.ModelID {
+	modelID, err := shared.NewModelID(value)
+	if err != nil {
+		panic(err)
+	}
+	return modelID
 }
 
 func TestProviderAddModelRejectsInvalidReasoningEffortMapping(t *testing.T) {

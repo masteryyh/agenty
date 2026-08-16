@@ -2,155 +2,95 @@
 
 [简体中文](./README.zh-CN.md)
 
-Agenty is an AI agent application that supports both local mode and self-hosted mode, with skills, MCP and memory support.
+Agenty is a local-first AI agent application. The current product path consists of
+`agenty-cli`, `agenty-core`, and the self-extracting `agenty-bootstrap` launcher.
+The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 over
+the child process's stdin/stdout; it does not start an HTTP server.
 
-It supports chat models from providers such as OpenAI, Anthropic, Gemini, Qwen, DeepSeek, Kimi, and BigModel.
+The current core supports provider/model/agent management, persistent sessions,
+streaming model output, agentic tool loops, and built-in filesystem tools. Skills,
+MCP, memory, compaction, and remote-client mode are not exposed until equivalent
+core implementations exist.
 
-[Quick Start](#quick-start) · [Run Modes](#run-modes) · [Configuration](#configuration) · [Database](#database) · [License](#license)
+## Quick start
 
-## Quick Start
-
-1. Open the [latest GitHub Release](https://github.com/masteryyh/agenty/releases/latest).
-2. Download the asset that matches your operating system and CPU architecture.
-3. Extract the downloaded release archive.
-4. Follow the install steps for your platform.
-
-### Linux
-
-```bash
-chmod +x agenty
-sudo install -m 755 agenty /usr/local/bin/agenty
-```
-
-### macOS
+Download the archive for your operating system and architecture from the
+[latest release](https://github.com/masteryyh/agenty/releases/latest), extract it,
+and install the `agenty` executable:
 
 ```bash
 chmod +x agenty
 sudo install -m 755 agenty /usr/local/bin/agenty
-```
-
-Start the interactive TUI:
-
-```bash
 agenty
 ```
 
-On first run, the launcher verifies and extracts the bundled CLI and runtime into `~/.agenty/bin`, then starts the CLI, which forks the runtime on a random local port. The runtime initializes its database, seeds preset providers and models, and creates the default agent; the CLI detects the uninitialized state and opens a setup wizard to configure provider API keys, web search, and default models.
+On first run, the launcher verifies and extracts the bundled CLI and core into
+`~/.agenty/bin/{cli,core}`. The CLI starts core as a child process and opens a setup
+wizard. The wizard creates one provider, one chat model, and one default agent through
+the existing `provider.*` and `agent.*` IPC methods, then calls `initialize.complete`.
 
-To run only the HTTP backend standalone, execute `~/.agenty/bin/runtime` after the first launch. It defaults to port `8080`, SQLite at `~/.agenty/agenty.db`, and debug logging disabled.
+## Runtime model
 
-## Run Modes
+The launcher contains two XZ-compressed payloads and their decompressed SHA3-256
+digests. Matching extracted files are reused; missing or mismatched files are verified
+and atomically replaced. The CLI resolves core in this order:
 
-Agenty ships as a single self-extracting artifact: the `agenty` launcher, a small Rust binary that carries the XZ-compressed `agenty-cli` (React OpenTUI terminal UI plus resource-management subcommands) and the `agenty` Go runtime (HTTP backend) appended after its own code, along with the SHA3-256 digests of both payloads.
+1. `AGENTY_CORE_BIN`
+2. `packages/agenty-core/bin/agenty-core` during repository development
+3. `~/.agenty/bin/core` from the launcher
 
-On startup the launcher shows the current bootstrap stage with a spinner. It checks `~/.agenty/bin/cli` and `~/.agenty/bin/runtime`: a file whose SHA3-256 matches the embedded digest is reused, while a missing or mismatched one is decompressed, verified, and atomically replaced. It then starts the CLI, which forks the runtime on a random local port. Set `AGENTY_BIN` only when you intentionally want the CLI to use an unmanaged runtime binary during development.
+Core reads one compact JSON-RPC message per stdin line and writes responses and
+notifications to stdout. After `session.start`, core sends ordered `session.event`
+notifications for round lifecycle, persisted messages, model stream deltas, tool calls,
+and the terminal round status. Notifications may arrive before the `session.start`
+response, so clients must subscribe before sending the request. Core exits when stdin
+reaches EOF.
 
-| Mode | Command | Use case |
-| --- | --- | --- |
-| Local interactive mode | `agenty` | Run the TUI; the launcher verifies or extracts `~/.agenty/bin/{cli,runtime}`, starts the CLI, and the CLI starts the runtime on a random local port. |
-| Local interactive mode (dev) | `pnpm cli:dev` | Build `agenty-runtime` through Turborepo, then run the TUI from source against the in-repository runtime. |
-| Local interactive mode with database | `agenty --db /path/to/agenty.db` | Use an explicit SQLite database for the local server. |
-| Server mode | `~/.agenty/bin/runtime` | Run the extracted HTTP backend service with default settings. |
-| Remote interactive mode | `agenty --server http://host:8080` | Connect the TUI to a remote `agenty` server instead of spawning a local one. |
-| Resource-management CLI | `agenty <subcommand>` | Initialize and manage agents, providers, models, settings, MCP servers, and global skills. See `agenty --help`. |
+The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/think`, `/status`,
+`/new`, `/resume`, `/help`, and `/exit`. Features not yet implemented by core are hidden.
 
-On first run, `agenty-cli` detects an uninitialized system and opens a setup wizard to configure provider API keys, web search, and default models.
+## Configuration and storage
 
-Common slash commands inside the TUI:
+Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the CLI or set
+`AGENTY_DATA_DIR` for core to use another root. Important files are:
 
-The TUI supports mouse-wheel scrolling, clickable lists and actions, and mouse text selection with OSC52 clipboard copy when the terminal supports it.
-
-| Command | Purpose |
+| Data | Path |
 | --- | --- |
-| `/help` | Show available commands. |
-| `/provider` | Manage model providers. |
-| `/model` | Switch the chat model. |
-| `/agents` | Manage agents and switch the current agent. |
-| `/config` | View and edit system settings. |
-| `/mcp` | Manage MCP servers. |
-| `/skill` | Browse available skills. |
-| `/compact` | Compact the current conversation. |
-| `/cwd` | Set or show the session working directory. |
-| `/think` | Set the current model thinking level. |
-| `/status` | Show current session status. |
-| `/new` | Start a new session. |
-| `/resume` | Resume a previous session. |
-| `/exit` | Quit the TUI. |
+| Configuration | `~/.agenty/config.json` |
+| Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
+| Session index | `~/.agenty/agenty.sqlite` |
+| Providers and models | `~/.agenty/providers/` |
+| Agents | `~/.agenty/agents/` |
+| Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
-## Configuration
+`AGENTY_LOG_LEVEL` accepts `debug`, `info`, `warn`, or `error`.
+`AGENTY_LOG_FORMAT` accepts `text` or `jsonl`.
 
-The Go backend does not read or create a configuration file. Its runtime settings are command-line flags:
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--port` | `8080` | HTTP listen port. |
-| `--db` | `~/.agenty/agenty.db` | SQLite database file. `~` is expanded to the current user's home directory. |
-| `--debug` | disabled | Enable debug logging and Gin debug mode. |
-| `--version`, `-v` | disabled | Print version information and exit. |
-
-For example:
+## Development
 
 ```bash
-agenty --port 9090 --db /srv/agenty/agenty.db --debug
+pnpm install
+pnpm cli:dev
 ```
 
-The CLI passes `--db` and `--debug` through to its local backend in local mode. Its remote-client settings remain separate; see `agenty --help` for `--server` and `--client-config`.
-
-## Build configuration
-
-Copy the tracked root `.env.example` to the ignored `.env`, export it, then run the build:
+`pnpm cli:dev` builds `agenty-core` first, then attaches the source TUI directly to the
+terminal. Useful focused commands include:
 
 ```bash
-cp .env.example .env
-set -a
-source .env
-set +a
+pnpm core:test
+pnpm core:test:integration
+pnpm core:test:e2e
+pnpm cli:typecheck
+pnpm bootstrap:test
 pnpm build
 ```
 
-```dotenv
-AGENTY_VERSION=0.1.0
-```
-
-CLI, runtime, and bootstrap builds all consume the exported `AGENTY_VERSION`; they fall back to `dev` when it is absent. Actual `.env` files are never committed. Release CI creates and sources the root `.env`, then passes runtime-specific `GOOS`, `GOARCH`, compiler, and output variables directly on the build command. Turbo hashes the exported variables as build inputs.
-
-## Database
-
-SQLite is the active database backend. By default, Agenty stores it at `~/.agenty/agenty.db`; use `--db` to select another file. The parent directory is created automatically.
-
-SQLite startup requires FTS5 and sqlite-vector. The release binary is expected to include FTS5 support. Agenty stores the sqlite-vector native extension next to the selected database and downloads the matching release asset when the extension is missing.
-
-Windows `arm64` cannot currently run the server because sqlite-vector does not provide that platform and PostgreSQL selection is not exposed through the CLI.
-
-The PostgreSQL implementation and schema remain in the codebase for a later decision, but the current server CLI does not expose PostgreSQL connection parameters. A future PostgreSQL deployment would still require creating the database:
-
-```sql
-CREATE DATABASE agenty;
-```
-
-Then connect to that database and enable the required extensions:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_search;
-```
-
-Agenty initializes and migrates its own tables from embedded SQL schema files at startup.
+The release version comes from the exported root `AGENTY_VERSION` value. Copy
+`.env.example` to the ignored `.env`, source it, and run `pnpm build` for a complete
+launcher build.
 
 ## License
 
-This project is licensed under the Apache License 2.0. For more details, see the LICENSE file in the repository.
+Licensed under the Apache License 2.0. See [LICENSE](./LICENSE).
 
 Copyright (c) 2026 masteryyh
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-[https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.

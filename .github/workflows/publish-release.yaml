@@ -85,7 +85,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: packages/agenty-runtime/go.mod
+          go-version-file: packages/agenty-core/go.mod
           cache: true
 
       - name: Setup pnpm
@@ -113,7 +113,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build runtime, CLI and bootstrap
+      - name: Build core, CLI and bootstrap
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
@@ -129,7 +129,7 @@ jobs:
           CC="" \
           CXX="" \
           PACKAGE_DIR="bin/${{ matrix.os }}_${{ matrix.arch }}" \
-          BIN_NAME="agenty${{ matrix.bin_ext }}" \
+          BIN_NAME="agenty-core${{ matrix.bin_ext }}" \
           OS="${{ matrix.os }}" \
           ARCH="${{ matrix.arch }}" \
           OPENTUI_LIBC="${{ matrix.opentui_libc }}" \

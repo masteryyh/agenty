@@ -1,289 +1,205 @@
-export const StreamEventType = {
-	ReasoningDelta: "reasoning_delta",
-	ContentDelta: "content_delta",
-	ToolCallStart: "tool_call_start",
-	ToolCallDelta: "tool_call_delta",
-	ToolCallDone: "tool_call_done",
-	ToolResult: "tool_result",
-	MessageDone: "message_done",
-	Usage: "usage",
-	Error: "error",
-	Done: "done",
-	ModelSwitch: "model_switch",
-	CompactionStart: "compaction_start",
-	CompactionDone: "compaction_done",
-} as const;
+export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type APIType = "openai" | "openai_completions" | "anthropic" | "gemini";
 
-export type StreamEventType = (typeof StreamEventType)[keyof typeof StreamEventType];
-
-export type MessageRole = "user" | "assistant" | "tool" | "system";
-
-export interface ToolCall {
-	id: string;
-	name: string;
-	arguments: string;
-}
-
-export interface ToolResult {
-	callId: string;
-	name: string;
-	content: string;
-	isError: boolean;
-}
-
-export interface ReasoningBlock {
-	summary: string;
-	signature?: string;
-	redacted?: boolean;
-}
-
-export interface ProviderMessage {
-	role: MessageRole;
-	content: string;
-	toolCalls?: ToolCall[];
-	toolResult?: ToolResult;
-	reasoningContent?: string;
-	reasoningDurationMillis?: number;
-	reasoningBlocks?: ReasoningBlock[];
-}
-
-export interface StreamUsage {
-	totalTokens: number;
-	contextTokens?: number;
-}
-
-export interface StreamEvent {
-	type: StreamEventType;
-	content?: string;
-	reasoning?: string;
-	toolCall?: ToolCall;
-	toolResult?: ToolResult;
-	usage?: StreamUsage;
-	error?: string;
-	message?: ProviderMessage;
-	modelId?: string;
-	modelName?: string;
-	modelThinking?: boolean;
-	modelThinkingLevels?: string[];
-}
-
-export interface ChatDto {
-	modelId: string;
-	message: string;
-	thinking: boolean;
-	thinkingLevel: string;
-}
-
-export interface ModelProviderDto {
-	id: string;
-	name: string;
-	type: string;
-	baseUrl: string;
-	bailianMultiModalEmbeddingBaseUrl?: string;
-	apiKeyCensored: string;
-	isPreset: boolean;
-}
-
-export interface CreateModelProviderDto {
-	name: string;
-	type: string;
-	baseUrl: string;
-	bailianMultiModalEmbeddingBaseUrl?: string;
-	apiKey: string;
-}
-
-export interface UpdateModelProviderDto {
-	name?: string;
-	type?: string;
-	baseUrl?: string;
-	bailianMultiModalEmbeddingBaseUrl?: string;
-	apiKey?: string;
-}
-
-export interface ModelDto {
-	id: string;
-	provider?: ModelProviderDto;
-	name: string;
-	code: string;
-	defaultModel: boolean;
-	embeddingModel: boolean;
-	contextCompressionModel: boolean;
-	multiModal: boolean;
-	light: boolean;
-	thinking: boolean;
-	thinkingLevels: string[];
-	anthropicAdaptiveThinking: boolean;
-	isPreset: boolean;
-	contextWindow: number;
-}
-
-export interface CreateModelDto {
-	providerId: string;
-	name: string;
-	code: string;
-	embeddingModel?: boolean;
-	contextCompressionModel?: boolean;
-	multiModal?: boolean;
-	light?: boolean;
-	thinking?: boolean;
-	thinkingLevels?: string[];
-	anthropicAdaptiveThinking?: boolean;
-}
-
-export interface UpdateModelDto {
-	name?: string;
-	defaultModel?: boolean;
-	embeddingModel?: boolean;
-	contextCompressionModel?: boolean;
-	multiModal?: boolean;
-	light?: boolean;
-	thinking?: boolean;
-	thinkingLevels?: string[];
-	anthropicAdaptiveThinking?: boolean;
+export interface ModelRef {
+    providerSlug: string;
+    modelSlug: string;
 }
 
 export interface AgentDto {
-	id: string;
-	name: string;
-	soul: string;
-	isDefault: boolean;
-	models?: ModelDto[];
+    slug: string;
+    name: string;
+    description?: string;
+    soul: string;
+    defaultModel?: ModelRef;
+    defaultContextWindow: number;
+    defaultReasoningEffort?: ReasoningEffort;
+    isDefault: boolean;
+    metadata?: Record<string, unknown>;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export interface CreateAgentDto {
-	name: string;
-	soul?: string;
-	isDefault: boolean;
-	modelIds?: string[];
+    slug: string;
+    name: string;
+    description?: string;
+    soul?: string;
+    defaultModel?: ModelRef;
+    defaultContextWindow?: number;
+    defaultReasoningEffort?: ReasoningEffort;
+    isDefault?: boolean;
+    metadata?: Record<string, unknown>;
 }
 
-export interface UpdateAgentDto {
-	name?: string;
-	soul?: string;
-	isDefault?: boolean;
-	modelIds?: string[];
+export type UpdateAgentDto = Partial<Omit<CreateAgentDto, "slug">>;
+
+export interface ModelDto {
+    slug: string;
+    providerSlug: string;
+    providerName: string;
+    name: string;
+    contextWindow: number;
+    maxOutputTokens: number;
+    multiModal: boolean;
+    light: boolean;
+    reasoningEffortMapping?: Record<string, ReasoningEffort>;
+    isDefault: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface CoreModelDto extends Omit<ModelDto, "providerSlug" | "providerName"> {}
+
+export interface CreateModelDto {
+    providerSlug: string;
+    modelSlug: string;
+    name: string;
+    contextWindow?: number;
+    maxOutputTokens: number;
+    multiModal?: boolean;
+    light?: boolean;
+    reasoningEffortMapping?: Record<string, ReasoningEffort>;
+    isDefault?: boolean;
+}
+
+export type UpdateModelDto = Omit<CreateModelDto, "providerSlug" | "modelSlug">;
+
+export interface ModelProviderDto {
+    slug: string;
+    name: string;
+    type: APIType;
+    baseUrl: string;
+    apiKey: string;
+    models: CoreModelDto[];
+    metadata?: Record<string, unknown>;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface CreateModelProviderDto {
+    slug: string;
+    name: string;
+    type: APIType;
+    baseUrl?: string;
+    apiKey?: string;
+    metadata?: Record<string, unknown>;
+}
+
+export type UpdateModelProviderDto = Partial<Omit<CreateModelProviderDto, "slug">>;
+
+export type ContentBlock =
+    | { type: "text"; text: string }
+    | { type: "reasoning"; text: string; signature?: string; redacted?: boolean }
+    | { type: "tool_use"; id: string; name: string; input: unknown }
+    | { type: "tool_result"; toolUseId: string; content: ContentBlock[]; isError: boolean }
+    | { type: "image"; mediaType: string; data: string };
+
+export type MessageRole = "user" | "assistant" | "system";
+
+export interface TokenUsage {
+    input: number;
+    output: number;
+    total: number;
 }
 
 export interface ChatMessageDto {
-	id: string;
-	roundId: string;
-	agentId: string;
-	role: MessageRole;
-	content: string;
-	toolCalls?: ToolCall[];
-	toolResult?: ToolResult;
-	model?: ModelDto;
-	reasoningContent?: string;
-	reasoningDurationMillis?: number;
-	createdAt: string;
+    id: string;
+    roundId: string;
+    role: MessageRole;
+    content: ContentBlock[];
+    model?: ModelRef;
+    usage?: TokenUsage;
+    createdAt: string;
+}
+
+export type RoundStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface RoundDto {
+    id: string;
+    sessionId: string;
+    sequence: number;
+    status: RoundStatus;
+    model: ModelRef;
+    contextWindow: number;
+    reasoningEffort?: ReasoningEffort;
+    cwd?: string;
+    messages: ChatMessageDto[];
+    usage: TokenUsage;
+    error?: string;
+    startedAt: string;
+    endedAt?: string;
 }
 
 export interface ChatSessionDto {
-	id: string;
-	agentId: string;
-	tokenConsumed: number;
-	contextTokens: number;
-	messages: ChatMessageDto[];
-	lastUsedModel: string;
-	lastUsedThinkingLevel?: string;
-	cwd?: string;
-	createdAt: string;
-	updatedAt: string;
+    id: string;
+    agentSlug: string;
+    title?: string;
+    cwd?: string;
+    currentModel?: ModelRef;
+    contextWindow: number;
+    currentReasoningEffort?: ReasoningEffort;
+    rounds: RoundDto[];
+    createdAt: string;
+    updatedAt: string;
 }
 
-export interface VersionDto {
-	version: string;
+export interface SessionSummaryDto {
+    id: string;
+    title: string;
+    agentSlug: string;
+    lastProviderSlug: string;
+    lastModelSlug: string;
+    contextWindow: number;
+    lastReasoningEffort?: ReasoningEffort;
+    createdAt: string;
+    updatedAt: string;
 }
 
-export interface SystemConfigDto {
-	initialized: boolean;
-	embeddingModelId?: string;
-	contextCompressionModelId?: string;
-	webSearchProvider: string;
-	configuredWebSearchProviders?: string[];
-	lastConfiguredWebSearchProvider?: string;
-	braveApiKey?: string;
-	tavilyApiKey?: string;
-	firecrawlApiKey?: string;
-	firecrawlBaseUrl?: string;
+export interface StreamEvent {
+    type: "text_delta" | "reasoning_delta" | "tool_use_start" | "tool_input_delta" | "tool_use_done" | "completed";
+    index?: number;
+    delta?: string;
+    toolUseId?: string;
+    toolName?: string;
+    toolInput?: unknown;
 }
 
-export interface UpdateSystemConfigDto {
-	initialized?: boolean;
-	embeddingModelId?: string;
-	contextCompressionModelId?: string;
-	webSearchProvider?: string;
-	braveApiKey?: string;
-	tavilyApiKey?: string;
-	firecrawlApiKey?: string;
-	firecrawlBaseUrl?: string;
+export interface SessionEvent {
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended";
+    sessionId: string;
+    roundId: string;
+    sequence: number;
+    iteration?: number;
+    stream?: StreamEvent;
+    message?: ChatMessageDto;
+    status?: RoundStatus;
+    usage?: TokenUsage;
+    error?: string;
 }
 
-export type MCPTransportType = "stdio" | "sse" | "streamable-http";
-
-export interface MCPServerDto {
-	id: string;
-	name: string;
-	transport: MCPTransportType;
-	enabled: boolean;
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	url?: string;
-	headers?: Record<string, string>;
-	status?: string;
-	tools?: string[];
-	error?: string;
-	createdAt: string;
-	updatedAt: string;
+export interface ExecutionStart {
+    sessionId: string;
+    roundId: string;
+    status: "running";
 }
 
-export interface CreateMCPServerDto {
-	name: string;
-	transport: MCPTransportType;
-	enabled?: boolean;
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	url?: string;
-	headers?: Record<string, string>;
-}
-
-export interface UpdateMCPServerDto {
-	name?: string;
-	transport?: MCPTransportType;
-	enabled?: boolean;
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	url?: string;
-	headers?: Record<string, string>;
-}
-
-export interface SkillDto {
-	id: string;
-	name: string;
-	description: string;
-	skillMdPath: string;
-	scope?: "global" | "project";
-	sourceDir?: string;
-	createdAt: string;
-	updatedAt: string;
-}
-
-export interface SkillContentResult {
-	content: string;
-}
-
-export interface GenericResponse<T> {
-	code: number;
-	message: string;
-	data?: T;
+export interface InitializeCompleteInput {
+    agentSlug: string;
+    providerSlug: string;
+    modelSlug: string;
 }
 
 export interface PagedResponse<T> {
-	total: number;
-	pageSize: number;
-	page: number;
-	data: T[];
+    total: number;
+    pageSize: number;
+    page: number;
+    data: T[];
+}
+
+export interface ToolResult {
+    callId: string;
+    name: string;
+    content: string;
+    isError: boolean;
 }

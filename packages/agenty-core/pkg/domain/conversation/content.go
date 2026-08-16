@@ -24,6 +24,17 @@ type ContentBlock interface {
 
 type Content []ContentBlock
 
+// MarshalJSON keeps the public content contract stable for empty messages and
+// nested tool results. JSON arrays must not regress to null when the in-memory
+// slice is nil.
+func (c Content) MarshalJSON() ([]byte, error) {
+	if c == nil {
+		return []byte("[]"), nil
+	}
+	type contentAlias Content
+	return json.Marshal(contentAlias(c))
+}
+
 type TextBlock struct {
 	Text string `json:"text"`
 }
@@ -115,7 +126,7 @@ func (b ImageBlock) MarshalJSON() ([]byte, error) {
 
 func (c *Content) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
-		*c = nil
+		*c = make(Content, 0)
 		return nil
 	}
 

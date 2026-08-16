@@ -175,10 +175,10 @@ mod tests {
         let lines = render_lines(&entries, 0, true);
         assert_eq!(lines[0], "  starting agenty 1.2.3...");
         assert_eq!(lines[1], "⠋ checking local binary integrity...");
-        assert_eq!(lines[2], "  \x1b[2mchecking cli binary integrity\x1b[0m");
+        assert_eq!(lines[2], "    \x1b[2mchecking cli binary integrity\x1b[0m");
         assert_eq!(
             lines[3],
-            "  \x1b[2mcli integrity check passed, skipping extraction.\x1b[0m"
+            "    \x1b[2mcli integrity check passed, skipping extraction.\x1b[0m"
         );
     }
 

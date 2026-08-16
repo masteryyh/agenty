@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/agentloop/builtin"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
@@ -59,18 +60,28 @@ func run() (exitCode int) {
 	}()
 
 	slog.InfoContext(ctx, "agenty-core started", "dataDir", config.Get().Paths().DataDir)
+	toolRegistry := agentloop.NewRegistry()
+	if err := builtin.RegisterAll(toolRegistry); err != nil {
+		slog.ErrorContext(ctx, "failed to register built-in tools", "error", err)
+		return 1
+	}
 
+	disp := rpc.NewDispatcher()
+	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
 		Agents:   repos.Agent,
 		Catalog:  repos.Catalog,
-		Tools:    agentloop.NewRegistry(),
+		Tools:    toolRegistry,
 		NewCaller: func(
 			callerCtx context.Context,
 			provider catalog.Provider,
 			model catalog.Model,
 		) (agentloop.Caller, error) {
 			return llm.NewCaller(callerCtx, provider, model)
+		},
+		Events: func(eventCtx context.Context, event agentloop.SessionEvent) error {
+			return srv.Notify(eventCtx, "session.event", event)
 		},
 	})
 	if err != nil {
@@ -90,10 +101,13 @@ func run() (exitCode int) {
 		repos.Conversation,
 		application.WithSessionExecutionState(execution),
 	)
-	disp := rpc.NewDispatcher()
+	agentService := application.NewAgentService(repos.Agent)
+	providerService := application.NewProviderService(repos.Catalog)
+	initializeService := application.NewInitializeService(agentService, providerService, config.Get())
 	adapter.RegisterAll(disp,
-		application.NewAgentService(repos.Agent),
-		application.NewProviderService(repos.Catalog),
+		agentService,
+		providerService,
+		initializeService,
 		sessionService,
 		execution,
 	)
@@ -102,7 +116,6 @@ func run() (exitCode int) {
 	rpc.RegisterChunkHandlers(disp, asm)
 	asm.StartCleanup(ctx)
 
-	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
 	if err := srv.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		slog.ErrorContext(ctx, "server stopped with an error", "error", err)
 		return 1

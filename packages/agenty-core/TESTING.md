@@ -9,10 +9,11 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | --- | --- | --- | --- |
 | Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and reasoning effort mapping validation | Yes |
 | Application | In-memory repository fakes | Agent, Provider, and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
+| Built-in tools | `t.TempDir()` and real filesystem operations | Registration, relative path resolution, ranged reads, create/overwrite, exact patching, safe single-file deletion, regular-expression search, recursive globbing, directory listing, output limits, and error paths | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
 | Complete wiring | Isolated filesystem and SQLite state | Repository initialization and RPC-to-application-to-storage flows, including asynchronous session start/stop | With `integration` |
-| Executable E2E | Real `cmd` subprocesses with isolated data directories and local HTTP stubs | stdio JSON-RPC business workflows, agent-loop completion/cancellation, parallel sessions, upstream request conversion, startup failure, chunk registration, restart persistence, and process isolation | With `e2e` |
+| Executable E2E | Real `cmd` subprocesses, isolated data directories, a typed IPC client, local provider fixtures, and optional live upstreams | Complete client journeys, all 28 public RPC methods, ordered session event notifications, four provider protocols, built-in tool definitions, multi-turn conversations, completion/failure/cancellation, same-channel concurrency, shutdown during execution, restart persistence, and stdio boundaries | With `e2e` |
 
 The `integration` build tag currently enables:
 
@@ -22,8 +23,10 @@ The `integration` build tag currently enables:
   chunked input.
 
 The `e2e` build tag enables `test/e2e`. `TestMain` builds the core binary once; every
-test starts its own process with a unique `AGENTY_DATA_DIR`. The test-side client uses
-only the public NDJSON protocol and does not import core implementation packages.
+test starts its own process with a unique `AGENTY_DATA_DIR`. The typed test client uses
+only the public NDJSON protocol, supports concurrent request-ID routing, notifications,
+batches, and chunks, and does not import core implementation packages.
+`blackbox_test.go` continuously enforces this dependency boundary.
 
 The suite intentionally skips pure DTOs, trivial struct construction, thin getters,
 and constructors that only assign fields. This includes `Agent.New`, `NewID`,
@@ -43,11 +46,16 @@ paths are also outside the unit-test scope.
   environment variables so the child is driven by its config file (seeded with
   info/text defaults). They do not mutate the test runner's environment, so
   independent workflows use `t.Parallel()` safely and write logs only inside
-  their isolated data directory. Tests that exercise env overrides set those
-  variables explicitly on the child.
-- Agent-loop E2E tests use local `httptest` HTTP servers as provider endpoints. Their
-  environment must allow loopback port binding; a sandbox that rejects `listen` must
-  rerun those tests in an allowed environment.
+  their isolated data directory.
+- Agent-loop E2E tests use local `httptest` servers to emulate OpenAI Responses,
+  OpenAI Chat Completions, Anthropic Messages, and Google GenAI. Their environment
+  must allow loopback port binding; a sandbox that rejects `listen` must rerun the
+  same command in an allowed environment.
+- `TestLiveProviderConversationsThroughIPC` uses the same typed client and a real core
+  subprocess for optional live conversations. Each provider checks its API key
+  independently. A missing or whitespace-only key skips only that subtest; configured
+  providers still run. An invalid configured key fails normally instead of being
+  treated as absent.
 - Chunk expiration tests use `testing/synctest` instead of real-time waits.
 
 Run Go commands from `packages/agenty-core/`. The module's pnpm commands can be run
@@ -78,16 +86,17 @@ go test -race -count=1 ./...
 go test -shuffle=on -count=10 ./...
 ```
 
-The live LLM integration cases use the following environment variables:
+The live LLM integration and optional live E2E cases use these environment variables:
 
 - `OPENAI_API_KEY`, optionally `OPENAI_BASE_URL`, `OPENAI_RESPONSES_MODEL`, and
   `OPENAI_CHAT_MODEL`.
 - `ANTHROPIC_API_KEY`, optionally `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL`.
 - `GEMINI_API_KEY`, optionally `GEMINI_BASE_URL` and `GEMINI_MODEL`.
 
-Each provider subtest calls both `Invoke` and `Stream`. A missing API key produces a
-visible `t.Skip` message and does not fail the integration suite. Request/response
-conversion tests remain in the default offline suite and never require credentials.
+Each integration provider subtest calls both `Invoke` and `Stream`; live E2E runs one
+real non-streaming conversation through stdio IPC. Both skip with a visible `t.Skip`
+message when the corresponding API key is missing. Request/response conversion tests
+and local-provider-fixture E2E remain offline and never require credentials.
 
 Run a package or one test while developing:
 
@@ -124,16 +133,28 @@ The default suite snapshot verified on 2026-07-22 has 70.1% statement coverage.
 untested construction and wiring code lowers the module total.
 
 Storage/RPC integration tests and all E2E tests use local files and SQLite. Optional
-LLM integration cases are the only tests that access external services, and only when
-their provider API key is present. E2E cases focus on observable process contracts.
-Exhaustive parser permutations, the physical 64 MiB line limit, and chunk assembler
-validation remain in the faster RPC tests instead of being duplicated with large
-subprocess payloads.
+LLM integration and `TestLiveProviderConversationsThroughIPC` access external services
+only when their corresponding provider API key is present; all other E2E scenarios use
+local provider fixtures. E2E cases focus on observable process contracts. Exhaustive
+parser permutations, the physical 64 MiB line limit, and chunk assembler validation
+remain in the faster RPC tests instead of being duplicated with large subprocess
+payloads.
 
-The execution E2E cases use a local OpenAI Chat Completions-compatible stub, not an
-external provider. They verify the 65,536 default output-token clamp, complete message
-and usage persistence, concurrent sessions, duplicate-start rejection, stop-driven
-terminal cancellation, and the public IPC result shapes.
+The E2E system treats core as a black box composed of stdin, stdout, stderr, exit
+status, and public provider HTTP requests. A complete typed-client journey creates
+and updates Agents, Providers/Models, and Sessions, continues a multi-turn conversation
+across a process restart, and queries persisted behavior through IPC without asserting
+SQLite, JSONL, or repository layout. Provider fixtures cover OpenAI Responses, OpenAI
+Chat Completions, Anthropic Messages, and Google GenAI. The scenarios verify the
+65,536 output-token clamp, upstream failure, concurrent sessions over one IPC client,
+duplicate-start and running-delete rejection, stop-driven cancellation, and recovery
+after the process exits during execution.
+
+The journey exercises all 28 current public methods: 2 Initialize, 5 Agent, 7 Provider,
+10 Session, and 4 Chunk methods. Session events, batches, exact request IDs, malformed-JSON
+recovery, a final line without a newline, stdin EOF, and startup failure remain
+process-level protocol scenarios. Exhaustive parser and invalid-chunk permutations
+remain in the lower-level RPC suite.
 
 Two implementation boundaries affect the tests:
 

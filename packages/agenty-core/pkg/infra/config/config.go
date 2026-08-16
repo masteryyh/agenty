@@ -123,6 +123,7 @@ func validateConfigFile(file, format string) error {
 func writeDefaultConfig(file string) error {
 	v := viper.New()
 	v.Set("version", 1)
+	v.Set("initialized", false)
 	v.Set("logging.level", "info")
 	v.Set("logging.format", "text")
 

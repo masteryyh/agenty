@@ -3,7 +3,7 @@ name = "agenty-bootstrap"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Self-extracting launcher for agenty: verifies, extracts and starts the bundled CLI and runtime"
+description = "Self-extracting launcher for agenty: verifies, extracts and starts the bundled CLI and core"
 
 [dependencies]
 liblzma = { version = "0.4", default-features = false, features = ["static"] }

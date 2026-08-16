@@ -6,6 +6,9 @@ type Config struct {
 	// Version is the schema version of this config file. Reserved for future use.
 	Version int `mapstructure:"version"`
 
+	// Initialized reports whether the first-run setup has been completed.
+	Initialized bool `mapstructure:"initialized"`
+
 	// Logging configures the slog file logger. Empty fields fall back to the
 	// logger defaults (info level, text format).
 	Logging LoggingConfig `mapstructure:"logging"`

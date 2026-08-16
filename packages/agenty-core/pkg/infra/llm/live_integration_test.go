@@ -21,7 +21,7 @@ func TestLiveProviders(t *testing.T) {
 		keyEnv       string
 		baseURLEnv   string
 		modelEnv     string
-		defaultModel shared.Slug
+		defaultModel shared.ModelID
 	}{
 		{
 			name: "OpenAI Responses", apiType: catalog.APIOpenAI, providerSlug: "openai",
@@ -53,7 +53,7 @@ func TestLiveProviders(t *testing.T) {
 
 			modelSlug := tt.defaultModel
 			if configured := os.Getenv(tt.modelEnv); configured != "" {
-				modelSlug = shared.Slug(configured)
+				modelSlug = shared.ModelID(configured)
 			}
 			provider := catalog.Provider{
 				Slug: tt.providerSlug, Type: tt.apiType,

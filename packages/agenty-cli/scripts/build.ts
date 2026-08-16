@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { resolveArch, resolveBunTarget, resolveOpenTUILibc, resolveOS } from "./target";
 
@@ -16,23 +16,23 @@ mkdirSync(DIST, { recursive: true });
 const outfile = join(DIST, `agenty-cli-${os}-${arch}${os === "windows" ? ".exe" : ""}`);
 
 const result = await Bun.build({
-	entrypoints: [join(PKG, "src/index.tsx")],
-	compile: { outfile, target: bunTarget },
-	target: "bun",
-	define: {
-		"process.env.AGENTY_VERSION": JSON.stringify(version),
-		...(opentuiLibc
-			? { "process.env.OPENTUI_LIBC": JSON.stringify(opentuiLibc) }
-			: {}),
-	},
+    entrypoints: [join(PKG, "src/index.tsx")],
+    compile: { outfile, target: bunTarget },
+    target: "bun",
+    define: {
+        "process.env.AGENTY_VERSION": JSON.stringify(version),
+        ...(opentuiLibc
+            ? { "process.env.OPENTUI_LIBC": JSON.stringify(opentuiLibc) }
+            : {}),
+    },
 });
 if (!result.success) {
-	for (const log of result.logs) {
-		console.error(log.message);
-	}
-	process.exit(1);
+    for (const log of result.logs) {
+        console.error(log.message);
+    }
+    process.exit(1);
 }
 
 console.log(
-	`agenty-cli single executable built -> ${outfile} (${bunTarget}${opentuiLibc ? `, ${opentuiLibc}` : ""})`,
+    `agenty-cli single executable built -> ${outfile} (${bunTarget}${opentuiLibc ? `, ${opentuiLibc}` : ""})`,
 );

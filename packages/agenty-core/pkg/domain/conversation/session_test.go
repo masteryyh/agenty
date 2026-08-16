@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -8,6 +9,42 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
+
+func TestSessionEmptyRoundsEncodeAsArray(t *testing.T) {
+	t.Parallel()
+
+	session := StartSession(
+		"coder",
+		shared.NewModelRef("anthropic", "claude-opus-4"),
+		200_000,
+		shared.ReasoningOff,
+		nil,
+	)
+
+	encoded, err := json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(payload["rounds"]); got != "[]" {
+		t.Errorf("rounds = %s, want []", got)
+	}
+
+	replayed := ReplaySession(session.PendingEvents())
+	replayedEncoded, err := json.Marshal(replayed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(replayedEncoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(payload["rounds"]); got != "[]" {
+		t.Errorf("replayed rounds = %s, want []", got)
+	}
+}
 
 func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	t.Parallel()

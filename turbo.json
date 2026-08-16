@@ -1,32 +1,34 @@
 {
-  "$schema": "https://v2-10-8.turborepo.dev/schema.json",
-  "tasks": {
-    "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["bin/**", "dist/**"],
-      "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"]
-    },
-    "agenty-cli#build": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["AGENTY_VERSION", "OS", "ARCH", "OPENTUI_LIBC"]
-    },
-    "agenty-bootstrap#build": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["AGENTY_VERSION", "OS", "ARCH"],
-      "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-      "outputs": ["dist/**"]
-    },
-    "agenty-bootstrap#test": {
-      "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
-    },
-    "test": {
-      "dependsOn": ["^build"]
-    },
-    "clean": {
-      "cache": false
-    },
-    "typecheck": {}
-  }
+    "$schema": "https://v2-10-10.turborepo.dev/schema.json",
+    "tasks": {
+        "build": {
+            "dependsOn": ["^build"],
+            "outputs": ["bin/**", "dist/**"],
+            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "GOCACHE", "PACKAGE_DIR", "BIN_NAME"]
+        },
+        "agenty-cli#build": {
+            "dependsOn": ["^build"],
+            "cache": false,
+            "env": ["AGENTY_VERSION", "OS", "ARCH", "OPENTUI_LIBC"]
+        },
+        "agenty-bootstrap#build": {
+            "dependsOn": ["^build"],
+            "cache": false,
+            "env": ["AGENTY_VERSION", "OS", "ARCH"],
+            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
+            "outputs": ["dist/**"]
+        },
+        "agenty-bootstrap#test": {
+            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+        },
+        "test": {
+            "dependsOn": ["^build"],
+            "env": ["GOCACHE"]
+        },
+        "lint": {},
+        "clean": {
+            "cache": false
+        },
+        "typecheck": {}
+    }
 }

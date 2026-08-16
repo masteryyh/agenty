@@ -178,7 +178,7 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 		}
 	}
 	if modelStr != "" {
-		if sum.LastModelSlug, err = shared.NewSlug(modelStr); err != nil {
+		if sum.LastModelSlug, err = shared.NewModelID(modelStr); err != nil {
 			return conversation.SessionSummary{}, err
 		}
 	}
@@ -219,7 +219,7 @@ func (r *ConversationRepository) listSessions(ctx context.Context, query convers
 	}
 	defer rows.Close()
 
-	var results []conversation.SessionSummary
+	results := make([]conversation.SessionSummary, 0)
 	for rows.Next() {
 		var sum conversation.SessionSummary
 		var idStr, agentStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
@@ -240,7 +240,7 @@ func (r *ConversationRepository) listSessions(ctx context.Context, query convers
 			}
 		}
 		if modelStr != "" {
-			if sum.LastModelSlug, err = shared.NewSlug(modelStr); err != nil {
+			if sum.LastModelSlug, err = shared.NewModelID(modelStr); err != nil {
 				return nil, err
 			}
 		}

@@ -2,8 +2,8 @@
 
 [English](README.md) | [简体中文](README-CN.md)
 
-Agenty 的下一代核心运行时，正在从零构建以替代 `agenty-runtime`。它围绕本地优先的
-存储模型（文件系统 + SQLite）和领域驱动设计（DDD）领域层进行设计。
+Agenty 的核心运行时。它围绕本地优先的存储模型（文件系统 + SQLite）和领域驱动设计
+（DDD）领域层进行设计。
 
 ## 存储模型
 
@@ -77,8 +77,9 @@ session 的 `Engine`。不同 session 可以并行执行，同一 session 只允
 每个 model 自行保存 `maxOutputTokens`，单次调用默认使用
 `min(65536, model.maxOutputTokens)`。当前单个 round 最多执行 20 次 LLM/tool 迭代。
 共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
-调用顺序返回。生产装配目前不注册任何工具；未来内置工具归入
-`pkg/agentloop/builtin/`，由 `cmd/main.go` 显式注册。
+调用顺序返回。`pkg/agentloop/builtin/` 提供生产环境文件系统工具 `read_file`、
+`write_file`、`patch_file`、`delete_file`、`grep`、`glob` 和 `ls`，由 `cmd/main.go`
+显式注册。相对路径基于该 round 捕获的 session 工作目录解析，绝对路径保持有效。
 
 ## 基础设施层
 
@@ -115,6 +116,7 @@ aggregate 一致（load -> mutate -> save -> clear pending events）。
 - `AgentService`：agent CRUD（`Create`/`Get`/`List`/`Update`/`Delete`）。
 - `ProviderService`：provider CRUD 以及 model 子资源操作
   （`AddModel`/`RemoveModel`）。
+- `InitializeService`：首次运行状态和完成校验；provider/model/agent 数据通过各自的正式服务写入。
 - `SessionService`：session CRUD 和配置修改
   （`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`）。
 
@@ -162,16 +164,24 @@ Methods 使用 `resource.action` 命名：
 
 | 分组 | Methods |
 | --- | --- |
+| Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
-`running` 状态，完整 agent turn 由引擎异步继续执行。`session.stop` 接收 `{id}` 并请求
-取消；client 通过 `session.get`
-观察最终的 `completed`、`failed` 或 `cancelled` round。同一 session 重复启动，或在运行
-期间删除该 session，会返回 `already exists`；不同 sessions 可以并行运行。
+`running` 状态，完整 agent turn 由引擎异步继续执行。执行期间，core 会写出
+`session.event` JSON-RPC notifications，事件类型包括 `round_started`、
+`message_appended`、`model_stream` 和 `round_ended`。每个事件都携带 `sessionId`、
+`roundId` 和 round 内单调递增的 `sequence`；模型事件还包含 provider-neutral stream
+event 和 agent loop 的 `iteration`。由于 round 与 request response 并发，notification
+可能早于 `session.start` response 写出，因此 client 必须先订阅再发起请求，并把
+notification 与 response 分开路由。`round_ended` 携带 `completed`、`failed` 或
+`cancelled` 终态、token usage 和可选 error。
+
+`session.stop` 接收 `{id}` 并请求取消。同一 session 重复启动，或在运行期间删除该
+session，会返回 `already exists`；不同 sessions 可以并行运行。
 
 ### 分块上传
 
@@ -250,4 +260,4 @@ process isolation contracts，不会访问用户的数据目录。
 基础设施层还提供
 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google GenAI 的统一
 非流式/流式 SDK 调用器。执行引擎当前使用非流式 caller；尚未实现 streaming agent turn
-传输、内置工具、基于该 core 的 HTTP API 和 CLI 集成。
+传输、命令和 todo 工具、基于该 core 的 HTTP API 和 CLI 集成。

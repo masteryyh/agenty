@@ -70,6 +70,12 @@ type response struct {
 	Error   *Error          `json:"error,omitempty"`
 }
 
+type notification struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
 func (r request) isNotification() bool {
 	return len(r.ID) == 0
 }

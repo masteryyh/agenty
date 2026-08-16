@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -348,6 +349,59 @@ func TestInitializeDataDirWritesLoggingDefaults(t *testing.T) {
 	}
 	if cfg.Logging.Format != "text" {
 		t.Errorf("default format = %q, want text", cfg.Logging.Format)
+	}
+	if cfg.Initialized {
+		t.Error("default initialized = true, want false")
+	}
+}
+
+func TestManagerSetInitializedPersistsExistingFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		content string
+	}{
+		{name: "json", file: "config.json", content: `{"version":1,"custom":"preserved"}`},
+		{name: "yaml", file: "config.yaml", content: "version: 1\ncustom: preserved\n"},
+		{name: "toml", file: "config.toml", content: "version = 1\ncustom = 'preserved'\n"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			t.Setenv(EnvDataDir, dataDir)
+			if err := os.WriteFile(filepath.Join(dataDir, test.file), []byte(test.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, paths, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			manager := &Manager{cfg: cfg, paths: paths}
+			if err := manager.SetInitialized(true); err != nil {
+				t.Fatalf("SetInitialized: %v", err)
+			}
+			if !manager.Initialized() {
+				t.Error("Initialized = false, want true")
+			}
+
+			reloaded, _, err := Load()
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if !reloaded.Initialized {
+				t.Error("persisted initialized = false, want true")
+			}
+
+			data, err := os.ReadFile(paths.ConfigFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), "custom") {
+				t.Fatalf("custom config was not preserved: %s", data)
+			}
+		})
 	}
 }
 

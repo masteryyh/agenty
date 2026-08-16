@@ -7,12 +7,11 @@ import (
 )
 
 type Model struct {
-	Slug                   shared.Slug                       `json:"slug"`
+	Slug                   shared.ModelID                    `json:"slug"`
 	Name                   string                            `json:"name"`
 	ContextWindow          int                               `json:"contextWindow"`
 	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
 	MultiModal             bool                              `json:"multiModal"`
-	Embedding              bool                              `json:"embedding"`
 	Light                  bool                              `json:"light"`
 	ReasoningEffortMapping map[string]shared.ReasoningEffort `json:"reasoningEffortMapping,omitempty"`
 	IsDefault              bool                              `json:"isDefault"`

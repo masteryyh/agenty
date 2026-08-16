@@ -1,5 +1,7 @@
 packages:
-  - "packages/*"
+  - "packages/agenty-core"
+  - "packages/agenty-cli"
+  - "packages/agenty-bootstrap"
 
 peerDependencyRules:
   allowedVersions:

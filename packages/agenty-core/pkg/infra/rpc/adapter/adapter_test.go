@@ -62,15 +62,32 @@ func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatc
 		convRepo,
 		application.WithSessionExecutionState(execution),
 	)
+	agentService := application.NewAgentService(agentRepo)
+	providerService := application.NewProviderService(catalogRepo)
+	initialization := &initializationState{}
 	d := rpc.NewDispatcher()
 	adapter.RegisterAll(
 		d,
-		application.NewAgentService(agentRepo),
-		application.NewProviderService(catalogRepo),
+		agentService,
+		providerService,
+		application.NewInitializeService(agentService, providerService, initialization),
 		sessionService,
 		execution,
 	)
 	return d
+}
+
+type initializationState struct {
+	initialized bool
+}
+
+func (s *initializationState) Initialized() bool {
+	return s.initialized
+}
+
+func (s *initializationState) SetInitialized(initialized bool) error {
+	s.initialized = initialized
+	return nil
 }
 
 type adapterTestCaller struct{}
@@ -167,6 +184,30 @@ func TestAdapterAgentCreateAndGet(t *testing.T) {
 	}
 }
 
+func TestAdapterEmptyCollectionsUseArrays(t *testing.T) {
+	d := newDispatcher(t)
+
+	for _, tt := range []struct {
+		name   string
+		method string
+		id     int
+	}{
+		{name: "agents", method: "agent.list", id: 1},
+		{name: "providers", method: "provider.list", id: 2},
+		{name: "sessions", method: "session.list", id: 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			response := call(t, d, request(tt.id, tt.method, map[string]any{}))
+			if errCode(response) != 0 {
+				t.Fatalf("%s error: %+v", tt.method, response["error"])
+			}
+			if _, ok := response["result"].([]any); !ok {
+				t.Errorf("%s result = %T, want array", tt.method, response["result"])
+			}
+		})
+	}
+}
+
 func TestAdapterAgentNotFound(t *testing.T) {
 	d := newDispatcher(t)
 	resp := call(t, d, request(1, "agent.get", map[string]any{"slug": "missing"}))
@@ -219,6 +260,49 @@ func TestAdapterProviderAddModel(t *testing.T) {
 	}
 }
 
+func TestAdapterInitializeJourney(t *testing.T) {
+	d := newDispatcher(t)
+
+	already := call(t, d, request(1, "initialize.already", struct{}{}))
+	if errCode(already) != 0 {
+		t.Fatalf("already error: %+v", already["error"])
+	}
+	if already["result"].(map[string]any)["initialized"] != false {
+		t.Fatalf("already result = %+v", already["result"])
+	}
+
+	for id, step := range []struct {
+		method string
+		params map[string]any
+	}{
+		{method: "provider.create", params: map[string]any{
+			"slug": "openai", "name": "OpenAI", "type": "openai", "apiKey": "test",
+		}},
+		{method: "provider.addModel", params: map[string]any{
+			"providerSlug": "openai", "modelSlug": "gpt-test", "name": "GPT Test",
+			"contextWindow": 128000, "maxOutputTokens": 16384, "isDefault": true,
+		}},
+		{method: "agent.create", params: map[string]any{
+			"slug": "default", "name": "Default", "soul": "Be helpful.", "isDefault": true,
+			"defaultContextWindow": 128000,
+			"defaultModel":         map[string]any{"providerSlug": "openai", "modelSlug": "gpt-test"},
+		}},
+		{method: "initialize.complete", params: map[string]any{
+			"agentSlug": "default", "providerSlug": "openai", "modelSlug": "gpt-test",
+		}},
+	} {
+		resp := call(t, d, request(id+2, step.method, step.params))
+		if errCode(resp) != 0 {
+			t.Fatalf("%s error: %+v", step.method, resp["error"])
+		}
+	}
+
+	already = call(t, d, request(10, "initialize.already", struct{}{}))
+	if already["result"].(map[string]any)["initialized"] != true {
+		t.Fatalf("already result after completion = %+v", already["result"])
+	}
+}
+
 func TestAdapterSessionCreateAndGet(t *testing.T) {
 	d := newDispatcher(t)
 
@@ -233,6 +317,9 @@ func TestAdapterSessionCreateAndGet(t *testing.T) {
 	}
 	result := create["result"].(map[string]any)
 	id := result["id"].(string)
+	if rounds, ok := result["rounds"].([]any); !ok || len(rounds) != 0 {
+		t.Errorf("created rounds = %v, want an empty array", result["rounds"])
+	}
 
 	got := call(t, d, request(2, "session.get", map[string]any{"id": id}))
 	if errCode(got) != 0 {
@@ -241,6 +328,9 @@ func TestAdapterSessionCreateAndGet(t *testing.T) {
 	gotResult := got["result"].(map[string]any)
 	if gotResult["id"] != id {
 		t.Errorf("id = %v, want %s", gotResult["id"], id)
+	}
+	if rounds, ok := gotResult["rounds"].([]any); !ok || len(rounds) != 0 {
+		t.Errorf("loaded rounds = %v, want an empty array", gotResult["rounds"])
 	}
 }
 

@@ -28,7 +28,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: packages/agenty-runtime/go.mod
+          go-version-file: packages/agenty-core/go.mod
           cache: true
 
       - name: Setup pnpm
@@ -53,7 +53,7 @@ jobs:
           queries: security-extended,security-and-quality
 
       - name: Build Go code for CodeQL
-        run: pnpm run runtime:build
+        run: pnpm run core:build
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@v4

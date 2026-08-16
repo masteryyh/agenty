@@ -25,7 +25,7 @@ pub struct PayloadSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Footer {
     pub cli: PayloadSpec,
-    pub runtime: PayloadSpec,
+    pub core: PayloadSpec,
 }
 
 impl Footer {
@@ -34,9 +34,9 @@ impl Footer {
         out[0..8].copy_from_slice(&self.cli.offset.to_le_bytes());
         out[8..16].copy_from_slice(&self.cli.len.to_le_bytes());
         out[16..48].copy_from_slice(&self.cli.sha3_256);
-        out[48..56].copy_from_slice(&self.runtime.offset.to_le_bytes());
-        out[56..64].copy_from_slice(&self.runtime.len.to_le_bytes());
-        out[64..96].copy_from_slice(&self.runtime.sha3_256);
+        out[48..56].copy_from_slice(&self.core.offset.to_le_bytes());
+        out[56..64].copy_from_slice(&self.core.len.to_le_bytes());
+        out[64..96].copy_from_slice(&self.core.sha3_256);
         out[96..100].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
         out[100..108].copy_from_slice(&MAGIC);
         out
@@ -65,8 +65,8 @@ impl Footer {
         };
         let mut cli_sha = [0u8; 32];
         cli_sha.copy_from_slice(&bytes[16..48]);
-        let mut runtime_sha = [0u8; 32];
-        runtime_sha.copy_from_slice(&bytes[64..96]);
+        let mut core_sha = [0u8; 32];
+        core_sha.copy_from_slice(&bytes[64..96]);
 
         Ok(Footer {
             cli: PayloadSpec {
@@ -74,10 +74,10 @@ impl Footer {
                 len: read_u64(8),
                 sha3_256: cli_sha,
             },
-            runtime: PayloadSpec {
+            core: PayloadSpec {
                 offset: read_u64(48),
                 len: read_u64(56),
-                sha3_256: runtime_sha,
+                sha3_256: core_sha,
             },
         })
     }
@@ -218,7 +218,7 @@ pub fn artifact_paths(home: &Path) -> (PathBuf, PathBuf) {
     let ext = if cfg!(windows) { ".exe" } else { "" };
     (
         dir.join(format!("cli{ext}")),
-        dir.join(format!("runtime{ext}")),
+        dir.join(format!("core{ext}")),
     )
 }
 
@@ -328,8 +328,8 @@ mod tests {
         for (i, b) in cli_sha.iter_mut().enumerate() {
             *b = i as u8;
         }
-        let mut runtime_sha = [0u8; 32];
-        for (i, b) in runtime_sha.iter_mut().enumerate() {
+        let mut core_sha = [0u8; 32];
+        for (i, b) in core_sha.iter_mut().enumerate() {
             *b = 0x20 + i as u8;
         }
         Footer {
@@ -338,10 +338,10 @@ mod tests {
                 len: 0x0102030405060708,
                 sha3_256: cli_sha,
             },
-            runtime: PayloadSpec {
+            core: PayloadSpec {
                 offset: 0x8877665544332211,
                 len: 0x0807060504030201,
-                sha3_256: runtime_sha,
+                sha3_256: core_sha,
             },
         }
     }
@@ -376,7 +376,7 @@ mod tests {
         };
         let footer = Footer {
             cli: spec.clone(),
-            runtime: spec.clone(),
+            core: spec.clone(),
         };
 
         let path = dir.join("packed");
@@ -558,18 +558,15 @@ mod tests {
 
         let footer = read_footer(&mut packed).unwrap();
         assert_eq!(footer.cli, spec);
-        assert_eq!(footer.runtime, spec);
+        assert_eq!(footer.core, spec);
     }
 
     #[test]
     fn artifact_paths_use_agenty_bin_dir() {
         let home = Path::new("/home/tester");
-        let (cli, runtime) = artifact_paths(home);
+        let (cli, core) = artifact_paths(home);
         let ext = if cfg!(windows) { ".exe" } else { "" };
         assert_eq!(cli, home.join(".agenty/bin").join(format!("cli{ext}")));
-        assert_eq!(
-            runtime,
-            home.join(".agenty/bin").join(format!("runtime{ext}"))
-        );
+        assert_eq!(core, home.join(".agenty/bin").join(format!("core{ext}")));
     }
 }

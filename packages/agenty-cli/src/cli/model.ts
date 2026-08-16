@@ -1,248 +1,116 @@
 import type { AgentyClient } from "@/api/client";
-import type { CreateModelDto, ModelDto, UpdateModelDto } from "@/api/types";
+import type { ReasoningEffort, UpdateModelDto } from "@/api/types";
+
 import {
-	action,
-	CliError,
-	configured,
-	displayModel,
-	flag,
-	hasFlag,
-	outputFields,
-	outputTable,
-	pageOptions,
-	parseBoolean,
-	render,
-	repeatedFlag,
-	requireFlag,
-	requirePositionals,
-	resolveModel,
-	resolveProvider,
-	type ParsedArgs,
+    action,
+    CliError,
+    displayModel,
+    flag,
+    hasFlag,
+    outputFields,
+    outputTable,
+    pageOptions,
+    parseBoolean,
+    type ParsedArgs,
+    render,
+    requireFlag,
+    requirePositionals,
+    resolveModel,
+    resolveProvider
 } from "./utils";
 
-const subcommandHandlers: Record<
-	string,
-	(client: AgentyClient, args: ParsedArgs) => Promise<void>
-> = {
-	list: handleListModel,
-	get: handleGetModel,
-	add: handleAddModel,
-	update: handleUpdateModel,
-	remove: handleRemoveModel,
-};
-
-interface ModelCapabilityUpdate {
-	embeddingModel?: boolean;
-	contextCompressionModel?: boolean;
-	multiModal?: boolean;
-	light?: boolean;
-	thinking?: boolean;
-	anthropicAdaptiveThinking?: boolean;
+export async function handleModel(client: AgentyClient, args: ParsedArgs): Promise<void> {
+    const command = args.positionals[1];
+    if (command === "list") {
+        requirePositionals(args, 2, "model list");
+        const { page, pageSize } = pageOptions(args);
+        const result = await client.listModelsPage(page, pageSize);
+        const data = result.data;
+        render(args, { ...result, data, total: data.length }, () => data.length === 0
+            ? process.stdout.write("No models.\n")
+            : outputTable(["Model", "Default", "Context", "Max output"], data.map((model) => [
+                displayModel(model), String(model.isDefault),
+                String(model.contextWindow), String(model.maxOutputTokens),
+            ])));
+        return;
+    }
+    if (command === "get") {
+        const [, , reference] = requirePositionals(args, 3, "model get <provider/model-or-name>");
+        const model = await resolveModel(client, reference);
+        render(args, model, () => outputFields([
+            ["Model", displayModel(model)], ["Name", model.name], ["Default", String(model.isDefault)],
+            ["Multimodal", String(model.multiModal)],
+            ["Light", String(model.light)], ["Context window", String(model.contextWindow)],
+            ["Max output tokens", String(model.maxOutputTokens)],
+        ]));
+        return;
+    }
+    if (command === "add") {
+        const [, , modelSlug] = requirePositionals(args, 3, "model add <slug> --provider <ref> --max-output-tokens <n> [options]");
+        const provider = await resolveProvider(client, requireFlag(args, "provider"));
+        const created = await client.createModel({
+            providerSlug: provider.slug,
+            modelSlug,
+            name: flag(args, "name")?.trim() || modelSlug,
+            contextWindow: positiveInteger(flag(args, "context-window") ?? "0", "--context-window", true),
+            maxOutputTokens: positiveInteger(requireFlag(args, "max-output-tokens"), "--max-output-tokens"),
+            multiModal: booleanFlag(args, "multi-modal"),
+            light: booleanFlag(args, "light"),
+            isDefault: booleanFlag(args, "default"),
+            reasoningEffortMapping: reasoningMapping(args),
+        });
+        action(args, created, `Model added: ${displayModel(created)}`);
+        return;
+    }
+    if (command === "update") {
+        const [, , reference] = requirePositionals(args, 3, "model update <provider/model-or-name> [options]");
+        const current = await resolveModel(client, reference);
+        const update: UpdateModelDto = {
+            name: hasFlag(args, "name") ? requireFlag(args, "name") : current.name,
+            contextWindow: hasFlag(args, "context-window") ? positiveInteger(requireFlag(args, "context-window"), "--context-window", true) : current.contextWindow,
+            maxOutputTokens: hasFlag(args, "max-output-tokens") ? positiveInteger(requireFlag(args, "max-output-tokens"), "--max-output-tokens") : current.maxOutputTokens,
+            multiModal: hasFlag(args, "multi-modal") ? booleanFlag(args, "multi-modal") : current.multiModal,
+            light: hasFlag(args, "light") ? booleanFlag(args, "light") : current.light,
+            isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,
+            reasoningEffortMapping: hasFlag(args, "reasoning-map") ? reasoningMapping(args) : current.reasoningEffortMapping,
+        };
+        const updated = await client.updateModel(current.providerSlug, current.slug, update);
+        action(args, updated, `Model updated: ${displayModel(updated)}`);
+        return;
+    }
+    if (command === "remove") {
+        const [, , reference] = requirePositionals(args, 3, "model remove <provider/model-or-name> --yes");
+        if (!hasFlag(args, "yes")) {
+            throw new CliError("use --yes to remove a model non-interactively");
+        }
+        const current = await resolveModel(client, reference);
+        await client.deleteModel(current.providerSlug, current.slug);
+        action(args, { providerSlug: current.providerSlug, modelSlug: current.slug, deleted: true }, `Model removed: ${displayModel(current)}`);
+        return;
+    }
+    throw new CliError("usage: model <list|get|add|update|remove>");
 }
 
-export async function handleModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	const subcommand = args.positionals[1];
-	const handler = subcommand ? subcommandHandlers[subcommand] : undefined;
-	if (!handler) {
-		throw new CliError("usage: model <list|get|add|update|remove>");
-	}
-	await handler(client, args);
+function booleanFlag(args: ParsedArgs, name: string): boolean {
+    return hasFlag(args, name) ? parseBoolean(flag(args, name), `--${name}`) : false;
 }
 
-async function handleListModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	requirePositionals(args, 2, "model list");
-	if (hasFlag(args, "chat-only") && hasFlag(args, "embedding-only")) {
-		throw new CliError(
-			"--chat-only and --embedding-only cannot be used together",
-		);
-	}
-	const { page, pageSize } = pageOptions(args);
-	const pageResult = await client.listModelsPage(page, pageSize);
-	const data = pageResult.data
-		.filter((model) => !hasFlag(args, "chat-only") || !model.embeddingModel)
-		.filter(
-			(model) => !hasFlag(args, "embedding-only") || model.embeddingModel,
-		);
-	const result = { ...pageResult, total: data.length, data };
-
-	render(args, result, () =>
-		data.length === 0
-			? process.stdout.write("No models.\n")
-			: outputTable(
-					["ID", "Model", "Code", "Kind", "Default", "Configured"],
-					data.map((model) => [
-						model.id,
-						displayModel(model),
-						model.code,
-						model.embeddingModel ? "embedding" : "chat",
-						String(model.defaultModel),
-						String(configured(model)),
-					]),
-				),
-	);
+function positiveInteger(raw: string, label: string, allowZero = false): number {
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) {
+        throw new CliError(`${label} must be ${allowZero ? "a non-negative" : "a positive"} integer`);
+    }
+    return value;
 }
 
-async function handleGetModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	const [, , reference] = requirePositionals(
-		args,
-		3,
-		"model get <name-code-or-id>",
-	);
-	const model = await resolveModel(client, reference);
-	render(args, model, () => renderModel(model));
-}
-
-async function handleAddModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	const [, , code] = requirePositionals(
-		args,
-		3,
-		"model add <code> --provider <ref> --name <name>",
-	);
-	const provider = await resolveProvider(client, requireFlag(args, "provider"));
-	const dto: CreateModelDto = {
-		providerId: provider.id,
-		name: requireFlag(args, "name"),
-		code,
-	};
-	applyCreateBooleanFlags(dto, args);
-	if (hasFlag(args, "thinking-level")) {
-		dto.thinkingLevels = parseThinkingLevels(args);
-	}
-	const created = await client.createModel(dto);
-	action(args, created, `Model added: ${displayModel(created)}`);
-}
-
-async function handleUpdateModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	const [, , reference] = requirePositionals(
-		args,
-		3,
-		"model update <name-code-or-id> [options]",
-	);
-	if (hasFlag(args, "thinking-level") && hasFlag(args, "clear-thinking-levels")) {
-		throw new CliError(
-			"--thinking-level and --clear-thinking-levels cannot be used together",
-		);
-	}
-	const current = await resolveModel(client, reference);
-	const dto: UpdateModelDto = {};
-	if (hasFlag(args, "name")) {
-		dto.name = requireFlag(args, "name");
-	}
-	applyUpdateBooleanFlags(dto, args);
-	if (hasFlag(args, "clear-thinking-levels")) {
-		dto.thinkingLevels = [];
-	} else if (hasFlag(args, "thinking-level")) {
-		dto.thinkingLevels = parseThinkingLevels(args);
-	}
-	if (Object.keys(dto).length === 0) {
-		throw new CliError("no changes specified");
-	}
-
-	await client.updateModel(current.id, dto);
-	action(
-		args,
-		{ id: current.id, name: dto.name ?? current.name, updated: true },
-		`Model updated: ${dto.name ?? displayModel(current)}`,
-	);
-}
-
-async function handleRemoveModel(
-	client: AgentyClient,
-	args: ParsedArgs,
-): Promise<void> {
-	const [, , reference] = requirePositionals(
-		args,
-		3,
-		"model remove <name-code-or-id> --yes",
-	);
-	if (!hasFlag(args, "yes")) {
-		throw new CliError("use --yes to remove a model non-interactively");
-	}
-	const current = await resolveModel(client, reference);
-	await client.deleteModel(current.id);
-	action(
-		args,
-		{ id: current.id, name: current.name, deleted: true },
-		`Model removed: ${displayModel(current)}`,
-	);
-}
-
-function renderModel(model: ModelDto): void {
-	outputFields([
-		["ID", model.id],
-		["Model", displayModel(model)],
-		["Code", model.code],
-		["Default", String(model.defaultModel)],
-		["Embedding", String(model.embeddingModel)],
-		["Context compression", String(model.contextCompressionModel)],
-		["Multimodal", String(model.multiModal)],
-		["Light", String(model.light)],
-		["Thinking", String(model.thinking)],
-		["Thinking levels", model.thinkingLevels.join(", ")],
-		["Anthropic adaptive thinking", String(model.anthropicAdaptiveThinking)],
-		["Preset", String(model.isPreset)],
-		["Context window", String(model.contextWindow)],
-	]);
-}
-
-function applyCreateBooleanFlags(
-	dto: ModelCapabilityUpdate,
-	args: ParsedArgs,
-): void {
-	if (hasFlag(args, "embedding")) {
-		dto.embeddingModel = parseBoolean(flag(args, "embedding"), "--embedding");
-	}
-	if (hasFlag(args, "context-compression")) {
-		dto.contextCompressionModel = parseBoolean(
-			flag(args, "context-compression"),
-			"--context-compression",
-		);
-	}
-	if (hasFlag(args, "multi-modal")) {
-		dto.multiModal = parseBoolean(flag(args, "multi-modal"), "--multi-modal");
-	}
-	if (hasFlag(args, "light")) {
-		dto.light = parseBoolean(flag(args, "light"), "--light");
-	}
-	if (hasFlag(args, "thinking")) {
-		dto.thinking = parseBoolean(flag(args, "thinking"), "--thinking");
-	}
-	if (hasFlag(args, "anthropic-adaptive-thinking")) {
-		dto.anthropicAdaptiveThinking = parseBoolean(
-			flag(args, "anthropic-adaptive-thinking"),
-			"--anthropic-adaptive-thinking",
-		);
-	}
-}
-
-function applyUpdateBooleanFlags(dto: UpdateModelDto, args: ParsedArgs): void {
-	if (hasFlag(args, "default")) {
-		dto.defaultModel = parseBoolean(flag(args, "default"), "--default");
-	}
-	applyCreateBooleanFlags(dto, args);
-}
-
-function parseThinkingLevels(args: ParsedArgs): string[] {
-	const levels = repeatedFlag(args, "thinking-level")
-		.map((level) => level.trim())
-		.filter(Boolean);
-	if (levels.length === 0) {
-		throw new CliError("--thinking-level cannot be empty");
-	}
-	return [...new Set(levels)];
+function reasoningMapping(args: ParsedArgs): Record<string, ReasoningEffort> | undefined {
+    const raw = flag(args, "reasoning-map")?.trim();
+    if (!raw) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(raw) as Record<string, ReasoningEffort>;
+    } catch {
+        throw new CliError("--reasoning-map must be a JSON object");
+    }
 }

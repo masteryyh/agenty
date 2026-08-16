@@ -33,7 +33,7 @@ type Session struct {
 }
 
 func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
-	s := &Session{}
+	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
 		SessionID:       shared.NewID(),
 		Agent:           agentSlug,
@@ -161,7 +161,7 @@ func (s *Session) ClearPending() {
 }
 
 func ReplaySession(events []shared.Event) *Session {
-	s := &Session{}
+	s := &Session{Rounds: make([]Round, 0)}
 	for _, e := range events {
 		s.apply(e)
 	}
@@ -182,6 +182,7 @@ func (s *Session) apply(e shared.Event) {
 		s.ContextWindow = ev.ContextWindow
 		s.CurrentReasoningEffort = ev.ReasoningEffort
 		s.Cwd = cloneString(ev.Cwd)
+		s.Rounds = make([]Round, 0)
 		s.CreatedAt = ev.At
 		s.UpdatedAt = ev.At
 	case SessionModelSet:

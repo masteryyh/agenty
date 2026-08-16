@@ -24,6 +24,14 @@ func mustSlug(s string) shared.Slug {
 	return slug
 }
 
+func mustModelID(s string) shared.ModelID {
+	id, err := shared.NewModelID(s)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
 func defaultModel() shared.ModelRef {
 	return shared.NewModelRef("anthropic", "claude-opus")
 }
@@ -64,7 +72,7 @@ func TestProjectionUpsertAndGet(t *testing.T) {
 		Title:               "test session",
 		AgentSlug:           mustSlug("coder"),
 		LastProviderSlug:    mustSlug("anthropic"),
-		LastModelSlug:       mustSlug("claude-opus"),
+		LastModelSlug:       mustModelID("claude-opus"),
 		ContextWindow:       1024,
 		LastReasoningEffort: shared.ReasoningHigh,
 		CreatedAt:           time.Now().UTC().Truncate(time.Second),
@@ -205,6 +213,21 @@ func TestProjectionList(t *testing.T) {
 	}
 	if len(offset) != 2 || offset[0].UpdatedAt != all[2].UpdatedAt || offset[1].UpdatedAt != all[3].UpdatedAt {
 		t.Errorf("offset results = %+v, want rows 2 and 3", offset)
+	}
+}
+
+func TestProjectionListReturnsEmptySliceWhenNoSessionsExist(t *testing.T) {
+	repo := newConversationRepo(t)
+
+	results, err := repo.listSessions(context.Background(), conversation.ListQuery{})
+	if err != nil {
+		t.Fatalf("List empty: %v", err)
+	}
+	if results == nil {
+		t.Fatal("List empty returned nil, want a non-nil empty slice")
+	}
+	if len(results) != 0 {
+		t.Fatalf("List empty returned %d sessions, want 0", len(results))
 	}
 }
 

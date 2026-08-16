@@ -1,689 +1,869 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { APIType } from "../api/types";
+import {
+    compatibleProviderTypes,
+    createCustomDraft,
+    createPresetDraft,
+    draftForProvider,
+    type ModelDraft,
+    modelDraftForProvider,
+    type ProviderDraft,
+    providerPresets,
+    validateModelDraft,
+    validateProviderDraft,
+} from "../consts/providerPresets";
 import { useInput } from "../hooks/useInput";
-import { useTuiRuntime } from "../tui/runtime";
-import { Box, Spinner, Text, TextInput } from "./ui";
+import { useWindowSize } from "../hooks/useWindowSize";
 import { useAppStore } from "../state/store";
-import type { ModelDto, ModelProviderDto } from "../api/types";
+import { useTuiRuntime } from "../tui/runtime";
+import { BottomDialog, useBottomDialogSize } from "./BottomDialog";
+import type { FormField, FormOption } from "./FormPanel";
+import { FormPanel } from "./FormPanel";
+import { Box, Spinner, Text } from "./ui";
+import {
+    moveWizardListFocus,
+    rowIndexForFocus,
+    type WizardListFocus,
+} from "./wizardNavigation";
+import {
+    persistWizardSetup,
+    selectedModelId,
+    validateWizardDrafts,
+} from "./wizardSetup";
 
-// Mirrors pkg/models/system.go WebSearchProvider constants.
-const WS_PROVIDERS = [
-	{ label: "Tavily", value: "tavily" },
-	{ label: "Brave", value: "brave" },
-	{ label: "Firecrawl", value: "firecrawl" },
-];
-const MAX_MODELS = 4;
-const NOT_SET = "<not set>";
+type WizardStep = "welcome" | "providers" | "provider-form" | "models" | "model-form" | "saving" | "done";
 
-type Step =
-	| "welcome"
-	| "providers"
-	| "providerInput"
-	| "webSearch"
-	| "webSearchKey"
-	| "firecrawlUrl"
-	| "models"
-	| "embed"
-	| "saving"
-	| "done";
-
-type Feedback = { msg: string; kind: "ok" | "err" | "warn" } | null;
-
-function modelLabel(m: ModelDto): string {
-	return `${m.provider?.name ?? "?"}/${m.name}`;
+interface ProviderRow {
+    kind: "preset" | "custom";
+    presetKey?: string;
+    draft?: ProviderDraft;
+    label: string;
+    description: string;
 }
 
-function maskKey(key: string): string {
-	if (key.length <= 4) return "*".repeat(key.length);
-	return `${key.slice(0, 2)}****${key.slice(-2)}`;
+function trunc(value: string, width: number): string {
+    if (width <= 0) {
+        return "";
+    }
+    if (value.length <= width) {
+        return value;
+    }
+    if (width === 1) {
+        return "…";
+    }
+    return `${value.slice(0, width - 1)}…`;
+}
+
+function pad(value: string, width: number): string {
+    const clipped = trunc(value, width);
+    return `${clipped}${" ".repeat(Math.max(width - clipped.length, 0))}`;
+}
+
+function providerTypeLabel(type: APIType): string {
+    return compatibleProviderTypes.find((option) => option.value === type)?.label ?? type;
+}
+
+function isAPIType(value: string): value is APIType {
+    return compatibleProviderTypes.some((option) => option.value === value);
+}
+
+function providerFields(draft: ProviderDraft): FormField[] {
+    const typeOptions: FormOption[] = compatibleProviderTypes.map((option) => ({
+        label: option.label,
+        value: option.value,
+    }));
+    return [
+        {
+            key: "name",
+            label: "Provider name",
+            kind: "text",
+            value: draft.name,
+            placeholder: "My provider",
+        },
+        {
+            key: "slug",
+            label: "Provider slug",
+            kind: "text",
+            value: draft.slug,
+            placeholder: "my-provider",
+            readOnly: draft.source === "preset",
+        },
+        {
+            key: "type",
+            label: "API protocol",
+            kind: "select",
+            value: draft.type,
+            options: typeOptions,
+            readOnly: draft.source === "preset",
+        },
+        {
+            key: "baseUrl",
+            label: "Base URL",
+            kind: "text",
+            value: draft.baseUrl,
+            placeholder: "https://api.example.com/v1",
+        },
+        {
+            key: "apiKey",
+            label: "API key",
+            kind: "text",
+            value: draft.apiKey,
+            placeholder: "paste a key",
+            secret: true,
+        },
+    ];
+}
+
+function modelFields(model: ModelDraft): FormField[] {
+    return [
+        {
+            key: "slug",
+            label: "Model ID",
+            kind: "text",
+            value: model.slug,
+            placeholder: "model-id or org/model-id",
+        },
+        {
+            key: "name",
+            label: "Model name",
+            kind: "text",
+            value: model.name,
+            placeholder: "Model name",
+        },
+        {
+            key: "contextWindow",
+            label: "Context window",
+            kind: "text",
+            value: String(model.contextWindow),
+            placeholder: "128000",
+        },
+        {
+            key: "maxOutputTokens",
+            label: "Max output tokens",
+            kind: "text",
+            value: String(model.maxOutputTokens),
+            placeholder: "16384",
+        },
+    ];
+}
+
+function rowsForDrafts(drafts: ProviderDraft[]): ProviderRow[] {
+    const rows: ProviderRow[] = providerPresets.map((preset) => ({
+        kind: "preset",
+        presetKey: preset.key,
+        draft: drafts.find((draft) => draft.presetKey === preset.key),
+        label: preset.label,
+        description: preset.description,
+    }));
+    rows.push(
+        ...drafts
+            .filter((draft) => draft.source === "custom")
+            .map((draft) => ({
+                kind: "custom" as const,
+                draft,
+                label: draft.name || draft.slug || "Custom provider",
+                description: providerTypeLabel(draft.type),
+            })),
+    );
+    return rows;
 }
 
 export function WizardOverlay() {
-	const client = useAppStore((s) => s.client);
-	const finishWizard = useAppStore((s) => s.finishWizard);
-	const { exit } = useTuiRuntime();
+    const { columns, rows } = useWindowSize();
+    const width = Math.max(columns - 2, 1);
+    const height = Math.max(rows - 1, 12);
 
-	const [step, setStep] = useState<Step>("welcome");
-	const [providers, setProviders] = useState<ModelProviderDto[]>([]);
-	const [configuredIds, setConfiguredIds] = useState<Set<string>>(new Set());
-	const [provCursor, setProvCursor] = useState(0);
-	const [selectedProvIdx, setSelectedProvIdx] = useState(0);
-	const [wsCursor, setWsCursor] = useState(0);
-	const [chatModels, setChatModels] = useState<ModelDto[]>([]);
-	const [embedModels, setEmbedModels] = useState<ModelDto[]>([]);
-	const [selectedModels, setSelectedModels] = useState<number[]>([]);
-	const [modelCursor, setModelCursor] = useState(0);
-	const [embedCursor, setEmbedCursor] = useState(0);
-	const [input, setInput] = useState("");
-	const [feedback, setFeedback] = useState<Feedback>(null);
-	const [savingLabel, setSavingLabel] = useState("");
-	const [wsKey, setWsKey] = useState("");
-	const [loadingProviders, setLoadingProviders] = useState(true);
+    return (
+        <BottomDialog width={width} height={height}>
+            <WizardContent />
+        </BottomDialog>
+    );
+}
 
-	useEffect(() => {
-		if (!client) return;
-		let cancelled = false;
-		(async () => {
-			try {
-				const list = await client.listProviders();
-				if (cancelled) return;
-				setProviders(list);
-				setConfiguredIds(
-					new Set(
-						list.filter((p) => p.apiKeyCensored !== NOT_SET).map((p) => p.id),
-					),
-				);
-			} catch (e) {
-				if (!cancelled) {
-					setFeedback({
-						msg: `Failed to load providers: ${(e as Error).message}`,
-						kind: "err",
-					});
-				}
-			} finally {
-				if (!cancelled) setLoadingProviders(false);
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [client]);
+function WizardContent() {
+    const client = useAppStore((state) => state.client);
+    const finishWizard = useAppStore((state) => state.finishWizard);
+    const { exit } = useTuiRuntime();
+    const [step, setStep] = useState<WizardStep>("welcome");
+    const [drafts, setDrafts] = useState<ProviderDraft[]>([]);
+    const [models, setModels] = useState<ModelDraft[]>([]);
+    const [editing, setEditing] = useState<ProviderDraft | null>(null);
+    const [editingModel, setEditingModel] = useState<ModelDraft | null>(null);
+    const [providerFocus, setProviderFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
+    const [modelFocus, setModelFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const draftCounter = useRef(0);
 
-	const provListLen = providers.length + 1; // trailing "Continue"
-	const wsListLen = WS_PROVIDERS.length + 1; // trailing "Skip"
+    const rows = useMemo(() => rowsForDrafts(drafts), [drafts]);
 
-	const loadModels = async (): Promise<{ chat: ModelDto[]; embed: ModelDto[] }> => {
-		if (!client) return { chat: [], embed: [] };
-		const all = await client.listModels();
-		const configured = configuredIds;
-		const chat = all.filter(
-			(m) => !m.embeddingModel && m.provider && configured.has(m.provider.id),
-		);
-		const embed = all.filter(
-			(m) => m.embeddingModel && m.provider && configured.has(m.provider.id),
-		);
-		setChatModels(chat);
-		setEmbedModels(embed);
-		setModelCursor(0);
-		setEmbedCursor(0);
-		setSelectedModels([]);
-		return { chat, embed };
-	};
+    useEffect(() => {
+        if (!client) {
+            return;
+        }
+        let cancelled = false;
+        setLoading(true);
+        void client
+            .listProviders()
+            .then((providers) => {
+                if (cancelled) {
+                    return;
+                }
+                const knownPresetSlugs = new Set(providerPresets.map((preset) => preset.slug));
+                const restored = (providers ?? []).map((provider) => {
+                    const preset = providerPresets.find((candidate) => candidate.slug === provider.slug);
+                    const draft = draftForProvider(provider, preset);
+                    return {
+                        draft,
+                        model: modelDraftForProvider(draft, preset, provider),
+                    };
+                });
+                const configured = restored.filter(({ draft }) =>
+                    draft.source === "custom" || knownPresetSlugs.has(draft.slug),
+                );
+                setDrafts(configured.map(({ draft }) => draft));
+                setModels(configured.map(({ model }) => model));
+                setError(null);
+            })
+            .catch((cause: unknown) => {
+                if (!cancelled) {
+                    setError(cause instanceof Error ? cause.message : String(cause));
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [client]);
 
-	const saveProviderKey = async (key: string) => {
-		const prov = providers[selectedProvIdx];
-		if (!prov || !client) return;
-		setStep("saving");
-		setSavingLabel("Saving API key…");
-		try {
-			await client.updateProvider(prov.id, { apiKey: key });
-			setConfiguredIds((s) => new Set(s).add(prov.id));
-			setProviders((list) =>
-				list.map((p) =>
-					p.id === prov.id ? { ...p, apiKeyCensored: maskKey(key) } : p,
-				),
-			);
-			setFeedback({ msg: `✓ API key saved for ${prov.name}`, kind: "ok" });
-			setStep("providers");
-		} catch (e) {
-			setFeedback({
-				msg: `Failed to save API key: ${(e as Error).message}`,
-				kind: "err",
-			});
-			setStep("providers");
-		}
-	};
+    const begin = () => {
+        setError(null);
+        setStep("providers");
+    };
 
-	const saveWebSearch = async (
-		provider: string,
-		key: string,
-		firecrawlUrl?: string,
-	) => {
-		if (!client) return;
-		setStep("saving");
-		setSavingLabel("Saving web search config…");
-		const dto: Record<string, string> = { webSearchProvider: provider };
-		if (provider === "tavily") dto.tavilyApiKey = key;
-		else if (provider === "brave") dto.braveApiKey = key;
-		else if (provider === "firecrawl") {
-			dto.firecrawlApiKey = key;
-			if (firecrawlUrl) dto.firecrawlBaseUrl = firecrawlUrl;
-		}
-		try {
-			await client.updateConfig(dto);
-			setFeedback(null);
-			setStep("models");
-		} catch (e) {
-			setFeedback({
-				msg: `Failed to save web search config: ${(e as Error).message}`,
-				kind: "err",
-			});
-			setStep("webSearch");
-		}
-	};
+    const openPreset = (presetKey: string) => {
+        const preset = providerPresets.find((candidate) => candidate.key === presetKey);
+        if (!preset) {
+            return;
+        }
+        const draft = drafts.find((candidate) => candidate.presetKey === preset.key) ?? createPresetDraft(preset);
+        setEditing(draft);
+        setError(null);
+        setStep("provider-form");
+    };
 
-	const saveAgentModels = async () => {
-		if (!client) return;
-		setStep("saving");
-		setSavingLabel("Saving agent models…");
-		const modelIds = selectedModels.map((i) => chatModels[i].id);
-		try {
-			const agents = await client.listAgents();
-			const def =
-				agents.find((a) => a.isDefault) ?? agents.find((a) => a.name === "default");
-			if (def) {
-				await client.updateAgent(def.id, { modelIds });
-			} else {
-				await client.createAgent({ name: "default", isDefault: true, modelIds });
-			}
-			setFeedback(null);
-			if (embedModels.length > 0) {
-				setStep("embed");
-			} else {
-				await finish();
-			}
-		} catch (e) {
-			setFeedback({
-				msg: `Failed to save agent models: ${(e as Error).message}`,
-				kind: "err",
-			});
-			setStep("models");
-		}
-	};
+    const openCustom = (draft?: ProviderDraft) => {
+        const next = draft ?? createCustomDraft(`custom:${draftCounter.current++}`);
+        setEditing(next);
+        setError(null);
+        setStep("provider-form");
+    };
 
-	const saveEmbed = async (selectedIndex = embedCursor) => {
-		if (!client) return;
-		const m = embedModels[selectedIndex];
-		if (!m) {
-			await finish();
-			return;
-		}
-		setStep("saving");
-		setSavingLabel("Saving embedding model…");
-		try {
-			await client.updateConfig({ embeddingModelId: m.id });
-			await finish();
-		} catch (e) {
-			setFeedback({
-				msg: `Failed to save embedding model: ${(e as Error).message}`,
-				kind: "err",
-			});
-			setStep("embed");
-		}
-	};
+    const saveDraft = (values: Record<string, string>) => {
+        if (!editing) {
+            return;
+        }
+        if (!isAPIType(values.type)) {
+            setError("Choose a supported API protocol.");
+            return;
+        }
+        const next: ProviderDraft = {
+            ...editing,
+            name: values.name.trim(),
+            slug: values.slug.trim(),
+            type: values.type,
+            baseUrl: values.baseUrl.trim(),
+            apiKey: values.apiKey.trim(),
+        };
+        const duplicate = drafts.some(
+            (draft) => draft.id !== next.id && draft.slug.trim() !== "" && draft.slug === next.slug,
+        );
+        if (duplicate) {
+            setError(`Provider slug already configured: ${next.slug}`);
+            return;
+        }
+        const validationError = validateProviderDraft(next);
+        if (validationError) {
+            setError(validationError);
+            return;
+        }
+        setDrafts((current) => {
+            const index = current.findIndex((draft) => draft.id === next.id);
+            if (index < 0) {
+                return [...current, next];
+            }
+            return current.map((draft, draftIndex) => draftIndex === index ? next : draft);
+        });
+        setModels((current) => {
+            const preset = next.presetKey
+                ? providerPresets.find((candidate) => candidate.key === next.presetKey)
+                : undefined;
+            const index = current.findIndex((model) => model.providerId === next.id);
+            if (index < 0) {
+                return [...current, modelDraftForProvider(next, preset)];
+            }
+            return current.map((model, modelIndex) => modelIndex === index
+                ? { ...model, providerSlug: next.slug, providerName: next.name }
+                : model);
+        });
+        setProviderFocus({ kind: "row", index: 0 });
+        setError(null);
+        setStep("providers");
+    };
 
-	const finish = async () => {
-		setStep("done");
-		await finishWizard();
-	};
+    const continueToModels = () => {
+        if (drafts.length === 0) {
+            setError("Configure at least one provider to continue.");
+            return;
+        }
+        setModelFocus((current) => ({
+            kind: "row",
+            index: Math.min(rowIndexForFocus(current), Math.max(models.length - 1, 0)),
+        }));
+        setError(null);
+        setStep("models");
+    };
 
-	const beginProviderInput = (index: number) => {
-		setProvCursor(index);
-		setSelectedProvIdx(index);
-		setInput("");
-		setFeedback(null);
-		setStep("providerInput");
-	};
+    const saveModel = (values: Record<string, string>) => {
+        if (!editingModel) {
+            return;
+        }
+        const next: ModelDraft = {
+            ...editingModel,
+            slug: values.slug.trim(),
+            name: values.name.trim(),
+            contextWindow: Number(values.contextWindow),
+            maxOutputTokens: Number(values.maxOutputTokens),
+        };
+        const validationError = validateModelDraft(next);
+        if (validationError) {
+            setError(validationError);
+            return;
+        }
+        setModels((current) => current.map((model) => model.id === next.id ? next : model));
+        setEditingModel(null);
+        setError(null);
+        setStep("models");
+    };
 
-	const continueFromProviders = () => {
-		setProvCursor(providers.length);
-		if (configuredIds.size === 0) {
-			setFeedback({
-				msg: "Configure at least one provider to continue",
-				kind: "warn",
-			});
-			return;
-		}
-		setFeedback(null);
-		setStep("saving");
-		setSavingLabel("Loading models…");
-		void loadModels()
-			.then(({ chat }) => {
-				if (chat.length === 0) {
-					setFeedback({
-						msg: "No models found for configured providers",
-						kind: "warn",
-					});
-					setStep("providers");
-				} else {
-					setStep("webSearch");
-				}
-			})
-			.catch((error) => {
-				setFeedback({
-					msg: `Failed to load models: ${(error as Error).message}`,
-					kind: "err",
-				});
-				setStep("providers");
-			});
-	};
+    const saveSetup = async (selectedId: string) => {
+        if (!client) {
+            return;
+        }
+        const validationError = validateWizardDrafts(drafts, models, selectedId);
+        if (validationError) {
+            setError(validationError);
+            return;
+        }
+        setStep("saving");
+        setError(null);
+        try {
+            await persistWizardSetup(client, drafts, models, selectedId);
+            setStep("done");
+            await finishWizard();
+        } catch (cause: unknown) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+            setStep("models");
+        }
+    };
 
-	const chooseWebSearch = (index: number) => {
-		setWsCursor(index);
-		setInput("");
-		setFeedback(null);
-		setStep("webSearchKey");
-	};
+    if (step === "welcome") {
+        return <WelcomeStep onBegin={begin} onExit={() => exit()} />;
+    }
+    if (step === "provider-form" && editing) {
+        return (
+            <Box flexDirection="column" flexGrow={1}>
+                {error ? <Text color="red">{error}</Text> : null}
+                <FormPanel
+                    key={editing.id}
+                    title={editing.source === "preset" ? `Configure ${editing.name}` : "Add compatible provider"}
+                    fields={providerFields(editing)}
+                    actions={[{ key: "save", label: "Save provider" }, { key: "cancel", label: "Back" }]}
+                    onAction={(action, values) => {
+                        if (action === "save") {
+                            saveDraft(values);
+                        } else {
+                            setError(null);
+                            setStep("providers");
+                        }
+                    }}
+                    onClose={() => {
+                        setError(null);
+                        setStep("providers");
+                    }}
+                />
+            </Box>
+        );
+    }
+    if (step === "model-form" && editingModel) {
+        return (
+            <Box flexDirection="column" flexGrow={1}>
+                {error ? <Text color="red">{error}</Text> : null}
+                <FormPanel
+                    key={editingModel.id}
+                    title={`Configure model for ${editingModel.providerName || editingModel.providerSlug}`}
+                    fields={modelFields(editingModel)}
+                    actions={[{ key: "save", label: "Save model" }, { key: "cancel", label: "Back" }]}
+                    onAction={(action, values) => {
+                        if (action === "save") {
+                            saveModel(values);
+                        } else {
+                            setError(null);
+                            setEditingModel(null);
+                            setStep("models");
+                        }
+                    }}
+                    onClose={() => {
+                        setError(null);
+                        setEditingModel(null);
+                        setStep("models");
+                    }}
+                />
+            </Box>
+        );
+    }
+    if (step === "models") {
+        return (
+            <ModelStep
+                models={models}
+                focus={modelFocus}
+                error={error}
+                onFocus={setModelFocus}
+                onEdit={(model) => {
+                    setEditingModel(model);
+                    setError(null);
+                    setStep("model-form");
+                }}
+                onConfirm={(model) => void saveSetup(selectedModelId(model))}
+                onBack={() => {
+                    setError(null);
+                    setStep("providers");
+                }}
+            />
+        );
+    }
+    if (step === "saving" || step === "done") {
+        return (
+            <Box flexDirection="column" padding={1} gap={1}>
+                {step === "done" ? (
+                    <Text color="green" bold>Setup complete. Starting agenty-cli…</Text>
+                ) : (
+                    <Spinner label="Saving providers, model, and default agent…" />
+                )}
+                {error ? <Text color="red">{error}</Text> : null}
+            </Box>
+        );
+    }
 
-	const skipWebSearch = () => {
-		setWsCursor(WS_PROVIDERS.length);
-		setFeedback(null);
-		setStep("models");
-	};
+    return (
+        <ProviderStep
+            rows={rows}
+            focus={providerFocus}
+            loading={loading}
+            error={error}
+            configuredCount={drafts.length}
+            onFocus={setProviderFocus}
+            onPreset={openPreset}
+            onCustom={openCustom}
+            onAddCustom={() => openCustom()}
+            onContinue={continueToModels}
+            onExit={() => exit()}
+        />
+    );
+}
 
-	const toggleModel = (index: number) => {
-		setModelCursor(index);
-		setSelectedModels((selected) => {
-			const existing = selected.indexOf(index);
-			if (existing >= 0) return selected.filter((value) => value !== index);
-			if (selected.length >= MAX_MODELS) {
-				setFeedback({
-					msg: `Maximum ${MAX_MODELS} models allowed (1 primary + ${MAX_MODELS - 1} fallbacks)`,
-					kind: "warn",
-				});
-				return selected;
-			}
-			setFeedback(null);
-			return [...selected, index];
-		});
-	};
+function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => void }) {
+    useInput((input, key) => {
+        if (key.return || input.toLowerCase() === "y") {
+            onBegin();
+        } else if (key.escape || input.toLowerCase() === "n") {
+            onExit();
+        }
+    });
 
-	useInput((ch, key, event) => {
-		if (step === "saving" || step === "done") return;
-		switch (step) {
-			case "welcome":
-				if (ch === "y" || key.return) {
-					setStep("providers");
-					setFeedback(null);
-				} else if (ch === "n" || key.escape) {
-					exit();
-				}
-				return;
-			case "providers": {
-				if (loadingProviders) return;
-				if (key.upArrow) {
-					setProvCursor((c) => Math.max(0, c - 1));
-					return;
-				}
-				if (key.downArrow) {
-					setProvCursor((c) => Math.min(provListLen - 1, c + 1));
-					return;
-				}
-				if (key.return) {
-					if (provCursor >= providers.length) {
-						continueFromProviders();
-						return;
-					}
-					beginProviderInput(provCursor);
-				}
-				return;
-			}
-			case "providerInput":
-				if (key.escape) {
-					event.preventDefault();
-					setStep("providers");
-					setFeedback(null);
-				}
-				return;
-			case "webSearch":
-				if (key.upArrow) {
-					setWsCursor((c) => Math.max(0, c - 1));
-					return;
-				}
-				if (key.downArrow) {
-					setWsCursor((c) => Math.min(wsListLen - 1, c + 1));
-					return;
-				}
-				if (key.return) {
-					if (wsCursor >= WS_PROVIDERS.length) {
-						skipWebSearch();
-						return;
-					}
-					chooseWebSearch(wsCursor);
-				}
-				return;
-			case "webSearchKey":
-				if (key.escape) {
-					event.preventDefault();
-					setStep("webSearch");
-					setFeedback(null);
-				}
-				return;
-			case "firecrawlUrl":
-				if (key.escape) {
-					event.preventDefault();
-					setStep("models");
-					setFeedback(null);
-				}
-				return;
-			case "models": {
-				if (chatModels.length === 0) return;
-				if (key.upArrow) {
-					setModelCursor((c) => Math.max(0, c - 1));
-					return;
-				}
-				if (key.downArrow) {
-					setModelCursor((c) => Math.min(chatModels.length - 1, c + 1));
-					return;
-				}
-				if (key.return) {
-					if (selectedModels.length === 0) {
-						setFeedback({
-							msg: "Select at least one model to continue",
-							kind: "warn",
-						});
-						return;
-					}
-					setFeedback(null);
-					void saveAgentModels();
-					return;
-				}
-				if (ch === " ") {
-					toggleModel(modelCursor);
-				}
-				return;
-			}
-			case "embed": {
-				if (embedModels.length === 0) {
-					void finish();
-					return;
-				}
-				if (key.upArrow) {
-					setEmbedCursor((c) => Math.max(0, c - 1));
-					return;
-				}
-				if (key.downArrow) {
-					setEmbedCursor((c) => Math.min(embedModels.length - 1, c + 1));
-					return;
-				}
-				if (key.return) {
-					setFeedback(null);
-					void saveEmbed();
-					return;
-				}
-				if (key.escape) {
-					void finish();
-				}
-				return;
-			}
-		}
-	});
+    return (
+        <Box flexDirection="column" flexGrow={1} padding={1} gap={1}>
+            <Text color="magenta" bold>AGENTY / FIRST RUN</Text>
+            <Text color="cyan" bold>Welcome to agenty</Text>
+            <Text>Connect a model provider, add one model, and choose the default agent model.</Text>
+            <Box flexDirection="column" height={10} borderStyle="single" borderColor="cyan" padding={1} marginTop={1}>
+                <Box height={1}>
+                    <Text color="cyan" bold>01  Provider access</Text>
+                </Box>
+                <Box height={1}>
+                    <Text dimColor wrap="truncate">Configure OpenAI, Anthropic, Google, or a compatible endpoint.</Text>
+                </Box>
+                <Box height={1}>
+                    <Text color="cyan" bold>02  Model details</Text>
+                </Box>
+                <Box height={1}>
+                    <Text dimColor wrap="truncate">Enter the model ID and limits used by the core loop.</Text>
+                </Box>
+                <Box height={1}>
+                    <Text color="cyan" bold>03  Default agent</Text>
+                </Box>
+                <Box height={1}>
+                    <Text dimColor wrap="truncate">Pick the model used when a new session starts.</Text>
+                </Box>
+            </Box>
+            <Box marginTop={1} gap={3}>
+                <Text color="cyan" bold onMouseClick={onBegin}>[Begin setup]</Text>
+                <Text color="gray" onMouseClick={onExit}>[Exit]</Text>
+            </Box>
+            <Text dimColor>Enter/y to begin · Esc/n to exit</Text>
+        </Box>
+    );
+}
 
-	const feedbackNode = feedback ? (
-		<Text
-			color={
-				feedback.kind === "ok"
-					? "green"
-					: feedback.kind === "err"
-						? "red"
-						: "yellow"
-			}
-		>
-			{feedback.msg}
-		</Text>
-	) : null;
+function ProviderStep({
+    rows,
+    focus,
+    loading,
+    error,
+    configuredCount,
+    onFocus,
+    onPreset,
+    onCustom,
+    onAddCustom,
+    onContinue,
+    onExit,
+}: {
+    rows: ProviderRow[];
+    focus: WizardListFocus;
+    loading: boolean;
+    error: string | null;
+    configuredCount: number;
+    onFocus: (focus: WizardListFocus) => void;
+    onPreset: (presetKey: string) => void;
+    onCustom: (draft?: ProviderDraft) => void;
+    onAddCustom: () => void;
+    onContinue: () => void;
+    onExit: () => void;
+}) {
+    return (
+        <Box flexDirection="column" flexGrow={1} gap={1}>
+            <Box flexDirection="column">
+                <Text color="magenta" bold>01 / Provider connections</Text>
+                <Text dimColor>Choose a row to configure it. You can add more than one provider.</Text>
+            </Box>
+            {loading ? <Spinner label="Loading existing providers…" /> : null}
+            {error ? <Text color="red">{error}</Text> : null}
+            {!loading ? (
+                <ProviderTable
+                    rows={rows}
+                    focus={focus}
+                    onFocus={onFocus}
+                    onActivate={(row) => {
+                        if (row.kind === "preset" && row.presetKey) {
+                            onPreset(row.presetKey);
+                        } else if (row.kind === "custom") {
+                            onCustom(row.draft);
+                        }
+                    }}
+                    onAddCustom={onAddCustom}
+                    onContinue={onContinue}
+                    onExit={onExit}
+                    canContinue={configuredCount > 0}
+                />
+            ) : null}
+        </Box>
+    );
+}
 
-	if (step === "saving" || step === "done") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				{step === "done" ? (
-					<Text color="green" bold>
-						✓ Setup complete. Starting agenty-cli…
-					</Text>
-				) : (
-					<Spinner label={savingLabel} />
-				)}
-				{feedbackNode}
-			</Box>
-		);
-	}
+function ProviderTable({
+    rows,
+    focus,
+    onFocus,
+    onActivate,
+    onAddCustom,
+    onContinue,
+    onExit,
+    canContinue,
+}: {
+    rows: ProviderRow[];
+    focus: WizardListFocus;
+    onFocus: (focus: WizardListFocus) => void;
+    onActivate: (row: ProviderRow) => void;
+    onAddCustom: () => void;
+    onContinue: () => void;
+    onExit: () => void;
+    canContinue: boolean;
+}) {
+    const dialogSize = useBottomDialogSize();
+    const compact = dialogSize.width < 72;
+    const nameWidth = compact ? Math.max(dialogSize.width - 8, 14) : 22;
+    const protocolWidth = compact ? 0 : Math.max(dialogSize.width - nameWidth - 18, 18);
 
-	if (step === "welcome") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					Welcome to agenty
-				</Text>
-				<Box marginTop={1} flexDirection="column">
-					<Text>Let's set up your model providers, web search, and default models.</Text>
-					<Text dimColor>
-						You can skip web search and embedding if you don't need them.
-					</Text>
-				</Box>
-				<Box marginTop={1}>
-					<Text dimColor>Press </Text>
-					<Text color="cyan" bold>y</Text>
-					<Text dimColor> to begin, </Text>
-					<Text color="cyan" bold>n</Text>
-					<Text dimColor> to exit.</Text>
-				</Box>
-				<Box marginTop={1} gap={2}>
-					<Text color="cyan" bold onMouseClick={() => setStep("providers")}>[Begin]</Text>
-					<Text color="gray" onMouseClick={() => exit()}>[Exit]</Text>
-				</Box>
-			</Box>
-		);
-	}
+    useInput((input, key) => {
+        if (key.escape) {
+            onExit();
+            return;
+        }
+        if (key.upArrow) {
+            onFocus(moveWizardListFocus(focus, rows.length, "up"));
+            return;
+        }
+        if (key.downArrow) {
+            onFocus(moveWizardListFocus(focus, rows.length, "down"));
+            return;
+        }
+        if (key.leftArrow) {
+            onFocus(moveWizardListFocus(focus, rows.length, "left"));
+            return;
+        }
+        if (key.rightArrow) {
+            onFocus(moveWizardListFocus(focus, rows.length, "right"));
+            return;
+        }
+        if (key.return) {
+            if (focus.kind === "action") {
+                if (focus.index === 0 && canContinue) {
+                    onContinue();
+                } else if (focus.index === 1) {
+                    onExit();
+                }
+                return;
+            }
+            const row = rows[focus.index];
+            if (row) {
+                onActivate(row);
+            }
+            return;
+        }
+        if (input.toLowerCase() === "a") {
+            onAddCustom();
+        } else if (input.toLowerCase() === "c" && canContinue) {
+            onContinue();
+        }
+    });
 
-	if (step === "providerInput") {
-		const prov = providers[selectedProvIdx];
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					API Key for {prov?.name ?? "provider"}
-				</Text>
-				<Text dimColor>{prov ? `Type: ${prov.type}` : ""}</Text>
-				<Box marginTop={1}>
-					<Text color="cyan">❯ </Text>
-					<TextInput
-						value={input}
-						onChange={setInput}
-						onSubmit={(v) => {
-							const k = v.trim();
-							if (k) void saveProviderKey(k);
-						}}
-						placeholder="paste API key, then Enter"
-					/>
-				</Box>
-				<Text dimColor>Esc to go back</Text>
-				{feedbackNode}
-			</Box>
-		);
-	}
+    return (
+        <Box flexDirection="column" flexGrow={1}>
+            <Box height={1} overflow="hidden">
+                <Text dimColor>
+                    {compact
+                        ? `  ${pad("Provider", nameWidth)}  Status`
+                        : `  ${pad("Provider", nameWidth)}  ${pad("Protocol", protocolWidth)}  Status`}
+                </Text>
+            </Box>
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                {rows.map((row, index) => {
+                    const active = focus.kind === "row" && index === focus.index;
+                    const configured = !!row.draft;
+                    const status = configured
+                        ? row.draft?.apiKey.trim()
+                            ? "✓ ready"
+                            : "! key"
+                        : "○ not set";
+                    return (
+                        <Box
+                            key={row.kind === "preset" ? row.presetKey : row.draft?.id}
+                            height={1}
+                            overflow="hidden"
+                            onMouseOver={() => onFocus({ kind: "row", index })}
+                            onMouseClick={() => {
+                                onFocus({ kind: "row", index });
+                                onActivate(row);
+                            }}
+                        >
+                            <Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
+                            <Text> </Text>
+                            <Box width={nameWidth}>
+                                <Text color={active ? "cyan" : "white"} bold={active} wrap="truncate">
+                                    {trunc(row.label, nameWidth)}
+                                </Text>
+                            </Box>
+                            {compact ? null : (
+                                <>
+                                    <Text>  </Text>
+                                    <Box width={protocolWidth}>
+                                        <Text color={active ? "cyan" : "gray"} wrap="truncate">
+                                            {trunc(row.description, protocolWidth)}
+                                        </Text>
+                                    </Box>
+                                </>
+                            )}
+                            <Text color={configured ? "green" : "gray"}>{status}</Text>
+                        </Box>
+                    );
+                })}
+            </Box>
+            <Box gap={3} marginTop={1}>
+                <Box
+                    onMouseOver={() => onFocus({ kind: "action", index: 0, rowIndex: rowIndexForFocus(focus) })}
+                    onMouseClick={canContinue ? onContinue : undefined}
+                >
+                    <Text color={focus.kind === "action" && focus.index === 0 && canContinue ? "cyan" : "gray"} bold={focus.kind === "action" && focus.index === 0 && canContinue}>
+                        {focus.kind === "action" && focus.index === 0 ? "[Continue to model]" : " Continue to model "}
+                    </Text>
+                </Box>
+                <Box
+                    onMouseOver={() => onFocus({ kind: "action", index: 1, rowIndex: rowIndexForFocus(focus) })}
+                    onMouseClick={onExit}
+                >
+                    <Text color={focus.kind === "action" && focus.index === 1 ? "cyan" : "gray"} bold={focus.kind === "action" && focus.index === 1}>
+                        {focus.kind === "action" && focus.index === 1 ? "[Exit]" : " Exit "}
+                    </Text>
+                </Box>
+            </Box>
+            <Text dimColor wrap="truncate">
+                ↑↓ rows/actions · ←→ choose action · Enter select · a add provider · c continue · Esc exit
+            </Text>
+        </Box>
+    );
+}
 
-	if (step === "webSearchKey") {
-		const ws = WS_PROVIDERS[wsCursor];
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					{ws?.label ?? "Web Search"} API Key
-				</Text>
-				<Box marginTop={1}>
-					<Text color="cyan">❯ </Text>
-					<TextInput
-						value={input}
-						onChange={setInput}
-						onSubmit={(v) => {
-							const k = v.trim();
-							if (!k) return;
-							setWsKey(k);
-							if (ws?.value === "firecrawl") {
-								setInput("");
-								setStep("firecrawlUrl");
-							} else {
-								void saveWebSearch(ws.value, k);
-							}
-						}}
-						placeholder="paste API key, then Enter"
-					/>
-				</Box>
-				<Text dimColor>Esc to go back</Text>
-				{feedbackNode}
-			</Box>
-		);
-	}
+function ModelStep({
+    models,
+    focus,
+    error,
+    onFocus,
+    onEdit,
+    onConfirm,
+    onBack,
+}: {
+    models: ModelDraft[];
+    focus: WizardListFocus;
+    error: string | null;
+    onFocus: (focus: WizardListFocus) => void;
+    onEdit: (model: ModelDraft) => void;
+    onConfirm: (model: ModelDraft) => void;
+    onBack: () => void;
+}) {
+    const dialogSize = useBottomDialogSize();
+    const compact = dialogSize.width < 72;
+    const providerWidth = compact ? Math.max(dialogSize.width - 8, 14) : 20;
+    const modelWidth = compact ? 0 : Math.max(dialogSize.width - providerWidth - 24, 18);
 
-	if (step === "firecrawlUrl") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					Firecrawl Base URL
-				</Text>
-				<Text dimColor>Leave empty for the default and press Enter.</Text>
-				<Box marginTop={1}>
-					<Text color="cyan">❯ </Text>
-					<TextInput
-						value={input}
-						onChange={setInput}
-						onSubmit={(v) => {
-							void saveWebSearch("firecrawl", wsKey, v.trim() || undefined);
-						}}
-						placeholder="https://api.firecrawl.dev"
-					/>
-				</Box>
-				<Text dimColor>Esc to skip</Text>
-				{feedbackNode}
-			</Box>
-		);
-	}
+    useInput((input, key) => {
+        if (key.escape) {
+            onBack();
+            return;
+        }
+        if (key.upArrow) {
+            onFocus(moveWizardListFocus(focus, models.length, "up"));
+            return;
+        }
+        if (key.downArrow) {
+            onFocus(moveWizardListFocus(focus, models.length, "down"));
+            return;
+        }
+        if (key.leftArrow) {
+            onFocus(moveWizardListFocus(focus, models.length, "left"));
+            return;
+        }
+        if (key.rightArrow) {
+            onFocus(moveWizardListFocus(focus, models.length, "right"));
+            return;
+        }
+        if (key.return) {
+            if (focus.kind === "action") {
+                if (focus.index === 0) {
+                    const model = models[rowIndexForFocus(focus)];
+                    if (model) {
+                        onConfirm(model);
+                    }
+                } else if (focus.index === 1) {
+                    onBack();
+                }
+                return;
+            }
+            const model = models[focus.index];
+            if (model) {
+                onEdit(model);
+            }
+            return;
+        }
+        if (input.toLowerCase() === "d") {
+            const model = models[rowIndexForFocus(focus)];
+            if (model) {
+                onConfirm(model);
+            }
+        }
+    });
 
-	if (step === "providers") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					Configure model providers
-				</Text>
-				<Text dimColor>
-					Select a provider to set its API key. ✓ = configured. ↑↓ move, Enter select.
-				</Text>
-				<Box marginTop={1} flexDirection="column">
-					{loadingProviders ? (
-						<Spinner label="Loading providers…" />
-					) : (
-						providers.map((p, i) => {
-							const active = i === provCursor;
-							const configured = configuredIds.has(p.id);
-							return (
-								<Box key={p.id} gap={1} onMouseClick={() => beginProviderInput(i)}>
-									<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
-									<Text color={configured ? "green" : "white"}>
-										{configured ? "✓" : "☐"} {p.name}
-									</Text>
-									<Text dimColor>{p.type}</Text>
-								</Box>
-							);
-						})
-					)}
-					{!loadingProviders && (
-						<Box gap={1} onMouseClick={continueFromProviders}>
-							<Text color={provCursor === providers.length ? "cyan" : "gray"}>
-								{provCursor === providers.length ? "❯" : " "}
-							</Text>
-							<Text color={provCursor === providers.length ? "cyan" : "white"} bold>
-								Continue →
-							</Text>
-						</Box>
-					)}
-				</Box>
-				{feedbackNode}
-			</Box>
-		);
-	}
-
-	if (step === "webSearch") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					Web search provider
-				</Text>
-				<Text dimColor>↑↓ move, Enter select. Pick Skip to disable web search.</Text>
-				<Box marginTop={1} flexDirection="column">
-					{WS_PROVIDERS.map((ws, i) => {
-						const active = i === wsCursor;
-						return (
-							<Box key={ws.value} gap={1} onMouseClick={() => chooseWebSearch(i)}>
-								<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
-								<Text color={active ? "cyan" : "white"} bold={active}>
-									{ws.label}
-								</Text>
-							</Box>
-						);
-					})}
-					<Box gap={1} onMouseClick={skipWebSearch}>
-						<Text color={wsCursor === WS_PROVIDERS.length ? "cyan" : "gray"}>
-							{wsCursor === WS_PROVIDERS.length ? "❯" : " "}
-						</Text>
-						<Text color={wsCursor === WS_PROVIDERS.length ? "cyan" : "white"} bold>
-							Skip
-						</Text>
-					</Box>
-				</Box>
-				{feedbackNode}
-			</Box>
-		);
-	}
-
-	if (step === "models") {
-		return (
-			<Box paddingX={2} paddingY={1} flexDirection="column">
-				<Text color="magenta" bold>
-					Select chat models
-				</Text>
-				<Text dimColor>
-					Space toggles (max {MAX_MODELS}, first selected is primary). Enter to confirm.
-				</Text>
-				<Box marginTop={1} flexDirection="column">
-					{chatModels.map((m, i) => {
-						const active = i === modelCursor;
-						const rank = selectedModels.indexOf(i);
-						return (
-							<Box key={m.id} gap={1} onMouseClick={() => toggleModel(i)}>
-								<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
-								<Text color={rank >= 0 ? "green" : "white"}>
-									{rank >= 0 ? `①②③④`[rank] ?? "✓" : "☐"} {modelLabel(m)}
-								</Text>
-							</Box>
-						);
-					})}
-				</Box>
-				<Box marginTop={1}>
-					<Text color="cyan" bold onMouseClick={() => void saveAgentModels()}>[Confirm models]</Text>
-				</Box>
-				{feedbackNode}
-			</Box>
-		);
-	}
-
-	// embed
-	return (
-		<Box paddingX={2} paddingY={1} flexDirection="column">
-			<Text color="magenta" bold>
-				Select embedding model
-			</Text>
-			<Text dimColor>↑↓ move, Enter to confirm, Esc to skip.</Text>
-			<Box marginTop={1} flexDirection="column">
-				{embedModels.map((m, i) => {
-					const active = i === embedCursor;
-					return (
-						<Box
-							key={m.id}
-							gap={1}
-							onMouseClick={() => {
-								setEmbedCursor(i);
-								void saveEmbed(i);
-							}}
-						>
-							<Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
-							<Text color={active ? "cyan" : "white"} bold={active}>
-								{modelLabel(m)}
-							</Text>
-						</Box>
-					);
-				})}
-			</Box>
-			<Box marginTop={1}>
-				<Text color="gray" onMouseClick={() => void finish()}>[Skip]</Text>
-			</Box>
-			{feedbackNode}
-		</Box>
-	);
+    return (
+        <Box flexDirection="column" flexGrow={1} gap={1}>
+            <Box flexDirection="column">
+                <Text color="magenta" bold>02 / Default agent model</Text>
+                <Text dimColor>Edit each model, then choose the one used for new sessions with the default agent.</Text>
+            </Box>
+            {error ? <Text color="red">{error}</Text> : null}
+            <Box height={1} overflow="hidden">
+                <Text dimColor>
+                    {compact
+                        ? `  ${pad("Provider", providerWidth)}  Select`
+                        : `  ${pad("Provider", providerWidth)}  ${pad("Model", modelWidth)}  Context`}
+                </Text>
+            </Box>
+            <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                {models.map((model, index) => {
+                    const active = focus.kind === "row" && index === focus.index;
+                    const provider = `${model.providerName} (${model.providerSlug})`;
+                    const modelLabel = model.name && model.slug ? `${model.name} · ${model.slug}` : "Configure model";
+                    return (
+                        <Box
+                            key={model.id}
+                            height={1}
+                            overflow="hidden"
+                            onMouseOver={() => onFocus({ kind: "row", index })}
+                            onMouseClick={() => {
+                                onFocus({ kind: "row", index });
+                                onEdit(model);
+                            }}
+                        >
+                            <Text color={active ? "cyan" : "gray"}>{active ? "❯" : " "}</Text>
+                            <Text> </Text>
+                            <Box width={providerWidth}>
+                                <Text color={active ? "cyan" : "white"} bold={active} wrap="truncate">
+                                    {trunc(provider, providerWidth)}
+                                </Text>
+                            </Box>
+                            {compact ? null : (
+                                <>
+                                    <Text>  </Text>
+                                    <Box width={modelWidth}>
+                                        <Text color={active ? "cyan" : "white"} wrap="truncate">
+                                            {trunc(modelLabel, modelWidth)}
+                                        </Text>
+                                    </Box>
+                                    <Text>  </Text>
+                                </>
+                            )}
+                            <Text color={active ? "cyan" : "gray"}>{model.contextWindow.toLocaleString()}</Text>
+                        </Box>
+                    );
+                })}
+            </Box>
+            <Box gap={3} marginTop={1}>
+                <Box
+                    onMouseOver={() => onFocus({ kind: "action", index: 0, rowIndex: rowIndexForFocus(focus) })}
+                    onMouseClick={() => {
+                        const model = models[rowIndexForFocus(focus)];
+                        if (model) {
+                            onConfirm(model);
+                        }
+                    }}
+                >
+                    <Text color={focus.kind === "action" && focus.index === 0 ? "cyan" : "gray"} bold={focus.kind === "action" && focus.index === 0}>
+                        {focus.kind === "action" && focus.index === 0 ? "[Use selected model]" : " Use selected model "}
+                    </Text>
+                </Box>
+                <Box
+                    onMouseOver={() => onFocus({ kind: "action", index: 1, rowIndex: rowIndexForFocus(focus) })}
+                    onMouseClick={onBack}
+                >
+                    <Text color={focus.kind === "action" && focus.index === 1 ? "cyan" : "gray"} bold={focus.kind === "action" && focus.index === 1}>
+                        {focus.kind === "action" && focus.index === 1 ? "[Back]" : " Back "}
+                    </Text>
+                </Box>
+            </Box>
+            <Text dimColor wrap="truncate">↑↓ rows/actions · ←→ choose action · Enter select · d choose default · Esc back</Text>
+        </Box>
+    );
 }
