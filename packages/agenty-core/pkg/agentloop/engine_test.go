@@ -262,6 +262,9 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 	if got[2].Stream == nil || got[2].Stream.Delta != "streamed" {
 		t.Fatalf("text delta event = %+v", got[2])
 	}
+	if got[1].Message == nil || got[1].Message.IsHidden() {
+		t.Fatalf("user event exposed hidden metadata = %+v", got[1])
+	}
 	if got[5].Status != conversation.RoundCompleted || got[5].Usage == nil || got[5].Usage.Total != 5 {
 		t.Fatalf("terminal event = %+v", got[5])
 	}
@@ -324,7 +327,7 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 		t.Fatalf("started = %+v, rounds = %+v", started, loaded.Rounds)
 	}
 	round := loaded.Rounds[0]
-	if round.Status != conversation.RoundCompleted || len(round.Messages) != 4 {
+	if round.Status != conversation.RoundCompleted || len(round.Messages) != 5 {
 		t.Fatalf("round = %+v", round)
 	}
 	if round.Usage != (conversation.TokenUsage{Input: 30, Output: 7, Total: 37}) {
@@ -341,8 +344,15 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	if requests[0].MaxOutputTokens != agentloop.DefaultMaxOutputTokens {
 		t.Errorf("max output tokens = %d, want %d", requests[0].MaxOutputTokens, agentloop.DefaultMaxOutputTokens)
 	}
-	if len(requests[0].Messages) != 1 || len(requests[1].Messages) != 3 {
-		t.Errorf("request message counts = %d, %d", len(requests[0].Messages), len(requests[1].Messages))
+	if len(requests[0].Messages) != 2 || len(requests[1].Messages) != 4 {
+		t.Fatalf("request message counts = %d, %d", len(requests[0].Messages), len(requests[1].Messages))
+	}
+	if !requests[0].Messages[0].IsHidden() || requests[0].Messages[1].IsHidden() {
+		t.Errorf("first request message visibility = %+v", requests[0].Messages[:2])
+	}
+	metadataText, ok := requests[0].Messages[0].Content[0].(conversation.TextBlock)
+	if !ok || !strings.Contains(metadataText.Text, "<model>gpt-5</model>") {
+		t.Errorf("first metadata message = %+v", requests[0].Messages[0])
 	}
 	if len(requests[0].Tools) != 1 || requests[0].Tools[0].Name != "lookup" {
 		t.Errorf("request tools = %+v", requests[0].Tools)
@@ -350,7 +360,7 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	if !strings.Contains(requests[0].SystemPrompt, "Be precise.") {
 		t.Errorf("system prompt does not contain soul: %q", requests[0].SystemPrompt)
 	}
-	toolResults := toolResultBlocks(round.Messages[2].Content)
+	toolResults := toolResultBlocks(round.Messages[3].Content)
 	if len(toolResults) != 1 || toolResults[0].ToolUseID != "call-1" || toolResults[0].IsError {
 		t.Errorf("tool results = %+v", toolResults)
 	}
@@ -377,6 +387,62 @@ func TestEngineUsesSmallerModelOutputLimit(t *testing.T) {
 	requests := caller.Requests()
 	if len(requests) != 1 || requests[0].MaxOutputTokens != 8_192 {
 		t.Fatalf("requests = %+v, want maxOutputTokens 8192", requests)
+	}
+}
+
+func TestEngineAppendsOnlyChangedMetadataAfterTheFirstRound(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	caller := &scriptedCaller{responses: []*agentloop.Response{
+		{Content: conversation.Text("first"), StopReason: agentloop.StopReasonEndTurn},
+		{Content: conversation.Text("second"), StopReason: agentloop.StopReasonEndTurn},
+	}}
+	engine := fixture.newEngine(t, func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+		return caller, nil
+	})
+	session := fixture.createSession(t)
+
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("first input")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	updated, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated.SetCwd(ptr("/workspace/two"))
+	updated.SetReasoningEffort(shared.ReasoningMax)
+	if err := fixture.sessions.Save(t.Context(), updated); err != nil {
+		t.Fatal(err)
+	}
+	updated.ClearPending()
+
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("second input")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	if len(requests[1].Messages) != 5 {
+		t.Fatalf("second request message count = %d, want 5", len(requests[1].Messages))
+	}
+	metadata, ok := requests[1].Messages[3].Content[0].(conversation.TextBlock)
+	if !ok {
+		t.Fatalf("second metadata message = %+v", requests[1].Messages[3])
+	}
+	if !strings.Contains(metadata.Text, "<cwd>/workspace/two</cwd>") ||
+		!strings.Contains(metadata.Text, "<reasoning-effort>max</reasoning-effort>") {
+		t.Errorf("second metadata = %q", metadata.Text)
+	}
+	for _, unchanged := range []string{"<model>", "<provider>", "<timezone>"} {
+		if strings.Contains(metadata.Text, unchanged) {
+			t.Errorf("second metadata unexpectedly contains %q: %q", unchanged, metadata.Text)
+		}
 	}
 }
 

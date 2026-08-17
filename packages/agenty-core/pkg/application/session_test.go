@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
@@ -56,6 +57,45 @@ func TestSessionCreateAndGet(t *testing.T) {
 	}
 	if got.CurrentReasoningEffort != shared.ReasoningHigh {
 		t.Errorf("reasoning effort = %s, want high", got.CurrentReasoningEffort)
+	}
+}
+
+func TestSessionGetFiltersHiddenMetadataMessages(t *testing.T) {
+	repo := newSessionRepositoryFake()
+	sessionSvc := application.NewSessionService(repo)
+	session := conversation.StartSession(
+		"coder",
+		shared.NewModelRef("anthropic", "claude-opus-4-8"),
+		200_000,
+		shared.ReasoningHigh,
+		ptr("/tmp/work"),
+	)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenUserMessage(
+		roundID,
+		conversation.Text("<metadata><cwd>/tmp/work</cwd></metadata>"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, conversation.Text("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := sessionSvc.Get(t.Context(), session.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rounds) != 1 || len(got.Rounds[0].Messages) != 1 {
+		t.Fatalf("visible messages = %+v, want one message", got.Rounds[0].Messages)
+	}
+	if got.Rounds[0].Messages[0].IsHidden() {
+		t.Errorf("public message is hidden: %+v", got.Rounds[0].Messages[0])
 	}
 }
 

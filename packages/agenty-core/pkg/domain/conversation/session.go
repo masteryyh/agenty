@@ -29,7 +29,8 @@ type Session struct {
 	CreatedAt              time.Time              `json:"createdAt"`
 	UpdatedAt              time.Time              `json:"updatedAt"`
 
-	pending []shared.Event
+	pending  []shared.Event
+	metadata *SessionMetadata
 }
 
 func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
@@ -87,6 +88,17 @@ func (s *Session) StartRound() (uuid.UUID, error) {
 }
 
 func (s *Session) AppendMessage(roundID uuid.UUID, role Role, content Content, model *shared.ModelRef, usage *TokenUsage) (Message, error) {
+	return s.appendMessage(roundID, role, content, model, usage, MessageVisible)
+}
+
+func (s *Session) appendMessage(
+	roundID uuid.UUID,
+	role Role,
+	content Content,
+	model *shared.ModelRef,
+	usage *TokenUsage,
+	visibility MessageVisibility,
+) (Message, error) {
 	if !role.Valid() {
 		return Message{}, ErrInvalidRole
 	}
@@ -100,13 +112,14 @@ func (s *Session) AppendMessage(roundID uuid.UUID, role Role, content Content, m
 	}
 
 	msg := Message{
-		ID:        shared.NewID(),
-		RoundID:   roundID,
-		Role:      role,
-		Content:   content,
-		Model:     model,
-		Usage:     usage,
-		CreatedAt: now(),
+		ID:         shared.NewID(),
+		RoundID:    roundID,
+		Role:       role,
+		Visibility: visibility,
+		Content:    content,
+		Model:      model,
+		Usage:      usage,
+		CreatedAt:  now(),
 	}
 	s.record(MessageAppended{
 		SessionID: s.ID,
@@ -118,6 +131,10 @@ func (s *Session) AppendMessage(roundID uuid.UUID, role Role, content Content, m
 
 func (s *Session) AppendUserMessage(roundID uuid.UUID, content Content) (Message, error) {
 	return s.AppendMessage(roundID, RoleUser, content, nil, nil)
+}
+
+func (s *Session) AppendHiddenUserMessage(roundID uuid.UUID, content Content) (Message, error) {
+	return s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
 }
 
 func (s *Session) AppendAssistantMessage(roundID uuid.UUID, content Content, model shared.ModelRef, usage *TokenUsage) (Message, error) {
@@ -158,6 +175,27 @@ func (s *Session) PendingEvents() []shared.Event {
 
 func (s *Session) ClearPending() {
 	s.pending = nil
+}
+
+func (s *Session) VisibleCopy() *Session {
+	copy := *s
+	copy.Rounds = make([]Round, len(s.Rounds))
+	if s.metadata != nil {
+		metadata := *s.metadata
+		copy.metadata = &metadata
+	}
+	for index, round := range s.Rounds {
+		copy.Rounds[index] = round
+		copy.Rounds[index].Messages = make([]Message, 0, len(round.Messages))
+		for _, message := range round.Messages {
+			if message.IsHidden() {
+				continue
+			}
+			copy.Rounds[index].Messages = append(copy.Rounds[index].Messages, message)
+		}
+	}
+	copy.pending = nil
+	return &copy
 }
 
 func ReplaySession(events []shared.Event) *Session {
@@ -213,6 +251,7 @@ func (s *Session) apply(e shared.Event) {
 		if r, _, ok := s.findRound(ev.Message.RoundID); ok {
 			r.Messages = append(r.Messages, ev.Message)
 		}
+		s.applyMessageMetadata(ev.Message)
 		s.UpdatedAt = ev.At
 	case RoundEnded:
 		if r, _, ok := s.findRound(ev.RoundID); ok {

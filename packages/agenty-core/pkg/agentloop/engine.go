@@ -326,6 +326,18 @@ func (engine *Engine) prepare(
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to start round", err)
 	}
+	round := session.Rounds[len(session.Rounds)-1]
+
+	metadata, err := metadataForRound(session, round)
+	if err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to build session metadata", err)
+	}
+	if len(metadata) > 0 {
+		if _, err := session.AppendHiddenUserMessage(roundID, metadata); err != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to append session metadata", err)
+		}
+	}
+
 	userMessage, err := session.AppendUserMessage(roundID, content)
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to append user message", err)

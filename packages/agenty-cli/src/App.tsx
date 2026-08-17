@@ -1,5 +1,5 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { ChatSessionDto, ModelDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
@@ -19,7 +19,6 @@ import { useCommandPalette } from "./hooks/useCommandPalette";
 import { type OverlayKind, useAppStore } from "./state/store";
 import { useTuiRuntime } from "./tui/runtime";
 
-const LOGO_HEIGHT = 5;
 const INPUT_HEIGHT = 4;
 const PROVIDER_OVERLAY_HEIGHT = 18;
 const AGENTS_OVERLAY_HEIGHT = 18;
@@ -64,16 +63,8 @@ export function App() {
         }
     });
 
-    useEffect(() => {
-        void app.init();
-    }, [app.init]);
-
     if (app.phase === "loading") {
-        return (
-            <Box padding={1}>
-                <Text color="cyan">Starting local agenty core…</Text>
-            </Box>
-        );
+        return null;
     }
 
     if (app.phase === "wizard") {

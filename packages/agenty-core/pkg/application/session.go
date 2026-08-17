@@ -86,7 +86,7 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 		return nil, Internal("failed to save session: " + err.Error())
 	}
 	session.ClearPending()
-	return session, nil
+	return session.VisibleCopy(), nil
 }
 
 func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.Session, error) {
@@ -102,7 +102,7 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 		}
 		return nil, Internal("failed to load session: " + err.Error())
 	}
-	return sess, nil
+	return sess.VisibleCopy(), nil
 }
 
 type SessionListQuery struct {
@@ -231,5 +231,5 @@ func (s *SessionService) saveUpdated(ctx context.Context, sess *conversation.Ses
 		return nil, Internal("failed to save session: " + err.Error())
 	}
 	sess.ClearPending()
-	return sess, nil
+	return sess.VisibleCopy(), nil
 }

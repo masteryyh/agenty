@@ -11,6 +11,8 @@ const command = await runCLICommand(process.argv.slice(2));
 if (command.handled) {
     process.exitCode = command.exitCode;
 } else {
+    await useAppStore.getState().init();
+
     let resolveDestroyed!: () => void;
     const destroyed = new Promise<void>((resolve) => {
         resolveDestroyed = resolve;
