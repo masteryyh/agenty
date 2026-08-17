@@ -5,11 +5,135 @@ package e2e_test
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
+
+func TestSessionMetadataIsPersistedButHiddenFromClients(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
+		return providerSuccess("openai_completions", "metadata reply", request.Call)
+	})
+	dataDir := t.TempDir()
+	ctx, cancel := testContext(t)
+	defer cancel()
+	process := startCoreAt(t, dataDir, coreEnv(dataDir))
+	client := newAgentyClient(process)
+
+	session, err := createExecutionResources(
+		ctx,
+		client,
+		fixture,
+		"openai_completions",
+		"metadata",
+	)
+	requireNoError(t, err)
+	_, err = client.SetSessionCwd(ctx, session.ID, stringPointer("/workspace/metadata"))
+	requireNoError(t, err)
+	started, err := client.StartSession(ctx, session.ID, []ContentInput{{
+		Type: "text",
+		Text: "hello",
+	}})
+	requireNoError(t, err)
+	completed, err := client.WaitForRoundStatus(ctx, session.ID, started.RoundID, "completed")
+	requireNoError(t, err)
+
+	request := waitForProviderCall(t, ctx, fixture.requests, 1)
+	messages := providerMessages(request)
+	if len(messages) != 3 {
+		t.Fatalf("provider messages = %+v, want system, metadata and user messages", messages)
+	}
+	systemText := providerMessageContent(messages[0])
+	for _, dynamicValue := range []string{
+		"<cwd>/workspace/metadata</cwd>",
+		"<model>metadata-model</model>",
+		"<provider>metadata-provider</provider>",
+		"<reasoning-effort>off</reasoning-effort>",
+	} {
+		if strings.Contains(systemText, dynamicValue) {
+			t.Errorf("system prompt contains dynamic metadata %q: %q", dynamicValue, systemText)
+		}
+	}
+	metadataText := providerMessageContent(messages[1])
+	if !strings.Contains(metadataText, "<metadata>") ||
+		!strings.Contains(metadataText, "<cwd>/workspace/metadata</cwd>") ||
+		!strings.Contains(metadataText, "<model>metadata-model</model>") ||
+		!strings.Contains(metadataText, "<provider>metadata-provider</provider>") {
+		t.Fatalf("provider metadata message = %q", metadataText)
+	}
+	if got := providerMessageContent(messages[2]); got != "hello" {
+		t.Fatalf("provider user message = %q, want hello after metadata", got)
+	}
+
+	if len(completed.Rounds) != 1 || len(completed.Rounds[0].Messages) != 2 {
+		t.Fatalf("public completed session = %+v, want metadata hidden", completed)
+	}
+	for _, message := range completed.Rounds[0].Messages {
+		for _, block := range message.Content {
+			if strings.Contains(block.Text, "<metadata>") {
+				t.Fatalf("public session exposed metadata message = %+v", message)
+			}
+		}
+	}
+
+	paths, err := filepath.Glob(filepath.Join(dataDir, "sessions", "*", "*", "*", session.ID+".jsonl"))
+	requireNoError(t, err)
+	if len(paths) != 1 {
+		t.Fatalf("transcript paths = %v, want one JSONL transcript", paths)
+	}
+	transcript, err := os.ReadFile(paths[0])
+	requireNoError(t, err)
+	transcriptText := string(transcript)
+	if !strings.Contains(transcriptText, `"visibility":"hidden"`) ||
+		!strings.Contains(transcriptText, "<metadata>") ||
+		!strings.Contains(transcriptText, "hello") {
+		t.Fatalf("transcript does not contain hidden metadata and user message: %s", transcriptText)
+	}
+}
+
+func providerMessages(request providerRequest) []map[string]any {
+	values, ok := request.Body["messages"].([]any)
+	if !ok {
+		return nil
+	}
+	messages := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		message, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func providerMessageContent(message map[string]any) string {
+	content := message["content"]
+	switch value := content.(type) {
+	case string:
+		return value
+	case []any:
+		var builder strings.Builder
+		for _, part := range value {
+			partMap, ok := part.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := partMap["text"].(string); ok {
+				builder.WriteString(text)
+			}
+		}
+		return builder.String()
+	default:
+		return ""
+	}
+}
 
 func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 	t.Parallel()
