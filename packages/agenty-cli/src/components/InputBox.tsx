@@ -40,6 +40,7 @@ interface InputBoxProps {
     phrase: string | null;
     modelName: string;
     cwd: string;
+    contextWindow: number;
     tokenConsumed: number;
     thinkingLevel: string;
     reasoningActive: boolean;
@@ -57,6 +58,7 @@ export function InputBox({
     phrase,
     modelName,
     cwd,
+    contextWindow,
     tokenConsumed,
     thinkingLevel,
     reasoningActive,
@@ -146,7 +148,7 @@ export function InputBox({
                     ) : null}
                 </Box>
                 <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden" />
-                <Text color="gray" dimColor>{`tokens: ${tokenConsumed}`}</Text>
+                <Text color="gray" dimColor>{`context: ${contextWindow}/${tokenConsumed}`}</Text>
             </Box>
         </Box>
     );

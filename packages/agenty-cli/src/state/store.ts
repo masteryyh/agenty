@@ -5,6 +5,7 @@ import type {
     AgentDto,
     ChatMessageDto,
     ChatSessionDto,
+    CompactionEvent,
     ContentBlock,
     ModelDto,
     ReasoningEffort,
@@ -16,8 +17,10 @@ import { loadOptions, parseThinking } from "../config";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
 import { startLocalCore } from "../localCore";
 
-export type MessageStatus = "idle" | "streaming" | "error";
+export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
 export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "agents" | "status" | null;
+export type SystemMessageVariant = "compacted";
+const TOAST_DURATION_MS = 3000;
 
 export interface ToastMsg {
     text: string;
@@ -41,6 +44,7 @@ export interface UIMessage {
     reasoningDurationMillis?: number;
     toolCalls?: UIToolCall[];
     error?: boolean;
+    systemVariant?: SystemMessageVariant;
 }
 
 type Phase = "loading" | "error" | "wizard" | "ready";
@@ -68,6 +72,7 @@ interface AppState {
     init: () => Promise<void>;
     finishWizard: () => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
+    compactSession: () => Promise<void>;
     abort: () => void;
     reset: () => void;
     newSession: () => Promise<void>;
@@ -171,8 +176,17 @@ function buildHistory(session: ChatSessionDto): UIMessage[] {
     return history;
 }
 
-function sessionTokens(session: ChatSessionDto): number {
-    return (session.rounds ?? []).reduce((total, round) => total + (round.usage?.total ?? 0), 0);
+function actualContextSize(session: ChatSessionDto): number {
+    for (let roundIndex = (session.rounds ?? []).length - 1; roundIndex >= 0; roundIndex -= 1) {
+        const messages = session.rounds[roundIndex]?.messages ?? [];
+        for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+            const message = messages[messageIndex];
+            if (message.role === "assistant" && message.usage) {
+                return message.usage.input + message.usage.output;
+            }
+        }
+    }
+    return 0;
 }
 
 function reasoningEffort(enabled: boolean, level: string): ReasoningEffort {
@@ -195,9 +209,19 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ current: null });
     };
 
-    const pushSystem = (text: string, error = false) => {
+    const pushSystem = (
+        text: string,
+        error = false,
+        systemVariant?: SystemMessageVariant,
+    ) => {
         set((state) => ({
-            history: [...state.history, { id: nextId(), role: "system", content: text, error }],
+            history: [...state.history, {
+                id: nextId(),
+                role: "system",
+                content: text,
+                error,
+                systemVariant,
+            }],
         }));
     };
 
@@ -205,7 +229,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ toast: { text, error } });
         setTimeout(() => {
             set((state) => state.toast?.text === text ? { toast: null } : {});
-        }, 5000);
+        }, TOAST_DURATION_MS);
     };
 
     const handleEvent = (event: SessionEvent) => {
@@ -291,12 +315,36 @@ export const useAppStore = create<AppState>((set, get) => {
                         history = [...history, finalizeReasoning(current)];
                         current = newAssistantMessage();
                     }
+                    const contextSize = event.message?.usage
+                        ? event.message.usage.input + event.message.usage.output
+                        : state.tokenConsumed;
                     if (hasContent(current)) {
-                        return { history };
+                        return { history, tokenConsumed: contextSize };
                     }
-                    return { history, current: messageToUI(event.message!) };
+                    return { history, current: messageToUI(event.message!), tokenConsumed: contextSize };
                 });
             }
+        }
+    };
+
+    const handleCompactionEvent = (event: CompactionEvent) => {
+        if (event.sessionId !== get().session?.id) {
+            return;
+        }
+        if (event.type === "started") {
+            flushCurrent();
+            set({
+                status: "compacting",
+                phrase: "Session compacting...",
+                activeSessionId: event.sessionId,
+            });
+        } else if (event.type === "failed" && event.error) {
+            pushSystem(`Session compaction failed: ${event.error}`, true);
+        } else if (event.type === "completed") {
+            if (get().status === "compacting") {
+                set({ status: "streaming", phrase: pickStreamingPhrase() });
+            }
+            pushSystem("Session compacted.", false, "compacted");
         }
     };
 
@@ -315,7 +363,7 @@ export const useAppStore = create<AppState>((set, get) => {
             model: prepared.model,
             session: prepared.session,
             history: buildHistory(prepared.session),
-            tokenConsumed: sessionTokens(prepared.session),
+            tokenConsumed: actualContextSize(prepared.session),
             thinkingEnabled: parsed.thinking,
             thinkingLevel: parsed.thinkingLevel,
             initError: null,
@@ -349,6 +397,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 const local = await startLocalCore({ dataDir: options.dataDir });
                 const client = new AgentyClient(local.rpc);
                 set({ client, _localCoreStop: local.stop });
+                client.onCompactionEvent(handleCompactionEvent);
                 if (!(await client.isInitialized())) {
                     set({ phase: "wizard", initError: null });
                     return;
@@ -374,7 +423,7 @@ export const useAppStore = create<AppState>((set, get) => {
         sendMessage: async (text) => {
             const trimmed = text.trim();
             const state = get();
-            if (!trimmed || state.status === "streaming" || !state.client || !state.session) {
+            if (!trimmed || (state.status !== "idle" && state.status !== "error") || !state.client || !state.session) {
                 return;
             }
             const { client, session } = state;
@@ -422,7 +471,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     pushSystem(message, true);
                 }
                 const updated = await client.getSession(session.id);
-                set({ session: updated, tokenConsumed: sessionTokens(updated) });
+                set({ session: updated, tokenConsumed: actualContextSize(updated) });
             } catch (error) {
                 const message = (error as Error).message;
                 set({ chatError: message });
@@ -431,6 +480,25 @@ export const useAppStore = create<AppState>((set, get) => {
                 unsubscribe();
                 unsubscribeClose();
                 flushCurrent();
+                set({ status: "idle", phrase: null, activeSessionId: null });
+            }
+        },
+
+        compactSession: async () => {
+            const { client, session, status } = get();
+            if (!client || !session || (status !== "idle" && status !== "error")) {
+                return;
+            }
+            set({ status: "compacting", phrase: "Session compacting...", activeSessionId: session.id, chatError: null });
+            try {
+                await client.compactSession(session.id);
+                const updated = await client.getSession(session.id);
+                set({ session: updated, tokenConsumed: actualContextSize(updated) });
+            } catch (error) {
+                const message = (error as Error).message;
+                set({ chatError: message });
+                pushSystem(`Session compaction failed: ${message}`, true);
+            } finally {
                 set({ status: "idle", phrase: null, activeSessionId: null });
             }
         },
@@ -480,9 +548,18 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const updated = await client.setSessionModel(session.id, model);
-                set({ model, session: updated, overlay: null });
+                set({
+                    model,
+                    session: updated,
+                    tokenConsumed: actualContextSize(updated),
+                    overlay: null,
+                    status: "idle",
+                    phrase: null,
+                    activeSessionId: null,
+                });
                 setToast(`Switched to ${model.providerName}/${model.name}`);
             } catch (error) {
+                set({ status: "idle", phrase: null, activeSessionId: null });
                 pushSystem(`switch model failed: ${(error as Error).message}`, true);
             }
         },
@@ -497,7 +574,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 const model = full.currentModel
                     ? await client.resolveModel(`${full.currentModel.providerSlug}/${full.currentModel.modelSlug}`)
                     : get().model;
-                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: sessionTokens(full), overlay: null });
+                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
             } catch (error) {
                 pushSystem(`resume failed: ${(error as Error).message}`, true);
             }
@@ -513,7 +590,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     ? await client.resolveModel(`${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}`)
                     : await client.getDefaultModel();
                 const session = await client.getLastSessionByAgent(agent.slug) ?? await client.createSession(agent.slug, model);
-                set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: sessionTokens(session), overlay: null });
+                set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: actualContextSize(session), overlay: null });
                 setToast(`Switched to agent: ${agent.name}`);
             } catch (error) {
                 pushSystem(`switch agent failed: ${(error as Error).message}`, true);

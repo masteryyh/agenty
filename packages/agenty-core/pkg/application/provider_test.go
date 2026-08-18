@@ -135,8 +135,8 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	if effort, ok := p.Models[0].MapReasoningEffort("high"); !ok || effort != shared.ReasoningHigh {
 		t.Errorf("mapped high effort = %q, %v; want high, true", effort, ok)
 	}
-	if p.Models[0].MaxOutputTokens != 32_000 {
-		t.Errorf("max output tokens = %d, want 32000", p.Models[0].MaxOutputTokens)
+	if p.Models[0].MaxOutputTokens != catalog.DefaultMaxOutputTokens {
+		t.Errorf("max output tokens = %d, want %d", p.Models[0].MaxOutputTokens, catalog.DefaultMaxOutputTokens)
 	}
 
 	// AddModel is upsert: re-adding the same slug replaces.
@@ -239,7 +239,7 @@ func TestProviderAddModelRejectsInvalidReasoningEffortMapping(t *testing.T) {
 	}
 }
 
-func TestProviderAddModelRejectsInvalidMaxOutputTokens(t *testing.T) {
+func TestProviderAddModelUsesGlobalMaxOutputTokens(t *testing.T) {
 	t.Parallel()
 
 	_, providerSvc, _ := newServices(t)
@@ -249,12 +249,15 @@ func TestProviderAddModelRejectsInvalidMaxOutputTokens(t *testing.T) {
 	}
 
 	for _, maxOutputTokens := range []int64{0, -1} {
-		_, err := providerSvc.AddModel(ctx, "openai", "gpt-5", application.ModelInput{
+		provider, err := providerSvc.AddModel(ctx, "openai", "gpt-5", application.ModelInput{
 			Name:            "GPT-5",
 			MaxOutputTokens: maxOutputTokens,
 		})
-		if code := appErrorCode(err); code != application.CodeValidation {
-			t.Errorf("maxOutputTokens %d code = %v, want validation", maxOutputTokens, code)
+		if err != nil {
+			t.Fatalf("maxOutputTokens %d: %v", maxOutputTokens, err)
+		}
+		if provider.Models[0].MaxOutputTokens != catalog.DefaultMaxOutputTokens {
+			t.Errorf("maxOutputTokens %d persisted as %d", maxOutputTokens, provider.Models[0].MaxOutputTokens)
 		}
 	}
 }

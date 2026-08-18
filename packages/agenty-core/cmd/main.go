@@ -83,6 +83,9 @@ func run() (exitCode int) {
 		Events: func(eventCtx context.Context, event agentloop.SessionEvent) error {
 			return srv.Notify(eventCtx, "session.event", event)
 		},
+		Compactions: func(eventCtx context.Context, event agentloop.CompactionEvent) error {
+			return srv.Notify(eventCtx, "session.compaction", event)
+		},
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to initialize execution engine", "error", err)

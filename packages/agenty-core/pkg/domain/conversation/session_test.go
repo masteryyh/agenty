@@ -3,6 +3,8 @@ package conversation
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,7 +35,7 @@ func TestSessionEmptyRoundsEncodeAsArray(t *testing.T) {
 		t.Errorf("rounds = %s, want []", got)
 	}
 
-	replayed := ReplaySession(session.PendingEvents())
+	replayed := ReplaySession(roundTripEvents(t, session.PendingEvents()))
 	replayedEncoded, err := json.Marshal(replayed)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +79,7 @@ func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 		t.Errorf("second round snapshot = %+v", got)
 	}
 
-	replayed := ReplaySession(session.PendingEvents())
+	replayed := ReplaySession(roundTripEvents(t, session.PendingEvents()))
 	if replayed.CurrentModel == nil || *replayed.CurrentModel != model2 || replayed.ContextWindow != 128_000 {
 		t.Errorf("replayed model configuration = %+v, %d", replayed.CurrentModel, replayed.ContextWindow)
 	}
@@ -124,6 +126,154 @@ func TestSessionLifecycleAndReplay(t *testing.T) {
 	summary := replayed.Summary()
 	if summary.Title != "greeting" || summary.LastProviderSlug != "anthropic" || summary.LastModelSlug != "claude-opus-4" {
 		t.Errorf("summary = %+v", summary)
+	}
+}
+
+func TestSessionCompactionReplacesOnlyEffectiveContext(t *testing.T) {
+	t.Parallel()
+
+	model := shared.NewModelRef("anthropic", "claude-opus")
+	session := StartSession("coder", model, 200_000, shared.ReasoningOff, nil)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, Text("goal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendAssistantMessage(roundID, Text("implemented"), model, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenUserMessage(roundID, Text("<metadata><model>claude-opus</model></metadata>")); err != nil {
+		t.Fatal(err)
+	}
+	rawRounds := len(session.Rounds[0].Messages)
+	if _, err := session.Compact(CompactionInput{
+		Trigger: CompactionTriggerManual,
+		Summary: "Task goals: goal\nCompleted: implemented",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(session.Rounds[0].Messages) != rawRounds {
+		t.Fatalf("raw round messages = %d, want %d", len(session.Rounds[0].Messages), rawRounds)
+	}
+	context := session.ContextMessages()
+	if len(context) != 4 || context[0].Role != RoleUser || !context[1].IsHidden() || !context[2].IsHidden() || context[3].Role != RoleAssistant {
+		t.Fatalf("effective context = %+v", context)
+	}
+	if got, _ := context[0].Content[0].(TextBlock); got.Text != "goal" {
+		t.Errorf("retained user context = %+v", context[0])
+	}
+	if kind, _ := context[1].Metadata["compactionKind"].(string); kind != "summary" {
+		t.Errorf("summary context kind = %q", kind)
+	}
+	if kind, _ := context[2].Metadata["compactionKind"].(string); kind != "metadata" {
+		t.Errorf("metadata context kind = %q", kind)
+	}
+
+	replayed := ReplaySession(roundTripEvents(t, session.PendingEvents()))
+	if len(replayed.Rounds[0].Messages) != rawRounds || len(replayed.ContextMessages()) != 4 {
+		t.Fatalf("replayed rounds/context = %d/%d", len(replayed.Rounds[0].Messages), len(replayed.ContextMessages()))
+	}
+	if replayed.ContextMessages()[0].Role != RoleUser || replayed.ContextMessages()[1].Metadata["compactionKind"] != "summary" {
+		t.Fatalf("replayed context order = %+v", replayed.ContextMessages())
+	}
+}
+
+func TestSessionCompactionMetadataTracksModelChangesInPlace(t *testing.T) {
+	t.Parallel()
+
+	model := shared.NewModelRef("anthropic", "claude-opus")
+	session := StartSession("coder", model, 200_000, shared.ReasoningOff, nil)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, Text("goal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenUserMessage(roundID, Text("<metadata><model>old</model></metadata>")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Compact(CompactionInput{Trigger: CompactionTriggerModelSwitch, Summary: "summary"}); err != nil {
+		t.Fatal(err)
+	}
+	session.SetModel(shared.NewModelRef("anthropic", "new"), 200_000)
+
+	context := session.ContextMessages()
+	if len(context) != 3 || context[0].Role != RoleUser || context[1].Metadata["compactionKind"] != "summary" || context[2].Metadata["compactionKind"] != "metadata" {
+		t.Fatalf("context = %+v, want user, summary, metadata", context)
+	}
+	if got := context[2].Content[0].(TextBlock).Text; !strings.Contains(got, "<model>new</model>") {
+		t.Errorf("refreshed metadata = %q", got)
+	}
+	metadata := session.LastMetadata()
+	if metadata == nil || metadata.Model != "new" {
+		t.Fatalf("cached metadata = %+v", metadata)
+	}
+
+	replayed := ReplaySession(roundTripEvents(t, session.PendingEvents()))
+	if got := replayed.ContextMessages()[2].Content[0].(TextBlock).Text; !strings.Contains(got, "<model>new</model>") {
+		t.Errorf("replayed metadata = %q", got)
+	}
+}
+
+func TestSessionCompactionRetainsThreeUsersBeforeSummaryAndFiveAssistantsAfter(t *testing.T) {
+	t.Parallel()
+
+	model := shared.NewModelRef("anthropic", "claude-opus")
+	session := StartSession("coder", model, 200_000, shared.ReasoningOff, nil)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenUserMessage(roundID, Text("<metadata><model>claude-opus</model></metadata>")); err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= 6; index++ {
+		if _, err := session.AppendUserMessage(roundID, Text(fmt.Sprintf("user-%d", index))); err != nil {
+			t.Fatal(err)
+		}
+		assistantContent := Text(fmt.Sprintf("assistant-%d", index))
+		if index == 6 {
+			assistantContent = Content{
+				ReasoningBlock{Reasoning: "private"},
+				ToolUseBlock{ID: "lookup", Name: "read_file", Input: shared.RawJSON(`{"path":"README.md"}`)},
+				TextBlock{Text: "assistant-6"},
+			}
+		}
+		if _, err := session.AppendAssistantMessage(roundID, assistantContent, model, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := session.AppendUserMessage(roundID, Content{
+		ToolResultBlock{ToolUseID: "lookup", Content: Text("tool output")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := session.Compact(CompactionInput{Trigger: CompactionTriggerManual, Summary: "summary"}); err != nil {
+		t.Fatal(err)
+	}
+	context := session.ContextMessages()
+	if len(context) != 10 {
+		t.Fatalf("context length = %d, want 10", len(context))
+	}
+	for index := 0; index < 3; index++ {
+		message := context[index]
+		if message.Role != RoleUser || message.Content[0].(TextBlock).Text != fmt.Sprintf("user-%d", index+4) {
+			t.Errorf("retained user[%d] = %+v", index, message)
+		}
+	}
+	if context[3].Metadata["compactionKind"] != "summary" || context[4].Metadata["compactionKind"] != "metadata" {
+		t.Fatalf("synthetic context order = %+v", context[3:5])
+	}
+	for index := 0; index < 5; index++ {
+		message := context[index+5]
+		if message.Role != RoleAssistant || message.Content[0].(TextBlock).Text != fmt.Sprintf("assistant-%d", index+2) {
+			t.Errorf("retained assistant[%d] = %+v", index, message)
+		}
 	}
 }
 
@@ -175,6 +325,24 @@ func TestSessionRejectsInvalidTransitions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func roundTripEvents(t *testing.T, events []shared.Event) []shared.Event {
+	t.Helper()
+
+	decoded := make([]shared.Event, 0, len(events))
+	for index, event := range events {
+		line, err := shared.EncodeEvent(int64(index+1), event)
+		if err != nil {
+			t.Fatalf("encode event %d: %v", index, err)
+		}
+		replayed, err := DecodeEventLine(line)
+		if err != nil {
+			t.Fatalf("decode event %d: %v", index, err)
+		}
+		decoded = append(decoded, replayed)
+	}
+	return decoded
 }
 
 func TestSessionCompleteRoundTerminalStatuses(t *testing.T) {

@@ -133,7 +133,7 @@ E2E system 将 core 视为由 stdin、stdout、stderr、退出码和公开 provi
 黑箱。完整用户旅程通过 typed client 创建和修改 Agent、Provider/Model 与 Session，跨进程
 连续执行多轮会话，再通过 IPC 查询持久化结果；不会断言 SQLite、JSONL 或 repository 的
 物理布局。Provider fixtures 覆盖 OpenAI Responses、OpenAI Chat Completions、Anthropic
-Messages 和 Google GenAI，并验证 65,536 输出 token 裁剪、上游失败、同一 IPC client 的
+Messages 和 Google GenAI，并验证 8,192 输出 token 裁剪、上游失败、同一 IPC client 的
 并发 session、重复启动/运行中删除拒绝、stop 取消和运行中进程退出后的恢复状态。
 
 当前 28 个公开 methods 由用户旅程统一覆盖：Initialize 2 个、Agent 5 个、Provider 7 个、

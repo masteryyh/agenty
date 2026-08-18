@@ -255,8 +255,8 @@ func TestAdapterProviderAddModel(t *testing.T) {
 		t.Errorf("models = %d, want 1", len(models))
 	}
 	model := models[0].(map[string]any)
-	if model["maxOutputTokens"] != float64(32000) {
-		t.Errorf("maxOutputTokens = %v, want 32000", model["maxOutputTokens"])
+	if model["maxOutputTokens"] != float64(8192) {
+		t.Errorf("maxOutputTokens = %v, want 8192", model["maxOutputTokens"])
 	}
 }
 

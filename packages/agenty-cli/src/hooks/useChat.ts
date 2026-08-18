@@ -10,6 +10,7 @@ export interface ChatSlice {
     tokenConsumed: number;
     phrase: string | null;
     sendMessage: (text: string) => Promise<void>;
+    compactSession: () => Promise<void>;
     abort: () => void;
 }
 
@@ -23,6 +24,7 @@ export function useChat(): ChatSlice {
             tokenConsumed: s.tokenConsumed,
             phrase: s.phrase,
             sendMessage: s.sendMessage,
+            compactSession: s.compactSession,
             abort: s.abort,
         })),
     );

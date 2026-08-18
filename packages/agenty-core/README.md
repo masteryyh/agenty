@@ -75,11 +75,22 @@ model-calling contract, tool contract, JSON Schema, thread-safe tool registry, a
 session permits one active round, and `Engine` owns cancellation and shutdown for all
 active rounds.
 
-Each loop resolves the Agent system prompt, rebuilds the complete conversation history,
+Each loop resolves the Agent system prompt, rebuilds the effective conversation context,
 converts it through the selected provider adapter, invokes the LLM, persists the
-assistant response, and repeats when tool calls are returned. A model stores its own
-`maxOutputTokens`; each invocation defaults to
-`min(65536, model.maxOutputTokens)`. The loop currently permits at most 20 LLM/tool
+assistant response, and repeats when tool calls are returned. Every model invocation uses
+the global `8192` output-token limit; the legacy per-model field is ignored and retained
+only for wire compatibility. Automatic compaction runs when the estimated context reaches
+`contextWindow * 90%`. `/compact` triggers the same flow
+manually. Compaction stores only the generated summary and compaction audit data in a
+`session_compacted` event. During replay and request construction, the effective model
+context is rebuilt from the transcript as up to three recent user messages, the summary,
+metadata, and up to five recent assistant messages; the original JSONL transcript remains
+unchanged. Reasoning and unresolved tool-use blocks are omitted from retained messages.
+The compaction request keeps the existing system, message, and tool prefix intact, appends
+only an in-memory user instruction, and keeps any compaction tool calls and results in an
+ephemeral buffer. Switching to a model whose 90% context threshold is reached first
+compacts with the current model, trims retained context to fit the target when necessary,
+then persists the model change. The loop currently permits at most 20 LLM/tool
 iterations. The shared registry implements the `ToolRuntime` port, executes one tool
 batch concurrently, and returns results in call order. `pkg/agentloop/builtin/` provides
 the production filesystem tools `read_file`, `write_file`, `patch_file`, `delete_file`,
@@ -185,7 +196,7 @@ Methods follow a `resource.action` naming:
 | Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
@@ -202,6 +213,13 @@ route notifications independently from responses. `round_ended` carries the term
 `session.stop` accepts `{id}` and requests cancellation. Starting a second round for the
 same session, or deleting that session while it is running, returns `already exists`.
 Different sessions can run in parallel.
+
+`session.compact` accepts `{id}` and performs a temporary summarization request using the
+current conversation plus a user-only compaction instruction. It emits
+`session.compaction` notifications with `started`, `completed`, or `failed` states, and
+persists a `session_compacted` event containing the generated summary without changing the
+public transcript projection. Retained user, metadata, and assistant messages are derived
+from the transcript during replay.
 
 ### Chunked uploads
 

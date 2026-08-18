@@ -90,6 +90,27 @@ type SessionEvent struct {
 
 type SessionEventHandler func(ctx context.Context, event SessionEvent) error
 
+type CompactionEventType string
+
+const (
+	CompactionEventStarted   CompactionEventType = "started"
+	CompactionEventCompleted CompactionEventType = "completed"
+	CompactionEventFailed    CompactionEventType = "failed"
+)
+
+type CompactionEvent struct {
+	Type                CompactionEventType            `json:"type"`
+	SessionID           uuid.UUID                      `json:"sessionId"`
+	CompactionID        uuid.UUID                      `json:"compactionId,omitempty"`
+	Trigger             conversation.CompactionTrigger `json:"trigger"`
+	ContextTokensBefore int64                          `json:"contextTokensBefore,omitempty"`
+	ContextTokensAfter  int64                          `json:"contextTokensAfter,omitempty"`
+	Usage               *conversation.TokenUsage       `json:"usage,omitempty"`
+	Error               string                         `json:"error,omitempty"`
+}
+
+type CompactionEventHandler func(ctx context.Context, event CompactionEvent) error
+
 type Caller interface {
 	Invoke(ctx context.Context, request Request) (*Response, error)
 	Stream(ctx context.Context, request Request, handler StreamHandler) (*Response, error)

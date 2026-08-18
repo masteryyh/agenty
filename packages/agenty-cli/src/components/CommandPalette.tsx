@@ -1,3 +1,4 @@
+import { RGBA } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
 
 import { quoteArg } from "../commands/registry";
@@ -7,6 +8,7 @@ import { Box, Text } from "./ui";
 
 const MAX_ITEMS = 8;
 const HIGHLIGHT = "#4FA8FF";
+const TERMINAL_BACKGROUND = RGBA.defaultBackground();
 
 interface CommandPaletteProps {
     palette: Palette;
@@ -69,7 +71,12 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
         const isExactSlash = matchPrefix === "/";
         const items = palette.matches.slice(windowStart, windowStart + MAX_ITEMS);
         return (
-            <Box flexDirection="column" marginTop={marginTop}>
+            <Box
+                flexDirection="column"
+                width="100%"
+                marginTop={marginTop}
+                backgroundColor={TERMINAL_BACKGROUND}
+            >
                 {items.map((c, i) => {
                     const absIdx = windowStart + i;
                     const isFull = c.name === matchPrefix;
@@ -143,7 +150,12 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
     const headerRest = ` ${command.argHint ?? ""} · Tab to cycle`;
 
     return (
-        <Box flexDirection="column" marginTop={marginTop}>
+        <Box
+            flexDirection="column"
+            width="100%"
+            marginTop={marginTop}
+            backgroundColor={TERMINAL_BACKGROUND}
+        >
             <Text>
                 {" "}
                 <Text color={HIGHLIGHT} bold>

@@ -113,8 +113,8 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	if gotOpus != nil && !gotOpus.SupportsReasoning() {
 		t.Errorf("opus SupportsReasoning = %v, want true", gotOpus.SupportsReasoning())
 	}
-	if gotOpus != nil && gotOpus.MaxOutputTokens != 32000 {
-		t.Errorf("opus max output tokens = %d, want 32000", gotOpus.MaxOutputTokens)
+	if gotOpus != nil && gotOpus.MaxOutputTokens != catalog.DefaultMaxOutputTokens {
+		t.Errorf("opus max output tokens = %d, want %d", gotOpus.MaxOutputTokens, catalog.DefaultMaxOutputTokens)
 	}
 	if gotHaiku != nil && gotHaiku.SupportsReasoning() {
 		t.Errorf("haiku SupportsReasoning = %v, want false", gotHaiku.SupportsReasoning())

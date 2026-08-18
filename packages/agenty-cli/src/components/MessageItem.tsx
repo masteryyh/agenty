@@ -3,12 +3,17 @@ import type React from "react";
 import { memo } from "react";
 
 import type { ToolResult } from "../api/types";
-import type { UIToolCall } from "../state/store";
+import type { SystemMessageVariant, UIToolCall } from "../state/store";
 import { Box, Text } from "./ui";
 
 const USER_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
     dark: "#2a3f47",
     light: "#dbe8ec",
+};
+
+const COMPACTED_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
+    dark: "#23332d",
+    light: "#dfece4",
 };
 
 const ARG_KEYS = [
@@ -123,6 +128,7 @@ export type MessageRenderItem =
         role: "user" | "assistant" | "system";
         content: string;
         error?: boolean;
+        systemVariant?: SystemMessageVariant;
     }
     | {
         id: string;
@@ -223,6 +229,20 @@ export const MessageItem = memo(({
     }
 
     if (item.role === "system") {
+        if (item.systemVariant === "compacted") {
+            return (
+                <Box
+                    width="100%"
+                    paddingX={1}
+                    backgroundColor={COMPACTED_MESSAGE_BACKGROUNDS[themeMode]}
+                >
+                    <Text italic dimColor wrap="wrap">
+                        {item.content}
+                    </Text>
+                </Box>
+            );
+        }
+
         return (
             <Rail color={item.error ? "red" : "yellow"}>
                 <Text color={item.error ? "red" : "yellow"}>

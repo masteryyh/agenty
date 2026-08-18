@@ -138,13 +138,6 @@ function modelFields(model: ModelDraft): FormField[] {
             value: String(model.contextWindow),
             placeholder: "128000",
         },
-        {
-            key: "maxOutputTokens",
-            label: "Max output tokens",
-            kind: "text",
-            value: String(model.maxOutputTokens),
-            placeholder: "16384",
-        },
     ];
 }
 
@@ -338,7 +331,6 @@ function WizardContent() {
             slug: values.slug.trim(),
             name: values.name.trim(),
             contextWindow: Number(values.contextWindow),
-            maxOutputTokens: Number(values.maxOutputTokens),
         };
         const validationError = validateModelDraft(next);
         if (validationError) {

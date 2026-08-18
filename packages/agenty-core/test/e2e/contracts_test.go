@@ -42,6 +42,7 @@ var publicRPCMethods = []string{
 	"session.setReasoningEffort",
 	"session.setCwd",
 	"session.start",
+	"session.compact",
 	"session.stop",
 	"chunk.begin",
 	"chunk.part",

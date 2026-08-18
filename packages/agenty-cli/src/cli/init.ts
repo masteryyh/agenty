@@ -18,7 +18,6 @@ export async function handleInit(client: AgentyClient, args: ParsedArgs): Promis
     const modelSlug = requireFlag(args, "model");
     const agentSlug = flag(args, "agent")?.trim() || "default";
     const contextWindow = positiveInteger(flag(args, "context-window") ?? "128000", "--context-window");
-    const maxOutputTokens = positiveInteger(flag(args, "max-output-tokens") ?? "16384", "--max-output-tokens");
     const apiKey = secret(args, "api-key", "api-key-env", "provider API key") ?? "";
 
     await client.createProvider({
@@ -33,7 +32,6 @@ export async function handleInit(client: AgentyClient, args: ParsedArgs): Promis
         modelSlug,
         name: flag(args, "model-name")?.trim() || modelSlug,
         contextWindow,
-        maxOutputTokens,
         isDefault: true,
     });
     await client.createAgent({

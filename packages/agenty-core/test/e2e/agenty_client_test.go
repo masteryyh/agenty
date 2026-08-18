@@ -194,17 +194,15 @@ func (c *agentyClient) SetSessionModel(
 	ctx context.Context,
 	id string,
 	model ModelRef,
-	contextWindow int64,
 ) (Session, error) {
 	return callResult[Session](
 		ctx,
 		c.rpc,
 		"session.setModel",
 		map[string]any{
-			"id":            id,
-			"providerSlug":  model.ProviderSlug,
-			"modelSlug":     model.ModelSlug,
-			"contextWindow": contextWindow,
+			"id":           id,
+			"providerSlug": model.ProviderSlug,
+			"modelSlug":    model.ModelSlug,
 		},
 	)
 }
@@ -259,6 +257,10 @@ func (c *agentyClient) StopSession(ctx context.Context, id string) (ExecutionSto
 		"session.stop",
 		map[string]any{"id": id},
 	)
+}
+
+func (c *agentyClient) CompactSession(ctx context.Context, id string) (map[string]any, error) {
+	return callResult[map[string]any](ctx, c.rpc, "session.compact", map[string]any{"id": id})
 }
 
 func (c *agentyClient) WaitForRoundStatus(

@@ -193,6 +193,9 @@ func (c *rpcClient) routeResponses() {
 			return
 		}
 		if notification != nil {
+			if notification.Method == "session.compaction" {
+				continue
+			}
 			if notification.Method != "session.event" {
 				c.setRouteError(fmt.Errorf("unexpected RPC notification %q", notification.Method))
 				return

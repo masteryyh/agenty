@@ -72,10 +72,19 @@ contract、tool contract、JSON Schema、线程安全的 tool registry，以及�
 session 的 `Engine`。不同 session 可以并行执行，同一 session 只允许一个 active round；
 `Engine` 统一管理所有运行中 round 的取消和 shutdown。
 
-每次 loop 会解析 Agent system prompt，重建完整会话历史，通过选定 provider adapter
+每次 loop 会解析 Agent system prompt，重建有效会话上下文，通过选定 provider adapter
 转换上游数据结构，调用 LLM、持久化 assistant 响应，并在返回 tool calls 时继续循环。
-每个 model 自行保存 `maxOutputTokens`，单次调用默认使用
-`min(65536, model.maxOutputTokens)`。当前单个 round 最多执行 20 次 LLM/tool 迭代。
+所有 model 统一使用 `8192` 最大输出 token；旧的 model 级字段仅为兼容旧 wire
+客户端而保留，实际值会被忽略。估算上下文达到
+`contextWindow` 的 `90%` 时自动压缩；TUI 的 `/compact`
+可以手动触发同一流程。压缩会在 `session_compacted` 事件中只保存生成的总结和压缩审计数据；
+重放和构造模型请求时，再从 transcript 动态计算最多三条最近 user 消息、总结、metadata
+以及最多五条最近 assistant 消息，原始 JSONL transcript 不变。保留消息会移除 reasoning
+和未配对的 tool-use block。当前单个 round 最多执行 20 次 LLM/tool 迭代。压缩请求
+保持原有 system、消息和工具前缀不变，只在内存中追加一条 user 压缩指令；压缩过程中的
+工具调用和结果也只保存在临时缓冲区。切换到上下文窗口较小的 model 时，如果达到目标
+窗口的 90%，先使用当前 model 压缩，必要时裁剪保留消息以适配目标窗口，再写入 model
+切换事件。
 共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
 调用顺序返回。`pkg/agentloop/builtin/` 提供生产环境文件系统工具 `read_file`、
 `write_file`、`patch_file`、`delete_file`、`grep`、`glob` 和 `ls`，由 `cmd/main.go`
@@ -167,7 +176,7 @@ Methods 使用 `resource.action` 命名：
 | Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.stop` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
@@ -182,6 +191,11 @@ notification 与 response 分开路由。`round_ended` 携带 `completed`、`fai
 
 `session.stop` 接收 `{id}` 并请求取消。同一 session 重复启动，或在运行期间删除该
 session，会返回 `already exists`；不同 sessions 可以并行运行。
+
+`session.compact` 接收 `{id}`，基于当前会话临时追加一条 user 压缩指令执行总结请求。
+执行期间通过 `session.compaction` notification 发出 `started`、`completed` 或 `failed`
+状态，并写入只包含总结的 `session_compacted` 事件；user、metadata 和 assistant 上下文会在
+重放时从 transcript 动态计算，公开 transcript projection 不会被替换。
 
 ### 分块上传
 

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultMaxOutputTokens int64 = 65_536
+	DefaultMaxOutputTokens int64 = catalog.DefaultMaxOutputTokens
 
 	maxAgentLoopIterations = 20
 )
@@ -42,18 +42,28 @@ type CallerFactory func(
 ) (Caller, error)
 
 type Dependencies struct {
-	Sessions  ExecutionSessionRepository
-	Agents    ExecutionAgentRepository
-	Catalog   ExecutionCatalogRepository
-	Tools     ToolRuntime
-	NewCaller CallerFactory
-	Events    SessionEventHandler
+	Sessions    ExecutionSessionRepository
+	Agents      ExecutionAgentRepository
+	Catalog     ExecutionCatalogRepository
+	Tools       ToolRuntime
+	NewCaller   CallerFactory
+	Events      SessionEventHandler
+	Compactions CompactionEventHandler
 }
 
 type StartResult struct {
 	SessionID uuid.UUID                `json:"sessionId"`
 	RoundID   uuid.UUID                `json:"roundId"`
 	Status    conversation.RoundStatus `json:"status"`
+}
+
+type CompactResult struct {
+	SessionID           uuid.UUID                      `json:"sessionId"`
+	CompactionID        uuid.UUID                      `json:"compactionId"`
+	Trigger             conversation.CompactionTrigger `json:"trigger"`
+	ContextTokensBefore int64                          `json:"contextTokensBefore"`
+	ContextTokensAfter  int64                          `json:"contextTokensAfter"`
+	Usage               conversation.TokenUsage        `json:"usage"`
 }
 
 type StopResult struct {
@@ -68,21 +78,22 @@ type activeExecution struct {
 }
 
 type Engine struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	sessions  ExecutionSessionRepository
-	agents    ExecutionAgentRepository
-	catalog   ExecutionCatalogRepository
-	tools     ToolRuntime
-	newCaller CallerFactory
-	events    SessionEventHandler
-	logger    *slog.Logger
-	mu        sync.Mutex
-	active    map[uuid.UUID]*activeExecution
-	waitGroup sync.WaitGroup
-	shutdown  bool
-	stopOnce  sync.Once
-	stopped   chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	sessions    ExecutionSessionRepository
+	agents      ExecutionAgentRepository
+	catalog     ExecutionCatalogRepository
+	tools       ToolRuntime
+	newCaller   CallerFactory
+	events      SessionEventHandler
+	compactions CompactionEventHandler
+	logger      *slog.Logger
+	mu          sync.Mutex
+	active      map[uuid.UUID]*activeExecution
+	waitGroup   sync.WaitGroup
+	shutdown    bool
+	stopOnce    sync.Once
+	stopped     chan struct{}
 }
 
 func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, error) {
@@ -107,17 +118,18 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Engine{
-		ctx:       ctx,
-		cancel:    cancel,
-		sessions:  dependencies.Sessions,
-		agents:    dependencies.Agents,
-		catalog:   dependencies.Catalog,
-		tools:     dependencies.Tools,
-		newCaller: dependencies.NewCaller,
-		events:    dependencies.Events,
-		logger:    slog.Default(),
-		active:    make(map[uuid.UUID]*activeExecution),
-		stopped:   make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
+		sessions:    dependencies.Sessions,
+		agents:      dependencies.Agents,
+		catalog:     dependencies.Catalog,
+		tools:       dependencies.Tools,
+		newCaller:   dependencies.NewCaller,
+		events:      dependencies.Events,
+		compactions: dependencies.Compactions,
+		logger:      slog.Default(),
+		active:      make(map[uuid.UUID]*activeExecution),
+		stopped:     make(chan struct{}),
 	}, nil
 }
 
@@ -187,6 +199,137 @@ func (engine *Engine) Stop(_ context.Context, sessionID string) (*StopResult, er
 		RoundID:       roundID,
 		StopRequested: true,
 	}, nil
+}
+
+func (engine *Engine) Compact(
+	ctx context.Context,
+	sessionID string,
+) (*CompactResult, error) {
+	id, err := uuid.Parse(sessionID)
+	if err != nil {
+		return nil, apperrors.Validation("invalid session id: " + err.Error())
+	}
+
+	runCtx, execution, err := engine.reserve(id)
+	if err != nil {
+		return nil, err
+	}
+	defer engine.release(id, execution)
+
+	session, err := engine.sessions.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, conversation.ErrSessionNotFound) {
+			return nil, apperrors.NotFound("session " + id.String() + " not found")
+		}
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
+	}
+	resources, err := engine.loadResources(ctx, runCtx, session)
+	if err != nil {
+		return nil, err
+	}
+	prepared := &preparedExecution{
+		session:         session,
+		model:           resources.model,
+		caller:          resources.caller,
+		systemPrompt:    resources.systemPrompt,
+		maxOutputTokens: DefaultMaxOutputTokens,
+	}
+	event, err := engine.compactPrepared(runCtx, prepared, conversation.CompactionTriggerManual)
+	if err != nil {
+		return nil, err
+	}
+	return &CompactResult{
+		SessionID:           event.SessionID,
+		CompactionID:        event.CompactionID,
+		Trigger:             event.Trigger,
+		ContextTokensBefore: event.ContextTokensBefore,
+		ContextTokensAfter:  event.ContextTokensAfter,
+		Usage:               event.Usage,
+	}, nil
+}
+
+func (engine *Engine) SetModel(
+	ctx context.Context,
+	sessionID string,
+	providerSlug string,
+	modelSlug string,
+) (*conversation.Session, error) {
+	id, err := uuid.Parse(sessionID)
+	if err != nil {
+		return nil, apperrors.Validation("invalid session id: " + err.Error())
+	}
+	providerID, err := shared.NewSlug(providerSlug)
+	if err != nil {
+		return nil, apperrors.Validation(err.Error())
+	}
+	modelID, err := shared.NewModelID(modelSlug)
+	if err != nil {
+		return nil, apperrors.Validation(err.Error())
+	}
+
+	runCtx, execution, err := engine.reserve(id)
+	if err != nil {
+		return nil, err
+	}
+	defer engine.release(id, execution)
+
+	session, err := engine.sessions.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, conversation.ErrSessionNotFound) {
+			return nil, apperrors.NotFound("session " + id.String() + " not found")
+		}
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
+	}
+	if session.CurrentModel != nil &&
+		session.CurrentModel.ProviderSlug == providerID &&
+		session.CurrentModel.ModelSlug == modelID {
+		return session.VisibleCopy(), nil
+	}
+
+	source, err := engine.loadResources(ctx, runCtx, session)
+	if err != nil {
+		return nil, err
+	}
+	targetRef := shared.NewModelRef(providerID, modelID)
+	_, targetModel, err := engine.loadCatalogModel(ctx, targetRef)
+	if err != nil {
+		return nil, err
+	}
+	targetContextWindow := int64(targetModel.ContextWindow)
+	if targetContextWindow <= 0 {
+		return nil, apperrors.Validation("target model context window must be positive")
+	}
+	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
+		session.SetModel(targetRef, targetContextWindow)
+		if err := engine.saveProgress(ctx, session); err != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "save session model", err)
+		}
+		return session.VisibleCopy(), nil
+	}
+
+	prepared := &preparedExecution{
+		session:         session,
+		model:           source.model,
+		caller:          source.caller,
+		systemPrompt:    source.systemPrompt,
+		maxOutputTokens: DefaultMaxOutputTokens,
+	}
+	request := engine.sessionRequestForWindow(prepared, targetContextWindow)
+	if ShouldCompact(estimateRequestTokens(request), targetContextWindow) {
+		if _, err := engine.compactPreparedForWindow(runCtx, prepared, conversation.CompactionTriggerModelSwitch, targetContextWindow); err != nil {
+			return nil, fmt.Errorf("compact session before model switch: %w", err)
+		}
+		request = engine.sessionRequestForWindow(prepared, targetContextWindow)
+		if ShouldCompact(estimateRequestTokens(request), targetContextWindow) {
+			return nil, apperrors.Validation("session context remains too large for target model after compaction")
+		}
+	}
+
+	session.SetModel(targetRef, targetContextWindow)
+	if err := engine.saveProgress(ctx, session); err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "save session model", err)
+	}
+	return session.VisibleCopy(), nil
 }
 
 func (engine *Engine) IsRunning(sessionID uuid.UUID) bool {
@@ -267,6 +410,12 @@ type preparedExecution struct {
 	eventSequence   uint64
 }
 
+type executionResources struct {
+	model        catalog.Model
+	caller       Caller
+	systemPrompt string
+}
+
 func (engine *Engine) prepare(
 	ctx context.Context,
 	runCtx context.Context,
@@ -281,42 +430,9 @@ func (engine *Engine) prepare(
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
 
-	agentDefinition, err := engine.agents.Get(ctx, session.AgentSlug)
+	resources, err := engine.loadResources(ctx, runCtx, session)
 	if err != nil {
-		if errors.Is(err, agent.ErrNotFound) {
-			return nil, apperrors.NotFound("agent " + session.AgentSlug.String() + " not found")
-		}
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load agent", err)
-	}
-	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
-		return nil, apperrors.Validation("session model is not configured")
-	}
-
-	provider, err := engine.catalog.Get(ctx, session.CurrentModel.ProviderSlug)
-	if err != nil {
-		if errors.Is(err, catalog.ErrProviderNotFound) {
-			return nil, apperrors.NotFound("provider " + session.CurrentModel.ProviderSlug.String() + " not found")
-		}
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load provider", err)
-	}
-	model, err := provider.Model(session.CurrentModel.ModelSlug)
-	if err != nil {
-		if errors.Is(err, catalog.ErrModelNotFound) {
-			return nil, apperrors.NotFound("model " + session.CurrentModel.ModelSlug.String() + " not found")
-		}
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load model", err)
-	}
-	if model.MaxOutputTokens <= 0 {
-		return nil, apperrors.Validation("model " + model.Slug.String() + " has invalid max output tokens")
-	}
-
-	systemPrompt, err := agentDefinition.ResolveSystemPrompt()
-	if err != nil {
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)
-	}
-	caller, err := engine.newCaller(runCtx, *provider, *model)
-	if err != nil {
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to create LLM caller", err)
+		return nil, err
 	}
 	if err := runCtx.Err(); err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "execution was cancelled before start", err)
@@ -350,12 +466,80 @@ func (engine *Engine) prepare(
 	return &preparedExecution{
 		session:         session,
 		roundID:         roundID,
-		model:           *model,
-		caller:          caller,
-		systemPrompt:    systemPrompt,
-		maxOutputTokens: min(DefaultMaxOutputTokens, model.MaxOutputTokens),
+		model:           resources.model,
+		caller:          resources.caller,
+		systemPrompt:    resources.systemPrompt,
+		maxOutputTokens: DefaultMaxOutputTokens,
 		userMessage:     userMessage,
 	}, nil
+}
+
+func (engine *Engine) loadResources(
+	ctx context.Context,
+	runCtx context.Context,
+	session *conversation.Session,
+) (*executionResources, error) {
+	agentDefinition, err := engine.agents.Get(ctx, session.AgentSlug)
+	if err != nil {
+		if errors.Is(err, agent.ErrNotFound) {
+			return nil, apperrors.NotFound("agent " + session.AgentSlug.String() + " not found")
+		}
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load agent", err)
+	}
+	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
+		return nil, apperrors.Validation("session model is not configured")
+	}
+
+	provider, model, err := engine.loadCatalogModel(ctx, *session.CurrentModel)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, err := agentDefinition.ResolveSystemPrompt()
+	if err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)
+	}
+	caller, err := engine.newCaller(runCtx, *provider, *model)
+	if err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to create LLM caller", err)
+	}
+	return &executionResources{model: *model, caller: caller, systemPrompt: systemPrompt}, nil
+}
+
+func (engine *Engine) loadCatalogModel(
+	ctx context.Context,
+	modelRef shared.ModelRef,
+) (*catalog.Provider, *catalog.Model, error) {
+	provider, err := engine.catalog.Get(ctx, modelRef.ProviderSlug)
+	if err != nil {
+		if errors.Is(err, catalog.ErrProviderNotFound) {
+			return nil, nil, apperrors.NotFound("provider " + modelRef.ProviderSlug.String() + " not found")
+		}
+		return nil, nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load provider", err)
+	}
+	model, err := provider.Model(modelRef.ModelSlug)
+	if err != nil {
+		if errors.Is(err, catalog.ErrModelNotFound) {
+			return nil, nil, apperrors.NotFound("model " + modelRef.ModelSlug.String() + " not found")
+		}
+		return nil, nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load model", err)
+	}
+	return provider, model, nil
+}
+
+func (engine *Engine) sessionRequest(prepared *preparedExecution) Request {
+	return engine.sessionRequestForWindow(prepared, modelContextWindow(prepared))
+}
+
+func (engine *Engine) sessionRequestForWindow(prepared *preparedExecution, contextWindow int64) Request {
+	request := Request{
+		SystemPrompt:    prepared.systemPrompt,
+		Messages:        sessionMessages(prepared.session),
+		Tools:           engine.tools.Definitions(),
+		MaxOutputTokens: prepared.maxOutputTokens,
+		ReasoningEffort: preparedReasoningEffort(prepared),
+	}
+	return fitCompactedRequest(request, contextWindow)
 }
 
 func (engine *Engine) run(
@@ -409,18 +593,22 @@ func (engine *Engine) executeLoop(
 	prepared *preparedExecution,
 ) (conversation.TokenUsage, error) {
 	totalUsage := conversation.TokenUsage{}
+	lastCompacted := false
 
 	for iteration := 1; iteration <= maxAgentLoopIterations; iteration++ {
 		if err := ctx.Err(); err != nil {
 			return totalUsage, err
 		}
 
-		request := Request{
-			SystemPrompt:    prepared.systemPrompt,
-			Messages:        sessionMessages(prepared.session),
-			Tools:           engine.tools.Definitions(),
-			MaxOutputTokens: prepared.maxOutputTokens,
-			ReasoningEffort: prepared.session.Rounds[len(prepared.session.Rounds)-1].ReasoningEffort,
+		request := engine.sessionRequest(prepared)
+		if ShouldCompact(estimateRequestTokens(request), modelContextWindow(prepared)) && !lastCompacted {
+			compaction, err := engine.compactPrepared(ctx, prepared, conversation.CompactionTriggerAuto)
+			if err != nil {
+				return totalUsage, fmt.Errorf("compact session before iteration %d: %w", iteration, err)
+			}
+			totalUsage = totalUsage.Add(compaction.Usage)
+			lastCompacted = true
+			request = engine.sessionRequest(prepared)
 		}
 		response, err := engine.call(ctx, prepared, iteration, request)
 		if err != nil {
@@ -429,6 +617,7 @@ func (engine *Engine) executeLoop(
 		if response == nil {
 			return totalUsage, fmt.Errorf("invoke LLM at iteration %d: empty response", iteration)
 		}
+		lastCompacted = false
 
 		totalUsage = totalUsage.Add(response.Usage)
 		message, err := prepared.session.AppendAssistantMessage(
@@ -494,6 +683,13 @@ func (engine *Engine) executeLoop(
 	}
 
 	return totalUsage, fmt.Errorf("agent loop exceeded %d iterations", maxAgentLoopIterations)
+}
+
+func modelContextWindow(prepared *preparedExecution) int64 {
+	if prepared.model.ContextWindow > 0 {
+		return int64(prepared.model.ContextWindow)
+	}
+	return prepared.session.ContextWindow
 }
 
 func (engine *Engine) call(
@@ -604,17 +800,7 @@ func (engine *Engine) release(
 }
 
 func sessionMessages(session *conversation.Session) []conversation.Message {
-	count := 0
-	for _, round := range session.Rounds {
-		count += len(round.Messages)
-	}
-
-	messages := make([]conversation.Message, 0, count)
-	for _, round := range session.Rounds {
-		messages = append(messages, round.Messages...)
-	}
-
-	return messages
+	return session.ContextMessages()
 }
 
 func toolCalls(content conversation.Content) []conversation.ToolUseBlock {

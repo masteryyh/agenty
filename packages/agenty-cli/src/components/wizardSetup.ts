@@ -27,7 +27,6 @@ export interface WizardSetupClient {
         modelSlug: string;
         name: string;
         contextWindow?: number;
-        maxOutputTokens: number;
         reasoningEffortMapping?: Record<string, ReasoningEffort>;
         isDefault?: boolean;
     }): Promise<unknown>;
@@ -152,7 +151,6 @@ export async function persistWizardSetup(
             modelSlug,
             name: model.name.trim(),
             contextWindow: model.contextWindow,
-            maxOutputTokens: model.maxOutputTokens,
             reasoningEffortMapping: model.reasoningEffortMapping,
             isDefault: isSelected,
         });

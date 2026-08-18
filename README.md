@@ -8,9 +8,9 @@ The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 o
 the child process's stdin/stdout; it does not start an HTTP server.
 
 The current core supports provider/model/agent management, persistent sessions,
-streaming model output, agentic tool loops, and built-in filesystem tools. Skills,
-MCP, memory, compaction, and remote-client mode are not exposed until equivalent
-core implementations exist.
+streaming model output, agentic tool loops, session compaction, and built-in filesystem
+tools. Skills, MCP, memory, and remote-client mode remain hidden until equivalent core
+implementations exist.
 
 ## Quick start
 

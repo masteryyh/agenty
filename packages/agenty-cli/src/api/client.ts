@@ -3,6 +3,7 @@ import type {
     AgentDto,
     ChatMessageDto,
     ChatSessionDto,
+    CompactionEvent,
     ContentBlock,
     CoreModelDto,
     CreateAgentDto,
@@ -35,6 +36,14 @@ export class AgentyClient {
         return this.rpc.onNotification<SessionEvent | null | undefined>("session.event", (event) => {
             if (event) {
                 listener(normalizeSessionEvent(event));
+            }
+        });
+    }
+
+    onCompactionEvent(listener: (event: CompactionEvent) => void): () => void {
+        return this.rpc.onNotification<CompactionEvent | null | undefined>("session.compaction", (event) => {
+            if (event) {
+                listener(event);
             }
         });
     }
@@ -228,7 +237,6 @@ export class AgentyClient {
             id,
             providerSlug: model.providerSlug,
             modelSlug: model.slug,
-            contextWindow: model.contextWindow,
         });
         return requireSession(session, `session.setModel ${id}`);
     }
@@ -249,6 +257,10 @@ export class AgentyClient {
 
     async stopSession(id: string): Promise<void> {
         await this.rpc.call("session.stop", { id });
+    }
+
+    async compactSession(id: string): Promise<void> {
+        await this.rpc.call("session.compact", { id });
     }
 
     async prepareSession(options: {

@@ -53,6 +53,7 @@ func (p *Provider) Model(slug shared.ModelID) (*Model, error) {
 }
 
 func (p *Provider) AddModel(m Model) {
+	m.MaxOutputTokens = DefaultMaxOutputTokens
 	for i := range p.Models {
 		if p.Models[i].Slug == m.Slug {
 			p.Models[i] = m
