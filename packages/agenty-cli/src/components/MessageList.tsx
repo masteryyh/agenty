@@ -110,6 +110,7 @@ export function MessageList({
                     role: msg.role,
                     content: msg.content,
                     error: msg.error,
+                    systemVariant: msg.systemVariant,
                 });
                 continue;
             }

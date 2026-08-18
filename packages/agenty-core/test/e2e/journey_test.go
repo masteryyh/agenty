@@ -141,13 +141,14 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		IsDefault: true,
 	})
 	requireNoError(t, err)
-	if len(provider.Models) != 1 || provider.Models[0].MaxOutputTokens != 100_000 {
+	if len(provider.Models) != 1 || provider.Models[0].MaxOutputTokens != 8_192 {
 		t.Fatalf("provider models = %+v", provider.Models)
 	}
 	_, err = first.AddModel(ctx, ModelInput{
 		ProviderSlug:    "local-openai",
 		ModelSlug:       "temporary-model",
 		Name:            "Temporary Model",
+		ContextWindow:   64_000,
 		MaxOutputTokens: 8_192,
 	})
 	requireNoError(t, err)
@@ -171,12 +172,12 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	_, err = first.SetSessionModel(ctx, primary.ID, ModelRef{
 		ProviderSlug: "local-openai",
 		ModelSlug:    "temporary-model",
-	}, 64_000)
+	})
 	requireNoError(t, err)
 	_, err = first.SetSessionModel(ctx, primary.ID, ModelRef{
 		ProviderSlug: "local-openai",
 		ModelSlug:    "primary-model",
-	}, 128_000)
+	})
 	requireNoError(t, err)
 	_, err = first.SetSessionReasoningEffort(ctx, primary.ID, "high")
 	requireNoError(t, err)
@@ -256,8 +257,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		fixture.requests,
 		2,
 	)
-	if firstProviderRequest.Body["max_completion_tokens"] != float64(65_536) {
-		t.Fatalf("max completion tokens = %v, want 65536", firstProviderRequest.Body["max_completion_tokens"])
+	if firstProviderRequest.Body["max_completion_tokens"] != float64(8_192) {
+		t.Fatalf("max completion tokens = %v, want 8192", firstProviderRequest.Body["max_completion_tokens"])
 	}
 	if providerMessageCount(secondProviderRequest) <= providerMessageCount(firstProviderRequest) {
 		t.Fatalf(
@@ -305,6 +306,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		cancelRound.RoundID,
 		"cancelled",
 	)
+	requireNoError(t, err)
+	_, err = second.CompactSession(ctx, primary.ID)
 	requireNoError(t, err)
 
 	var chunkedAgent Agent

@@ -21,10 +21,11 @@ func RegisterSessionHandlers(
 	d.Register("session.list", sessionList(svc))
 	d.Register("session.delete", sessionDelete(svc))
 	d.Register("session.setTitle", sessionSetTitle(svc))
-	d.Register("session.setModel", sessionSetModel(svc))
+	d.Register("session.setModel", sessionSetModel(execution))
 	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
 	d.Register("session.start", sessionStart(execution))
+	d.Register("session.compact", sessionCompact(execution))
 	d.Register("session.stop", sessionStop(execution))
 }
 
@@ -101,19 +102,18 @@ func sessionSetTitle(svc *application.SessionService) rpc.Handler {
 }
 
 type sessionSetModelParams struct {
-	ID            string `json:"id"`
-	ProviderSlug  string `json:"providerSlug"`
-	ModelSlug     string `json:"modelSlug"`
-	ContextWindow int64  `json:"contextWindow"`
+	ID           string `json:"id"`
+	ProviderSlug string `json:"providerSlug"`
+	ModelSlug    string `json:"modelSlug"`
 }
 
-func sessionSetModel(svc *application.SessionService) rpc.Handler {
+func sessionSetModel(execution *agentloop.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p sessionSetModelParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.SetModel(ctx, p.ID, p.ProviderSlug, p.ModelSlug, p.ContextWindow))
+		return wrap(execution.SetModel(ctx, p.ID, p.ProviderSlug, p.ModelSlug))
 	}
 }
 
@@ -159,6 +159,16 @@ func sessionStart(execution *agentloop.Engine) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(execution.Start(ctx, p.ID, p.Content))
+	}
+}
+
+func sessionCompact(execution *agentloop.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p idParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.Compact(ctx, p.ID))
 	}
 }
 

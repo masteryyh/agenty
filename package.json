@@ -7,7 +7,6 @@
         "test": "turbo run test",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "dev": "pnpm cli:dev",
         "clean": "rm -rf dist && turbo run clean",
         "deepclean": "pnpm clean && rm -rf node_modules packages/*/node_modules",
         "core:build": "turbo run build --filter=agenty-core",

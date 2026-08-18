@@ -4,7 +4,6 @@ export interface ModelPreset {
     slug: string;
     name: string;
     contextWindow: number;
-    maxOutputTokens: number;
     reasoningEffortMapping?: Record<string, ReasoningEffort>;
 }
 
@@ -32,7 +31,6 @@ export const providerPresets: readonly ProviderPreset[] = [
             slug: "gpt-5-mini",
             name: "GPT-5 mini",
             contextWindow: 128_000,
-            maxOutputTokens: 16_384,
             reasoningEffortMapping: {
                 low: "low",
                 medium: "medium",
@@ -53,7 +51,6 @@ export const providerPresets: readonly ProviderPreset[] = [
             slug: "claude-haiku-4-5",
             name: "Claude Haiku 4.5",
             contextWindow: 200_000,
-            maxOutputTokens: 8_192,
             reasoningEffortMapping: {
                 low: "low",
                 medium: "medium",
@@ -74,7 +71,6 @@ export const providerPresets: readonly ProviderPreset[] = [
             slug: "gemini-2.5-flash",
             name: "Gemini 2.5 Flash",
             contextWindow: 128_000,
-            maxOutputTokens: 8_192,
             reasoningEffortMapping: {
                 low: "low",
                 medium: "medium",
@@ -110,7 +106,6 @@ export interface ModelDraft {
     slug: string;
     name: string;
     contextWindow: number;
-    maxOutputTokens: number;
     reasoningEffortMapping?: Record<string, ReasoningEffort>;
 }
 
@@ -175,7 +170,6 @@ export function modelDraftForProvider(
         slug: model?.slug ?? fallback?.slug ?? "",
         name: model?.name ?? fallback?.name ?? "",
         contextWindow: model?.contextWindow ?? fallback?.contextWindow ?? 128_000,
-        maxOutputTokens: model?.maxOutputTokens ?? fallback?.maxOutputTokens ?? 16_384,
         reasoningEffortMapping: model?.reasoningEffortMapping ?? fallback?.reasoningEffortMapping,
     };
 }
@@ -205,9 +199,6 @@ export function validateModelDraft(draft: ModelDraft): string | null {
     }
     if (!Number.isSafeInteger(draft.contextWindow) || draft.contextWindow <= 0) {
         return `Context window for ${draft.name.trim()} must be a positive integer.`;
-    }
-    if (!Number.isSafeInteger(draft.maxOutputTokens) || draft.maxOutputTokens <= 0) {
-        return `Max output tokens for ${draft.name.trim()} must be a positive integer.`;
     }
     return null;
 }

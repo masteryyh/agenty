@@ -6,6 +6,8 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
+const DefaultMaxOutputTokens int64 = 8_192
+
 type Model struct {
 	Slug                   shared.ModelID                    `json:"slug"`
 	Name                   string                            `json:"name"`

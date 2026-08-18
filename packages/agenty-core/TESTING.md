@@ -146,7 +146,7 @@ and updates Agents, Providers/Models, and Sessions, continues a multi-turn conve
 across a process restart, and queries persisted behavior through IPC without asserting
 SQLite, JSONL, or repository layout. Provider fixtures cover OpenAI Responses, OpenAI
 Chat Completions, Anthropic Messages, and Google GenAI. The scenarios verify the
-65,536 output-token clamp, upstream failure, concurrent sessions over one IPC client,
+8,192 output-token clamp, upstream failure, concurrent sessions over one IPC client,
 duplicate-start and running-delete rejection, stop-driven cancellation, and recovery
 after the process exits during execution.
 

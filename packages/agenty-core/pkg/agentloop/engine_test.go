@@ -180,15 +180,25 @@ func (fixture *executionFixture) newEngineWithEvents(
 	callerFactory agentloop.CallerFactory,
 	events agentloop.SessionEventHandler,
 ) *agentloop.Engine {
+	return fixture.newEngineWithHandlers(t, callerFactory, events, nil)
+}
+
+func (fixture *executionFixture) newEngineWithHandlers(
+	t *testing.T,
+	callerFactory agentloop.CallerFactory,
+	events agentloop.SessionEventHandler,
+	compactions agentloop.CompactionEventHandler,
+) *agentloop.Engine {
 	t.Helper()
 
 	engine, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
-		Sessions:  fixture.sessions,
-		Agents:    fixture.agents,
-		Catalog:   fixture.catalog,
-		Tools:     fixture.registry,
-		NewCaller: callerFactory,
-		Events:    events,
+		Sessions:    fixture.sessions,
+		Agents:      fixture.agents,
+		Catalog:     fixture.catalog,
+		Tools:       fixture.registry,
+		NewCaller:   callerFactory,
+		Events:      events,
+		Compactions: compactions,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -366,7 +376,7 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	}
 }
 
-func TestEngineUsesSmallerModelOutputLimit(t *testing.T) {
+func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	t.Parallel()
 
 	fixture := newExecutionFixture(t, 8_192)
@@ -385,8 +395,282 @@ func TestEngineUsesSmallerModelOutputLimit(t *testing.T) {
 	waitForExecution(t, engine, session.ID)
 
 	requests := caller.Requests()
-	if len(requests) != 1 || requests[0].MaxOutputTokens != 8_192 {
-		t.Fatalf("requests = %+v, want maxOutputTokens 8192", requests)
+	if len(requests) != 1 || requests[0].MaxOutputTokens != agentloop.DefaultMaxOutputTokens {
+		t.Fatalf("requests = %+v, want maxOutputTokens %d", requests, agentloop.DefaultMaxOutputTokens)
+	}
+}
+
+func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	provider, err := fixture.catalog.Get(t.Context(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := provider.Model("gpt-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.ContextWindow = 100
+	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+	compactionEvents := make(chan agentloop.CompactionEvent, 2)
+	caller := &scriptedCaller{responses: []*agentloop.Response{
+		{
+			Content: conversation.Text("Task goals: finish the task\nCompleted: initial work\nIncomplete: follow up"),
+			Usage:   conversation.TokenUsage{Input: 10, Output: 20, Total: 30},
+		},
+		{
+			Content:    conversation.Text("continued"),
+			Usage:      conversation.TokenUsage{Input: 3, Output: 2, Total: 5},
+			StopReason: agentloop.StopReasonEndTurn,
+		},
+	}}
+	engine := fixture.newEngineWithHandlers(
+		t,
+		func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+			return caller, nil
+		},
+		nil,
+		func(_ context.Context, event agentloop.CompactionEvent) error {
+			compactionEvents <- event
+			return nil
+		},
+	)
+	session := fixture.createSession(t)
+	session.SetModel(*session.CurrentModel, 100)
+	if err := fixture.sessions.Save(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	session.ClearPending()
+
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("finish the task")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	loaded, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Rounds) != 1 || len(loaded.Rounds[0].Messages) != 3 {
+		t.Fatalf("raw transcript rounds/messages = %d/%d", len(loaded.Rounds), len(loaded.Rounds[0].Messages))
+	}
+	if len(loaded.ContextMessages()) != 4 {
+		t.Fatalf("effective context messages = %d, want retained user, summary, metadata, and response", len(loaded.ContextMessages()))
+	}
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("LLM requests = %d, want compaction plus normal", len(requests))
+	}
+	if !strings.Contains(requests[0].SystemPrompt, "Be precise.") {
+		t.Errorf("compaction system prompt = %q", requests[0].SystemPrompt)
+	}
+	compactionPromptBlock, ok := requests[0].Messages[2].Content[0].(conversation.TextBlock)
+	if !ok || len(requests[0].Messages) != 3 || !strings.Contains(compactionPromptBlock.Text, "session-compaction-request") {
+		t.Fatalf("compaction request messages = %+v", requests[0].Messages)
+	}
+	if len(requests[0].Tools) != 0 {
+		t.Fatalf("compaction request tools = %+v", requests[0].Tools)
+	}
+	if requests[0].MaxOutputTokens != agentloop.DefaultMaxOutputTokens || requests[1].MaxOutputTokens != agentloop.DefaultMaxOutputTokens {
+		t.Errorf("max output tokens = %d/%d", requests[0].MaxOutputTokens, requests[1].MaxOutputTokens)
+	}
+	if len(requests[1].Messages) != 2 {
+		t.Fatalf("post-compaction message count = %d", len(requests[1].Messages))
+	}
+	started := <-compactionEvents
+	completed := <-compactionEvents
+	if started.Type != agentloop.CompactionEventStarted || completed.Type != agentloop.CompactionEventCompleted || started.CompactionID != completed.CompactionID {
+		t.Errorf("compaction events = %+v, %+v", started, completed)
+	}
+}
+
+func TestEngineCompactsManually(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	caller := &scriptedCaller{responses: []*agentloop.Response{{
+		Content: conversation.Text("manual summary"),
+		Usage:   conversation.TokenUsage{Input: 4, Output: 5, Total: 9},
+	}}}
+	engine := fixture.newEngine(t, func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+		return caller, nil
+	})
+	session := fixture.createSession(t)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, conversation.Text("manual goal")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sessions.Save(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	session.ClearPending()
+
+	result, err := engine.Compact(t.Context(), session.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trigger != conversation.CompactionTriggerManual || result.Usage.Total != 9 {
+		t.Fatalf("compact result = %+v", result)
+	}
+	loaded, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Rounds[0].Messages) != 1 || len(loaded.ContextMessages()) != 2 {
+		t.Fatalf("manual compact transcript/context = %d/%d", len(loaded.Rounds[0].Messages), len(loaded.ContextMessages()))
+	}
+}
+
+func TestManualCompactionKeepsSessionStateOutOfTemporaryToolTurns(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	var toolContext agentloop.CallContext
+	if err := fixture.registry.Register(&executionTestTool{
+		definition: agentloop.ToolDefinition{Name: "lookup"},
+		execute: func(_ context.Context, callContext agentloop.CallContext, _ []byte) (conversation.Content, error) {
+			toolContext = callContext
+			return conversation.Text("tool result"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	caller := &scriptedCaller{responses: []*agentloop.Response{
+		{
+			Content: conversation.Content{
+				conversation.ToolUseBlock{ID: "compact-call", Name: "lookup", Input: []byte(`{"query":"session"}`)},
+			},
+			Usage:      conversation.TokenUsage{Input: 10, Output: 2, Total: 12},
+			StopReason: agentloop.StopReasonToolUse,
+		},
+		{
+			Content:    conversation.Text("manual summary"),
+			Usage:      conversation.TokenUsage{Input: 20, Output: 5, Total: 25},
+			StopReason: agentloop.StopReasonEndTurn,
+		},
+	}}
+	engine := fixture.newEngine(t, func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
+		return caller, nil
+	})
+	session := fixture.createSession(t)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, conversation.Text("manual goal")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sessions.Save(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	session.ClearPending()
+
+	if _, err := engine.Compact(t.Context(), session.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("compaction requests = %d, want 2", len(requests))
+	}
+	if len(requests[0].Tools) != 1 || len(requests[0].Messages) != 2 {
+		t.Fatalf("first compaction request = %+v", requests[0])
+	}
+	if len(requests[1].Messages) != 4 {
+		t.Fatalf("second compaction request messages = %d, want 4", len(requests[1].Messages))
+	}
+	if toolContext.SessionID != session.ID || toolContext.RoundID == roundID || toolContext.RoundID == uuid.Nil {
+		t.Fatalf("temporary tool context = %+v", toolContext)
+	}
+
+	loaded, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Rounds[0].Messages) != 1 {
+		t.Fatalf("raw transcript messages = %d, want 1", len(loaded.Rounds[0].Messages))
+	}
+	for _, event := range fixture.sessions.events[session.ID] {
+		if _, ok := event.(conversation.MessageAppended); !ok {
+			continue
+		}
+		message := event.(conversation.MessageAppended).Message
+		if message.RoundID == toolContext.RoundID {
+			t.Fatalf("temporary compaction message was persisted: %+v", message)
+		}
+	}
+}
+
+func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	provider, err := fixture.catalog.Get(t.Context(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.AddModel(catalog.Model{
+		Slug:          "small-model",
+		Name:          "Small Model",
+		ContextWindow: 4_000,
+	})
+	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+	caller := &scriptedCaller{responses: []*agentloop.Response{{
+		Content:    conversation.Text("model switch summary"),
+		Usage:      conversation.TokenUsage{Input: 10, Output: 5, Total: 15},
+		StopReason: agentloop.StopReasonEndTurn,
+	}}}
+	engine := fixture.newEngine(t, func(_ context.Context, _ catalog.Provider, model catalog.Model) (agentloop.Caller, error) {
+		if model.Slug != "gpt-5" {
+			t.Fatalf("compression used target model %q", model.Slug)
+		}
+		return caller, nil
+	})
+	session := fixture.createSession(t)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendUserMessage(roundID, conversation.Text(strings.Repeat("important context ", 1_000))); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sessions.Save(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	session.ClearPending()
+
+	updated, err := engine.SetModel(t.Context(), session.ID.String(), "openai", "small-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.CurrentModel == nil || updated.CurrentModel.ModelSlug != "small-model" || updated.ContextWindow != 4_000 {
+		t.Fatalf("updated session model = %+v, context window = %d", updated.CurrentModel, updated.ContextWindow)
+	}
+	if len(caller.Requests()) != 1 {
+		t.Fatalf("model switch LLM requests = %d, want 1 compaction request", len(caller.Requests()))
+	}
+
+	events := fixture.sessions.events[session.ID]
+	compactedIndex := -1
+	modelSetIndex := -1
+	for index, event := range events {
+		switch event.(type) {
+		case conversation.SessionCompacted:
+			compactedIndex = index
+		case conversation.SessionModelSet:
+			modelSetIndex = index
+		}
+	}
+	if compactedIndex < 0 || modelSetIndex < 0 || compactedIndex >= modelSetIndex {
+		t.Fatalf("event order = %+v", events)
 	}
 }
 

@@ -66,6 +66,11 @@ export const commands: Command[] = [
         usage: "/status",
     },
     {
+        name: "/compact",
+        description: "Compact the current session context",
+        usage: "/compact",
+    },
+    {
         name: "/cwd",
         description: "Set or show the session working directory",
         usage: "/cwd [<path>|clear]",

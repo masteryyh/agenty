@@ -20,6 +20,7 @@ import { type OverlayKind, useAppStore } from "./state/store";
 import { useTuiRuntime } from "./tui/runtime";
 
 const INPUT_HEIGHT = 4;
+const INPUT_TOP_GAP = 1;
 const PROVIDER_OVERLAY_HEIGHT = 18;
 const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
@@ -101,13 +102,14 @@ function ChatView() {
     );
 
     const streaming = chat.status === "streaming";
+    const busy = streaming || chat.status === "compacting";
     const reasoningActive = streaming && !!chat.current?.reasoning && !chat.current.content;
 
     const panelH = panelHeight(app.overlay);
     const hasPanelOverlay = panelH !== null;
     // Bottom dialogs float over the chat and input instead of changing the main
     // flex flow. This keeps scroll position and message layout stable.
-    const messageHeight = Math.max(rows - INPUT_HEIGHT, 1);
+    const messageHeight = Math.max(rows - INPUT_HEIGHT - INPUT_TOP_GAP, 1);
 
     const switchModelByRef = async (ref: string) => {
         if (!client) {
@@ -197,6 +199,9 @@ function ChatView() {
                 case "/status":
                     app.setOverlay("status");
                     return;
+                case "/compact":
+                    void chat.compactSession();
+                    return;
                 case "/cwd": {
                     if (!arg) {
                         app.setToast(`CWD: ${app.session?.cwd ?? process.cwd()}`);
@@ -262,22 +267,25 @@ function ChatView() {
                 marginTop={-paletteHeight}
                 onChoose={setValue}
             />
-            <InputBox
-                value={value}
-                onChange={setValue}
-                onSubmit={handleSubmit}
-                onTab={handleTab}
-                streaming={streaming}
-                phrase={chat.phrase}
-                modelName={`${app.model?.providerName ?? "?"}/${app.model?.name ?? "?"}`}
-                cwd={app.session?.cwd ?? process.cwd()}
-                tokenConsumed={chat.tokenConsumed}
-                thinkingLevel={thinkingLevel}
-                reasoningActive={reasoningActive}
-                abort={chat.abort}
-                toast={app.toast}
-                active={!hasPanelOverlay}
-            />
+            <Box marginTop={INPUT_TOP_GAP}>
+                <InputBox
+                    value={value}
+                    onChange={setValue}
+                    onSubmit={handleSubmit}
+                    onTab={handleTab}
+                    streaming={busy}
+                    phrase={chat.phrase}
+                    modelName={`${app.model?.providerName ?? "?"}/${app.model?.name ?? "?"}`}
+                    cwd={app.session?.cwd ?? process.cwd()}
+                    contextWindow={app.session?.contextWindow ?? 0}
+                    tokenConsumed={chat.tokenConsumed}
+                    thinkingLevel={thinkingLevel}
+                    reasoningActive={reasoningActive}
+                    abort={chat.abort}
+                    toast={app.toast}
+                    active={!hasPanelOverlay}
+                />
+            </Box>
             {hasPanelOverlay ? (
                 <BottomDialog
                     width={Math.max(columns - 2, 1)}

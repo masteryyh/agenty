@@ -17,8 +17,12 @@ const (
 	EventSessionCwdSet             = "session_cwd_set"
 	EventRoundStarted              = "round_started"
 	EventMessageAppended           = "message_appended"
-	EventRoundEnded                = "round_ended"
-	EventSessionTitleSet           = "session_title_set"
+	EventSessionCompacted          = "session_compacted"
+	// EventSessionMetadataRefreshed is retained for replaying development
+	// transcripts written before compaction metadata became derived state.
+	EventSessionMetadataRefreshed = "session_metadata_refreshed"
+	EventRoundEnded               = "round_ended"
+	EventSessionTitleSet          = "session_title_set"
 )
 
 type SessionStarted struct {
@@ -115,6 +119,47 @@ func (e MessageAppended) OccurredAt() time.Time {
 	return e.At
 }
 
+type CompactionTrigger string
+
+const (
+	CompactionTriggerManual      CompactionTrigger = "manual"
+	CompactionTriggerAuto        CompactionTrigger = "auto"
+	CompactionTriggerModelSwitch CompactionTrigger = "model_switch"
+)
+
+type SessionCompacted struct {
+	SessionID           uuid.UUID         `json:"sessionId"`
+	CompactionID        uuid.UUID         `json:"compactionId"`
+	Trigger             CompactionTrigger `json:"trigger"`
+	Summary             string            `json:"summary"`
+	ContextTokensBefore int64             `json:"contextTokensBefore"`
+	ContextTokensAfter  int64             `json:"-"`
+	Usage               TokenUsage        `json:"usage"`
+	At                  time.Time         `json:"occurredAt"`
+}
+
+func (SessionCompacted) EventType() string {
+	return EventSessionCompacted
+}
+
+func (e SessionCompacted) OccurredAt() time.Time {
+	return e.At
+}
+
+type SessionMetadataRefreshed struct {
+	SessionID uuid.UUID `json:"sessionId"`
+	Message   Message   `json:"message"`
+	At        time.Time `json:"occurredAt"`
+}
+
+func (SessionMetadataRefreshed) EventType() string {
+	return EventSessionMetadataRefreshed
+}
+
+func (e SessionMetadataRefreshed) OccurredAt() time.Time {
+	return e.At
+}
+
 type RoundEnded struct {
 	SessionID uuid.UUID   `json:"sessionId"`
 	RoundID   uuid.UUID   `json:"roundId"`
@@ -160,6 +205,10 @@ func DecodeEvent(env shared.Envelope) (shared.Event, error) {
 		return decodePayload[RoundStarted](env.Payload)
 	case EventMessageAppended:
 		return decodePayload[MessageAppended](env.Payload)
+	case EventSessionCompacted:
+		return decodePayload[SessionCompacted](env.Payload)
+	case EventSessionMetadataRefreshed:
+		return decodePayload[SessionMetadataRefreshed](env.Payload)
 	case EventRoundEnded:
 		return decodePayload[RoundEnded](env.Payload)
 	case EventSessionTitleSet:

@@ -156,8 +156,10 @@ func (s *ProviderService) Delete(ctx context.Context, slug string) error {
 }
 
 type ModelInput struct {
-	Name                   string                            `json:"name"`
-	ContextWindow          int                               `json:"contextWindow,omitempty"`
+	Name          string `json:"name"`
+	ContextWindow int    `json:"contextWindow,omitempty"`
+	// MaxOutputTokens is retained for wire compatibility with older clients.
+	// The core ignores it and persists the single global output limit.
 	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
 	MultiModal             bool                              `json:"multiModal,omitempty"`
 	Light                  bool                              `json:"light,omitempty"`
@@ -175,10 +177,6 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	if in.MaxOutputTokens <= 0 {
-		return nil, Validation("max output tokens must be greater than zero")
-	}
-
 	for nativeEffort, agentyEffort := range in.ReasoningEffortMapping {
 		if nativeEffort == "" {
 			return nil, Validation("reasoning effort mapping contains an empty native effort")
@@ -201,7 +199,7 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 		Slug:                   ms,
 		Name:                   in.Name,
 		ContextWindow:          in.ContextWindow,
-		MaxOutputTokens:        in.MaxOutputTokens,
+		MaxOutputTokens:        catalog.DefaultMaxOutputTokens,
 		MultiModal:             in.MultiModal,
 		Light:                  in.Light,
 		ReasoningEffortMapping: in.ReasoningEffortMapping,

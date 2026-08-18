@@ -50,7 +50,7 @@ function createProvider(draft: ProviderDraft, model: ModelDraft = createModel(dr
             slug: model.slug,
             name: model.name,
             contextWindow: model.contextWindow,
-            maxOutputTokens: model.maxOutputTokens,
+            maxOutputTokens: 8_192,
             multiModal: false,
             light: false,
             isDefault: true,
@@ -147,7 +147,6 @@ describe("first-run provider setup", () => {
         expect(validateProviderDraft({ ...draft, apiKey: "" })).toContain("API key");
         expect(validateProviderDraft(draft)).toBeNull();
         expect(validateModelDraft({ ...model, contextWindow: 0 })).toContain("Context window");
-        expect(validateModelDraft({ ...model, maxOutputTokens: 0 })).toContain("Max output tokens");
         expect(validateModelDraft({ ...model, slug: "org/model_name[v2]" })).toBeNull();
     });
 

@@ -46,6 +46,10 @@ func (r *CatalogRepository) Get(ctx context.Context, slug shared.Slug) (*catalog
 	}
 	if p.Models == nil {
 		p.Models = make([]catalog.Model, 0, len(entries))
+	} else {
+		for index := range p.Models {
+			p.Models[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
+		}
 	}
 
 	for _, entry := range entries {
@@ -62,6 +66,7 @@ func (r *CatalogRepository) Get(ctx context.Context, slug shared.Slug) (*catalog
 		if err := json.Unmarshal(modelData, &m); err != nil {
 			return nil, err
 		}
+		m.MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		p.Models = append(p.Models, m)
 	}
 
@@ -142,6 +147,7 @@ func (r *CatalogRepository) Save(ctx context.Context, provider *catalog.Provider
 	}
 
 	for _, model := range provider.Models {
+		model.MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		modelData, err := json.MarshalIndent(model, "", "    ")
 		if err != nil {
 			return err

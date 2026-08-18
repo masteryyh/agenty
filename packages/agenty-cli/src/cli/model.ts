@@ -46,14 +46,13 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
         return;
     }
     if (command === "add") {
-        const [, , modelSlug] = requirePositionals(args, 3, "model add <slug> --provider <ref> --max-output-tokens <n> [options]");
+        const [, , modelSlug] = requirePositionals(args, 3, "model add <slug> --provider <ref> [options]");
         const provider = await resolveProvider(client, requireFlag(args, "provider"));
         const created = await client.createModel({
             providerSlug: provider.slug,
             modelSlug,
             name: flag(args, "name")?.trim() || modelSlug,
             contextWindow: positiveInteger(flag(args, "context-window") ?? "0", "--context-window", true),
-            maxOutputTokens: positiveInteger(requireFlag(args, "max-output-tokens"), "--max-output-tokens"),
             multiModal: booleanFlag(args, "multi-modal"),
             light: booleanFlag(args, "light"),
             isDefault: booleanFlag(args, "default"),
@@ -68,7 +67,6 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
         const update: UpdateModelDto = {
             name: hasFlag(args, "name") ? requireFlag(args, "name") : current.name,
             contextWindow: hasFlag(args, "context-window") ? positiveInteger(requireFlag(args, "context-window"), "--context-window", true) : current.contextWindow,
-            maxOutputTokens: hasFlag(args, "max-output-tokens") ? positiveInteger(requireFlag(args, "max-output-tokens"), "--max-output-tokens") : current.maxOutputTokens,
             multiModal: hasFlag(args, "multi-modal") ? booleanFlag(args, "multi-modal") : current.multiModal,
             light: hasFlag(args, "light") ? booleanFlag(args, "light") : current.light,
             isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,

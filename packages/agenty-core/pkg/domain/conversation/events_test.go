@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,8 @@ func TestEventEnvelopeRoundTrip(t *testing.T) {
 		{name: "cwd cleared", event: SessionCwdSet{SessionID: sessionID, Cwd: nil, At: at}},
 		{name: "round started", event: RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
 		{name: "message appended", event: MessageAppended{SessionID: sessionID, Message: Message{ID: shared.NewID(), RoundID: roundID, Role: RoleAssistant, Content: Text("hi"), Model: &model, Usage: &TokenUsage{Input: 10, Output: 20, Total: 30}, CreatedAt: at}, At: at}},
+		{name: "session compacted", event: SessionCompacted{SessionID: sessionID, CompactionID: shared.NewID(), Trigger: CompactionTriggerAuto, Summary: "done", ContextTokensBefore: 100, Usage: TokenUsage{Input: 10, Output: 20, Total: 30}, At: at}},
+		{name: "session metadata refreshed", event: SessionMetadataRefreshed{SessionID: sessionID, Message: Message{ID: shared.NewID(), Role: RoleUser, Visibility: MessageHidden, Content: Text("<metadata/>")}, At: at}},
 		{name: "round failed", event: RoundEnded{SessionID: sessionID, RoundID: roundID, Status: RoundFailed, Usage: TokenUsage{Input: 10, Output: 20, Total: 30}, Error: &errMessage, At: at}},
 		{name: "title set", event: SessionTitleSet{SessionID: sessionID, Title: "greeting", At: at}},
 	}
@@ -47,6 +50,39 @@ func TestEventEnvelopeRoundTrip(t *testing.T) {
 				t.Errorf("decoded event = %#v, want %#v", decoded, tt.event)
 			}
 		})
+	}
+}
+
+func TestSessionCompactedPersistenceContainsSummaryButNoDerivedMessages(t *testing.T) {
+	t.Parallel()
+
+	event := SessionCompacted{
+		SessionID:           shared.NewID(),
+		CompactionID:        shared.NewID(),
+		Trigger:             CompactionTriggerAuto,
+		Summary:             "done",
+		ContextTokensBefore: 100,
+		Usage:               TokenUsage{Input: 10, Output: 20, Total: 30},
+		At:                  time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC),
+	}
+	line, err := shared.EncodeEvent(1, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(line)
+	if !strings.Contains(encoded, `"summary":"done"`) {
+		t.Fatalf("summary missing from persisted event: %s", encoded)
+	}
+	for _, field := range []string{
+		"recentContextXml",
+		"metadataXml",
+		"retainedMessages",
+		"summaryMessage",
+		"metadataMessage",
+	} {
+		if strings.Contains(encoded, field) {
+			t.Fatalf("derived field %q persisted: %s", field, encoded)
+		}
 	}
 }
 

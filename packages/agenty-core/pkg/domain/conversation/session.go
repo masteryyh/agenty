@@ -15,6 +15,7 @@ var (
 	ErrRoundNotFound      = errors.New("conversation: round not found")
 	ErrRoundNotRunning    = errors.New("conversation: round is not running")
 	ErrInvalidRole        = errors.New("conversation: invalid message role")
+	ErrInvalidCompaction  = errors.New("conversation: invalid compaction")
 )
 
 type Session struct {
@@ -31,6 +32,16 @@ type Session struct {
 
 	pending  []shared.Event
 	metadata *SessionMetadata
+	context  []Message
+}
+
+type CompactionInput struct {
+	CompactionID        uuid.UUID
+	Trigger             CompactionTrigger
+	Summary             string
+	ContextTokensBefore int64
+	Usage               TokenUsage
+	At                  time.Time
 }
 
 func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
@@ -141,6 +152,40 @@ func (s *Session) AppendAssistantMessage(roundID uuid.UUID, content Content, mod
 	return s.AppendMessage(roundID, RoleAssistant, content, &model, usage)
 }
 
+// Compact records a compaction event while keeping the append-only rounds
+// untouched. The generated synthetic messages are used only when constructing
+// the next model request and are recreated from the event during replay.
+func (s *Session) Compact(input CompactionInput) (SessionCompacted, error) {
+	if input.Trigger != CompactionTriggerManual && input.Trigger != CompactionTriggerAuto && input.Trigger != CompactionTriggerModelSwitch {
+		return SessionCompacted{}, ErrInvalidCompaction
+	}
+	if input.Summary == "" {
+		return SessionCompacted{}, ErrInvalidCompaction
+	}
+	if s.ID == uuid.Nil {
+		return SessionCompacted{}, ErrInvalidCompaction
+	}
+
+	at := input.At
+	if at.IsZero() {
+		at = now()
+	}
+	event := SessionCompacted{
+		SessionID:           s.ID,
+		CompactionID:        input.CompactionID,
+		Trigger:             input.Trigger,
+		Summary:             input.Summary,
+		ContextTokensBefore: input.ContextTokensBefore,
+		Usage:               input.Usage,
+		At:                  at,
+	}
+	if event.CompactionID == uuid.Nil {
+		event.CompactionID = shared.NewID()
+	}
+	s.record(event)
+	return event, nil
+}
+
 func (s *Session) CompleteRound(roundID uuid.UUID, status RoundStatus, usage TokenUsage, errMsg *string) error {
 	if !status.Terminal() {
 		return fmt.Errorf("conversation: %q is not a terminal round status", status)
@@ -195,7 +240,14 @@ func (s *Session) VisibleCopy() *Session {
 		}
 	}
 	copy.pending = nil
+	copy.context = nil
 	return &copy
+}
+
+func (s *Session) ContextMessages() []Message {
+	messages := make([]Message, len(s.context))
+	copy(messages, s.context)
+	return messages
 }
 
 func ReplaySession(events []shared.Event) *Session {
@@ -221,17 +273,24 @@ func (s *Session) apply(e shared.Event) {
 		s.CurrentReasoningEffort = ev.ReasoningEffort
 		s.Cwd = cloneString(ev.Cwd)
 		s.Rounds = make([]Round, 0)
+		s.context = make([]Message, 0)
 		s.CreatedAt = ev.At
 		s.UpdatedAt = ev.At
 	case SessionModelSet:
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
+		s.updateMetadataModel(ev.Model)
+		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case SessionReasoningEffortSet:
 		s.CurrentReasoningEffort = ev.ReasoningEffort
+		s.updateMetadataReasoningEffort(ev.ReasoningEffort)
+		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case SessionCwdSet:
 		s.Cwd = cloneString(ev.Cwd)
+		s.updateMetadataCwd(ev.Cwd)
+		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case RoundStarted:
 		s.Rounds = append(s.Rounds, Round{
@@ -251,7 +310,15 @@ func (s *Session) apply(e shared.Event) {
 		if r, _, ok := s.findRound(ev.Message.RoundID); ok {
 			r.Messages = append(r.Messages, ev.Message)
 		}
+		s.context = append(s.context, ev.Message)
 		s.applyMessageMetadata(ev.Message)
+		s.UpdatedAt = ev.At
+	case SessionCompacted:
+		s.applyCompaction(ev)
+		s.UpdatedAt = ev.At
+	case SessionMetadataRefreshed:
+		s.applyMessageMetadata(ev.Message)
+		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case RoundEnded:
 		if r, _, ok := s.findRound(ev.RoundID); ok {
@@ -275,6 +342,37 @@ func cloneString(value *string) *string {
 	}
 	copy := *value
 	return &copy
+}
+
+func cloneMessages(messages []Message) []Message {
+	if messages == nil {
+		return nil
+	}
+	cloned := make([]Message, len(messages))
+	for index, message := range messages {
+		cloned[index] = cloneMessage(message)
+	}
+	return cloned
+}
+
+func cloneMessage(message Message) Message {
+	cloned := message
+	cloned.Content = append(Content(nil), message.Content...)
+	if message.Model != nil {
+		model := *message.Model
+		cloned.Model = &model
+	}
+	if message.Usage != nil {
+		usage := *message.Usage
+		cloned.Usage = &usage
+	}
+	if message.Metadata != nil {
+		cloned.Metadata = make(shared.Metadata, len(message.Metadata))
+		for key, value := range message.Metadata {
+			cloned.Metadata[key] = value
+		}
+	}
+	return cloned
 }
 
 func (s *Session) findRound(id uuid.UUID) (*Round, int, bool) {

@@ -58,6 +58,16 @@ func (update MetadataUpdate) XML() (string, error) {
 	return string(encoded), nil
 }
 
+func (metadata SessionMetadata) XML() (string, error) {
+	return MetadataUpdate{
+		Cwd:             metadataStringPointer(metadata.Cwd),
+		Model:           metadataStringPointer(metadata.Model),
+		Provider:        metadataStringPointer(metadata.Provider),
+		Timezone:        metadataStringPointer(metadata.Timezone),
+		ReasoningEffort: metadataStringPointer(metadata.ReasoningEffort),
+	}.XML()
+}
+
 func (s *Session) LastMetadata() *SessionMetadata {
 	if s.metadata == nil {
 		return nil

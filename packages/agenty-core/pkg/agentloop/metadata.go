@@ -8,6 +8,32 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/utils"
 )
 
+func fullMetadataXML(session *conversation.Session) (string, error) {
+	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
+		return "", nil
+	}
+
+	cwd := ""
+	if session.Cwd != nil {
+		cwd = *session.Cwd
+	} else {
+		resolved, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve metadata cwd: %w", err)
+		}
+		cwd = resolved
+	}
+
+	metadata := conversation.SessionMetadata{
+		Cwd:             cwd,
+		Model:           session.CurrentModel.ModelSlug.String(),
+		Provider:        session.CurrentModel.ProviderSlug.String(),
+		Timezone:        utils.TimezoneName(),
+		ReasoningEffort: string(session.CurrentReasoningEffort),
+	}
+	return metadata.XML()
+}
+
 func metadataForRound(
 	session *conversation.Session,
 	round conversation.Round,

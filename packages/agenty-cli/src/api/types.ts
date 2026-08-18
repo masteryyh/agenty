@@ -40,6 +40,7 @@ export interface ModelDto {
     providerName: string;
     name: string;
     contextWindow: number;
+    /** Legacy projection; core now always uses 8192 for every model. */
     maxOutputTokens: number;
     multiModal: boolean;
     light: boolean;
@@ -56,7 +57,8 @@ export interface CreateModelDto {
     modelSlug: string;
     name: string;
     contextWindow?: number;
-    maxOutputTokens: number;
+    /** @deprecated Core ignores per-model output limits and uses 8192. */
+    maxOutputTokens?: number;
     multiModal?: boolean;
     light?: boolean;
     reasoningEffortMapping?: Record<string, ReasoningEffort>;
@@ -174,6 +176,17 @@ export interface SessionEvent {
     stream?: StreamEvent;
     message?: ChatMessageDto;
     status?: RoundStatus;
+    usage?: TokenUsage;
+    error?: string;
+}
+
+export interface CompactionEvent {
+    type: "started" | "completed" | "failed";
+    sessionId: string;
+    compactionId?: string;
+    trigger: "manual" | "auto" | "model_switch";
+    contextTokensBefore?: number;
+    contextTokensAfter?: number;
     usage?: TokenUsage;
     error?: string;
 }

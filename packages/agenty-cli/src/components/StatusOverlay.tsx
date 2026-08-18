@@ -49,7 +49,7 @@ export function StatusOverlay() {
         ["Model", `${model?.providerName ?? "?"}/${model?.name ?? "?"}`],
         ["Thinking", thinking],
         ["Messages", String(history.length)],
-        ["Tokens", String(tokenConsumed)],
+        ["Context", `${session?.contextWindow ?? 0}/${tokenConsumed}`],
         ["CWD", session?.cwd ?? process.cwd()],
     ];
     const keyWidth = Math.min(10, Math.max(Math.floor(dialogSize.width / 4), 7));
