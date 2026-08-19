@@ -111,8 +111,8 @@ function formatPath(value: unknown): string {
 }
 
 function formatRange(input: JsonRecord | undefined, result: JsonRecord | undefined): string {
-    const start = numberValue(result?.startLine) ?? numberValue(input?.startLine);
-    const end = numberValue(result?.endLine) ?? numberValue(input?.endLine);
+    const start = numberValue(result?.startLine) ?? numberValue(input?.start_line);
+    const end = numberValue(result?.endLine) ?? numberValue(input?.end_line);
     if (start === undefined && end === undefined) {
         return "";
     }

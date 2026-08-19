@@ -118,13 +118,30 @@ function textFromBlocks(blocks: ContentBlock[], type: "text" | "reasoning"): str
 }
 
 function toolCallsFromBlocks(blocks: ContentBlock[]): UIToolCall[] {
-    return blocks
-        .filter((block): block is Extract<ContentBlock, { type: "tool_use" }> => block.type === "tool_use")
-        .map((block) => ({
-            id: block.id,
-            name: block.name,
-            arguments: typeof block.input === "string" ? block.input : JSON.stringify(block.input),
-        }));
+    const calls: UIToolCall[] = [];
+    for (const block of blocks) {
+        if (block.type === "tool_use") {
+            calls.push({
+                id: block.id,
+                name: block.name,
+                arguments: typeof block.input === "string" ? block.input : JSON.stringify(block.input),
+            });
+        } else if (block.type === "shell_call") {
+            const input: Record<string, unknown> = { commands: block.commands };
+            if (block.timeoutMs !== undefined) {
+                input.timeout_ms = block.timeoutMs;
+            }
+            if (block.maxOutputLength !== undefined) {
+                input.max_output_length = block.maxOutputLength;
+            }
+            calls.push({
+                id: block.callId,
+                name: "shell",
+                arguments: JSON.stringify(input),
+            });
+        }
+    }
+    return calls;
 }
 
 function messageToUI(message: ChatMessageDto): UIMessage {

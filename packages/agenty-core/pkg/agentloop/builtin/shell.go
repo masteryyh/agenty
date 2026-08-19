@@ -20,6 +20,9 @@ const (
 	defaultShellOutputLimit int64 = 4_096
 	maxShellTimeout         int64 = 120_000
 	maxShellOutputLimit     int64 = 1 << 20
+	maxShellCommands              = 4
+	maxShellConcurrency           = 4
+	shellWaitDelay                = 500 * time.Millisecond
 )
 
 type shellArguments struct {
@@ -32,13 +35,16 @@ type shellTool struct{}
 
 func (tool *shellTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
-		Type:        agentloop.ToolTypeShell,
-		Name:        "shell",
-		Description: "Execute one or more shell commands in parallel.",
+		Type: agentloop.ToolTypeShell,
+		Name: "shell",
+		Description: "Execute up to 4 shell commands in parallel. " +
+			"Uses zsh on macOS, bash on Linux, and sh as a fallback when the preferred shell is unavailable. " +
+			"On Windows, uses pwsh.exe or powershell.exe when available, then cmd.exe.",
 		InputSchema: objectSchema(map[string]agentloop.JSONSchema{
 			"commands": {
 				Type:     agentloop.JSONSchemaTypeArray,
 				MinItems: new(uint64(1)),
+				MaxItems: new(uint64(maxShellCommands)),
 				Items:    &agentloop.JSONSchema{Type: agentloop.JSONSchemaTypeString},
 			},
 			"timeout_ms": {
@@ -73,14 +79,22 @@ func (tool *shellTool) Execute(
 	}
 
 	results := make([]conversation.ShellCommandOutput, len(arguments.Commands))
+	jobs := make(chan shellJob)
+	workerCount := min(len(arguments.Commands), maxShellConcurrency)
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(len(arguments.Commands))
-	for index, command := range arguments.Commands {
+	waitGroup.Add(workerCount)
+	for range workerCount {
 		go func() {
 			defer waitGroup.Done()
-			results[index] = executeShellCommand(ctx, callContext.Cwd, command, timeout, outputLimit)
+			for job := range jobs {
+				results[job.index] = executeShellCommand(ctx, callContext.Cwd, job.command, timeout, outputLimit)
+			}
 		}()
 	}
+	for index, command := range arguments.Commands {
+		jobs <- shellJob{index: index, command: command}
+	}
+	close(jobs)
 	waitGroup.Wait()
 
 	return conversation.Content{conversation.ShellCallOutputBlock{
@@ -89,9 +103,17 @@ func (tool *shellTool) Execute(
 	}}, nil
 }
 
+type shellJob struct {
+	index   int
+	command string
+}
+
 func normalizeShellArguments(arguments shellArguments) (time.Duration, int64, error) {
 	if len(arguments.Commands) == 0 {
 		return 0, 0, fmt.Errorf("commands must contain at least one command")
+	}
+	if len(arguments.Commands) > maxShellCommands {
+		return 0, 0, fmt.Errorf("commands must contain at most %d commands", maxShellCommands)
 	}
 	for index, command := range arguments.Commands {
 		if strings.TrimSpace(command) == "" {
@@ -129,6 +151,7 @@ func executeShellCommand(
 	defer cancel()
 
 	process := newShellCommand(commandContext, command)
+	prepareShellProcess(process)
 	if strings.TrimSpace(cwd) != "" {
 		process.Dir = cwd
 	}
@@ -138,25 +161,41 @@ func executeShellCommand(
 	process.Stderr = &stderr
 	err := process.Run()
 
-	capturedStdout, capturedStderr := truncateShellOutput(stdout.String(), stderr.String(), outputLimit)
-	result := conversation.ShellCommandOutput{Stdout: capturedStdout, Stderr: capturedStderr}
 	if errors.Is(commandContext.Err(), context.DeadlineExceeded) {
-		result.Outcome = conversation.ShellOutcome{Type: "timeout"}
-		return result
+		capturedStdout, capturedStderr := truncateShellOutput(stdout.String(), stderr.String(), outputLimit)
+		return conversation.ShellCommandOutput{
+			Stdout:  capturedStdout,
+			Stderr:  capturedStderr,
+			Outcome: conversation.ShellOutcome{Type: "timeout"},
+		}
 	}
 	if err == nil {
 		code := int64(0)
-		result.Outcome = conversation.ShellOutcome{Type: "exit", ExitCode: &code}
-		return result
+		capturedStdout, capturedStderr := truncateShellOutput(stdout.String(), stderr.String(), outputLimit)
+		return conversation.ShellCommandOutput{
+			Stdout:  capturedStdout,
+			Stderr:  capturedStderr,
+			Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &code},
+		}
 	}
 
 	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
 		code := int64(exitError.ExitCode())
-		result.Outcome = conversation.ShellOutcome{Type: "exit", ExitCode: &code}
-		return result
+		capturedStdout, capturedStderr := truncateShellOutput(stdout.String(), stderr.String(), outputLimit)
+		return conversation.ShellCommandOutput{
+			Stdout:  capturedStdout,
+			Stderr:  capturedStderr,
+			Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &code},
+		}
 	}
-	result.Outcome = conversation.ShellOutcome{Type: "exit", ExitCode: new(int64(-1))}
-	return result
+	_, _ = stderr.Write([]byte(err.Error()))
+	capturedStdout, capturedStderr := truncateShellOutput(stdout.String(), stderr.String(), outputLimit)
+	code := int64(-1)
+	return conversation.ShellCommandOutput{
+		Stdout:  capturedStdout,
+		Stderr:  capturedStderr,
+		Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &code},
+	}
 }
 
 type shellOutputBuffer struct {

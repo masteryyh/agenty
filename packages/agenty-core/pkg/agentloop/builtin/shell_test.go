@@ -2,6 +2,8 @@ package builtin_test
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,11 +39,15 @@ func TestShellRunsCommandsInParallelAndPreservesOrder(t *testing.T) {
 func TestShellCapturesExitTimeoutAndOutputLimit(t *testing.T) {
 	t.Parallel()
 
+	started := time.Now()
 	output := executeShell(t, `{
-		"commands":["printf 12345; printf abcde >&2; exit 7","printf before; sleep 1"],
+		"commands":["printf 12345; printf abcde >&2; exit 7","printf before; sleep 2 & wait"],
 		"timeout_ms":30,
 		"max_output_length":7
 	}`)
+	if elapsed := time.Since(started); elapsed >= 1500*time.Millisecond {
+		t.Fatalf("timed out shell command took %v, want process tree termination", elapsed)
+	}
 	if output.MaxOutputLength != 7 {
 		t.Errorf("max output length = %d, want 7", output.MaxOutputLength)
 	}
@@ -72,6 +78,29 @@ func TestShellRegistryAttachesCallIDToSpecialOutput(t *testing.T) {
 	}
 }
 
+func TestShellDefinitionDocumentsRuntimeAndCommandLimit(t *testing.T) {
+	t.Parallel()
+
+	tool, ok := newRegistry(t).Get("shell")
+	if !ok {
+		t.Fatal("shell is not registered")
+	}
+	definition := tool.Definition()
+	if definition.Name != "shell" {
+		t.Fatalf("shell definition = %q, want shell", definition.Name)
+	}
+	maxItems := definition.InputSchema.Properties["commands"].MaxItems
+	const wantMaxItems = uint64(4)
+	if maxItems == nil || *maxItems != wantMaxItems {
+		t.Fatalf("commands maxItems = %v, want %d", maxItems, wantMaxItems)
+	}
+	for _, phrase := range []string{"zsh on macOS", "bash on Linux", "sh as a fallback"} {
+		if !strings.Contains(definition.Description, phrase) {
+			t.Errorf("description %q does not mention %q", definition.Description, phrase)
+		}
+	}
+}
+
 func TestShellRejectsInvalidArguments(t *testing.T) {
 	t.Parallel()
 
@@ -85,6 +114,7 @@ func TestShellRejectsInvalidArguments(t *testing.T) {
 		`{"commands":[" "]}`,
 		`{"commands":["true"],"timeout_ms":0}`,
 		`{"commands":["true"],"max_output_length":0}`,
+		`{"commands":["true","true","true","true","true"]}`,
 	} {
 		if _, err := tool.Execute(context.Background(), agentloop.CallContext{}, []byte(input)); err == nil {
 			t.Errorf("Execute(%s) succeeded", input)
@@ -92,7 +122,28 @@ func TestShellRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestShellReportsProcessStartErrors(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	if err := os.Remove(cwd); err != nil {
+		t.Fatal(err)
+	}
+	output := executeShellWithCwd(t, cwd, `{"commands":["printf never-runs"]}`)
+	if output.Output[0].Outcome.Type != "exit" || output.Output[0].Outcome.ExitCode == nil || *output.Output[0].Outcome.ExitCode != -1 {
+		t.Fatalf("start error outcome = %+v, want exit -1", output.Output[0].Outcome)
+	}
+	if output.Output[0].Stderr == "" {
+		t.Fatal("start error stderr is empty")
+	}
+}
+
 func executeShell(t *testing.T, arguments string) conversation.ShellCallOutputBlock {
+	t.Helper()
+	return executeShellWithCwd(t, "", arguments)
+}
+
+func executeShellWithCwd(t *testing.T, cwd string, arguments string) conversation.ShellCallOutputBlock {
 	t.Helper()
 
 	registry := newRegistry(t)
@@ -100,7 +151,7 @@ func executeShell(t *testing.T, arguments string) conversation.ShellCallOutputBl
 	if !ok {
 		t.Fatal("shell is not registered")
 	}
-	content, err := tool.Execute(t.Context(), agentloop.CallContext{}, []byte(arguments))
+	content, err := tool.Execute(t.Context(), agentloop.CallContext{Cwd: cwd}, []byte(arguments))
 	if err != nil {
 		t.Fatal(err)
 	}

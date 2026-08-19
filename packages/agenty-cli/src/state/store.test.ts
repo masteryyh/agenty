@@ -197,4 +197,92 @@ describe("chat tool event projection", () => {
             },
         });
     });
+
+    test("projects persisted native shell calls and attaches special output", async () => {
+        const persisted: ChatSessionDto = {
+            ...session,
+            rounds: [{
+                id: "round-shell",
+                sessionId: session.id,
+                sequence: 1,
+                status: "completed",
+                model: session.currentModel!,
+                contextWindow: session.contextWindow,
+                messages: [
+                    {
+                        id: "assistant-shell",
+                        roundId: "round-shell",
+                        role: "assistant",
+                        content: [{
+                            type: "shell_call",
+                            callId: "call-shell",
+                            commands: ["pwd"],
+                            timeoutMs: 100,
+                            maxOutputLength: 20,
+                        }],
+                        createdAt: "2026-01-01T00:00:01Z",
+                    },
+                    {
+                        id: "tool-result-shell",
+                        roundId: "round-shell",
+                        role: "user",
+                        content: [{
+                            type: "tool_result",
+                            toolUseId: "call-shell",
+                            content: [{
+                                type: "shell_call_output",
+                                callId: "call-shell",
+                                maxOutputLength: 20,
+                                output: [{
+                                    stdout: "/tmp\n",
+                                    stderr: "",
+                                    outcome: { type: "exit", exitCode: 0 },
+                                }],
+                            }],
+                            isError: false,
+                        }],
+                        createdAt: "2026-01-01T00:00:02Z",
+                    },
+                ],
+                usage: { input: 10, output: 5, total: 15 },
+                startedAt: "2026-01-01T00:00:00Z",
+                endedAt: "2026-01-01T00:00:03Z",
+            }],
+        };
+        const client = {
+            async getSession() {
+                return persisted;
+            },
+            async resolveModel() {
+                return {
+                    slug: "model",
+                    providerSlug: "provider",
+                    providerName: "Provider",
+                    name: "Model",
+                    contextWindow: 32_000,
+                    maxOutputTokens: 8192,
+                    multiModal: false,
+                    light: false,
+                    isDefault: true,
+                };
+            },
+        } as unknown as AgentyClient;
+
+        useAppStore.setState({ client, session, history: [], current: null });
+        await useAppStore.getState().resumeSession(session);
+
+        const call = useAppStore.getState().history[0]?.toolCalls?.[0];
+        expect(call).toMatchObject({ id: "call-shell", name: "shell" });
+        expect(JSON.parse(call?.arguments ?? "{}")).toEqual({
+            commands: ["pwd"],
+            timeout_ms: 100,
+            max_output_length: 20,
+        });
+        expect(call?.result).toMatchObject({
+            callId: "call-shell",
+            name: "shell",
+            isError: false,
+        });
+        expect(call?.result?.content).toContain("shell_call_output");
+    });
 });

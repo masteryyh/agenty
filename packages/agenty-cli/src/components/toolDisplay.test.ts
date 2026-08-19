@@ -22,7 +22,7 @@ describe("tool display", () => {
     test("summarizes read_file without rendering its JSON envelope", () => {
         const display = buildToolDisplay(toolCall(
             "read_file",
-            { path: "src/MessageItem.tsx", startLine: 10, endLine: 20 },
+            { path: "src/MessageItem.tsx", start_line: 10, end_line: 20 },
             JSON.stringify({
                 path: "/repo/src/MessageItem.tsx",
                 content: "10: const first = true;\n11: const second = false;",

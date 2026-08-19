@@ -119,7 +119,8 @@ the default cache unavailable.
 - Persistent writes use explicit repositories and event-sourced session mutations; do
   not treat SQLite as the transcript source of truth.
 - Built-in tool contracts live in `pkg/agentloop`; implementations live in
-  `pkg/agentloop/builtin`. Tool arguments use JSON Schema and lowerCamelCase fields.
+  `pkg/agentloop/builtin`. Tool names and input argument fields use `snake_case`;
+  persisted and RPC JSON fields retain lowerCamelCase.
 - User-facing product text is English unless a localized copy is explicitly required.
 
 ## Change and verification discipline
