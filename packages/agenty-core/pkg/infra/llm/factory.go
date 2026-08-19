@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -56,7 +57,11 @@ func NewCaller(
 	switch provider.Type {
 	case catalog.APIOpenAI:
 		client := newOpenAIClient(provider, config)
-		return &openAIResponsesCaller{client: &client, model: model}, nil
+		return &openAIResponsesCaller{
+			client:      &client,
+			model:       model,
+			nativeShell: nativeOpenAIShellProvider(provider),
+		}, nil
 	case catalog.APIOpenAICompletions:
 		client := newOpenAIClient(provider, config)
 		return &openAIChatCaller{client: &client, model: model}, nil
@@ -72,6 +77,26 @@ func NewCaller(
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedAPI, provider.Type)
 	}
+}
+
+func nativeOpenAIShellProvider(provider catalog.Provider) bool {
+	if provider.Slug.String() != "openai" {
+		return false
+	}
+	baseURL := strings.TrimSpace(provider.BaseURL)
+	if baseURL == "" {
+		return true
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+
+	return strings.EqualFold(parsed.Scheme, "https") &&
+		strings.EqualFold(parsed.Hostname(), "api.openai.com") &&
+		strings.TrimRight(parsed.EscapedPath(), "/") == "/v1" &&
+		parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func newOpenAIClient(provider catalog.Provider, config factoryConfig) openai.Client {

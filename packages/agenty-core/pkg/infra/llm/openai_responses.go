@@ -10,14 +10,16 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	openaishared "github.com/openai/openai-go/v3/shared"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
 type openAIResponsesCaller struct {
-	client *openai.Client
-	model  catalog.Model
+	client      *openai.Client
+	model       catalog.Model
+	nativeShell bool
 }
 
 func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
@@ -67,18 +69,34 @@ func (caller *openAIResponsesCaller) Stream(
 				Type: modelStreamEventToolInputDelta, Index: int(event.OutputIndex), Delta: event.Delta,
 			})
 		case responses.ResponseOutputItemAddedEvent:
-			if item, ok := event.Item.AsAny().(responses.ResponseFunctionToolCall); ok {
+			switch item := event.Item.AsAny().(type) {
+			case responses.ResponseFunctionToolCall:
 				err = emit(handler, modelStreamEvent{
 					Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: item.Name,
 				})
+			case responses.ResponseFunctionShellToolCall:
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
+					ToolUseID: item.CallID, ToolName: "shell",
+				})
 			}
 		case responses.ResponseOutputItemDoneEvent:
-			if item, ok := event.Item.AsAny().(responses.ResponseFunctionToolCall); ok {
+			switch item := event.Item.AsAny().(type) {
+			case responses.ResponseFunctionToolCall:
 				err = emit(handler, modelStreamEvent{
 					Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: item.Name,
 					ToolInput: shared.RawJSON(item.Arguments),
+				})
+			case responses.ResponseFunctionShellToolCall:
+				input := conversation.ShellCallBlock{
+					CallID: item.CallID, Commands: item.Action.Commands,
+					TimeoutMs: item.Action.TimeoutMs, MaxOutputLength: item.Action.MaxOutputLength,
+				}.ToolUseBlock().Input
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
+					ToolUseID: item.CallID, ToolName: "shell", ToolInput: input,
 				})
 			}
 		case responses.ResponseCompletedEvent:
@@ -120,20 +138,16 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 		if message.Role == conversation.RoleSystem {
 			continue
 		}
-		items, err := openAIResponsesMessage(message)
+		items, err := openAIResponsesMessage(message, caller.nativeShell)
 		if err != nil {
 			return responses.ResponseNewParams{}, fmt.Errorf("llm: convert OpenAI Responses message %d: %w", index, err)
 		}
 		input = append(input, items...)
 	}
 
-	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		converted, err := openAIResponsesToolDefinition(tool)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
-		tools = append(tools, converted)
+	tools, err := openAIResponsesTools(request.Tools, caller.nativeShell)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
 	}
 
 	params := responses.ResponseNewParams{
@@ -156,7 +170,31 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 	return params, nil
 }
 
-func openAIResponsesToolDefinition(tool modelToolDefinition) (responses.ToolUnionParam, error) {
+func openAIResponsesTools(definitions []modelToolDefinition, nativeShell bool) ([]responses.ToolUnionParam, error) {
+	tools := make([]responses.ToolUnionParam, 0, len(definitions))
+	for _, definition := range definitions {
+		tool, err := openAIResponsesToolDefinition(definition, nativeShell)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
+}
+
+func openAIResponsesToolDefinition(tool modelToolDefinition, nativeShell bool) (responses.ToolUnionParam, error) {
+	toolType, err := providerToolType(tool)
+	if err != nil {
+		return responses.ToolUnionParam{}, err
+	}
+	if toolType == agentloop.ToolTypeShell && nativeShell {
+		return responses.ToolUnionParam{OfShell: &responses.FunctionShellToolParam{
+			Environment: responses.FunctionShellToolEnvironmentUnionParam{
+				OfLocal: &responses.LocalEnvironmentParam{},
+			},
+		}}, nil
+	}
+
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return responses.ToolUnionParam{}, fmt.Errorf("llm: convert OpenAI Responses tool %q schema: %w", tool.Name, err)
@@ -172,7 +210,7 @@ func openAIResponsesToolDefinition(tool modelToolDefinition) (responses.ToolUnio
 	return responses.ToolUnionParam{OfFunction: &converted}, nil
 }
 
-func openAIResponsesMessage(message conversation.Message) (responses.ResponseInputParam, error) {
+func openAIResponsesMessage(message conversation.Message, nativeShell bool) (responses.ResponseInputParam, error) {
 	role := responses.EasyInputMessageRole(message.Role)
 	content := make(responses.ResponseInputMessageContentListParam, 0, len(message.Content))
 	items := make(responses.ResponseInputParam, 0, len(message.Content)+1)
@@ -221,8 +259,46 @@ func openAIResponsesMessage(message conversation.Message) (responses.ResponseInp
 			items = append(items, responses.ResponseInputItemParamOfFunctionCall(
 				string(value.Input), value.ID, value.Name,
 			))
+		case conversation.ShellCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return nil, unsupportedContent("OpenAI Responses shell call requires assistant role")
+			}
+			flush()
+			if !nativeShell {
+				call := value.ToolUseBlock()
+				if _, err := rawObject(call.Input, "tool input"); err != nil {
+					return nil, err
+				}
+				items = append(items, responses.ResponseInputItemParamOfFunctionCall(
+					string(call.Input), call.ID, call.Name,
+				))
+				continue
+			}
+			action := responses.ResponseInputItemShellCallActionParam{Commands: value.Commands}
+			if value.TimeoutMs > 0 {
+				action.TimeoutMs = openai.Int(value.TimeoutMs)
+			}
+			if value.MaxOutputLength > 0 {
+				action.MaxOutputLength = openai.Int(value.MaxOutputLength)
+			}
+			item := responses.ResponseInputItemParamOfShellCall(action, value.CallID)
+			if value.ID != "" {
+				item.OfShellCall.ID = openai.String(value.ID)
+			}
+			item.OfShellCall.Environment.OfLocal = &responses.LocalEnvironmentParam{}
+			items = append(items, item)
 		case conversation.ToolResultBlock:
 			flush()
+			if nativeShell {
+				if output, ok := shellCallOutput(value.Content); ok {
+					item, err := openAIResponsesShellCallOutput(output)
+					if err != nil {
+						return nil, err
+					}
+					items = append(items, item)
+					continue
+				}
+			}
 			output, err := textContent(value.Content)
 			if err != nil {
 				return nil, err
@@ -237,6 +313,51 @@ func openAIResponsesMessage(message conversation.Message) (responses.ResponseInp
 	flush()
 
 	return items, nil
+}
+
+func shellCallOutput(content conversation.Content) (conversation.ShellCallOutputBlock, bool) {
+	if len(content) != 1 {
+		return conversation.ShellCallOutputBlock{}, false
+	}
+	output, ok := content[0].(conversation.ShellCallOutputBlock)
+	return output, ok
+}
+
+func openAIResponsesShellCallOutput(
+	output conversation.ShellCallOutputBlock,
+) (responses.ResponseInputItemUnionParam, error) {
+	contents := make([]responses.ResponseFunctionShellCallOutputContentParam, 0, len(output.Output))
+	for index, command := range output.Output {
+		converted := responses.ResponseFunctionShellCallOutputContentParam{
+			Stdout: command.Stdout,
+			Stderr: command.Stderr,
+		}
+		switch command.Outcome.Type {
+		case "timeout":
+			timeout := responses.NewResponseFunctionShellCallOutputContentOutcomeTimeoutParam()
+			converted.Outcome.OfTimeout = &timeout
+		case "exit":
+			if command.Outcome.ExitCode == nil {
+				return responses.ResponseInputItemUnionParam{}, invalidRequest(
+					"shell output %d exit outcome has no exit code", index,
+				)
+			}
+			converted.Outcome.OfExit = &responses.ResponseFunctionShellCallOutputContentOutcomeExitParam{
+				ExitCode: *command.Outcome.ExitCode,
+			}
+		default:
+			return responses.ResponseInputItemUnionParam{}, invalidRequest(
+				"shell output %d has unknown outcome %q", index, command.Outcome.Type,
+			)
+		}
+		contents = append(contents, converted)
+	}
+
+	item := responses.ResponseInputItemParamOfShellCallOutput(output.CallID, contents)
+	if output.MaxOutputLength > 0 {
+		item.OfShellCallOutput.MaxOutputLength = openai.Int(output.MaxOutputLength)
+	}
+	return item, nil
 }
 
 func openAIResponsesResponse(result *responses.Response) (*modelResponse, error) {
@@ -261,6 +382,15 @@ func openAIResponsesResponse(result *responses.Response) (*modelResponse, error)
 			}
 			content = append(content, conversation.ToolUseBlock{
 				ID: item.CallID, Name: item.Name, Input: arguments,
+			})
+		case responses.ResponseFunctionShellToolCall:
+			hasToolUse = true
+			content = append(content, conversation.ShellCallBlock{
+				ID:              item.ID,
+				CallID:          item.CallID,
+				Commands:        item.Action.Commands,
+				TimeoutMs:       item.Action.TimeoutMs,
+				MaxOutputLength: item.Action.MaxOutputLength,
 			})
 		case responses.ResponseReasoningItem:
 			parts := make([]string, 0, len(item.Content)+len(item.Summary))

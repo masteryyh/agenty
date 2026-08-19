@@ -110,13 +110,9 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 		config.SystemInstruction = genai.NewContentFromText(prompt, genai.RoleUser)
 	}
 	if len(request.Tools) > 0 {
-		declarations := make([]*genai.FunctionDeclaration, 0, len(request.Tools))
-		for _, tool := range request.Tools {
-			declaration, err := googleToolDefinition(tool)
-			if err != nil {
-				return nil, nil, err
-			}
-			declarations = append(declarations, declaration)
+		declarations, err := googleTools(request.Tools)
+		if err != nil {
+			return nil, nil, err
 		}
 		config.Tools = []*genai.Tool{{FunctionDeclarations: declarations}}
 	}
@@ -138,7 +134,22 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 	return contents, config, nil
 }
 
+func googleTools(definitions []modelToolDefinition) ([]*genai.FunctionDeclaration, error) {
+	tools := make([]*genai.FunctionDeclaration, 0, len(definitions))
+	for _, definition := range definitions {
+		tool, err := googleToolDefinition(definition)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
+}
+
 func googleToolDefinition(tool modelToolDefinition) (*genai.FunctionDeclaration, error) {
+	if _, err := providerToolType(tool); err != nil {
+		return nil, err
+	}
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("llm: convert Google tool %q schema: %w", tool.Name, err)
@@ -155,8 +166,11 @@ func googleToolNames(messages []conversation.Message) map[string]string {
 	names := make(map[string]string)
 	for _, message := range messages {
 		for _, block := range message.Content {
-			if tool, ok := block.(conversation.ToolUseBlock); ok {
+			switch tool := block.(type) {
+			case conversation.ToolUseBlock:
 				names[tool.ID] = tool.Name
+			case conversation.ShellCallBlock:
+				names[tool.CallID] = "shell"
 			}
 		}
 	}
@@ -215,6 +229,18 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 			part := genai.NewPartFromFunctionCall(value.Name, input)
 			part.FunctionCall.ID = value.ID
 			parts = append(parts, part)
+		case conversation.ShellCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return nil, unsupportedContent("Google shell call requires assistant role")
+			}
+			call := value.ToolUseBlock()
+			input, err := rawObject(call.Input, "tool input")
+			if err != nil {
+				return nil, err
+			}
+			part := genai.NewPartFromFunctionCall(call.Name, input)
+			part.FunctionCall.ID = call.ID
+			parts = append(parts, part)
 		case conversation.ToolResultBlock:
 			if message.Role != conversation.RoleUser {
 				return nil, unsupportedContent("Google function response requires user role")
@@ -223,15 +249,33 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 			if name == "" {
 				return nil, invalidRequest("Google tool result %q has no matching tool call", value.ToolUseID)
 			}
-			text, err := textContent(value.Content)
-			if err != nil {
-				return nil, err
-			}
 			key := "output"
 			if value.IsError {
 				key = "error"
 			}
-			part := genai.NewPartFromFunctionResponse(name, map[string]any{key: text})
+			response := map[string]any{}
+			if len(value.Content) == 1 {
+				if shellOutput, ok := value.Content[0].(conversation.ShellCallOutputBlock); ok {
+					object, err := shellCallOutputObject(shellOutput)
+					if err != nil {
+						return nil, err
+					}
+					response = object
+				} else {
+					text, err := textContent(value.Content)
+					if err != nil {
+						return nil, err
+					}
+					response[key] = text
+				}
+			} else {
+				text, err := textContent(value.Content)
+				if err != nil {
+					return nil, err
+				}
+				response[key] = text
+			}
+			part := genai.NewPartFromFunctionResponse(name, response)
 			part.FunctionResponse.ID = value.ToolUseID
 			parts = append(parts, part)
 		default:

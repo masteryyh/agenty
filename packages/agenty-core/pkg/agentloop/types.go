@@ -30,7 +30,15 @@ const (
 	StreamEventCompleted      StreamEventType = "completed"
 )
 
+type ToolType string
+
+const (
+	ToolTypeFunction ToolType = "function"
+	ToolTypeShell    ToolType = "shell"
+)
+
 type ToolDefinition struct {
+	Type        ToolType   `json:"type,omitempty"`
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
 	InputSchema JSONSchema `json:"inputSchema"`

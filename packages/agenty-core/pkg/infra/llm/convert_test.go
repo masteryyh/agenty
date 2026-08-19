@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -181,7 +182,7 @@ func TestToolDefinitionConversions(t *testing.T) {
 	t.Run("OpenAI Responses", func(t *testing.T) {
 		t.Parallel()
 
-		converted, err := openAIResponsesToolDefinition(tool)
+		converted, err := openAIResponsesToolDefinition(tool, false)
 		if err != nil {
 			t.Fatalf("convert tool: %v", err)
 		}
@@ -246,6 +247,82 @@ func TestToolDefinitionConversions(t *testing.T) {
 	})
 }
 
+func TestShellToolDefinitionConversions(t *testing.T) {
+	t.Parallel()
+
+	tool := testShellTool()
+
+	openAIResponses, err := openAIResponsesToolDefinition(tool, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openAIResponses.OfShell == nil || openAIResponses.OfShell.Environment.OfLocal == nil {
+		t.Fatalf("OpenAI Responses shell = %#v, want native local shell", openAIResponses)
+	}
+	compatibleResponses, err := openAIResponsesToolDefinition(tool, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compatibleResponses.OfFunction == nil || compatibleResponses.OfFunction.Name != "shell" {
+		t.Fatalf("compatible Responses shell = %#v, want function", compatibleResponses)
+	}
+	assertShellToolSchemaMap(t, compatibleResponses.OfFunction.Parameters)
+
+	openAIChat, err := openAIChatToolDefinition(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openAIChat.OfFunction == nil || openAIChat.OfFunction.Function.Name != "shell" {
+		t.Fatalf("OpenAI Chat shell = %#v, want function", openAIChat)
+	}
+
+	anthropicTool, err := anthropicToolDefinition(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anthropicTool.OfTool == nil || anthropicTool.OfTool.Name != "shell" {
+		t.Fatalf("Anthropic shell = %#v, want custom tool", anthropicTool)
+	}
+
+	googleTool, err := googleToolDefinition(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if googleTool.Name != "shell" {
+		t.Fatalf("Google shell name = %q", googleTool.Name)
+	}
+}
+
+func TestProviderToolRegistrationsRejectUnknownToolType(t *testing.T) {
+	t.Parallel()
+
+	tool := testTool()
+	tool.Type = "unknown"
+	checks := []func() error{
+		func() error {
+			_, err := openAIResponsesTools([]modelToolDefinition{tool}, false)
+			return err
+		},
+		func() error {
+			_, err := openAIChatTools([]modelToolDefinition{tool})
+			return err
+		},
+		func() error {
+			_, err := anthropicTools([]modelToolDefinition{tool})
+			return err
+		},
+		func() error {
+			_, err := googleTools([]modelToolDefinition{tool})
+			return err
+		},
+	}
+	for index, check := range checks {
+		if err := check(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("provider registration %d error = %v, want ErrInvalidRequest", index, err)
+		}
+	}
+}
+
 func TestToolDefinitionConversionsRejectNonObjectSchema(t *testing.T) {
 	t.Parallel()
 
@@ -261,7 +338,7 @@ func TestToolDefinitionConversionsRejectNonObjectSchema(t *testing.T) {
 		{
 			name: "OpenAI Responses",
 			convert: func() error {
-				_, err := openAIResponsesToolDefinition(tool)
+				_, err := openAIResponsesToolDefinition(tool, false)
 				return err
 			},
 		},
@@ -323,6 +400,31 @@ func TestProviderResponseConversions(t *testing.T) {
 		tool := response.Content[2].(conversation.ToolUseBlock)
 		if string(tool.Input) != `{"q":"x"}` {
 			t.Errorf("tool input = %s", tool.Input)
+		}
+	})
+
+	t.Run("OpenAI Responses shell call", func(t *testing.T) {
+		t.Parallel()
+
+		var sdkResponse responses.Response
+		mustUnmarshal(t, `{
+			"id":"resp_shell","model":"gpt-test","status":"completed",
+			"output":[{
+				"type":"shell_call","id":"sh_1","call_id":"call_1","status":"completed",
+				"environment":{"type":"local"},
+				"action":{"commands":["pwd","false"],"timeout_ms":1000,"max_output_length":4096}
+			}],
+			"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}
+		}`, &sdkResponse)
+
+		response, err := openAIResponsesResponse(&sdkResponse)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertResponse(t, response, modelStopReasonToolUse, 1, 7)
+		call, ok := response.Content[0].(conversation.ShellCallBlock)
+		if !ok || call.CallID != "call_1" || !slices.Equal(call.Commands, []string{"pwd", "false"}) {
+			t.Fatalf("shell call = %#v", response.Content[0])
 		}
 	})
 
@@ -405,7 +507,7 @@ func TestSDKMessageConversionsUseTypedVariants(t *testing.T) {
 				}`)},
 				conversation.ToolUseBlock{ID: "call_1", Name: "lookup", Input: shared.RawJSON(`{"q":"x"}`)},
 			},
-		})
+		}, false)
 		if err != nil {
 			t.Fatalf("convert message: %v", err)
 		}
@@ -477,6 +579,112 @@ func TestSDKMessageConversionsUseTypedVariants(t *testing.T) {
 			t.Errorf("content = %#v, want one function-call SDK part", content)
 		}
 	})
+}
+
+func TestShellMessageConversionsAcrossProviders(t *testing.T) {
+	t.Parallel()
+
+	exitCode := int64(0)
+	call := conversation.ShellCallBlock{
+		ID: "sh_1", CallID: "call_1", Commands: []string{"printf hi"},
+		TimeoutMs: 1000, MaxOutputLength: 4096,
+	}
+	result := conversation.Message{
+		Role: conversation.RoleUser,
+		Content: conversation.Content{conversation.ToolResultBlock{
+			ToolUseID: "call_1",
+			Content: conversation.Content{conversation.ShellCallOutputBlock{
+				CallID: "call_1", MaxOutputLength: 4096,
+				Output: []conversation.ShellCommandOutput{{
+					Stdout: "hi", Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &exitCode},
+				}},
+			}},
+		}},
+	}
+
+	responsesCall, err := openAIResponsesMessage(conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	}, true)
+	if err != nil || len(responsesCall) != 1 || responsesCall[0].OfShellCall == nil {
+		t.Fatalf("Responses shell call = %#v, err = %v", responsesCall, err)
+	}
+	if responsesCall[0].OfShellCall.Action.Commands[0] != "printf hi" {
+		t.Errorf("Responses commands = %#v", responsesCall[0].OfShellCall.Action.Commands)
+	}
+
+	responsesResult, err := openAIResponsesMessage(result, true)
+	if err != nil || len(responsesResult) != 1 || responsesResult[0].OfShellCallOutput == nil {
+		t.Fatalf("Responses shell output = %#v, err = %v", responsesResult, err)
+	}
+	if len(responsesResult[0].OfShellCallOutput.Output) != 1 {
+		t.Errorf("Responses output = %#v", responsesResult[0].OfShellCallOutput.Output)
+	}
+
+	compatibleCall, err := openAIResponsesMessage(conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	}, false)
+	if err != nil || len(compatibleCall) != 1 || compatibleCall[0].OfFunctionCall == nil {
+		t.Fatalf("compatible Responses shell call = %#v, err = %v", compatibleCall, err)
+	}
+	if compatibleCall[0].OfFunctionCall.Name != "shell" ||
+		compatibleCall[0].OfFunctionCall.Arguments != `{"commands":["printf hi"],"timeout_ms":1000,"max_output_length":4096}` {
+		t.Errorf("compatible Responses shell call = %#v", compatibleCall[0].OfFunctionCall)
+	}
+	compatibleResult, err := openAIResponsesMessage(result, false)
+	if err != nil || len(compatibleResult) != 1 || compatibleResult[0].OfFunctionCallOutput == nil {
+		t.Fatalf("compatible Responses shell result = %#v, err = %v", compatibleResult, err)
+	}
+	if compatibleResult[0].OfFunctionCallOutput.Output.OfString.Value != `{"type":"shell_call_output","call_id":"call_1","max_output_length":4096,"output":[{"stdout":"hi","stderr":"","outcome":{"type":"exit","exit_code":0}}]}` {
+		t.Errorf("compatible Responses shell result = %#v", compatibleResult[0].OfFunctionCallOutput.Output)
+	}
+
+	chatCall, err := openAIChatMessages(conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	})
+	if err != nil || len(chatCall) != 1 || len(chatCall[0].OfAssistant.ToolCalls) != 1 {
+		t.Fatalf("Chat shell call = %#v, err = %v", chatCall, err)
+	}
+	chatResult, err := openAIChatMessages(result)
+	if err != nil || len(chatResult) != 1 || chatResult[0].OfTool == nil {
+		t.Fatalf("Chat shell output = %#v, err = %v", chatResult, err)
+	}
+	if chatResult[0].OfTool.Content.OfString.Value != `{"type":"shell_call_output","call_id":"call_1","max_output_length":4096,"output":[{"stdout":"hi","stderr":"","outcome":{"type":"exit","exit_code":0}}]}` {
+		t.Errorf("Chat shell output JSON = %q", chatResult[0].OfTool.Content.OfString.Value)
+	}
+
+	anthropicCall, err := anthropicMessage(conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	})
+	if err != nil || len(anthropicCall.Content) != 1 || anthropicCall.Content[0].OfToolUse == nil {
+		t.Fatalf("Anthropic shell call = %#v, err = %v", anthropicCall, err)
+	}
+	anthropicResult, err := anthropicMessage(result)
+	if err != nil || len(anthropicResult.Content) != 1 || anthropicResult.Content[0].OfToolResult == nil {
+		t.Fatalf("Anthropic shell output = %#v, err = %v", anthropicResult, err)
+	}
+	if len(anthropicResult.Content[0].OfToolResult.Content) != 1 ||
+		anthropicResult.Content[0].OfToolResult.Content[0].OfText == nil ||
+		anthropicResult.Content[0].OfToolResult.Content[0].OfText.Text != `{"type":"shell_call_output","call_id":"call_1","max_output_length":4096,"output":[{"stdout":"hi","stderr":"","outcome":{"type":"exit","exit_code":0}}]}` {
+		t.Errorf("Anthropic shell output JSON = %#v", anthropicResult.Content[0].OfToolResult.Content)
+	}
+
+	googleCall, err := googleMessage(conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	}, nil)
+	if err != nil || len(googleCall.Parts) != 1 || googleCall.Parts[0].FunctionCall == nil {
+		t.Fatalf("Google shell call = %#v, err = %v", googleCall, err)
+	}
+	googleResult, err := googleMessage(result, map[string]string{"call_1": "shell"})
+	if err != nil || len(googleResult.Parts) != 1 || googleResult.Parts[0].FunctionResponse == nil {
+		t.Fatalf("Google shell output = %#v, err = %v", googleResult, err)
+	}
+	if googleResult.Parts[0].FunctionResponse.Response["type"] != "shell_call_output" ||
+		googleResult.Parts[0].FunctionResponse.Response["call_id"] != "call_1" {
+		t.Errorf("Google shell output response = %#v", googleResult.Parts[0].FunctionResponse.Response)
+	}
+	if _, ok := googleResult.Parts[0].FunctionResponse.Response["exitCode"]; ok {
+		t.Errorf("Google shell output response contains camelCase exitCode: %#v", googleResult.Parts[0].FunctionResponse.Response)
+	}
 }
 
 func TestStreamEventConversions(t *testing.T) {
@@ -552,6 +760,70 @@ func TestNewCallerValidation(t *testing.T) {
 	}
 }
 
+func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		provider catalog.Provider
+		want     bool
+	}{
+		{
+			name: "built-in OpenAI with SDK default URL",
+			provider: catalog.Provider{
+				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+			},
+			want: true,
+		},
+		{
+			name: "built-in OpenAI with official URL",
+			provider: catalog.Provider{
+				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				BaseURL: "https://api.openai.com/v1/",
+			},
+			want: true,
+		},
+		{
+			name: "OpenRouter Responses compatibility",
+			provider: catalog.Provider{
+				Slug: "openrouter", Type: catalog.APIOpenAI, APIKey: "test-key",
+				BaseURL: "https://openrouter.ai/api/v1",
+			},
+		},
+		{
+			name: "custom proxy using OpenAI slug",
+			provider: catalog.Provider{
+				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				BaseURL: "https://proxy.example/v1",
+			},
+		},
+		{
+			name: "custom provider using official endpoint",
+			provider: catalog.Provider{
+				Slug: "custom-openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				BaseURL: "https://api.openai.com/v1",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			caller, err := NewCaller(t.Context(), tt.provider, testModel())
+			if err != nil {
+				t.Fatalf("NewCaller() error = %v", err)
+			}
+			responsesCaller, ok := caller.(*openAIResponsesCaller)
+			if !ok {
+				t.Fatalf("NewCaller() = %T, want *openAIResponsesCaller", caller)
+			}
+			if responsesCaller.nativeShell != tt.want {
+				t.Errorf("nativeShell = %v, want %v", responsesCaller.nativeShell, tt.want)
+			}
+		})
+	}
+}
+
 func testModel() catalog.Model {
 	return catalog.Model{
 		Slug: "test-model",
@@ -576,6 +848,26 @@ func testTool() modelToolDefinition {
 	}
 }
 
+func testShellTool() modelToolDefinition {
+	return modelToolDefinition{
+		Type: agentloop.ToolTypeShell, Name: "shell", Description: "Execute shell commands",
+		InputSchema: toolJSONSchema{
+			Type: toolJSONSchemaTypeObject,
+			Properties: map[string]toolJSONSchema{
+				"commands": {
+					Type:  toolJSONSchemaTypeArray,
+					Items: &toolJSONSchema{Type: toolJSONSchemaTypeString},
+				},
+				"timeout_ms":        {Type: toolJSONSchemaTypeInteger},
+				"max_output_length": {Type: toolJSONSchemaTypeInteger},
+			},
+			Required:             []string{"commands"},
+			AdditionalProperties: allowAdditionalProperties(false),
+		},
+		Strict: true,
+	}
+}
+
 func assertToolSchemaMap(t *testing.T, schema map[string]any) {
 	t.Helper()
 	if schema["type"] != "object" {
@@ -587,6 +879,30 @@ func assertToolSchemaMap(t *testing.T, schema map[string]any) {
 	required, ok := schema["required"].([]string)
 	if !ok || len(required) != 1 || required[0] != "q" {
 		t.Errorf("required = %#v, want [q]", schema["required"])
+	}
+}
+
+func assertShellToolSchemaMap(t *testing.T, schema map[string]any) {
+	t.Helper()
+	if schema["type"] != "object" {
+		t.Errorf("type = %#v, want object", schema["type"])
+	}
+	if additional, ok := schema["additionalProperties"].(bool); !ok || additional {
+		t.Errorf("additionalProperties = %#v, want false", schema["additionalProperties"])
+	}
+	required, ok := schema["required"].([]string)
+	if !ok || len(required) != 1 || required[0] != "commands" {
+		t.Errorf("required = %#v, want [commands]", schema["required"])
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v, want object", schema["properties"])
+	}
+	if _, ok := properties["commands"]; !ok {
+		t.Errorf("properties = %#v, want commands", properties)
+	}
+	if _, ok := properties["action"]; ok {
+		t.Errorf("properties = %#v, unexpected action wrapper", properties)
 	}
 }
 

@@ -82,14 +82,72 @@ func systemPrompt(request modelRequest) (string, error) {
 func textContent(content conversation.Content) (string, error) {
 	var builder strings.Builder
 	for _, block := range content {
-		text, ok := block.(conversation.TextBlock)
-		if !ok {
+		switch value := block.(type) {
+		case conversation.TextBlock:
+			builder.WriteString(value.Text)
+		case conversation.ShellCallOutputBlock:
+			encoded, err := marshalShellCallOutput(value)
+			if err != nil {
+				return "", fmt.Errorf("encode shell output: %w", err)
+			}
+			builder.WriteString(encoded)
+		default:
 			return "", unsupportedContent("expected text block, got %q", block.BlockType())
 		}
-		builder.WriteString(text.Text)
 	}
 
 	return builder.String(), nil
+}
+
+type shellCallOutputWire struct {
+	Type            string                   `json:"type"`
+	CallID          string                   `json:"call_id"`
+	MaxOutputLength int64                    `json:"max_output_length"`
+	Output          []shellCommandOutputWire `json:"output"`
+}
+
+type shellCommandOutputWire struct {
+	Stdout  string           `json:"stdout"`
+	Stderr  string           `json:"stderr"`
+	Outcome shellOutcomeWire `json:"outcome"`
+}
+
+type shellOutcomeWire struct {
+	Type     string `json:"type"`
+	ExitCode *int64 `json:"exit_code,omitempty"`
+}
+
+func marshalShellCallOutput(value conversation.ShellCallOutputBlock) (string, error) {
+	output := make([]shellCommandOutputWire, 0, len(value.Output))
+	for _, command := range value.Output {
+		output = append(output, shellCommandOutputWire{
+			Stdout: command.Stdout,
+			Stderr: command.Stderr,
+			Outcome: shellOutcomeWire{
+				Type: command.Outcome.Type, ExitCode: command.Outcome.ExitCode,
+			},
+		})
+	}
+
+	encoded, err := json.MarshalString(shellCallOutputWire{
+		Type:            string(conversation.BlockShellOutput),
+		CallID:          value.CallID,
+		MaxOutputLength: value.MaxOutputLength,
+		Output:          output,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return encoded, nil
+}
+
+func shellCallOutputObject(value conversation.ShellCallOutputBlock) (map[string]any, error) {
+	encoded, err := marshalShellCallOutput(value)
+	if err != nil {
+		return nil, err
+	}
+	return rawObject(shared.RawJSON(encoded), "shell output")
 }
 
 func rawObject(raw shared.RawJSON, field string) (map[string]any, error) {

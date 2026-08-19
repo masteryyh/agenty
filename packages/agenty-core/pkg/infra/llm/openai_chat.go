@@ -135,13 +135,9 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 		messages = append(messages, converted...)
 	}
 
-	tools := make([]openai.ChatCompletionToolUnionParam, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		converted, err := openAIChatToolDefinition(tool)
-		if err != nil {
-			return openai.ChatCompletionNewParams{}, err
-		}
-		tools = append(tools, converted)
+	tools, err := openAIChatTools(request.Tools)
+	if err != nil {
+		return openai.ChatCompletionNewParams{}, err
 	}
 
 	params := openai.ChatCompletionNewParams{
@@ -160,7 +156,22 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 	return params, nil
 }
 
+func openAIChatTools(definitions []modelToolDefinition) ([]openai.ChatCompletionToolUnionParam, error) {
+	tools := make([]openai.ChatCompletionToolUnionParam, 0, len(definitions))
+	for _, definition := range definitions {
+		tool, err := openAIChatToolDefinition(definition)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
+}
+
 func openAIChatToolDefinition(tool modelToolDefinition) (openai.ChatCompletionToolUnionParam, error) {
+	if _, err := providerToolType(tool); err != nil {
+		return openai.ChatCompletionToolUnionParam{}, err
+	}
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return openai.ChatCompletionToolUnionParam{}, fmt.Errorf("llm: convert OpenAI Chat tool %q schema: %w", tool.Name, err)
@@ -229,6 +240,16 @@ func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMe
 				},
 			}
 			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: &call})
+		case conversation.ShellCallBlock:
+			call := value.ToolUseBlock()
+			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: call.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name: call.Name, Arguments: string(call.Input),
+					},
+				},
+			})
 		default:
 			return nil, unsupportedContent("OpenAI Chat assistant message cannot contain %q", block.BlockType())
 		}

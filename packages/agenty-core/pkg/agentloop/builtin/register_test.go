@@ -26,6 +26,7 @@ func TestRegisterAll(t *testing.T) {
 		"ls",
 		"patch_file",
 		"read_file",
+		"shell",
 		"write_file",
 	}
 	definitions := registry.Definitions()

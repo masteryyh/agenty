@@ -120,13 +120,9 @@ func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNe
 		messages = append(messages, converted)
 	}
 
-	tools := make([]anthropic.ToolUnionParam, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		converted, err := anthropicToolDefinition(tool)
-		if err != nil {
-			return anthropic.MessageNewParams{}, err
-		}
-		tools = append(tools, converted)
+	tools, err := anthropicTools(request.Tools)
+	if err != nil {
+		return anthropic.MessageNewParams{}, err
 	}
 
 	params := anthropic.MessageNewParams{
@@ -152,7 +148,22 @@ func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNe
 	return params, nil
 }
 
+func anthropicTools(definitions []modelToolDefinition) ([]anthropic.ToolUnionParam, error) {
+	tools := make([]anthropic.ToolUnionParam, 0, len(definitions))
+	for _, definition := range definitions {
+		tool, err := anthropicToolDefinition(definition)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
+}
+
 func anthropicToolDefinition(tool modelToolDefinition) (anthropic.ToolUnionParam, error) {
+	if _, err := providerToolType(tool); err != nil {
+		return anthropic.ToolUnionParam{}, err
+	}
 	schema, err := toolSchemaMap(tool.InputSchema)
 	if err != nil {
 		return anthropic.ToolUnionParam{}, fmt.Errorf("llm: convert Anthropic tool %q schema: %w", tool.Name, err)
@@ -215,6 +226,12 @@ func anthropicMessage(message conversation.Message) (anthropic.MessageParam, err
 				return anthropic.MessageParam{}, err
 			}
 			content = append(content, anthropic.NewToolUseBlock(value.ID, value.Input, value.Name))
+		case conversation.ShellCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return anthropic.MessageParam{}, unsupportedContent("Anthropic shell call requires assistant role")
+			}
+			call := value.ToolUseBlock()
+			content = append(content, anthropic.NewToolUseBlock(call.ID, call.Input, call.Name))
 		case conversation.ToolResultBlock:
 			if message.Role != conversation.RoleUser {
 				return anthropic.MessageParam{}, unsupportedContent("Anthropic tool result requires user role")
@@ -248,6 +265,14 @@ func anthropicToolResultContent(content conversation.Content) ([]anthropic.ToolR
 		case conversation.TextBlock:
 			result = append(result, anthropic.ToolResultBlockParamContentUnion{
 				OfText: &anthropic.TextBlockParam{Text: value.Text},
+			})
+		case conversation.ShellCallOutputBlock:
+			text, err := textContent(conversation.Content{value})
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, anthropic.ToolResultBlockParamContentUnion{
+				OfText: &anthropic.TextBlockParam{Text: text},
 			})
 		case conversation.ImageBlock:
 			if value.Data == "" {

@@ -13,6 +13,7 @@ func RegisterAll(registry *agentloop.Registry) error {
 
 	fileSystem := &fileSystem{}
 	tools := []agentloop.Tool{
+		&shellTool{},
 		&readFileTool{fileSystem: fileSystem},
 		&writeFileTool{fileSystem: fileSystem},
 		&patchFileTool{fileSystem: fileSystem},

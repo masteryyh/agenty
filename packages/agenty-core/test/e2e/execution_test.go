@@ -207,6 +207,7 @@ func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 				"ls",
 				"patch_file",
 				"read_file",
+				"shell",
 				"write_file",
 			}
 			if names := providerToolNames(request, tt.apiType); !slices.Equal(names, wantTools) {

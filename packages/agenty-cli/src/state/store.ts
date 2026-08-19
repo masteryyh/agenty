@@ -97,7 +97,11 @@ function newAssistantMessage(): UIMessage {
 }
 
 function hasContent(message: UIMessage): boolean {
-    return Boolean(message.content || message.reasoning || message.toolCalls?.length);
+    return Boolean(
+        message.content ||
+        message.reasoning ||
+        (message.toolCalls?.length ?? 0) > 0,
+    );
 }
 
 function finalizeReasoning(message: UIMessage): UIMessage {
@@ -138,36 +142,41 @@ function toolResultText(blocks: ContentBlock[]): string {
     return textFromBlocks(blocks, "text") || JSON.stringify(blocks);
 }
 
-function attachToolResults(history: UIMessage[], message: ChatMessageDto): void {
+function attachToolResults(history: UIMessage[], message: ChatMessageDto): UIMessage[] {
+    let nextHistory = history;
     for (const block of message.content ?? []) {
         if (block.type !== "tool_result") {
             continue;
         }
-        for (let index = history.length - 1; index >= 0; index--) {
-            const calls = history[index].toolCalls;
+        for (let index = nextHistory.length - 1; index >= 0; index--) {
+            const calls = nextHistory[index].toolCalls;
             const callIndex = calls?.findIndex((call) => call.id === block.toolUseId) ?? -1;
             if (calls && callIndex >= 0) {
-                calls[callIndex] = {
-                    ...calls[callIndex],
+                const updatedCalls = [...calls];
+                updatedCalls[callIndex] = {
+                    ...updatedCalls[callIndex],
                     result: {
                         callId: block.toolUseId,
-                        name: calls[callIndex].name,
+                        name: updatedCalls[callIndex].name,
                         content: toolResultText(block.content),
                         isError: block.isError,
                     },
                 };
+                nextHistory = [...nextHistory];
+                nextHistory[index] = { ...nextHistory[index], toolCalls: updatedCalls };
                 break;
             }
         }
     }
+    return nextHistory;
 }
 
 function buildHistory(session: ChatSessionDto): UIMessage[] {
-    const history: UIMessage[] = [];
+    let history: UIMessage[] = [];
     for (const round of session.rounds ?? []) {
         for (const message of round.messages ?? []) {
             if ((message.content ?? []).some((block) => block.type === "tool_result")) {
-                attachToolResults(history, message);
+                history = attachToolResults(history, message);
                 continue;
             }
             history.push(messageToUI(message));
@@ -197,6 +206,56 @@ function reasoningEffort(enabled: boolean, level: string): ReasoningEffort {
         return level;
     }
     return "medium";
+}
+
+function fallbackToolCallId(event: SessionEvent): string {
+    return `tool-${event.iteration ?? 0}-${event.stream?.index ?? 0}`;
+}
+
+function findToolCallIndex(
+    calls: UIToolCall[],
+    event: SessionEvent,
+    toolUseId?: string,
+): number {
+    if (toolUseId) {
+        const exactIndex = calls.findIndex((call) => call.id === toolUseId);
+        if (exactIndex >= 0) {
+            return exactIndex;
+        }
+    }
+
+    const fallbackId = fallbackToolCallId(event);
+    const fallbackIndex = calls.findIndex((call) => call.id === fallbackId);
+    if (fallbackIndex >= 0) {
+        return fallbackIndex;
+    }
+
+    const streamIndex = event.stream?.index;
+    if (streamIndex !== undefined && streamIndex < calls.length) {
+        return streamIndex;
+    }
+    return -1;
+}
+
+function mergeToolCalls(
+    streamedCalls: UIToolCall[],
+    persistedCalls: UIToolCall[],
+): UIToolCall[] {
+    const merged = [...streamedCalls];
+    for (const [index, persisted] of persistedCalls.entries()) {
+        const existingIndex = merged.findIndex((call) => call.id === persisted.id);
+        const targetIndex = existingIndex >= 0
+            ? existingIndex
+            : index < merged.length
+                ? index
+                : -1;
+        if (targetIndex >= 0) {
+            merged[targetIndex] = { ...merged[targetIndex], ...persisted };
+        } else {
+            merged.push(persisted);
+        }
+    }
+    return merged;
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -264,18 +323,30 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_use_start") {
                 set((state) => {
-                    const current = finalizeReasoning(state.current ?? newAssistantMessage());
-                    return { current: { ...current, toolCalls: [...(current.toolCalls ?? []), {
-                        id: stream.toolUseId ?? `tool-${event.iteration ?? 0}-${stream.index ?? 0}`,
+                    let current = finalizeReasoning(state.current ?? newAssistantMessage());
+                    let history = state.history;
+                    if (current.toolCalls?.some((call) => call.result)) {
+                        history = [...history, current];
+                        current = newAssistantMessage();
+                    }
+                    const calls = [...(current.toolCalls ?? [])];
+                    const index = findToolCallIndex(calls, event, stream.toolUseId);
+                    const call = {
+                        id: stream.toolUseId ?? fallbackToolCallId(event),
                         name: stream.toolName ?? "tool",
-                        arguments: "",
-                    }] } };
+                    };
+                    if (index >= 0) {
+                        calls[index] = { ...calls[index], ...call };
+                    } else {
+                        calls.push({ ...call, arguments: "" });
+                    }
+                    return { history, current: { ...current, toolCalls: calls } };
                 });
             } else if (stream.type === "tool_input_delta" && stream.delta) {
                 set((state) => {
                     const current = state.current ?? newAssistantMessage();
                     const calls = [...(current.toolCalls ?? [])];
-                    const index = stream.toolUseId ? calls.findIndex((call) => call.id === stream.toolUseId) : calls.length - 1;
+                    const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
                         calls[index] = { ...calls[index], arguments: calls[index].arguments + stream.delta };
                     }
@@ -285,10 +356,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 set((state) => {
                     const current = state.current ?? newAssistantMessage();
                     const calls = [...(current.toolCalls ?? [])];
-                    const index = stream.toolUseId ? calls.findIndex((call) => call.id === stream.toolUseId) : calls.length - 1;
+                    const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
                         calls[index] = {
                             ...calls[index],
+                            id: stream.toolUseId ?? calls[index].id,
                             name: stream.toolName ?? calls[index].name,
                             arguments: stream.toolInput === undefined ? calls[index].arguments : JSON.stringify(stream.toolInput),
                         };
@@ -303,9 +375,8 @@ export const useAppStore = create<AppState>((set, get) => {
             if ((event.message.content ?? []).some((block) => block.type === "tool_result")) {
                 set((state) => {
                     const current = state.current ?? newAssistantMessage();
-                    const holder = [current];
-                    attachToolResults(holder, event.message!);
-                    return { current: holder[0] };
+                    const updated = attachToolResults([current], event.message!);
+                    return { current: updated[0] };
                 });
             } else if (event.message.role === "assistant") {
                 set((state) => {
@@ -319,7 +390,20 @@ export const useAppStore = create<AppState>((set, get) => {
                         ? event.message.usage.input + event.message.usage.output
                         : state.tokenConsumed;
                     if (hasContent(current)) {
-                        return { history, tokenConsumed: contextSize };
+                        const persisted = messageToUI(event.message!);
+                        return {
+                            history,
+                            current: {
+                                ...current,
+                                content: current.content || persisted.content,
+                                reasoning: current.reasoning || persisted.reasoning,
+                                toolCalls: mergeToolCalls(
+                                    current.toolCalls ?? [],
+                                    persisted.toolCalls ?? [],
+                                ),
+                            },
+                            tokenConsumed: contextSize,
+                        };
                     }
                     return { history, current: messageToUI(event.message!), tokenConsumed: contextSize };
                 });

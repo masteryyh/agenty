@@ -2,8 +2,12 @@ import type { ThemeMode } from "@opentui/core";
 import type React from "react";
 import { memo } from "react";
 
-import type { ToolResult } from "../api/types";
 import type { SystemMessageVariant, UIToolCall } from "../state/store";
+import {
+    buildToolDisplay,
+    type ShellCommandDisplay,
+    type ShellOutputStream,
+} from "./toolDisplay";
 import { Box, Text } from "./ui";
 
 const USER_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
@@ -16,107 +20,171 @@ const COMPACTED_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
     light: "#dfece4",
 };
 
-const ARG_KEYS = [
-    "filePath",
-    "file_path",
-    "path",
-    "command",
-    "cmd",
-    "query",
-    "pattern",
-    "url",
-    "name",
-    "filename",
-    "id",
-];
-
-function collapse(text: string): string {
-    return text.replace(/\s+/g, " ").trim();
+function statusGlyph(status: "pending" | "success" | "error", blinkOn: boolean): string {
+    if (status === "success") {
+        return "✓";
+    }
+    if (status === "error") {
+        return "✗";
+    }
+    return blinkOn ? "…" : "·";
 }
 
-function truncate(text: string, max: number): string {
-    if (text.length <= max) {
-        return text;
+function statusColor(status: "pending" | "success" | "error"): string {
+    if (status === "success") {
+        return "green";
     }
-    return `${text.slice(0, max)}…`;
+    if (status === "error") {
+        return "red";
+    }
+    return "magenta";
 }
 
-function summarizeArgs(argsJson: string): string {
-    if (!argsJson) {
-        return "";
-    }
-    try {
-        const parsed = JSON.parse(argsJson) as Record<string, unknown>;
-        for (const key of ARG_KEYS) {
-            const v = parsed[key];
-            if (typeof v === "string" && v) {
-                return truncate(collapse(v), 48);
-            }
-        }
-        const first = Object.values(parsed).find((v) => typeof v === "string" && v);
-        if (typeof first === "string") {
-            return truncate(collapse(first), 48);
-        }
-        return truncate(collapse(argsJson), 48);
-    } catch {
-        return truncate(collapse(argsJson), 48);
-    }
+function outputColor(stream: ShellOutputStream): string | undefined {
+    return stream === "stderr"
+        ? "red"
+        : stream === "empty" || stream === "pending" || stream === "newline"
+            ? "gray"
+            : undefined;
 }
 
-interface ResultSummary {
-    glyph: string;
-    color: string;
-    summary: string;
-    detailLines: string[];
-}
-
-function summarizeResult(result: ToolResult | undefined): ResultSummary {
-    if (!result) {
-        return { glyph: "…", color: "gray", summary: "", detailLines: [] };
-    }
-    const lines = result.content
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean);
-
-    if (result.isError) {
-        return {
-            glyph: "✗",
-            color: "red",
-            summary: lines.length > 0 ? truncate(lines[0], 60) : "error",
-            detailLines: lines.slice(1, 3).map((l) => truncate(l, 80)),
-        };
-    }
-
-    const firstLine = lines.length > 0 ? truncate(lines[0], 60) : "";
-    const extra = lines.length > 1 ? ` +${lines.length - 1} lines` : "";
-    return {
-        glyph: "✓",
-        color: "green",
-        summary: firstLine ? `${firstLine}${extra}` : "done",
-        detailLines: [],
-    };
-}
-
-function ToolCallLine({ tc }: { tc: UIToolCall }) {
-    const { glyph, color, summary, detailLines } = summarizeResult(tc.result);
-    const args = summarizeArgs(tc.arguments);
+function ConnectedOutput({
+    lines,
+    marginLeft,
+    trailingMarker,
+}: {
+    lines: Array<{ text: string; stream?: ShellOutputStream }>;
+    marginLeft: number;
+    trailingMarker?: string;
+}) {
     return (
-        <Box flexDirection="column">
-            <Text wrap="wrap">
-                <Text bold>{tc.name}</Text>
-                <Text dimColor>({args})</Text>
-                <Text> </Text>
-                <Text color={color}>{glyph}</Text>
-                {summary ? <Text color="gray"> {summary}</Text> : null}
-            </Text>
-            {detailLines.map((line, i) => (
-                <Box key={`${tc.id}-detail-${i}`} marginLeft={2}>
-                    <Text dimColor color="red">
-                        ● {line}
-                    </Text>
+        <Box flexDirection="column" width="100%" marginLeft={marginLeft}>
+            {lines.map((line, index) => {
+                const stream = line.stream ?? "stdout";
+                const muted = stream !== "stderr";
+                const quiet = stream === "empty" || stream === "pending" || stream === "newline";
+                return (
+                    <Box
+                        key={`${index}-${line.text}`}
+                        flexDirection="row"
+                        width="100%"
+                        flexShrink={0}
+                    >
+                        <Box width={2} flexShrink={0}>
+                            <Text width={2} color="gray" dimColor>
+                                {index === 0 ? "⎿ " : "  "}
+                            </Text>
+                        </Box>
+                        <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+                            <Text
+                                width="100%"
+                                wrap="wrap"
+                                color={outputColor(stream)}
+                                dimColor={muted}
+                                italic={quiet}
+                            >
+                                {line.text}
+                                {trailingMarker && index === lines.length - 1 ? (
+                                    <Text color="gray" dimColor italic>
+                                        {trailingMarker}
+                                    </Text>
+                                ) : null}
+                            </Text>
+                        </Box>
+                    </Box>
+                );
+            })}
+        </Box>
+    );
+}
+
+function ShellCommandDetails({
+    commands,
+    blinkOn,
+}: {
+    commands: ShellCommandDisplay[];
+    blinkOn: boolean;
+}) {
+    return (
+        <Box flexDirection="column" width="100%" flexShrink={0}>
+            {commands.map((command, index) => (
+                <Box
+                    key={`${index}-${command.command}`}
+                    flexDirection="column"
+                    width="100%"
+                    flexShrink={0}
+                    marginBottom={index === commands.length - 1 ? 0 : 1}
+                >
+                    <Box marginLeft={2}>
+                        <Text width="100%" wrap="wrap">
+                            <Text color={statusColor(command.status)}>
+                                {statusGlyph(command.status, blinkOn)}
+                            </Text>
+                            <Text> $ {command.command}</Text>
+                        </Text>
+                    </Box>
+                    <ConnectedOutput
+                        lines={command.outputLines.length > 0
+                            ? command.outputLines
+                            : command.endsWithNewline
+                                ? [{ text: "", stream: "newline" as const }]
+                                : command.outputLines}
+                        marginLeft={4}
+                        trailingMarker={command.endsWithNewline && command.outputLines.length > 0 ? " ↵" : undefined}
+                    />
                 </Box>
             ))}
+        </Box>
+    );
+}
+
+function ToolCallLine({
+    tc,
+    expanded,
+    onToggle,
+    blinkOn,
+}: {
+    tc: UIToolCall;
+    expanded: boolean;
+    onToggle: () => void;
+    blinkOn: boolean;
+}) {
+    const display = buildToolDisplay(tc);
+    const hasShellDetails = (display.shellCommands?.length ?? 0) > 0;
+    const hasDetails = display.detailLines.length > 0 || hasShellDetails;
+    return (
+        <Box
+            width="100%"
+            flexDirection="column"
+            flexShrink={0}
+            onMouseClick={hasDetails ? onToggle : undefined}
+        >
+            <Text width="100%" wrap="wrap">
+                <Text color={statusColor(display.status)}>
+                    {statusGlyph(display.status, blinkOn)}
+                </Text>
+                <Text> </Text>
+                <Text bold>{display.label}</Text>
+                {hasDetails ? <Text dimColor>{expanded ? " ▾" : " ▸"}</Text> : null}
+            </Text>
+            {!(expanded && hasShellDetails)
+                ? display.summaryLines.map((line, index) => (
+                    <Box key={`${tc.id}-summary-${index}`} marginLeft={2}>
+                        <Text width="100%" dimColor wrap="wrap">
+                            {line}
+                        </Text>
+                    </Box>
+                ))
+                : null}
+            {expanded && hasShellDetails ? (
+                <ShellCommandDetails commands={display.shellCommands ?? []} blinkOn={blinkOn} />
+            ) : null}
+            {expanded && !hasShellDetails && display.detailLines.length > 0 ? (
+                <ConnectedOutput
+                    lines={display.detailLines.map((text) => ({ text }))}
+                    marginLeft={4}
+                />
+            ) : null}
         </Box>
     );
 }
@@ -124,6 +192,7 @@ function ToolCallLine({ tc }: { tc: UIToolCall }) {
 export type MessageRenderItem =
     | {
         id: string;
+        groupId: string;
         type: "message";
         role: "user" | "assistant" | "system";
         content: string;
@@ -132,6 +201,7 @@ export type MessageRenderItem =
     }
     | {
         id: string;
+        groupId: string;
         type: "reasoning";
         content: string;
         durationSeconds: number;
@@ -140,9 +210,11 @@ export type MessageRenderItem =
     }
     | {
         id: string;
+        groupId: string;
         type: "tool";
         toolCall: UIToolCall;
         blinkOn: boolean;
+        expanded: boolean;
     };
 
 function Rail({
@@ -157,6 +229,8 @@ function Rail({
     return (
         <Box
             flexDirection="column"
+            width="100%"
+            flexShrink={0}
             borderStyle="single"
             borderColor={color}
             borderTop={false}
@@ -173,10 +247,12 @@ function Rail({
 export const MessageItem = memo(({
     item,
     onToggleReasoning,
+    onToggleTool,
     themeMode = "dark",
 }: {
     item: MessageRenderItem;
     onToggleReasoning?: (id: string) => void;
+    onToggleTool?: (id: string) => void;
     themeMode?: ThemeMode;
 }) => {
     if (item.type === "reasoning") {
@@ -187,14 +263,14 @@ export const MessageItem = memo(({
                 paddingX={1}
                 onMouseClick={() => onToggleReasoning?.(item.id)}
             >
-                <Text dimColor={!item.expanded} italic={!item.expanded} wrap="wrap">
+                <Text width="100%" dimColor={!item.expanded} italic={!item.expanded} wrap="wrap">
                     {item.done
                         ? `Thought for ${item.durationSeconds.toFixed(1)}s.`
                         : `Thinking for ${item.durationSeconds.toFixed(1)}s...`}
                 </Text>
                 {item.expanded ? (
                     <Box marginTop={1}>
-                        <Text dimColor italic wrap="wrap">
+                        <Text width="100%" dimColor italic wrap="wrap">
                             {item.content}
                         </Text>
                     </Box>
@@ -205,9 +281,17 @@ export const MessageItem = memo(({
 
     if (item.type === "tool") {
         const done = !!item.toolCall.result;
+        const display = buildToolDisplay(item.toolCall);
         return (
-            <Rail color={done || item.blinkOn ? "magenta" : "gray"}>
-                <ToolCallLine tc={item.toolCall} />
+            <Rail
+                color={display.status === "error" ? "red" : done || item.blinkOn ? "magenta" : "gray"}
+            >
+                <ToolCallLine
+                    tc={item.toolCall}
+                    expanded={item.expanded}
+                    blinkOn={item.blinkOn}
+                    onToggle={() => onToggleTool?.(item.id)}
+                />
             </Rail>
         );
     }
@@ -219,7 +303,7 @@ export const MessageItem = memo(({
                 paddingX={1}
                 backgroundColor={USER_MESSAGE_BACKGROUNDS[themeMode]}
             >
-                <Text wrap="wrap">
+                <Text width="100%" wrap="wrap">
                     <Text dimColor>you</Text>
                     <Text color="cyan"> › </Text>
                     {item.content}
@@ -236,7 +320,7 @@ export const MessageItem = memo(({
                     paddingX={1}
                     backgroundColor={COMPACTED_MESSAGE_BACKGROUNDS[themeMode]}
                 >
-                    <Text italic dimColor wrap="wrap">
+                    <Text width="100%" italic dimColor wrap="wrap">
                         {item.content}
                     </Text>
                 </Box>
@@ -245,7 +329,7 @@ export const MessageItem = memo(({
 
         return (
             <Rail color={item.error ? "red" : "yellow"}>
-                <Text color={item.error ? "red" : "yellow"}>
+                <Text width="100%" color={item.error ? "red" : "yellow"} wrap="wrap">
                     {item.error ? "✗" : "●"} {item.content}
                 </Text>
             </Rail>
@@ -253,8 +337,8 @@ export const MessageItem = memo(({
     }
 
     return (
-        <Box width="100%" paddingX={1}>
-            <Text wrap="wrap">
+        <Box width="100%" flexShrink={0} paddingX={1}>
+            <Text width="100%" wrap="wrap">
                 {item.content}
             </Text>
         </Box>

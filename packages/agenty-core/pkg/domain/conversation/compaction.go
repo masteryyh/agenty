@@ -79,7 +79,7 @@ func retainedAssistantMessage(message Message) (Message, bool) {
 	content := make(Content, 0, len(message.Content))
 	for _, block := range message.Content {
 		switch block.(type) {
-		case ReasoningBlock, ToolUseBlock:
+		case ReasoningBlock, ToolUseBlock, ShellCallBlock:
 			continue
 		default:
 			content = append(content, block)
