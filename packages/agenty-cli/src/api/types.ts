@@ -106,6 +106,7 @@ export type ContentBlock =
         type: "shell_call_output";
         callId: string;
         maxOutputLength: number;
+        openAINative?: boolean;
         output: Array<{
             stdout: string;
             stderr: string;

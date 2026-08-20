@@ -92,7 +92,7 @@ func TestShellBlocksRoundTrip(t *testing.T) {
 		ToolResultBlock{
 			ToolUseID: "call_1",
 			Content: Content{ShellCallOutputBlock{
-				CallID: "call_1", MaxOutputLength: 4096,
+				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: boolPointer(true),
 				Output: []ShellCommandOutput{
 					{Stdout: "/tmp\n", Outcome: ShellOutcome{Type: "exit", ExitCode: int64Pointer(0)}},
 					{Stderr: "failed\n", Outcome: ShellOutcome{Type: "exit", ExitCode: &exitCode}},
@@ -116,12 +116,17 @@ func TestShellBlocksRoundTrip(t *testing.T) {
 	if !ok || len(result.Content) != 1 {
 		t.Fatalf("result block = %#v", decoded[1])
 	}
-	if output, ok := result.Content[0].(ShellCallOutputBlock); !ok || len(output.Output) != 2 {
+	if output, ok := result.Content[0].(ShellCallOutputBlock); !ok || len(output.Output) != 2 ||
+		output.OpenAINative == nil || !*output.OpenAINative {
 		t.Fatalf("shell output = %#v", result.Content)
 	}
 }
 
 func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func boolPointer(value bool) *bool {
 	return &value
 }
 

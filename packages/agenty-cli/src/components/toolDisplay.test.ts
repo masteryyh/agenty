@@ -119,7 +119,7 @@ describe("tool display", () => {
         expect(display.shellCommands?.[0]?.endsWithNewline).toBe(true);
     });
 
-    test("uses the final displayed output stream for the newline marker", () => {
+    test("prefers stdout when both output streams are present", () => {
         const display = buildToolDisplay(toolCall(
             "shell",
             { commands: ["run command"] },
@@ -133,7 +133,84 @@ describe("tool display", () => {
             }]),
         ));
 
-        expect(display.shellCommands?.[0]?.endsWithNewline).toBe(false);
+        expect(display.shellCommands?.[0]?.outputLines).toEqual([
+            { text: "done", stream: "stdout" },
+        ]);
+        expect(display.shellCommands?.[0]?.endsWithNewline).toBe(true);
+    });
+
+    test("renders stderr in red when stdout is empty", () => {
+        const display = buildToolDisplay(toolCall(
+            "shell",
+            { commands: ["run command"] },
+            JSON.stringify([{
+                type: "shell_call_output",
+                output: [{
+                    stdout: "",
+                    stderr: "warning",
+                    outcome: { type: "exit", exitCode: 1 },
+                }],
+            }]),
+        ));
+
+        expect(display.shellCommands?.[0]?.outputLines).toEqual([
+            { text: "warning", stream: "stderr" },
+        ]);
+    });
+
+    test("describes an empty process result with its exit status", () => {
+        const display = buildToolDisplay(toolCall(
+            "shell",
+            { commands: ["true"] },
+            JSON.stringify([{
+                type: "shell_call_output",
+                output: [{
+                    stdout: "",
+                    stderr: "",
+                    outcome: { type: "exit", exitCode: 0 },
+                }],
+            }]),
+        ));
+
+        expect(display.shellCommands?.[0]?.outputLines).toEqual([
+            { text: "(process exited with code 0)", stream: "empty" },
+        ]);
+    });
+
+    test("describes an empty timed-out process", () => {
+        const display = buildToolDisplay(toolCall(
+            "shell",
+            { commands: ["sleep 1"] },
+            JSON.stringify([{
+                type: "shell_call_output",
+                output: [{
+                    stdout: "",
+                    stderr: "",
+                    outcome: { type: "timeout" },
+                }],
+            }]),
+        ));
+
+        expect(display.shellCommands?.[0]?.outputLines).toEqual([
+            { text: "(process timed out)", stream: "empty" },
+        ]);
+    });
+
+    test("defers shell output lines while collapsed", () => {
+        const display = buildToolDisplay(toolCall(
+            "shell",
+            { commands: ["cat output.txt"] },
+            JSON.stringify([{
+                type: "shell_call_output",
+                output: [{
+                    stdout: `${"line\n".repeat(1000)}`,
+                    stderr: "",
+                    outcome: { type: "exit", exitCode: 0 },
+                }],
+            }]),
+        ), false);
+
+        expect(display.shellCommands?.[0]?.outputLines).toEqual([]);
     });
 
     test("keeps unknown tool arguments structured and full details available", () => {

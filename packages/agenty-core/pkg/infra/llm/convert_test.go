@@ -266,6 +266,9 @@ func TestShellToolDefinitionConversions(t *testing.T) {
 	if compatibleResponses.OfFunction == nil || compatibleResponses.OfFunction.Name != "shell" {
 		t.Fatalf("compatible Responses shell = %#v, want function", compatibleResponses)
 	}
+	if compatibleResponses.OfFunction.Strict.Value {
+		t.Error("compatible Responses shell strict = true, want false")
+	}
 	assertShellToolSchemaMap(t, compatibleResponses.OfFunction.Parameters)
 
 	openAIChat, err := openAIChatToolDefinition(tool)
@@ -274,6 +277,9 @@ func TestShellToolDefinitionConversions(t *testing.T) {
 	}
 	if openAIChat.OfFunction == nil || openAIChat.OfFunction.Function.Name != "shell" {
 		t.Fatalf("OpenAI Chat shell = %#v, want function", openAIChat)
+	}
+	if openAIChat.OfFunction.Function.Strict.Value {
+		t.Error("OpenAI Chat shell strict = true, want false")
 	}
 
 	anthropicTool, err := anthropicToolDefinition(tool)
@@ -594,7 +600,7 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 		Content: conversation.Content{conversation.ToolResultBlock{
 			ToolUseID: "call_1",
 			Content: conversation.Content{conversation.ShellCallOutputBlock{
-				CallID: "call_1", MaxOutputLength: 4096,
+				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: boolPointer(true),
 				Output: []conversation.ShellCommandOutput{{
 					Stdout: "hi", Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &exitCode},
 				}},
@@ -684,6 +690,59 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 	}
 	if _, ok := googleResult.Parts[0].FunctionResponse.Response["exitCode"]; ok {
 		t.Errorf("Google shell output response contains camelCase exitCode: %#v", googleResult.Parts[0].FunctionResponse.Response)
+	}
+}
+
+func TestOpenAIResponsesShellOutputUsesPersistedSource(t *testing.T) {
+	t.Parallel()
+
+	exitCode := int64(0)
+	for _, test := range []struct {
+		name       string
+		native     *bool
+		wantNative bool
+	}{
+		{name: "native", native: boolPointer(true), wantNative: true},
+		{name: "function", native: boolPointer(false), wantNative: false},
+		{name: "legacy native", native: nil, wantNative: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := conversation.Message{
+				Role: conversation.RoleUser,
+				Content: conversation.Content{conversation.ToolResultBlock{
+					ToolUseID: "call_1",
+					Content: conversation.Content{conversation.ShellCallOutputBlock{
+						CallID: "call_1", MaxOutputLength: 4096, OpenAINative: test.native,
+						Output: []conversation.ShellCommandOutput{{
+							Stdout: "hi", Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &exitCode},
+						}},
+					}},
+				}},
+			}
+			if test.name == "legacy native" {
+				items, err := openAIResponsesMessages([]conversation.Message{
+					{Role: conversation.RoleAssistant, Content: conversation.Content{
+						conversation.ShellCallBlock{CallID: "call_1", Commands: []string{"printf hi"}},
+					}},
+					result,
+				}, true)
+				if err != nil || len(items) != 2 || items[1].OfShellCallOutput == nil {
+					t.Fatalf("legacy native result = %#v, err = %v", items, err)
+				}
+				return
+			}
+
+			items, err := openAIResponsesMessage(result, true)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("result = %#v, err = %v", items, err)
+			}
+			if test.wantNative && items[0].OfShellCallOutput == nil {
+				t.Fatalf("result = %#v, want shell_call_output", items[0])
+			}
+			if !test.wantNative && items[0].OfFunctionCallOutput == nil {
+				t.Fatalf("result = %#v, want function_call_output", items[0])
+			}
+		})
 	}
 }
 
@@ -833,6 +892,10 @@ func testModel() catalog.Model {
 	}
 }
 
+func boolPointer(value bool) *bool {
+	return &value
+}
+
 func testTool() modelToolDefinition {
 	return modelToolDefinition{
 		Name: "lookup", Description: "Look up a value",
@@ -864,7 +927,7 @@ func testShellTool() modelToolDefinition {
 			Required:             []string{"commands"},
 			AdditionalProperties: allowAdditionalProperties(false),
 		},
-		Strict: true,
+		Strict: false,
 	}
 }
 

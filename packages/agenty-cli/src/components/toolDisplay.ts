@@ -207,18 +207,17 @@ function toolStatus(result: ToolResult | undefined): ToolDisplayStatus {
     return result.isError ? "error" : "success";
 }
 
-function shellStatus(result: ToolResult | undefined): ToolDisplayStatus {
+function shellStatus(result: ToolResult | undefined, outputList: unknown[]): ToolDisplayStatus {
     if (!result) {
         return "pending";
     }
     if (result.isError) {
         return "error";
     }
-    const output = resultRecord(result)?.output;
-    if (!Array.isArray(output)) {
+    if (outputList.length === 0) {
         return "success";
     }
-    const hasFailedCommand = output.some((entry) => {
+    const hasFailedCommand = outputList.some((entry) => {
         if (!isRecord(entry) || !isRecord(entry.outcome)) {
             return false;
         }
@@ -358,7 +357,11 @@ function listDisplay(input: JsonRecord | undefined, result: ToolResult | undefin
     };
 }
 
-function shellDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
+function shellDisplay(
+    input: JsonRecord | undefined,
+    result: ToolResult | undefined,
+    expanded: boolean,
+): ToolDisplay {
     const commands = Array.isArray(input?.commands)
         ? input.commands.filter((value): value is string => typeof value === "string")
         : [];
@@ -392,23 +395,47 @@ function shellDisplay(input: JsonRecord | undefined, result: ToolResult | undefi
         const status: ToolDisplayStatus = !result?.isError && outcomeType === "exit" && exitCode === 0
             ? "success"
             : "error";
+        if (!expanded) {
+            return {
+                command,
+                status,
+                endsWithNewline: false,
+                outputLines: [],
+            };
+        }
+
         const stdoutValue = stringValue(output.stdout);
         const stderrValue = stringValue(output.stderr);
-        const stdout = previewShellOutput(stdoutValue, "stdout");
-        const stderr = previewShellOutput(stderrValue, "stderr");
-        const outputLines: ShellCommandDisplay["outputLines"] = [
-            ...stdout.lines,
-            ...stderr.lines,
-        ];
-        const endsWithNewline = stderrValue ? stderr.endsWithNewline : stdout.endsWithNewline;
-        if (outputLines.length === 0 && !endsWithNewline) {
-            outputLines.push({ text: "no output", stream: "empty" });
+        const selectedOutput = stdoutValue !== ""
+            ? { value: stdoutValue, stream: "stdout" as const }
+            : stderrValue !== ""
+                ? { value: stderrValue, stream: "stderr" as const }
+                : undefined;
+        if (selectedOutput) {
+            const preview = previewShellOutput(selectedOutput.value, selectedOutput.stream);
+            return {
+                command,
+                status,
+                endsWithNewline: preview.endsWithNewline,
+                outputLines: preview.lines,
+            };
         }
-        return { command, status, endsWithNewline, outputLines };
+
+        const emptyOutput = outcomeType === "exit" && exitCode !== undefined
+            ? `(process exited with code ${exitCode})`
+            : outcomeType === "timeout"
+                ? "(process timed out)"
+                : "no output";
+        return {
+            command,
+            status,
+            endsWithNewline: false,
+            outputLines: [{ text: emptyOutput, stream: "empty" }],
+        };
     });
     return {
         label: TOOL_LABELS.shell,
-        status: shellStatus(result),
+        status: shellStatus(result, outputList),
         summaryLines,
         detailLines: [],
         shellCommands,
@@ -428,7 +455,7 @@ function unknownDisplay(name: string, input: JsonRecord | undefined, rawArgument
     };
 }
 
-export function buildToolDisplay(toolCall: UIToolCall): ToolDisplay {
+export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDisplay {
     const input = parseArguments(toolCall.arguments);
     const display = (() => {
         switch (toolCall.name) {
@@ -447,7 +474,7 @@ export function buildToolDisplay(toolCall: UIToolCall): ToolDisplay {
             case "ls":
                 return listDisplay(input, toolCall.result);
             case "shell":
-                return shellDisplay(input, toolCall.result);
+                return shellDisplay(input, toolCall.result, expanded);
             default:
                 return unknownDisplay(toolCall.name, input, toolCall.arguments, toolCall.result);
         }

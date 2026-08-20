@@ -60,7 +60,6 @@ func (tool *shellTool) Definition() agentloop.ToolDefinition {
 				Maximum:     new(float64(maxShellOutputLimit)),
 			},
 		}, []string{"commands"}),
-		Strict: true,
 	}
 }
 

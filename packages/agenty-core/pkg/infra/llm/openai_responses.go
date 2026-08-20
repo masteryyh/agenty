@@ -133,16 +133,9 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 		return responses.ResponseNewParams{}, err
 	}
 
-	input := make(responses.ResponseInputParam, 0, len(request.Messages))
-	for index, message := range request.Messages {
-		if message.Role == conversation.RoleSystem {
-			continue
-		}
-		items, err := openAIResponsesMessage(message, caller.nativeShell)
-		if err != nil {
-			return responses.ResponseNewParams{}, fmt.Errorf("llm: convert OpenAI Responses message %d: %w", index, err)
-		}
-		input = append(input, items...)
+	input, err := openAIResponsesMessages(request.Messages, caller.nativeShell)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
 	}
 
 	tools, err := openAIResponsesTools(request.Tools, caller.nativeShell)
@@ -182,6 +175,42 @@ func openAIResponsesTools(definitions []modelToolDefinition, nativeShell bool) (
 	return tools, nil
 }
 
+func openAIResponsesMessages(
+	messages []conversation.Message,
+	nativeShell bool,
+) (responses.ResponseInputParam, error) {
+	legacyNativeCallIDs := legacyNativeShellCallIDs(messages)
+	input := make(responses.ResponseInputParam, 0, len(messages))
+	for index, message := range messages {
+		if message.Role == conversation.RoleSystem {
+			continue
+		}
+		items, err := openAIResponsesMessageWithNativeCallIDs(
+			message,
+			nativeShell,
+			legacyNativeCallIDs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("llm: convert OpenAI Responses message %d: %w", index, err)
+		}
+		input = append(input, items...)
+	}
+	return input, nil
+}
+
+func legacyNativeShellCallIDs(messages []conversation.Message) map[string]struct{} {
+	callIDs := make(map[string]struct{})
+	for _, message := range messages {
+		for _, block := range message.Content {
+			call, ok := block.(conversation.ShellCallBlock)
+			if ok && call.CallID != "" {
+				callIDs[call.CallID] = struct{}{}
+			}
+		}
+	}
+	return callIDs
+}
+
 func openAIResponsesToolDefinition(tool modelToolDefinition, nativeShell bool) (responses.ToolUnionParam, error) {
 	toolType, err := providerToolType(tool)
 	if err != nil {
@@ -211,6 +240,14 @@ func openAIResponsesToolDefinition(tool modelToolDefinition, nativeShell bool) (
 }
 
 func openAIResponsesMessage(message conversation.Message, nativeShell bool) (responses.ResponseInputParam, error) {
+	return openAIResponsesMessageWithNativeCallIDs(message, nativeShell, nil)
+}
+
+func openAIResponsesMessageWithNativeCallIDs(
+	message conversation.Message,
+	nativeShell bool,
+	legacyNativeCallIDs map[string]struct{},
+) (responses.ResponseInputParam, error) {
 	role := responses.EasyInputMessageRole(message.Role)
 	content := make(responses.ResponseInputMessageContentListParam, 0, len(message.Content))
 	items := make(responses.ResponseInputParam, 0, len(message.Content)+1)
@@ -289,7 +326,16 @@ func openAIResponsesMessage(message conversation.Message, nativeShell bool) (res
 			items = append(items, item)
 		case conversation.ToolResultBlock:
 			flush()
-			if nativeShell {
+			useNativeShellOutput := false
+			if output, ok := shellCallOutput(value.Content); ok {
+				if output.OpenAINative != nil {
+					useNativeShellOutput = nativeShell && *output.OpenAINative
+				} else {
+					_, useNativeShellOutput = legacyNativeCallIDs[value.ToolUseID]
+					useNativeShellOutput = nativeShell && useNativeShellOutput
+				}
+			}
+			if useNativeShellOutput {
 				if output, ok := shellCallOutput(value.Content); ok {
 					item, err := openAIResponsesShellCallOutput(output)
 					if err != nil {

@@ -658,6 +658,7 @@ func (engine *Engine) executeLoop(
 			RoundID:   prepared.roundID,
 			Cwd:       cwd,
 		}, toolCalls)
+		markNativeShellResults(response.Content, results)
 		if err := ctx.Err(); err != nil {
 			return totalUsage, err
 		}

@@ -153,6 +153,7 @@ type ShellCommandOutput struct {
 type ShellCallOutputBlock struct {
 	CallID          string               `json:"callId"`
 	MaxOutputLength int64                `json:"maxOutputLength"`
+	OpenAINative    *bool                `json:"openAINative,omitempty"`
 	Output          []ShellCommandOutput `json:"output"`
 }
 

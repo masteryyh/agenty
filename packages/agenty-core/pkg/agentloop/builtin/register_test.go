@@ -46,6 +46,9 @@ func TestRegisterAll(t *testing.T) {
 		if definition.InputSchema.Type != agentloop.JSONSchemaTypeObject {
 			t.Errorf("definition %q schema type = %q, want object", definition.Name, definition.InputSchema.Type)
 		}
+		if definition.Strict {
+			t.Errorf("definition %q strict = true, want false", definition.Name)
+		}
 		additional := definition.InputSchema.AdditionalProperties
 		if additional == nil || additional.Allowed == nil || *additional.Allowed {
 			t.Errorf("definition %q additionalProperties = %#v, want false", definition.Name, additional)

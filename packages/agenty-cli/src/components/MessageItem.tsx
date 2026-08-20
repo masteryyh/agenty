@@ -1,12 +1,13 @@
 import type { ThemeMode } from "@opentui/core";
 import type React from "react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 
 import type { SystemMessageVariant, UIToolCall } from "../state/store";
 import {
     buildToolDisplay,
     type ShellCommandDisplay,
     type ShellOutputStream,
+    type ToolDisplay,
 } from "./toolDisplay";
 import { Box, Text } from "./ui";
 
@@ -140,16 +141,17 @@ function ShellCommandDetails({
 
 function ToolCallLine({
     tc,
+    display,
     expanded,
     onToggle,
     blinkOn,
 }: {
     tc: UIToolCall;
+    display: ToolDisplay;
     expanded: boolean;
     onToggle: () => void;
     blinkOn: boolean;
 }) {
-    const display = buildToolDisplay(tc);
     const hasShellDetails = (display.shellCommands?.length ?? 0) > 0;
     const hasDetails = display.detailLines.length > 0 || hasShellDetails;
     return (
@@ -186,6 +188,33 @@ function ToolCallLine({
                 />
             ) : null}
         </Box>
+    );
+}
+
+function ToolMessageItem({
+    item,
+    onToggleTool,
+}: {
+    item: Extract<MessageRenderItem, { type: "tool" }>;
+    onToggleTool?: (id: string) => void;
+}) {
+    const display = useMemo(
+        () => buildToolDisplay(item.toolCall, item.expanded),
+        [item.toolCall, item.expanded],
+    );
+    const done = !!item.toolCall.result;
+    return (
+        <Rail
+            color={display.status === "error" ? "red" : done || item.blinkOn ? "magenta" : "gray"}
+        >
+            <ToolCallLine
+                tc={item.toolCall}
+                display={display}
+                expanded={item.expanded}
+                blinkOn={item.blinkOn}
+                onToggle={() => onToggleTool?.(item.id)}
+            />
+        </Rail>
     );
 }
 
@@ -280,20 +309,7 @@ export const MessageItem = memo(({
     }
 
     if (item.type === "tool") {
-        const done = !!item.toolCall.result;
-        const display = buildToolDisplay(item.toolCall);
-        return (
-            <Rail
-                color={display.status === "error" ? "red" : done || item.blinkOn ? "magenta" : "gray"}
-            >
-                <ToolCallLine
-                    tc={item.toolCall}
-                    expanded={item.expanded}
-                    blinkOn={item.blinkOn}
-                    onToggle={() => onToggleTool?.(item.id)}
-                />
-            </Rail>
-        );
+        return <ToolMessageItem item={item} onToggleTool={onToggleTool} />;
     }
 
     if (item.role === "user") {
