@@ -28,7 +28,7 @@ import {
 } from "./wizardNavigation";
 import {
     persistWizardSetup,
-    selectedModelId,
+    selectedModelCode,
     validateWizardDrafts,
 } from "./wizardSetup";
 
@@ -82,10 +82,10 @@ function providerFields(draft: ProviderDraft): FormField[] {
             placeholder: "My provider",
         },
         {
-            key: "slug",
-            label: "Provider slug",
+            key: "code",
+            label: "Provider Code",
             kind: "text",
-            value: draft.slug,
+            value: draft.code,
             placeholder: "my-provider",
             readOnly: draft.source === "preset",
         },
@@ -118,11 +118,11 @@ function providerFields(draft: ProviderDraft): FormField[] {
 function modelFields(model: ModelDraft): FormField[] {
     return [
         {
-            key: "slug",
-            label: "Model ID",
+            key: "code",
+            label: "Model Code",
             kind: "text",
-            value: model.slug,
-            placeholder: "model-id or org/model-id",
+            value: model.code,
+            placeholder: "model-code or org/model-code",
         },
         {
             key: "name",
@@ -155,7 +155,7 @@ function rowsForDrafts(drafts: ProviderDraft[]): ProviderRow[] {
             .map((draft) => ({
                 kind: "custom" as const,
                 draft,
-                label: draft.name || draft.slug || "Custom provider",
+                label: draft.name || draft.code || "Custom provider",
                 description: providerTypeLabel(draft.type),
             })),
     );
@@ -203,9 +203,9 @@ function WizardContent() {
                 if (cancelled) {
                     return;
                 }
-                const knownPresetSlugs = new Set(providerPresets.map((preset) => preset.slug));
+                const knownPresetCodes = new Set(providerPresets.map((preset) => preset.code));
                 const restored = (providers ?? []).map((provider) => {
-                    const preset = providerPresets.find((candidate) => candidate.slug === provider.slug);
+                    const preset = providerPresets.find((candidate) => candidate.code === provider.code);
                     const draft = draftForProvider(provider, preset);
                     return {
                         draft,
@@ -213,7 +213,7 @@ function WizardContent() {
                     };
                 });
                 const configured = restored.filter(({ draft }) =>
-                    draft.source === "custom" || knownPresetSlugs.has(draft.slug),
+                    draft.source === "custom" || knownPresetCodes.has(draft.code),
                 );
                 setDrafts(configured.map(({ draft }) => draft));
                 setModels(configured.map(({ model }) => model));
@@ -268,16 +268,16 @@ function WizardContent() {
         const next: ProviderDraft = {
             ...editing,
             name: values.name.trim(),
-            slug: values.slug.trim(),
+            code: values.code.trim(),
             type: values.type,
             baseUrl: values.baseUrl.trim(),
             apiKey: values.apiKey.trim(),
         };
         const duplicate = drafts.some(
-            (draft) => draft.id !== next.id && draft.slug.trim() !== "" && draft.slug === next.slug,
+            (draft) => draft.id !== next.id && draft.code.trim() !== "" && draft.code === next.code,
         );
         if (duplicate) {
-            setError(`Provider slug already configured: ${next.slug}`);
+            setError(`Provider code already configured: ${next.code}`);
             return;
         }
         const validationError = validateProviderDraft(next);
@@ -301,7 +301,7 @@ function WizardContent() {
                 return [...current, modelDraftForProvider(next, preset)];
             }
             return current.map((model, modelIndex) => modelIndex === index
-                ? { ...model, providerSlug: next.slug, providerName: next.name }
+                ? { ...model, providerCode: next.code, providerName: next.name }
                 : model);
         });
         setProviderFocus({ kind: "row", index: 0 });
@@ -328,7 +328,7 @@ function WizardContent() {
         }
         const next: ModelDraft = {
             ...editingModel,
-            slug: values.slug.trim(),
+            code: values.code.trim(),
             name: values.name.trim(),
             contextWindow: Number(values.contextWindow),
         };
@@ -398,7 +398,7 @@ function WizardContent() {
                 {error ? <Text color="red">{error}</Text> : null}
                 <FormPanel
                     key={editingModel.id}
-                    title={`Configure model for ${editingModel.providerName || editingModel.providerSlug}`}
+                    title={`Configure model for ${editingModel.providerName || editingModel.providerCode}`}
                     fields={modelFields(editingModel)}
                     actions={[{ key: "save", label: "Save model" }, { key: "cancel", label: "Back" }]}
                     onAction={(action, values) => {
@@ -431,7 +431,7 @@ function WizardContent() {
                     setError(null);
                     setStep("model-form");
                 }}
-                onConfirm={(model) => void saveSetup(selectedModelId(model))}
+                onConfirm={(model) => void saveSetup(selectedModelCode(model))}
                 onBack={() => {
                     setError(null);
                     setStep("providers");
@@ -494,7 +494,7 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
                     <Text color="cyan" bold>02  Model details</Text>
                 </Box>
                 <Box height={1}>
-                    <Text dimColor wrap="truncate">Enter the model ID and limits used by the core loop.</Text>
+                    <Text dimColor wrap="truncate">Enter the model code and limits used by the core loop.</Text>
                 </Box>
                 <Box height={1}>
                     <Text color="cyan" bold>03  Default agent</Text>
@@ -796,8 +796,8 @@ function ModelStep({
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
                 {models.map((model, index) => {
                     const active = focus.kind === "row" && index === focus.index;
-                    const provider = `${model.providerName} (${model.providerSlug})`;
-                    const modelLabel = model.name && model.slug ? `${model.name} · ${model.slug}` : "Configure model";
+                    const provider = `${model.providerName} (${model.providerCode})`;
+                    const modelLabel = model.name && model.code ? `${model.name} · ${model.code}` : "Configure model";
                     return (
                         <Box
                             key={model.id}

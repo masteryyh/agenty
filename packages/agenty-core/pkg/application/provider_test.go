@@ -22,8 +22,8 @@ func TestProviderCreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if p.Slug.String() != "anthropic" {
-		t.Errorf("slug = %s", p.Slug)
+	if p.Code.String() != "anthropic" {
+		t.Errorf("code = %s", p.Code)
 	}
 
 	got, err := providerSvc.Get(ctx, "anthropic")
@@ -64,8 +64,8 @@ func TestProviderList(t *testing.T) {
 	_, providerSvc, _ := newServices(t)
 	ctx := context.Background()
 
-	for _, slug := range []string{"anthropic", "openai"} {
-		if _, err := providerSvc.Create(ctx, slug, application.ProviderInput{Name: slug, Type: catalog.APIOpenAI}); err != nil {
+	for _, code := range []string{"anthropic", "openai"} {
+		if _, err := providerSvc.Create(ctx, code, application.ProviderInput{Name: code, Type: catalog.APIOpenAI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,7 +139,7 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 		t.Errorf("max output tokens = %d, want %d", p.Models[0].MaxOutputTokens, catalog.DefaultMaxOutputTokens)
 	}
 
-	// AddModel is upsert: re-adding the same slug replaces.
+	// AddModel is upsert: re-adding the same code replaces.
 	if _, err := providerSvc.AddModel(ctx, "anthropic", "claude-opus-4-8", application.ModelInput{
 		Name:            "Claude Opus 4.8 Updated",
 		ContextWindow:   210_000,
@@ -158,23 +158,23 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 		t.Errorf("model name = %s, want updated", p.Models[0].Name)
 	}
 
-	// Model IDs may include provider namespaces, underscores and variant markers.
-	const namespacedModelID = "org/model_name[v2]"
-	if _, err := providerSvc.AddModel(ctx, "anthropic", namespacedModelID, application.ModelInput{
+	// Model Codes may include provider namespaces, underscores and variant markers.
+	const namespacedModelCode = "org/model_name[v2]"
+	if _, err := providerSvc.AddModel(ctx, "anthropic", namespacedModelCode, application.ModelInput{
 		Name:            "Namespaced model",
 		MaxOutputTokens: 16_384,
 	}); err != nil {
-		t.Fatalf("AddModel namespaced ID: %v", err)
+		t.Fatalf("AddModel namespaced code: %v", err)
 	}
 	p, err = providerSvc.Get(ctx, "anthropic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Model(mustModelIDForTest(namespacedModelID)); err != nil {
+	if _, err := p.Model(mustModelCodeForTest(namespacedModelCode)); err != nil {
 		t.Fatalf("namespaced model lookup: %v", err)
 	}
-	if _, err := providerSvc.RemoveModel(ctx, "anthropic", namespacedModelID); err != nil {
-		t.Fatalf("RemoveModel namespaced ID: %v", err)
+	if _, err := providerSvc.RemoveModel(ctx, "anthropic", namespacedModelCode); err != nil {
+		t.Fatalf("RemoveModel namespaced code: %v", err)
 	}
 
 	// Add a second model, then remove the first.
@@ -192,8 +192,8 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	if len(p.Models) != 1 {
 		t.Fatalf("after remove has %d models, want 1", len(p.Models))
 	}
-	if p.Models[0].Slug.String() != "claude-haiku-4-5" {
-		t.Errorf("remaining model = %s, want claude-haiku-4-5", p.Models[0].Slug)
+	if p.Models[0].Code.String() != "claude-haiku-4-5" {
+		t.Errorf("remaining model = %s, want claude-haiku-4-5", p.Models[0].Code)
 	}
 
 	// Removing again surfaces not-found.
@@ -203,12 +203,12 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 	}
 }
 
-func mustModelIDForTest(value string) shared.ModelID {
-	modelID, err := shared.NewModelID(value)
+func mustModelCodeForTest(value string) shared.ModelCode {
+	modelCode, err := shared.NewModelCode(value)
 	if err != nil {
 		panic(err)
 	}
-	return modelID
+	return modelCode
 }
 
 func TestProviderAddModelRejectsInvalidReasoningEffortMapping(t *testing.T) {

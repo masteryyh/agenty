@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 )
@@ -24,7 +25,7 @@ func (caller *googleCaller) Invoke(ctx context.Context, request modelRequest) (*
 		return nil, err
 	}
 
-	result, err := caller.client.Models.GenerateContent(ctx, caller.model.Slug.String(), contents, config)
+	result, err := caller.client.Models.GenerateContent(ctx, caller.model.Code.String(), contents, config)
 	if err != nil {
 		return nil, fmt.Errorf("llm: invoke Google GenAI SDK: %w", err)
 	}
@@ -45,7 +46,7 @@ func (caller *googleCaller) Stream(
 	merged := &genai.GenerateContentResponse{}
 	for chunk, streamErr := range caller.client.Models.GenerateContentStream(
 		ctx,
-		caller.model.Slug.String(),
+		caller.model.Code.String(),
 		contents,
 		config,
 	) {
@@ -137,6 +138,9 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 func googleTools(definitions []modelToolDefinition) ([]*genai.FunctionDeclaration, error) {
 	tools := make([]*genai.FunctionDeclaration, 0, len(definitions))
 	for _, definition := range definitions {
+		if definition.Type == agentloop.ToolTypeApplyPatch {
+			continue
+		}
 		tool, err := googleToolDefinition(definition)
 		if err != nil {
 			return nil, err
@@ -171,6 +175,8 @@ func googleToolNames(messages []conversation.Message) map[string]string {
 				names[tool.ID] = tool.Name
 			case conversation.ShellCallBlock:
 				names[tool.CallID] = "shell"
+			case conversation.ApplyPatchCallBlock:
+				names[tool.CallID] = "apply_patch"
 			}
 		}
 	}
@@ -232,6 +238,18 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 		case conversation.ShellCallBlock:
 			if message.Role != conversation.RoleAssistant {
 				return nil, unsupportedContent("Google shell call requires assistant role")
+			}
+			call := value.ToolUseBlock()
+			input, err := rawObject(call.Input, "tool input")
+			if err != nil {
+				return nil, err
+			}
+			part := genai.NewPartFromFunctionCall(call.Name, input)
+			part.FunctionCall.ID = call.ID
+			parts = append(parts, part)
+		case conversation.ApplyPatchCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return nil, unsupportedContent("Google apply patch call requires assistant role")
 			}
 			call := value.ToolUseBlock()
 			input, err := rawObject(call.Input, "tool input")

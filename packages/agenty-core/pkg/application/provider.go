@@ -15,11 +15,10 @@ type ProviderService struct {
 }
 
 type providerRepository interface {
-	Get(ctx context.Context, slug shared.Slug) (*catalog.Provider, error)
+	Get(ctx context.Context, code shared.Code) (*catalog.Provider, error)
 	List(ctx context.Context) ([]*catalog.Provider, error)
 	Save(ctx context.Context, provider *catalog.Provider) error
-	Delete(ctx context.Context, slug shared.Slug) error
-	DeleteModel(ctx context.Context, providerSlug shared.Slug, modelSlug shared.ModelID) error
+	Delete(ctx context.Context, code shared.Code) error
 }
 
 func NewProviderService(repo providerRepository) *ProviderService {
@@ -34,8 +33,8 @@ type ProviderInput struct {
 	Metadata shared.Metadata `json:"metadata,omitempty"`
 }
 
-func (s *ProviderService) Create(ctx context.Context, slug string, in ProviderInput) (*catalog.Provider, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *ProviderService) Create(ctx context.Context, code string, in ProviderInput) (*catalog.Provider, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -43,14 +42,14 @@ func (s *ProviderService) Create(ctx context.Context, slug string, in ProviderIn
 		return nil, Validation("invalid api type: " + string(in.Type))
 	}
 
-	existing, err := s.repo.Get(ctx, slugVal)
+	existing, err := s.repo.Get(ctx, codeVal)
 	if err == nil && existing != nil {
-		return nil, AlreadyExists("provider " + slug + " already exists")
+		return nil, AlreadyExists("provider " + code + " already exists")
 	} else if err != nil && !errors.Is(err, storage.ErrProviderNotFound) {
 		return nil, Internal("failed to check existing provider: " + err.Error())
 	}
 
-	p, err := catalog.NewProvider(slug, in.Name, in.Type)
+	p, err := catalog.NewProvider(code, in.Name, in.Type)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -65,16 +64,16 @@ func (s *ProviderService) Create(ctx context.Context, slug string, in ProviderIn
 	return p, nil
 }
 
-func (s *ProviderService) Get(ctx context.Context, slug string) (*catalog.Provider, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *ProviderService) Get(ctx context.Context, code string) (*catalog.Provider, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
 
-	p, err := s.repo.Get(ctx, slugVal)
+	p, err := s.repo.Get(ctx, codeVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
-			return nil, NotFound("provider " + slug + " not found")
+			return nil, NotFound("provider " + code + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
@@ -100,16 +99,16 @@ type ProviderUpdate struct {
 	Metadata *shared.Metadata `json:"metadata,omitempty"`
 }
 
-func (s *ProviderService) Update(ctx context.Context, slug string, upd ProviderUpdate) (*catalog.Provider, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderUpdate) (*catalog.Provider, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
 
-	p, err := s.repo.Get(ctx, slugVal)
+	p, err := s.repo.Get(ctx, codeVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
-			return nil, NotFound("provider " + slug + " not found")
+			return nil, NotFound("provider " + code + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
@@ -140,15 +139,15 @@ func (s *ProviderService) Update(ctx context.Context, slug string, upd ProviderU
 	return p, nil
 }
 
-func (s *ProviderService) Delete(ctx context.Context, slug string) error {
-	slugVal, err := shared.NewSlug(slug)
+func (s *ProviderService) Delete(ctx context.Context, code string) error {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return Validation(err.Error())
 	}
 
-	if err := s.repo.Delete(ctx, slugVal); err != nil {
+	if err := s.repo.Delete(ctx, codeVal); err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
-			return NotFound("provider " + slug + " not found")
+			return NotFound("provider " + code + " not found")
 		}
 		return Internal("failed to delete provider: " + err.Error())
 	}
@@ -167,13 +166,13 @@ type ModelInput struct {
 	IsDefault              bool                              `json:"isDefault,omitempty"`
 }
 
-func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug string, in ModelInput) (*catalog.Provider, error) {
-	ps, err := shared.NewSlug(providerSlug)
+func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode string, in ModelInput) (*catalog.Provider, error) {
+	ps, err := shared.NewCode(providerCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
 
-	ms, err := shared.NewModelID(modelSlug)
+	ms, err := shared.NewModelCode(modelCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -189,14 +188,14 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 	p, err := s.repo.Get(ctx, ps)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
-			return nil, NotFound("provider " + providerSlug + " not found")
+			return nil, NotFound("provider " + providerCode + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
 
 	now := time.Now().UTC()
 	p.AddModel(catalog.Model{
-		Slug:                   ms,
+		Code:                   ms,
 		Name:                   in.Name,
 		ContextWindow:          in.ContextWindow,
 		MaxOutputTokens:        catalog.DefaultMaxOutputTokens,
@@ -215,31 +214,36 @@ func (s *ProviderService) AddModel(ctx context.Context, providerSlug, modelSlug 
 	return p, nil
 }
 
-func (s *ProviderService) RemoveModel(ctx context.Context, providerSlug, modelSlug string) (*catalog.Provider, error) {
-	ps, err := shared.NewSlug(providerSlug)
+func (s *ProviderService) RemoveModel(ctx context.Context, providerCode, modelCode string) (*catalog.Provider, error) {
+	ps, err := shared.NewCode(providerCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
 
-	ms, err := shared.NewModelID(modelSlug)
+	ms, err := shared.NewModelCode(modelCode)
 	if err != nil {
 		return nil, Validation(err.Error())
-	}
-
-	if err := s.repo.DeleteModel(ctx, ps, ms); err != nil {
-		switch {
-		case errors.Is(err, storage.ErrProviderNotFound):
-			return nil, NotFound("provider " + providerSlug + " not found")
-		case errors.Is(err, catalog.ErrModelNotFound):
-			return nil, NotFound("model " + modelSlug + " not found in provider " + providerSlug)
-		default:
-			return nil, Internal("failed to remove model: " + err.Error())
-		}
 	}
 
 	p, err := s.repo.Get(ctx, ps)
 	if err != nil {
-		return nil, Internal("failed to reload provider: " + err.Error())
+		if errors.Is(err, storage.ErrProviderNotFound) {
+			return nil, NotFound("provider " + providerCode + " not found")
+		}
+		return nil, Internal("failed to get provider: " + err.Error())
+	}
+
+	if _, err := p.Model(ms); err != nil {
+		if errors.Is(err, catalog.ErrModelNotFound) {
+			return nil, NotFound("model " + modelCode + " not found in provider " + providerCode)
+		}
+		return nil, Internal("failed to find model: " + err.Error())
+	}
+
+	p.RemoveModel(ms)
+	p.UpdatedAt = time.Now().UTC()
+	if err := s.repo.Save(ctx, p); err != nil {
+		return nil, Internal("failed to save provider: " + err.Error())
 	}
 	return p, nil
 }

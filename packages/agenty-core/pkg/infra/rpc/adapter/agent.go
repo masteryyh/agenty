@@ -8,9 +8,9 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 )
 
-// slugParams identifies a resource by its slug.
-type slugParams struct {
-	Slug string `json:"slug"`
+// codeParams identifies a resource by its code.
+type codeParams struct {
+	Code string `json:"code"`
 }
 
 // RegisterAgentHandlers registers agent.* methods on d.
@@ -23,7 +23,7 @@ func RegisterAgentHandlers(d *rpc.Dispatcher, svc *application.AgentService) {
 }
 
 type agentCreateParams struct {
-	Slug string `json:"slug"`
+	Code string `json:"code"`
 	application.AgentInput
 }
 
@@ -33,17 +33,17 @@ func agentCreate(svc *application.AgentService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Create(ctx, p.Slug, p.AgentInput))
+		return wrap(svc.Create(ctx, p.Code, p.AgentInput))
 	}
 }
 
 func agentGet(svc *application.AgentService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p slugParams
+		var p codeParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Get(ctx, p.Slug))
+		return wrap(svc.Get(ctx, p.Code))
 	}
 }
 
@@ -58,7 +58,7 @@ func agentList(svc *application.AgentService) rpc.Handler {
 }
 
 type agentUpdateParams struct {
-	Slug string `json:"slug"`
+	Code string `json:"code"`
 	application.AgentUpdate
 }
 
@@ -68,19 +68,19 @@ func agentUpdate(svc *application.AgentService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Update(ctx, p.Slug, p.AgentUpdate))
+		return wrap(svc.Update(ctx, p.Code, p.AgentUpdate))
 	}
 }
 
 func agentDelete(svc *application.AgentService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p slugParams
+		var p codeParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		if err := svc.Delete(ctx, p.Slug); err != nil {
+		if err := svc.Delete(ctx, p.Code); err != nil {
 			return nil, toRPCError(err)
 		}
-		return map[string]any{"slug": p.Slug, "deleted": true}, nil
+		return map[string]any{"code": p.Code, "deleted": true}, nil
 	}
 }

@@ -16,13 +16,13 @@ export const commands: Command[] = [
     },
     {
         name: "/model",
-        description: "Switch the chat model",
+        description: "Manage and switch chat models",
         usage: "/model [provider/model]",
         argHint: "provider/model",
         completeArgs: async (client) => {
             const models = await client.listModels();
             return models
-                .map((m) => `${m.providerSlug}/${m.slug}`);
+                .map((m) => `${m.providerCode}/${m.code}`);
         },
     },
     {

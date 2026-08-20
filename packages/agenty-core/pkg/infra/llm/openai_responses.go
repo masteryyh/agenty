@@ -17,9 +17,9 @@ import (
 )
 
 type openAIResponsesCaller struct {
-	client      *openai.Client
-	model       catalog.Model
-	nativeShell bool
+	client       *openai.Client
+	model        catalog.Model
+	nativeOpenAI bool
 }
 
 func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
@@ -80,6 +80,18 @@ func (caller *openAIResponsesCaller) Stream(
 					Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: "shell",
 				})
+			case responses.ResponseApplyPatchToolCall:
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
+					ToolUseID: item.CallID, ToolName: "apply_patch",
+				})
+			case responses.ResponseCustomToolCall:
+				if item.Name == "apply_patch" {
+					err = emit(handler, modelStreamEvent{
+						Type: modelStreamEventToolUseStart, Index: int(event.OutputIndex),
+						ToolUseID: item.CallID, ToolName: item.Name,
+					})
+				}
 			}
 		case responses.ResponseOutputItemDoneEvent:
 			switch item := event.Item.AsAny().(type) {
@@ -98,6 +110,31 @@ func (caller *openAIResponsesCaller) Stream(
 					Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
 					ToolUseID: item.CallID, ToolName: "shell", ToolInput: input,
 				})
+			case responses.ResponseApplyPatchToolCall:
+				operation, operationErr := openAIApplyPatchOperation(item.Operation)
+				if operationErr != nil {
+					err = operationErr
+					break
+				}
+				input := conversation.ApplyPatchCallBlock{
+					CallID: item.CallID, Source: conversation.ApplyPatchSourceNative,
+					Operation: &operation,
+				}.ToolUseBlock().Input
+				err = emit(handler, modelStreamEvent{
+					Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
+					ToolUseID: item.CallID, ToolName: "apply_patch", ToolInput: input,
+				})
+			case responses.ResponseCustomToolCall:
+				if item.Name == "apply_patch" {
+					input := conversation.ApplyPatchCallBlock{
+						CallID: item.CallID, Source: conversation.ApplyPatchSourceCustom,
+						Patch: item.Input,
+					}.ToolUseBlock().Input
+					err = emit(handler, modelStreamEvent{
+						Type: modelStreamEventToolUseDone, Index: int(event.OutputIndex),
+						ToolUseID: item.CallID, ToolName: item.Name, ToolInput: input,
+					})
+				}
 			}
 		case responses.ResponseCompletedEvent:
 			final, err = openAIResponsesResponse(&event.Response)
@@ -133,18 +170,18 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 		return responses.ResponseNewParams{}, err
 	}
 
-	input, err := openAIResponsesMessages(request.Messages, caller.nativeShell)
+	input, err := openAIResponsesMessages(request.Messages, caller.nativeOpenAI)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 
-	tools, err := openAIResponsesTools(request.Tools, caller.nativeShell)
+	tools, err := openAIResponsesTools(request.Tools, caller.nativeOpenAI)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 
 	params := responses.ResponseNewParams{
-		Model:           openaishared.ResponsesModel(caller.model.Slug.String()),
+		Model:           openaishared.ResponsesModel(caller.model.Code.String()),
 		Input:           responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 		MaxOutputTokens: openai.Int(request.MaxOutputTokens),
 		Store:           openai.Bool(false),
@@ -163,10 +200,13 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 	return params, nil
 }
 
-func openAIResponsesTools(definitions []modelToolDefinition, nativeShell bool) ([]responses.ToolUnionParam, error) {
+func openAIResponsesTools(definitions []modelToolDefinition, nativeOpenAI bool) ([]responses.ToolUnionParam, error) {
 	tools := make([]responses.ToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
-		tool, err := openAIResponsesToolDefinition(definition, nativeShell)
+		if isReplacedFileTool(definition.Name) {
+			continue
+		}
+		tool, err := openAIResponsesToolDefinition(definition, nativeOpenAI)
 		if err != nil {
 			return nil, err
 		}
@@ -177,9 +217,9 @@ func openAIResponsesTools(definitions []modelToolDefinition, nativeShell bool) (
 
 func openAIResponsesMessages(
 	messages []conversation.Message,
-	nativeShell bool,
+	nativeOpenAI bool,
 ) (responses.ResponseInputParam, error) {
-	legacyNativeCallIDs := legacyNativeShellCallIDs(messages)
+	callSources := openAIResponsesCallSources(messages)
 	input := make(responses.ResponseInputParam, 0, len(messages))
 	for index, message := range messages {
 		if message.Role == conversation.RoleSystem {
@@ -187,8 +227,8 @@ func openAIResponsesMessages(
 		}
 		items, err := openAIResponsesMessageWithNativeCallIDs(
 			message,
-			nativeShell,
-			legacyNativeCallIDs,
+			nativeOpenAI,
+			callSources,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("llm: convert OpenAI Responses message %d: %w", index, err)
@@ -198,29 +238,60 @@ func openAIResponsesMessages(
 	return input, nil
 }
 
-func legacyNativeShellCallIDs(messages []conversation.Message) map[string]struct{} {
-	callIDs := make(map[string]struct{})
+type openAIResponsesCallSource struct {
+	nativeShell      bool
+	applyPatchSource conversation.ApplyPatchCallSource
+}
+
+func openAIResponsesCallSources(messages []conversation.Message) map[string]openAIResponsesCallSource {
+	sources := make(map[string]openAIResponsesCallSource)
 	for _, message := range messages {
 		for _, block := range message.Content {
-			call, ok := block.(conversation.ShellCallBlock)
-			if ok && call.CallID != "" {
-				callIDs[call.CallID] = struct{}{}
+			switch call := block.(type) {
+			case conversation.ShellCallBlock:
+				if call.CallID != "" {
+					sources[call.CallID] = openAIResponsesCallSource{nativeShell: true}
+				}
+			case conversation.ApplyPatchCallBlock:
+				if call.CallID != "" {
+					sources[call.CallID] = openAIResponsesCallSource{
+						applyPatchSource: call.Source,
+					}
+				}
 			}
 		}
 	}
-	return callIDs
+	return sources
 }
 
-func openAIResponsesToolDefinition(tool modelToolDefinition, nativeShell bool) (responses.ToolUnionParam, error) {
+func isReplacedFileTool(name string) bool {
+	switch name {
+	case "write_file", "patch_file", "delete_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIResponsesToolDefinition(tool modelToolDefinition, nativeOpenAI bool) (responses.ToolUnionParam, error) {
 	toolType, err := providerToolType(tool)
 	if err != nil {
 		return responses.ToolUnionParam{}, err
 	}
-	if toolType == agentloop.ToolTypeShell && nativeShell {
+	if toolType == agentloop.ToolTypeShell && nativeOpenAI {
 		return responses.ToolUnionParam{OfShell: &responses.FunctionShellToolParam{
 			Environment: responses.FunctionShellToolEnvironmentUnionParam{
 				OfLocal: &responses.LocalEnvironmentParam{},
 			},
+		}}, nil
+	}
+	if toolType == agentloop.ToolTypeApplyPatch {
+		if nativeOpenAI {
+			return responses.ToolUnionParam{OfApplyPatch: &responses.ApplyPatchToolParam{}}, nil
+		}
+		return responses.ToolUnionParam{OfCustom: &responses.CustomToolParam{
+			Name:        "apply_patch",
+			Description: openai.String(tool.Description),
 		}}, nil
 	}
 
@@ -239,14 +310,14 @@ func openAIResponsesToolDefinition(tool modelToolDefinition, nativeShell bool) (
 	return responses.ToolUnionParam{OfFunction: &converted}, nil
 }
 
-func openAIResponsesMessage(message conversation.Message, nativeShell bool) (responses.ResponseInputParam, error) {
-	return openAIResponsesMessageWithNativeCallIDs(message, nativeShell, nil)
+func openAIResponsesMessage(message conversation.Message, nativeOpenAI bool) (responses.ResponseInputParam, error) {
+	return openAIResponsesMessageWithNativeCallIDs(message, nativeOpenAI, nil)
 }
 
 func openAIResponsesMessageWithNativeCallIDs(
 	message conversation.Message,
-	nativeShell bool,
-	legacyNativeCallIDs map[string]struct{},
+	nativeOpenAI bool,
+	callSources map[string]openAIResponsesCallSource,
 ) (responses.ResponseInputParam, error) {
 	role := responses.EasyInputMessageRole(message.Role)
 	content := make(responses.ResponseInputMessageContentListParam, 0, len(message.Content))
@@ -301,7 +372,7 @@ func openAIResponsesMessageWithNativeCallIDs(
 				return nil, unsupportedContent("OpenAI Responses shell call requires assistant role")
 			}
 			flush()
-			if !nativeShell {
+			if !nativeOpenAI {
 				call := value.ToolUseBlock()
 				if _, err := rawObject(call.Input, "tool input"); err != nil {
 					return nil, err
@@ -324,15 +395,50 @@ func openAIResponsesMessageWithNativeCallIDs(
 			}
 			item.OfShellCall.Environment.OfLocal = &responses.LocalEnvironmentParam{}
 			items = append(items, item)
+		case conversation.ApplyPatchCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return nil, unsupportedContent("OpenAI Responses apply patch call requires assistant role")
+			}
+			flush()
+			item, err := openAIResponsesApplyPatchCall(value, nativeOpenAI)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
 		case conversation.ToolResultBlock:
 			flush()
+			if source := callSources[value.ToolUseID].applyPatchSource; source != "" {
+				output, err := textContent(value.Content)
+				if err != nil {
+					return nil, err
+				}
+				if source == conversation.ApplyPatchSourceNative && nativeOpenAI {
+					status := "completed"
+					if value.IsError {
+						status = "failed"
+					}
+					item := responses.ResponseInputItemParamOfApplyPatchCallOutput(
+						value.ToolUseID,
+						status,
+					)
+					if output != "" {
+						item.OfApplyPatchCallOutput.Output = openai.String(output)
+					}
+					items = append(items, item)
+				} else {
+					items = append(items, responses.ResponseInputItemParamOfCustomToolCallOutput(
+						value.ToolUseID,
+						output,
+					))
+				}
+				continue
+			}
 			useNativeShellOutput := false
 			if output, ok := shellCallOutput(value.Content); ok {
 				if output.OpenAINative != nil {
-					useNativeShellOutput = nativeShell && *output.OpenAINative
+					useNativeShellOutput = nativeOpenAI && *output.OpenAINative
 				} else {
-					_, useNativeShellOutput = legacyNativeCallIDs[value.ToolUseID]
-					useNativeShellOutput = nativeShell && useNativeShellOutput
+					useNativeShellOutput = nativeOpenAI && callSources[value.ToolUseID].nativeShell
 				}
 			}
 			if useNativeShellOutput {
@@ -367,6 +473,143 @@ func shellCallOutput(content conversation.Content) (conversation.ShellCallOutput
 	}
 	output, ok := content[0].(conversation.ShellCallOutputBlock)
 	return output, ok
+}
+
+func openAIResponsesApplyPatchCall(
+	call conversation.ApplyPatchCallBlock,
+	nativeOpenAI bool,
+) (responses.ResponseInputItemUnionParam, error) {
+	if call.CallID == "" {
+		return responses.ResponseInputItemUnionParam{}, invalidRequest("apply patch call ID is required")
+	}
+
+	if call.Source == conversation.ApplyPatchSourceCustom {
+		if call.Patch == "" {
+			return responses.ResponseInputItemUnionParam{}, invalidRequest("custom apply patch call has no patch")
+		}
+		item := responses.ResponseInputItemParamOfCustomToolCall(call.CallID, call.Patch, "apply_patch")
+		if call.ID != "" {
+			item.OfCustomToolCall.ID = openai.String(call.ID)
+		}
+		return item, nil
+	}
+	if call.Source != conversation.ApplyPatchSourceNative || call.Operation == nil {
+		return responses.ResponseInputItemUnionParam{}, invalidRequest("native apply patch call has no operation")
+	}
+	if !nativeOpenAI {
+		patch, err := applyPatchOperationEnvelope(*call.Operation)
+		if err != nil {
+			return responses.ResponseInputItemUnionParam{}, err
+		}
+		item := responses.ResponseInputItemParamOfCustomToolCall(call.CallID, patch, "apply_patch")
+		if call.ID != "" {
+			item.OfCustomToolCall.ID = openai.String(call.ID)
+		}
+		return item, nil
+	}
+
+	operation := *call.Operation
+	var item responses.ResponseInputItemUnionParam
+	switch operation.Type {
+	case conversation.ApplyPatchCreateFile:
+		item = responses.ResponseInputItemParamOfApplyPatchCall(
+			call.CallID,
+			responses.ResponseInputItemApplyPatchCallOperationCreateFileParam{
+				Path: operation.Path,
+				Diff: operation.Diff,
+			},
+			"completed",
+		)
+	case conversation.ApplyPatchDeleteFile:
+		item = responses.ResponseInputItemParamOfApplyPatchCall(
+			call.CallID,
+			responses.ResponseInputItemApplyPatchCallOperationDeleteFileParam{Path: operation.Path},
+			"completed",
+		)
+	case conversation.ApplyPatchUpdateFile:
+		if operation.MoveTo != "" {
+			return responses.ResponseInputItemUnionParam{}, invalidRequest(
+				"native apply patch operation cannot move files",
+			)
+		}
+		item = responses.ResponseInputItemParamOfApplyPatchCall(
+			call.CallID,
+			responses.ResponseInputItemApplyPatchCallOperationUpdateFileParam{
+				Path: operation.Path,
+				Diff: operation.Diff,
+			},
+			"completed",
+		)
+	default:
+		return responses.ResponseInputItemUnionParam{}, invalidRequest(
+			"apply patch operation has unknown type %q",
+			operation.Type,
+		)
+	}
+	if call.ID != "" {
+		item.OfApplyPatchCall.ID = openai.String(call.ID)
+	}
+	return item, nil
+}
+
+func applyPatchOperationEnvelope(operation conversation.ApplyPatchOperation) (string, error) {
+	var header string
+	switch operation.Type {
+	case conversation.ApplyPatchCreateFile:
+		header = "*** Add File: " + operation.Path
+	case conversation.ApplyPatchDeleteFile:
+		header = "*** Delete File: " + operation.Path
+	case conversation.ApplyPatchUpdateFile:
+		header = "*** Update File: " + operation.Path
+	default:
+		return "", invalidRequest("apply patch operation has unknown type %q", operation.Type)
+	}
+	if operation.Path == "" {
+		return "", invalidRequest("apply patch operation path is required")
+	}
+
+	var patch strings.Builder
+	patch.WriteString("*** Begin Patch\n")
+	patch.WriteString(header)
+	patch.WriteByte('\n')
+	if operation.MoveTo != "" {
+		if operation.Type != conversation.ApplyPatchUpdateFile {
+			return "", invalidRequest("only update operations can move files")
+		}
+		patch.WriteString("*** Move to: ")
+		patch.WriteString(operation.MoveTo)
+		patch.WriteByte('\n')
+	}
+	patch.WriteString(operation.Diff)
+	if operation.Diff != "" && !strings.HasSuffix(operation.Diff, "\n") {
+		patch.WriteByte('\n')
+	}
+	patch.WriteString("*** End Patch")
+	return patch.String(), nil
+}
+
+func openAIApplyPatchOperation(
+	operation responses.ResponseApplyPatchToolCallOperationUnion,
+) (conversation.ApplyPatchOperation, error) {
+	converted := conversation.ApplyPatchOperation{
+		Type: conversation.ApplyPatchOperationType(operation.Type),
+		Path: operation.Path,
+		Diff: operation.Diff,
+	}
+	if converted.Path == "" {
+		return conversation.ApplyPatchOperation{}, invalidRequest("apply patch operation path is required")
+	}
+	switch converted.Type {
+	case conversation.ApplyPatchCreateFile, conversation.ApplyPatchUpdateFile:
+	case conversation.ApplyPatchDeleteFile:
+		converted.Diff = ""
+	default:
+		return conversation.ApplyPatchOperation{}, invalidRequest(
+			"apply patch operation has unknown type %q",
+			operation.Type,
+		)
+	}
+	return converted, nil
 }
 
 func openAIResponsesShellCallOutput(
@@ -438,6 +681,28 @@ func openAIResponsesResponse(result *responses.Response) (*modelResponse, error)
 				TimeoutMs:       item.Action.TimeoutMs,
 				MaxOutputLength: item.Action.MaxOutputLength,
 			})
+		case responses.ResponseApplyPatchToolCall:
+			hasToolUse = true
+			operation, err := openAIApplyPatchOperation(item.Operation)
+			if err != nil {
+				return nil, fmt.Errorf("llm: OpenAI Responses returned invalid apply patch operation: %w", err)
+			}
+			content = append(content, conversation.ApplyPatchCallBlock{
+				ID: item.ID, CallID: item.CallID, Source: conversation.ApplyPatchSourceNative,
+				Operation: &operation,
+			})
+		case responses.ResponseCustomToolCall:
+			if item.Name != "apply_patch" {
+				continue
+			}
+			hasToolUse = true
+			if item.Input == "" {
+				return nil, fmt.Errorf("llm: OpenAI Responses returned an empty custom apply patch input")
+			}
+			content = append(content, conversation.ApplyPatchCallBlock{
+				ID: item.ID, CallID: item.CallID, Source: conversation.ApplyPatchSourceCustom,
+				Patch: item.Input,
+			})
 		case responses.ResponseReasoningItem:
 			parts := make([]string, 0, len(item.Content)+len(item.Summary))
 			for _, part := range item.Content {
@@ -483,6 +748,12 @@ type openAIResponsesStreamEvent struct {
 		CallID    string `json:"call_id"`
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
+		Input     string `json:"input"`
+		Operation struct {
+			Type string `json:"type"`
+			Path string `json:"path"`
+			Diff string `json:"diff"`
+		} `json:"operation"`
 	} `json:"item"`
 }
 
@@ -493,10 +764,16 @@ func emitOpenAIResponsesEvent(handler modelStreamHandler, event openAIResponsesS
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		return emit(handler, modelStreamEvent{Type: modelStreamEventReasoningDelta, Index: event.OutputIndex, Delta: event.Delta})
 	case "response.output_item.added":
-		if event.Item.Type == "function_call" {
+		if event.Item.Type == "function_call" ||
+			event.Item.Type == "apply_patch_call" ||
+			(event.Item.Type == "custom_tool_call" && event.Item.Name == "apply_patch") {
+			name := event.Item.Name
+			if event.Item.Type == "apply_patch_call" {
+				name = "apply_patch"
+			}
 			return emit(handler, modelStreamEvent{
 				Type: modelStreamEventToolUseStart, Index: event.OutputIndex,
-				ToolUseID: event.Item.CallID, ToolName: event.Item.Name,
+				ToolUseID: event.Item.CallID, ToolName: name,
 			})
 		}
 	case "response.function_call_arguments.delta":
@@ -507,6 +784,31 @@ func emitOpenAIResponsesEvent(handler modelStreamHandler, event openAIResponsesS
 				Type: modelStreamEventToolUseDone, Index: event.OutputIndex,
 				ToolUseID: event.Item.CallID, ToolName: event.Item.Name,
 				ToolInput: shared.RawJSON(event.Item.Arguments),
+			})
+		}
+		if event.Item.Type == "apply_patch_call" {
+			operation := conversation.ApplyPatchOperation{
+				Type: conversation.ApplyPatchOperationType(event.Item.Operation.Type),
+				Path: event.Item.Operation.Path,
+				Diff: event.Item.Operation.Diff,
+			}
+			input := conversation.ApplyPatchCallBlock{
+				CallID: event.Item.CallID, Source: conversation.ApplyPatchSourceNative,
+				Operation: &operation,
+			}.ToolUseBlock().Input
+			return emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolUseDone, Index: event.OutputIndex,
+				ToolUseID: event.Item.CallID, ToolName: "apply_patch", ToolInput: input,
+			})
+		}
+		if event.Item.Type == "custom_tool_call" && event.Item.Name == "apply_patch" {
+			input := conversation.ApplyPatchCallBlock{
+				CallID: event.Item.CallID, Source: conversation.ApplyPatchSourceCustom,
+				Patch: event.Item.Input,
+			}.ToolUseBlock().Input
+			return emit(handler, modelStreamEvent{
+				Type: modelStreamEventToolUseDone, Index: event.OutputIndex,
+				ToolUseID: event.Item.CallID, ToolName: "apply_patch", ToolInput: input,
 			})
 		}
 	}

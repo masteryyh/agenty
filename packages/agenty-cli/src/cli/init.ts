@@ -14,40 +14,40 @@ import {
 
 export async function handleInit(client: AgentyClient, args: ParsedArgs): Promise<void> {
     requirePositionals(args, 1, "init [options]");
-    const providerSlug = requireFlag(args, "provider");
-    const modelSlug = requireFlag(args, "model");
-    const agentSlug = flag(args, "agent")?.trim() || "default";
+    const providerCode = requireFlag(args, "provider");
+    const modelCode = requireFlag(args, "model");
+    const agentCode = flag(args, "agent")?.trim() || "default";
     const contextWindow = positiveInteger(flag(args, "context-window") ?? "128000", "--context-window");
     const apiKey = secret(args, "api-key", "api-key-env", "provider API key") ?? "";
 
     await client.createProvider({
-        slug: providerSlug,
-        name: flag(args, "provider-name")?.trim() || providerSlug,
+        code: providerCode,
+        name: flag(args, "provider-name")?.trim() || providerCode,
         type: requireFlag(args, "type") as APIType,
         baseUrl: flag(args, "base-url")?.trim() || "",
         apiKey,
     });
     await client.createModel({
-        providerSlug,
-        modelSlug,
-        name: flag(args, "model-name")?.trim() || modelSlug,
+        providerCode,
+        modelCode,
+        name: flag(args, "model-name")?.trim() || modelCode,
         contextWindow,
         isDefault: true,
     });
     await client.createAgent({
-        slug: agentSlug,
-        name: flag(args, "agent-name")?.trim() || agentSlug,
+        code: agentCode,
+        name: flag(args, "agent-name")?.trim() || agentCode,
         soul: flag(args, "soul") ?? "",
-        defaultModel: { providerSlug, modelSlug },
+        defaultModel: { providerCode, modelCode },
         defaultContextWindow: contextWindow,
         isDefault: true,
     });
-    const result = await client.completeInitialization({ agentSlug, providerSlug, modelSlug });
+    const result = await client.completeInitialization({ agentCode, providerCode, modelCode });
     render(args, result, () => outputFields([
         ["Initialized", String(result.initialized)],
-        ["Provider", providerSlug],
-        ["Model", `${providerSlug}/${modelSlug}`],
-        ["Agent", agentSlug],
+        ["Provider", providerCode],
+        ["Model", `${providerCode}/${modelCode}`],
+        ["Agent", agentCode],
     ]));
 }
 

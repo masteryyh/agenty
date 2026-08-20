@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -167,7 +168,7 @@ func TestProviderRequestConversions(t *testing.T) {
 
 func modelWithReasoningNative(native string) catalog.Model {
 	return catalog.Model{
-		Slug: "test-model",
+		Code: "test-model",
 		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
 			native: shared.ReasoningHigh,
 		},
@@ -297,6 +298,72 @@ func TestShellToolDefinitionConversions(t *testing.T) {
 	if googleTool.Name != "shell" {
 		t.Fatalf("Google shell name = %q", googleTool.Name)
 	}
+}
+
+func TestApplyPatchToolRegistrations(t *testing.T) {
+	t.Parallel()
+
+	definitions := []modelToolDefinition{
+		testNamedTool("read_file"),
+		testNamedTool("write_file"),
+		testNamedTool("patch_file"),
+		testNamedTool("delete_file"),
+		testApplyPatchTool(),
+	}
+
+	native, err := openAIResponsesTools(definitions, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(native) != 2 || native[0].OfFunction == nil || native[0].OfFunction.Name != "read_file" ||
+		native[1].OfApplyPatch == nil {
+		t.Fatalf("native Responses tools = %#v, want read_file and native apply_patch", native)
+	}
+
+	compatible, err := openAIResponsesTools(definitions, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compatible) != 2 || compatible[0].OfFunction == nil || compatible[0].OfFunction.Name != "read_file" ||
+		compatible[1].OfCustom == nil || compatible[1].OfCustom.Name != "apply_patch" {
+		t.Fatalf("compatible Responses tools = %#v, want read_file and custom apply_patch", compatible)
+	}
+
+	chat, err := openAIChatTools(definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := openAIChatToolNames(chat); !slices.Equal(names, []string{
+		"read_file", "write_file", "patch_file", "delete_file",
+	}) {
+		t.Errorf("OpenAI Chat tools = %q", names)
+	}
+
+	anthropicDefinitions, err := anthropicTools(definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anthropicDefinitions) != 4 {
+		t.Errorf("Anthropic tools = %d, want 4 original filesystem tools", len(anthropicDefinitions))
+	}
+
+	googleDefinitions, err := googleTools(definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(googleDefinitions) != 4 {
+		t.Errorf("Google tools = %#v, want 4 original filesystem tools", googleDefinitions)
+	}
+}
+
+func openAIChatToolNames(tools []openai.ChatCompletionToolUnionParam) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.OfFunction != nil {
+			names = append(names, tool.OfFunction.Function.Name)
+		}
+	}
+	return names
 }
 
 func TestProviderToolRegistrationsRejectUnknownToolType(t *testing.T) {
@@ -431,6 +498,55 @@ func TestProviderResponseConversions(t *testing.T) {
 		call, ok := response.Content[0].(conversation.ShellCallBlock)
 		if !ok || call.CallID != "call_1" || !slices.Equal(call.Commands, []string{"pwd", "false"}) {
 			t.Fatalf("shell call = %#v", response.Content[0])
+		}
+	})
+
+	t.Run("OpenAI Responses native apply patch call", func(t *testing.T) {
+		t.Parallel()
+
+		var sdkResponse responses.Response
+		mustUnmarshal(t, `{
+			"id":"resp_patch","model":"gpt-test","status":"completed",
+			"output":[{
+				"type":"apply_patch_call","id":"apc_1","call_id":"call_1","status":"completed",
+				"operation":{"type":"update_file","path":"main.go","diff":"@@\n-old\n+new"}
+			}],
+			"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}
+		}`, &sdkResponse)
+
+		response, err := openAIResponsesResponse(&sdkResponse)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertResponse(t, response, modelStopReasonToolUse, 1, 7)
+		call, ok := response.Content[0].(conversation.ApplyPatchCallBlock)
+		if !ok || call.Source != conversation.ApplyPatchSourceNative || call.Operation == nil ||
+			call.Operation.Type != conversation.ApplyPatchUpdateFile || call.Operation.Path != "main.go" {
+			t.Fatalf("apply patch call = %#v", response.Content[0])
+		}
+	})
+
+	t.Run("OpenAI Responses custom apply patch call", func(t *testing.T) {
+		t.Parallel()
+
+		const patch = "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"
+		var sdkResponse responses.Response
+		mustUnmarshal(t, `{
+			"id":"resp_patch","model":"gpt-test","status":"completed",
+			"output":[{
+				"type":"custom_tool_call","id":"ctc_1","call_id":"call_1","name":"apply_patch",
+				"input":"*** Begin Patch\n*** Delete File: old.txt\n*** End Patch","status":"completed"
+			}],
+			"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}
+		}`, &sdkResponse)
+
+		response, err := openAIResponsesResponse(&sdkResponse)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call, ok := response.Content[0].(conversation.ApplyPatchCallBlock)
+		if !ok || call.Source != conversation.ApplyPatchSourceCustom || call.Patch != patch {
+			t.Fatalf("custom apply patch call = %#v", response.Content[0])
 		}
 	})
 
@@ -693,6 +809,88 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 	}
 }
 
+func TestApplyPatchMessageConversionsAcrossProviders(t *testing.T) {
+	t.Parallel()
+
+	operation := conversation.ApplyPatchOperation{
+		Type: conversation.ApplyPatchUpdateFile,
+		Path: "notes.txt",
+		Diff: "@@\n-old\n+new",
+	}
+	call := conversation.ApplyPatchCallBlock{
+		ID: "apc_1", CallID: "call_1", Source: conversation.ApplyPatchSourceNative,
+		Operation: &operation,
+	}
+	assistant := conversation.Message{
+		Role: conversation.RoleAssistant, Content: conversation.Content{call},
+	}
+	result := conversation.Message{
+		Role: conversation.RoleUser,
+		Content: conversation.Content{conversation.ToolResultBlock{
+			ToolUseID: "call_1", Content: conversation.Text(`{"operations":[{"type":"update_file","path":"notes.txt"}]}`),
+		}},
+	}
+
+	nativeItems, err := openAIResponsesMessages([]conversation.Message{assistant, result}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nativeItems) != 2 || nativeItems[0].OfApplyPatchCall == nil ||
+		nativeItems[1].OfApplyPatchCallOutput == nil || nativeItems[1].OfApplyPatchCallOutput.Status != "completed" {
+		t.Fatalf("native Responses history = %#v", nativeItems)
+	}
+
+	compatibleItems, err := openAIResponsesMessages([]conversation.Message{assistant, result}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compatibleItems) != 2 || compatibleItems[0].OfCustomToolCall == nil ||
+		compatibleItems[1].OfCustomToolCallOutput == nil {
+		t.Fatalf("compatible Responses history = %#v", compatibleItems)
+	}
+	wantPatch := "*** Begin Patch\n*** Update File: notes.txt\n@@\n-old\n+new\n*** End Patch"
+	if compatibleItems[0].OfCustomToolCall.Input != wantPatch {
+		t.Errorf("compatible patch = %q, want %q", compatibleItems[0].OfCustomToolCall.Input, wantPatch)
+	}
+
+	customCall := conversation.ApplyPatchCallBlock{
+		ID: "ctc_1", CallID: "call_2", Source: conversation.ApplyPatchSourceCustom,
+		Patch: "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch",
+	}
+	customItems, err := openAIResponsesMessages([]conversation.Message{
+		{Role: conversation.RoleAssistant, Content: conversation.Content{customCall}},
+		{Role: conversation.RoleUser, Content: conversation.Content{conversation.ToolResultBlock{
+			ToolUseID: "call_2", Content: conversation.Text(`{"operations":[{"type":"delete_file","path":"old.txt"}]}`),
+		}}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(customItems) != 2 || customItems[0].OfCustomToolCall == nil ||
+		customItems[1].OfCustomToolCallOutput == nil {
+		t.Fatalf("custom Responses history = %#v", customItems)
+	}
+
+	chatMessages, err := openAIChatMessages(assistant)
+	if err != nil || len(chatMessages) != 1 || len(chatMessages[0].OfAssistant.ToolCalls) != 1 ||
+		chatMessages[0].OfAssistant.ToolCalls[0].OfFunction.Function.Name != "apply_patch" {
+		t.Fatalf("Chat apply patch history = %#v, err = %v", chatMessages, err)
+	}
+	anthropicMessage, err := anthropicMessage(assistant)
+	if err != nil || len(anthropicMessage.Content) != 1 ||
+		anthropicMessage.Content[0].OfToolUse == nil || anthropicMessage.Content[0].OfToolUse.Name != "apply_patch" {
+		t.Fatalf("Anthropic apply patch history = %#v, err = %v", anthropicMessage, err)
+	}
+	googleMessage, err := googleMessage(assistant, nil)
+	if err != nil || len(googleMessage.Parts) != 1 ||
+		googleMessage.Parts[0].FunctionCall == nil || googleMessage.Parts[0].FunctionCall.Name != "apply_patch" {
+		t.Fatalf("Google apply patch history = %#v, err = %v", googleMessage, err)
+	}
+	if name := googleToolNames([]conversation.Message{assistant})["call_1"]; name != "apply_patch" {
+		t.Errorf("Google apply patch tool name = %q", name)
+	}
+}
+
 func TestOpenAIResponsesShellOutputUsesPersistedSource(t *testing.T) {
 	t.Parallel()
 
@@ -792,6 +990,42 @@ func TestStreamEventConversions(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesCustomApplyPatchStreamUsesCompletedFreeformInput(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	err := emitOpenAIResponsesEvent(func(modelStreamEvent) error {
+		called = true
+		return nil
+	}, openAIResponsesStreamEvent{
+		Type: "response.custom_tool_call_input.delta", OutputIndex: 1,
+		Delta: "*** Begin Patch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("custom freeform delta was emitted as a JSON tool input delta")
+	}
+
+	done := openAIResponsesStreamEvent{Type: "response.output_item.done", OutputIndex: 1}
+	done.Item.Type = "custom_tool_call"
+	done.Item.CallID = "call_1"
+	done.Item.Name = "apply_patch"
+	done.Item.Input = "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"
+	var got modelStreamEvent
+	if err := emitOpenAIResponsesEvent(func(event modelStreamEvent) error {
+		got = event
+		return nil
+	}, done); err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != modelStreamEventToolUseDone || got.ToolUseID != "call_1" ||
+		!strings.Contains(string(got.ToolInput), `"patch":"*** Begin Patch`) {
+		t.Errorf("completed custom apply patch event = %#v", got)
+	}
+}
+
 func TestNewCallerValidation(t *testing.T) {
 	t.Parallel()
 
@@ -803,7 +1037,7 @@ func TestNewCallerValidation(t *testing.T) {
 	}{
 		{
 			name:     "missing API key",
-			provider: catalog.Provider{Slug: "openai", Type: catalog.APIOpenAI},
+			provider: catalog.Provider{Code: "openai", Type: catalog.APIOpenAI},
 			want:     ErrInvalidRequest,
 		},
 	}
@@ -819,7 +1053,7 @@ func TestNewCallerValidation(t *testing.T) {
 	}
 }
 
-func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
+func TestNewCallerConfiguresNativeOpenAIResponsesToolsByProviderIdentity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -830,14 +1064,14 @@ func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
 		{
 			name: "built-in OpenAI with SDK default URL",
 			provider: catalog.Provider{
-				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
 			},
 			want: true,
 		},
 		{
 			name: "built-in OpenAI with official URL",
 			provider: catalog.Provider{
-				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
 				BaseURL: "https://api.openai.com/v1/",
 			},
 			want: true,
@@ -845,21 +1079,21 @@ func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
 		{
 			name: "OpenRouter Responses compatibility",
 			provider: catalog.Provider{
-				Slug: "openrouter", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openrouter", Type: catalog.APIOpenAI, APIKey: "test-key",
 				BaseURL: "https://openrouter.ai/api/v1",
 			},
 		},
 		{
-			name: "custom proxy using OpenAI slug",
+			name: "custom proxy using OpenAI code",
 			provider: catalog.Provider{
-				Slug: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
 				BaseURL: "https://proxy.example/v1",
 			},
 		},
 		{
 			name: "custom provider using official endpoint",
 			provider: catalog.Provider{
-				Slug: "custom-openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "custom-openai", Type: catalog.APIOpenAI, APIKey: "test-key",
 				BaseURL: "https://api.openai.com/v1",
 			},
 		},
@@ -876,8 +1110,8 @@ func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
 			if !ok {
 				t.Fatalf("NewCaller() = %T, want *openAIResponsesCaller", caller)
 			}
-			if responsesCaller.nativeShell != tt.want {
-				t.Errorf("nativeShell = %v, want %v", responsesCaller.nativeShell, tt.want)
+			if responsesCaller.nativeOpenAI != tt.want {
+				t.Errorf("nativeOpenAI = %v, want %v", responsesCaller.nativeOpenAI, tt.want)
 			}
 		})
 	}
@@ -885,7 +1119,7 @@ func TestNewCallerConfiguresNativeOpenAIShellByProviderIdentity(t *testing.T) {
 
 func testModel() catalog.Model {
 	return catalog.Model{
-		Slug: "test-model",
+		Code: "test-model",
 		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
 			"low": shared.ReasoningLow, "HIGH": shared.ReasoningHigh,
 		},
@@ -929,6 +1163,18 @@ func testShellTool() modelToolDefinition {
 		},
 		Strict: false,
 	}
+}
+
+func testApplyPatchTool() modelToolDefinition {
+	tool := testNamedTool("apply_patch")
+	tool.Type = agentloop.ToolTypeApplyPatch
+	return tool
+}
+
+func testNamedTool(name string) modelToolDefinition {
+	tool := testTool()
+	tool.Name = name
+	return tool
 }
 
 func assertToolSchemaMap(t *testing.T, schema map[string]any) {

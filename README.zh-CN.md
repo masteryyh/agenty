@@ -53,7 +53,7 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 配置 | `~/.agenty/config.json` |
 | 会话 transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | 会话索引 | `~/.agenty/agenty.sqlite` |
-| Providers 和 models | `~/.agenty/providers/` |
+| Providers 和 models | `~/.agenty/providers/<provider-code>.json`（模型内嵌） |
 | Agents | `~/.agenty/agents/` |
 | 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 

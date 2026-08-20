@@ -22,8 +22,8 @@ func TestAgentCreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if a.Slug.String() != "coder" {
-		t.Errorf("slug = %s, want coder", a.Slug)
+	if a.Code.String() != "coder" {
+		t.Errorf("code = %s, want coder", a.Code)
 	}
 	if a.Name != "Code Assistant" {
 		t.Errorf("name = %s", a.Name)
@@ -65,11 +65,11 @@ func TestAgentCreateDuplicate(t *testing.T) {
 	}
 }
 
-func TestAgentCreateInvalidSlug(t *testing.T) {
+func TestAgentCreateInvalidCode(t *testing.T) {
 	agentSvc, _, _ := newServices(t)
-	_, err := agentSvc.Create(context.Background(), "Bad Slug", application.AgentInput{Name: "A"})
+	_, err := agentSvc.Create(context.Background(), "Bad Code", application.AgentInput{Name: "A"})
 	if code := appErrorCode(err); code != application.CodeValidation {
-		t.Errorf("invalid slug code = %v, want validation", code)
+		t.Errorf("invalid code code = %v, want validation", code)
 	}
 }
 
@@ -77,8 +77,8 @@ func TestAgentList(t *testing.T) {
 	agentSvc, _, _ := newServices(t)
 	ctx := context.Background()
 
-	for _, slug := range []string{"coder", "writer", "reviewer"} {
-		if _, err := agentSvc.Create(ctx, slug, application.AgentInput{Name: slug}); err != nil {
+	for _, code := range []string{"coder", "writer", "reviewer"} {
+		if _, err := agentSvc.Create(ctx, code, application.AgentInput{Name: code}); err != nil {
 			t.Fatal(err)
 		}
 	}

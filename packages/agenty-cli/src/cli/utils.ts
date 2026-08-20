@@ -114,18 +114,18 @@ export async function resolveProvider(client: AgentyClient, reference: string): 
     const lower = reference.toLowerCase();
 
     const matched = providers.filter((provider) =>
-        provider.slug === reference || provider.name.toLowerCase() === lower);
+        provider.code === reference || provider.name.toLowerCase() === lower);
     if (matched.length === 0) {
         throw new CliError(`provider not found: ${reference}`);
     }
     if (matched.length > 1) {
-        throw new CliError(`provider name is ambiguous: ${reference}; use provider ID instead`);
+        throw new CliError(`provider name is ambiguous: ${reference}; use provider code instead`);
     }
     return matched[0];
 }
 
 export function displayModel(model: ModelDto): string {
-    return `${model.providerSlug}/${model.slug}`;
+    return `${model.providerCode}/${model.code}`;
 }
 
 export async function resolveModel(client: AgentyClient, reference: string): Promise<ModelDto> {
@@ -133,7 +133,7 @@ export async function resolveModel(client: AgentyClient, reference: string): Pro
     const lower = reference.toLowerCase();
 
     const matched = models.filter((model) =>
-        model.slug === reference ||
+        model.code === reference ||
         model.name.toLowerCase() === lower ||
         displayModel(model).toLowerCase() === lower,
     );
@@ -141,13 +141,13 @@ export async function resolveModel(client: AgentyClient, reference: string): Pro
         throw new CliError(`model not found: ${reference}`);
     }
     if (matched.length > 1) {
-        throw new CliError(`model reference is ambiguous: ${reference}; use provider/name or model ID instead`);
+        throw new CliError(`model reference is ambiguous: ${reference}; use provider/name or model code instead`);
     }
     return matched[0];
 }
 
 export function configured(model: ModelDto): boolean {
-    return model.providerSlug !== "";
+    return model.providerCode !== "";
 }
 
 export function hasFlag(args: ParsedArgs, name: string): boolean {

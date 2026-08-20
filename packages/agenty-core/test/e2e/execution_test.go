@@ -201,14 +201,10 @@ func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 				)
 			}
 			wantTools := []string{
-				"delete_file",
-				"glob",
-				"grep",
-				"ls",
-				"patch_file",
-				"read_file",
-				"shell",
-				"write_file",
+				"delete_file", "glob", "grep", "ls", "patch_file", "read_file", "shell", "write_file",
+			}
+			if tt.apiType == "openai" {
+				wantTools = []string{"apply_patch", "glob", "grep", "ls", "read_file", "shell"}
 			}
 			if names := providerToolNames(request, tt.apiType); !slices.Equal(names, wantTools) {
 				t.Errorf("provider tools = %q, want %q", names, wantTools)
@@ -245,9 +241,9 @@ func TestSingleIPCClientRunsSessionsConcurrently(t *testing.T) {
 	)
 	requireNoError(t, err)
 	second, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     "parallel-agent",
-		ProviderSlug:  "parallel-provider",
-		ModelSlug:     "parallel-model",
+		AgentCode:     "parallel-agent",
+		ProviderCode:  "parallel-provider",
+		ModelCode:     "parallel-model",
 		ContextWindow: 128_000,
 	})
 	requireNoError(t, err)

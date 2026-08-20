@@ -11,8 +11,8 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	t.Parallel()
 
 	p := &Provider{Models: []Model{
-		{Slug: "model-a", Name: "A", IsDefault: true},
-		{Slug: "model-b", Name: "B"},
+		{Code: "model-a", Name: "A", IsDefault: true},
+		{Code: "model-b", Name: "B"},
 	}}
 
 	got, err := p.Model("model-b")
@@ -24,7 +24,7 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	}
 
 	p.AddModel(Model{
-		Slug: "model-b",
+		Code: "model-b",
 		Name: "B2",
 		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
 			"high": shared.ReasoningHigh,
@@ -42,7 +42,7 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	}
 
 	defaultModel, ok := p.DefaultModel()
-	if !ok || defaultModel.Slug != "model-a" {
+	if !ok || defaultModel.Code != "model-a" {
 		t.Errorf("default model = %+v, %v", defaultModel, ok)
 	}
 

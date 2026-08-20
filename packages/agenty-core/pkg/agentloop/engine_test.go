@@ -134,7 +134,7 @@ func newExecutionFixture(t *testing.T, maxOutputTokens int64) *executionFixture 
 	}
 	provider.APIKey = "test-key"
 	provider.AddModel(catalog.Model{
-		Slug:            "gpt-5",
+		Code:            "gpt-5",
 		Name:            "GPT-5",
 		ContextWindow:   128_000,
 		MaxOutputTokens: maxOutputTokens,
@@ -616,7 +616,7 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	provider.AddModel(catalog.Model{
-		Slug:          "small-model",
+		Code:          "small-model",
 		Name:          "Small Model",
 		ContextWindow: 4_000,
 	})
@@ -629,8 +629,8 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 		StopReason: agentloop.StopReasonEndTurn,
 	}}}
 	engine := fixture.newEngine(t, func(_ context.Context, _ catalog.Provider, model catalog.Model) (agentloop.Caller, error) {
-		if model.Slug != "gpt-5" {
-			t.Fatalf("compression used target model %q", model.Slug)
+		if model.Code != "gpt-5" {
+			t.Fatalf("compression used target model %q", model.Code)
 		}
 		return caller, nil
 	})
@@ -651,7 +651,7 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.CurrentModel == nil || updated.CurrentModel.ModelSlug != "small-model" || updated.ContextWindow != 4_000 {
+	if updated.CurrentModel == nil || updated.CurrentModel.ModelCode != "small-model" || updated.ContextWindow != 4_000 {
 		t.Fatalf("updated session model = %+v, context window = %d", updated.CurrentModel, updated.ContextWindow)
 	}
 	if len(caller.Requests()) != 1 {

@@ -12,7 +12,7 @@ var (
 )
 
 type Provider struct {
-	Slug      shared.Slug     `json:"slug"`
+	Code      shared.Code     `json:"code"`
 	Name      string          `json:"name"`
 	Type      APIType         `json:"type"`
 	BaseURL   string          `json:"baseUrl"`
@@ -23,8 +23,8 @@ type Provider struct {
 	UpdatedAt time.Time       `json:"updatedAt"`
 }
 
-func NewProvider(slug, name string, apiType APIType) (*Provider, error) {
-	s, err := shared.NewSlug(slug)
+func NewProvider(code, name string, apiType APIType) (*Provider, error) {
+	s, err := shared.NewCode(code)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func NewProvider(slug, name string, apiType APIType) (*Provider, error) {
 
 	now := time.Now().UTC()
 	return &Provider{
-		Slug:      s,
+		Code:      s,
 		Name:      name,
 		Type:      apiType,
 		Models:    make([]Model, 0),
@@ -43,9 +43,9 @@ func NewProvider(slug, name string, apiType APIType) (*Provider, error) {
 	}, nil
 }
 
-func (p *Provider) Model(slug shared.ModelID) (*Model, error) {
+func (p *Provider) Model(code shared.ModelCode) (*Model, error) {
 	for i := range p.Models {
-		if p.Models[i].Slug == slug {
+		if p.Models[i].Code == code {
 			return &p.Models[i], nil
 		}
 	}
@@ -55,7 +55,7 @@ func (p *Provider) Model(slug shared.ModelID) (*Model, error) {
 func (p *Provider) AddModel(m Model) {
 	m.MaxOutputTokens = DefaultMaxOutputTokens
 	for i := range p.Models {
-		if p.Models[i].Slug == m.Slug {
+		if p.Models[i].Code == m.Code {
 			p.Models[i] = m
 			return
 		}
@@ -63,9 +63,9 @@ func (p *Provider) AddModel(m Model) {
 	p.Models = append(p.Models, m)
 }
 
-func (p *Provider) RemoveModel(slug shared.ModelID) {
+func (p *Provider) RemoveModel(code shared.ModelCode) {
 	for i := range p.Models {
-		if p.Models[i].Slug == slug {
+		if p.Models[i].Code == code {
 			p.Models = append(p.Models[:i], p.Models[i+1:]...)
 			return
 		}

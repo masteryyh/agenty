@@ -28,7 +28,7 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		t.Fatal("fresh data dir reported initialized")
 	}
 	_, err = first.CreateProvider(ctx, ProviderCreateInput{
-		Slug:     "setup-provider",
+		Code:     "setup-provider",
 		Name:     "Setup Provider",
 		Type:     "openai_completions",
 		BaseURL:  fixture.BaseURL("openai_completions"),
@@ -37,8 +37,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	})
 	requireNoError(t, err)
 	_, err = first.AddModel(ctx, ModelInput{
-		ProviderSlug:    "setup-provider",
-		ModelSlug:       "setup-model",
+		ProviderCode:    "setup-provider",
+		ModelCode:       "setup-model",
 		Name:            "Setup Model",
 		ContextWindow:   64_000,
 		MaxOutputTokens: 8_192,
@@ -46,9 +46,9 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	})
 	requireNoError(t, err)
 	_, err = first.CreateAgent(ctx, AgentCreateInput{
-		Slug:                 "setup-agent",
+		Code:                 "setup-agent",
 		Name:                 "Setup Agent",
-		DefaultModel:         &ModelRef{ProviderSlug: "setup-provider", ModelSlug: "setup-model"},
+		DefaultModel:         &ModelRef{ProviderCode: "setup-provider", ModelCode: "setup-model"},
 		DefaultContextWindow: 64_000,
 		IsDefault:            true,
 	})
@@ -64,25 +64,25 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 
 	createdAgent, err := first.CreateAgent(ctx, AgentCreateInput{
-		Slug:                   "daily-assistant",
+		Code:                   "daily-assistant",
 		Name:                   "Daily Assistant",
 		Description:            "Helps with daily work",
 		Soul:                   "Be concise and verify facts.",
-		DefaultModel:           &ModelRef{ProviderSlug: "local-openai", ModelSlug: "primary-model"},
+		DefaultModel:           &ModelRef{ProviderCode: "local-openai", ModelCode: "primary-model"},
 		DefaultContextWindow:   128_000,
 		DefaultReasoningEffort: "high",
 		IsDefault:              true,
 		Metadata:               map[string]any{"team": "platform"},
 	})
 	requireNoError(t, err)
-	if createdAgent.Slug != "daily-assistant" || createdAgent.CreatedAt.IsZero() {
+	if createdAgent.Code != "daily-assistant" || createdAgent.CreatedAt.IsZero() {
 		t.Fatalf("created agent = %+v", createdAgent)
 	}
-	_, err = first.CreateAgent(ctx, AgentCreateInput{Slug: "daily-assistant", Name: "duplicate"})
+	_, err = first.CreateAgent(ctx, AgentCreateInput{Code: "daily-assistant", Name: "duplicate"})
 	requireRPCCode(t, err, errAlreadyExists)
 
 	updatedAgent, err := first.UpdateAgent(ctx, AgentUpdateInput{
-		Slug:        "daily-assistant",
+		Code:        "daily-assistant",
 		Name:        stringPointer("Senior Daily Assistant"),
 		Description: stringPointer(""),
 		Metadata:    map[string]any{"team": "runtime"},
@@ -103,7 +103,7 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	}
 
 	provider, err := first.CreateProvider(ctx, ProviderCreateInput{
-		Slug:     "local-openai",
+		Code:     "local-openai",
 		Name:     "Local OpenAI",
 		Type:     "openai_completions",
 		BaseURL:  fixture.BaseURL("openai_completions"),
@@ -113,7 +113,7 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 	providerName := "Local OpenAI Compatible"
 	provider, err = first.UpdateProvider(ctx, ProviderUpdateInput{
-		Slug: "local-openai",
+		Code: "local-openai",
 		Name: &providerName,
 	})
 	requireNoError(t, err)
@@ -122,15 +122,15 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	}
 	providers, err := first.ListProviders(ctx)
 	requireNoError(t, err)
-	if len(providers) != 1 || providers[0].Slug != "local-openai" {
+	if len(providers) != 1 || providers[0].Code != "local-openai" {
 		t.Fatalf("providers = %+v", providers)
 	}
 	_, err = first.GetProvider(ctx, "local-openai")
 	requireNoError(t, err)
 
 	provider, err = first.AddModel(ctx, ModelInput{
-		ProviderSlug:    "local-openai",
-		ModelSlug:       "primary-model",
+		ProviderCode:    "local-openai",
+		ModelCode:       "primary-model",
 		Name:            "Primary Model",
 		ContextWindow:   128_000,
 		MaxOutputTokens: 100_000,
@@ -145,8 +145,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		t.Fatalf("provider models = %+v", provider.Models)
 	}
 	_, err = first.AddModel(ctx, ModelInput{
-		ProviderSlug:    "local-openai",
-		ModelSlug:       "temporary-model",
+		ProviderCode:    "local-openai",
+		ModelCode:       "temporary-model",
 		Name:            "Temporary Model",
 		ContextWindow:   64_000,
 		MaxOutputTokens: 8_192,
@@ -154,29 +154,29 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 
 	primary, err := first.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     "daily-assistant",
-		ProviderSlug:  "local-openai",
-		ModelSlug:     "primary-model",
+		AgentCode:     "daily-assistant",
+		ProviderCode:  "local-openai",
+		ModelCode:     "primary-model",
 		ContextWindow: 128_000,
 	})
 	requireNoError(t, err)
 	secondary, err := first.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     "daily-assistant",
-		ProviderSlug:  "local-openai",
-		ModelSlug:     "primary-model",
+		AgentCode:     "daily-assistant",
+		ProviderCode:  "local-openai",
+		ModelCode:     "primary-model",
 		ContextWindow: 64_000,
 	})
 	requireNoError(t, err)
 	_, err = first.SetSessionTitle(ctx, primary.ID, "Plan the release")
 	requireNoError(t, err)
 	_, err = first.SetSessionModel(ctx, primary.ID, ModelRef{
-		ProviderSlug: "local-openai",
-		ModelSlug:    "temporary-model",
+		ProviderCode: "local-openai",
+		ModelCode:    "temporary-model",
 	})
 	requireNoError(t, err)
 	_, err = first.SetSessionModel(ctx, primary.ID, ModelRef{
-		ProviderSlug: "local-openai",
-		ModelSlug:    "primary-model",
+		ProviderCode: "local-openai",
+		ModelCode:    "primary-model",
 	})
 	requireNoError(t, err)
 	_, err = first.SetSessionReasoningEffort(ctx, primary.ID, "high")
@@ -188,12 +188,12 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 
 	summaries, err := first.ListSessions(ctx, SessionListInput{
-		AgentSlug: "daily-assistant",
+		AgentCode: "daily-assistant",
 		Limit:     1,
 		Offset:    1,
 	})
 	requireNoError(t, err)
-	if len(summaries) != 1 || summaries[0].AgentSlug != "daily-assistant" {
+	if len(summaries) != 1 || summaries[0].AgentCode != "daily-assistant" {
 		t.Fatalf("session summaries = %+v", summaries)
 	}
 
@@ -269,9 +269,9 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	}
 
 	cancelSession, err := second.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     "daily-assistant",
-		ProviderSlug:  "local-openai",
-		ModelSlug:     "primary-model",
+		AgentCode:     "daily-assistant",
+		ProviderCode:  "local-openai",
+		ModelCode:     "primary-model",
 		ContextWindow: 128_000,
 	})
 	requireNoError(t, err)
@@ -312,12 +312,12 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 
 	var chunkedAgent Agent
 	err = second.rpc.CallChunked(ctx, "agent.create", AgentCreateInput{
-		Slug: "chunked-agent",
+		Code: "chunked-agent",
 		Name: "Chunked Agent",
 		Soul: "This payload is split by the client and reassembled by core.",
 	}, 17, &chunkedAgent)
 	requireNoError(t, err)
-	if chunkedAgent.Slug != "chunked-agent" {
+	if chunkedAgent.Code != "chunked-agent" {
 		t.Fatalf("chunked agent = %+v", chunkedAgent)
 	}
 	requireNoError(t, second.rpc.AbortChunk(ctx, "aborted-upload", "agent.create"))

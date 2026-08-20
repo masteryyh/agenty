@@ -54,7 +54,7 @@ func sessionGet(svc *application.SessionService) rpc.Handler {
 }
 
 type sessionListParams struct {
-	AgentSlug string `json:"agentSlug,omitempty"`
+	AgentCode string `json:"agentCode,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
 	Offset    int    `json:"offset,omitempty"`
 }
@@ -66,7 +66,7 @@ func sessionList(svc *application.SessionService) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(svc.List(ctx, application.SessionListQuery{
-			AgentSlug: p.AgentSlug,
+			AgentCode: p.AgentCode,
 			Limit:     p.Limit,
 			Offset:    p.Offset,
 		}))
@@ -103,8 +103,8 @@ func sessionSetTitle(svc *application.SessionService) rpc.Handler {
 
 type sessionSetModelParams struct {
 	ID           string `json:"id"`
-	ProviderSlug string `json:"providerSlug"`
-	ModelSlug    string `json:"modelSlug"`
+	ProviderCode string `json:"providerCode"`
+	ModelCode    string `json:"modelCode"`
 }
 
 func sessionSetModel(execution *agentloop.Engine) rpc.Handler {
@@ -113,7 +113,7 @@ func sessionSetModel(execution *agentloop.Engine) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(execution.SetModel(ctx, p.ID, p.ProviderSlug, p.ModelSlug))
+		return wrap(execution.SetModel(ctx, p.ID, p.ProviderCode, p.ModelCode))
 	}
 }
 

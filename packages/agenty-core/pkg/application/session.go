@@ -45,24 +45,24 @@ func NewSessionService(repo sessionRepository, options ...SessionServiceOption) 
 }
 
 type SessionCreateInput struct {
-	AgentSlug       string                 `json:"agentSlug"`
-	ProviderSlug    string                 `json:"providerSlug"`
-	ModelSlug       string                 `json:"modelSlug"`
+	AgentCode       string                 `json:"agentCode"`
+	ProviderCode    string                 `json:"providerCode"`
+	ModelCode       string                 `json:"modelCode"`
 	ContextWindow   int64                  `json:"contextWindow,omitempty"`
 	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
 	Cwd             *string                `json:"cwd,omitempty"`
 }
 
 func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*conversation.Session, error) {
-	agentSlug, err := shared.NewSlug(in.AgentSlug)
+	agentCode, err := shared.NewCode(in.AgentCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	providerSlug, err := shared.NewSlug(in.ProviderSlug)
+	providerCode, err := shared.NewCode(in.ProviderCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	modelSlug, err := shared.NewModelID(in.ModelSlug)
+	modelCode, err := shared.NewModelCode(in.ModelCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -76,8 +76,8 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 	}
 
 	session := conversation.StartSession(
-		agentSlug,
-		shared.NewModelRef(providerSlug, modelSlug),
+		agentCode,
+		shared.NewModelRef(providerCode, modelCode),
 		in.ContextWindow,
 		effort,
 		in.Cwd,
@@ -106,22 +106,22 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 }
 
 type SessionListQuery struct {
-	AgentSlug string
+	AgentCode string
 	Limit     int
 	Offset    int
 }
 
 func (s *SessionService) List(ctx context.Context, q SessionListQuery) ([]conversation.SessionSummary, error) {
-	var agentSlug *shared.Slug
-	if q.AgentSlug != "" {
-		sv, err := shared.NewSlug(q.AgentSlug)
+	var agentCode *shared.Code
+	if q.AgentCode != "" {
+		sv, err := shared.NewCode(q.AgentCode)
 		if err != nil {
 			return nil, Validation(err.Error())
 		}
-		agentSlug = &sv
+		agentCode = &sv
 	}
 
-	sums, err := s.repo.List(ctx, conversation.ListQuery{AgentSlug: agentSlug, Limit: q.Limit, Offset: q.Offset})
+	sums, err := s.repo.List(ctx, conversation.ListQuery{AgentCode: agentCode, Limit: q.Limit, Offset: q.Offset})
 	if err != nil {
 		return nil, Internal("failed to list sessions: " + err.Error())
 	}
@@ -170,16 +170,16 @@ func (s *SessionService) SetTitle(ctx context.Context, idStr, title string) (*co
 	return s.saveUpdated(ctx, sess)
 }
 
-func (s *SessionService) SetModel(ctx context.Context, idStr, providerSlug, modelSlug string, contextWindow int64) (*conversation.Session, error) {
+func (s *SessionService) SetModel(ctx context.Context, idStr, providerCode, modelCode string, contextWindow int64) (*conversation.Session, error) {
 	sess, err := s.loadForUpdate(ctx, idStr)
 	if err != nil {
 		return nil, err
 	}
-	ps, err := shared.NewSlug(providerSlug)
+	ps, err := shared.NewCode(providerCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	ms, err := shared.NewModelID(modelSlug)
+	ms, err := shared.NewModelCode(modelCode)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}

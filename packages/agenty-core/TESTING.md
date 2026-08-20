@@ -7,7 +7,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 
 | Area | Environment | Covered behavior | Default suite |
 | --- | --- | --- | --- |
-| Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, slug and reasoning effort mapping validation | Yes |
+| Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, code and reasoning effort mapping validation | Yes |
 | Application | In-memory repository fakes | Agent, Provider, and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
 | Built-in tools | `t.TempDir()` and real filesystem operations | Registration, relative path resolution, ranged reads, create/overwrite, exact patching, safe single-file deletion, regular-expression search, recursive globbing, directory listing, output limits, and error paths | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |

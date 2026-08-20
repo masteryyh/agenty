@@ -50,11 +50,11 @@ func nativeReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) (
 
 	switch len(matches) {
 	case 0:
-		return "", invalidRequest("model %q does not support reasoning effort %q", model.Slug, effort)
+		return "", invalidRequest("model %q does not support reasoning effort %q", model.Code, effort)
 	case 1:
 		return matches[0], nil
 	default:
-		return "", invalidRequest("model %q maps reasoning effort %q ambiguously to %s", model.Slug, effort, strings.Join(matches, ", "))
+		return "", invalidRequest("model %q maps reasoning effort %q ambiguously to %s", model.Code, effort, strings.Join(matches, ", "))
 	}
 }
 

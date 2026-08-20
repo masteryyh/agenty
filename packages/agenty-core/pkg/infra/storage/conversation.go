@@ -129,22 +129,22 @@ func (r *ConversationRepository) Delete(ctx context.Context, id uuid.UUID) error
 
 func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversation.SessionSummary) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at)
+		INSERT INTO sessions (id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
-			agent_slug = excluded.agent_slug,
-			last_provider_slug = excluded.last_provider_slug,
-			last_model_slug = excluded.last_model_slug,
+			agent_code = excluded.agent_code,
+			last_provider_code = excluded.last_provider_code,
+			last_model_code = excluded.last_model_code,
 			context_window = excluded.context_window,
 			last_reasoning_effort = excluded.last_reasoning_effort,
 			updated_at = excluded.updated_at
 	`,
 		sum.ID.String(),
 		sum.Title,
-		sum.AgentSlug.String(),
-		sum.LastProviderSlug.String(),
-		sum.LastModelSlug.String(),
+		sum.AgentCode.String(),
+		sum.LastProviderCode.String(),
+		sum.LastModelCode.String(),
 		sum.ContextWindow,
 		sum.LastReasoningEffort,
 		sum.CreatedAt.Format(time.RFC3339),
@@ -158,7 +158,7 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 	var idStr, agentStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at
+		SELECT id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at
 		FROM sessions WHERE id = ?
 	`, id.String()).Scan(&idStr, &sum.Title, &agentStr, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr)
 
@@ -169,16 +169,16 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 	if sum.ID, err = uuid.Parse(idStr); err != nil {
 		return conversation.SessionSummary{}, err
 	}
-	if sum.AgentSlug, err = shared.NewSlug(agentStr); err != nil {
+	if sum.AgentCode, err = shared.NewCode(agentStr); err != nil {
 		return conversation.SessionSummary{}, err
 	}
 	if providerStr != "" {
-		if sum.LastProviderSlug, err = shared.NewSlug(providerStr); err != nil {
+		if sum.LastProviderCode, err = shared.NewCode(providerStr); err != nil {
 			return conversation.SessionSummary{}, err
 		}
 	}
 	if modelStr != "" {
-		if sum.LastModelSlug, err = shared.NewModelID(modelStr); err != nil {
+		if sum.LastModelCode, err = shared.NewModelCode(modelStr); err != nil {
 			return conversation.SessionSummary{}, err
 		}
 	}
@@ -194,12 +194,12 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 }
 
 func (r *ConversationRepository) listSessions(ctx context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error) {
-	q := "SELECT id, title, agent_slug, last_provider_slug, last_model_slug, context_window, last_reasoning_effort, created_at, updated_at FROM sessions"
+	q := "SELECT id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at FROM sessions"
 	args := []any{}
 
-	if query.AgentSlug != nil {
-		q += " WHERE agent_slug = ?"
-		args = append(args, query.AgentSlug.String())
+	if query.AgentCode != nil {
+		q += " WHERE agent_code = ?"
+		args = append(args, query.AgentCode.String())
 	}
 
 	q += " ORDER BY updated_at DESC"
@@ -231,16 +231,16 @@ func (r *ConversationRepository) listSessions(ctx context.Context, query convers
 		if sum.ID, err = uuid.Parse(idStr); err != nil {
 			return nil, err
 		}
-		if sum.AgentSlug, err = shared.NewSlug(agentStr); err != nil {
+		if sum.AgentCode, err = shared.NewCode(agentStr); err != nil {
 			return nil, err
 		}
 		if providerStr != "" {
-			if sum.LastProviderSlug, err = shared.NewSlug(providerStr); err != nil {
+			if sum.LastProviderCode, err = shared.NewCode(providerStr); err != nil {
 				return nil, err
 			}
 		}
 		if modelStr != "" {
-			if sum.LastModelSlug, err = shared.NewModelID(modelStr); err != nil {
+			if sum.LastModelCode, err = shared.NewModelCode(modelStr); err != nil {
 				return nil, err
 			}
 		}

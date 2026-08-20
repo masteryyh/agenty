@@ -14,9 +14,8 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Session transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` | Write model — append-only event log (source of truth) |
 | Session index | `~/.agenty/agenty.sqlite` → `sessions` | Read model — projection for fast listing/search |
 | Global config | `~/.agenty/config.json` | Application configuration |
-| Providers | `~/.agenty/providers/<slug>/provider.json` | Catalog aggregate |
-| Models | `~/.agenty/providers/<slug>/models/<model-slug>.json` | Catalog aggregate member |
-| Agents | `~/.agenty/agents/<slug>.json` | Agent aggregate |
+| Providers | `~/.agenty/providers/<provider-code>.json` | Catalog aggregate, including its models |
+| Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
@@ -27,12 +26,12 @@ reasoning effort.
 ## Domain layer
 
 The domain layer is split by bounded context. Aggregates reference each other only by
-identity (UUIDv7 for the conversation family, kebab-case slugs for agents, providers,
-and models).
+identity (UUIDv7 for the conversation family, path-safe codes for agents and providers,
+and opaque upstream codes for models).
 
 ```
 pkg/domain/
-├── shared/        Shared kernel: Slug, ModelRef, ReasoningEffort, Metadata, Event, ID
+├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session → Round → Message), content blocks, events
 ├── agent/         Agent aggregate
 └── catalog/       Provider aggregate (Provider → Model)
@@ -111,7 +110,7 @@ pkg/infra/
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── agent.go        AgentRepository (agent JSON files)
-│   ├── catalog.go      CatalogRepository (provider/model JSON files, DeleteModel)
+│   ├── catalog.go      CatalogRepository (provider aggregate JSON, embedded models)
 │   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
 └── rpc/                stdio JSON-RPC 2.0 interface layer
     ├── message.go      Request/Response/Notification/Error/ID wire types
@@ -251,8 +250,8 @@ map to `-32602`.
 Example:
 
 ```
-$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"slug":"dev","name":"Dev"}}' | go run ./cmd
-{"jsonrpc":"2.0","id":1,"result":{"slug":"dev","name":"Dev",...}}
+$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"code":"dev","name":"Dev"}}' | go run ./cmd
+{"jsonrpc":"2.0","id":1,"result":{"code":"dev","name":"Dev",...}}
 ```
 
 Note: the `rpc` and `adapter` packages use `encoding/json` (RawMessage-native,

@@ -22,12 +22,12 @@ func (c *agentyClient) InitializeAlready(ctx context.Context) (InitializeResult,
 
 func (c *agentyClient) CompleteInitialization(
 	ctx context.Context,
-	agentSlug, providerSlug, modelSlug string,
+	agentCode, providerCode, modelCode string,
 ) (InitializeResult, error) {
 	return callResult[InitializeResult](ctx, c.rpc, "initialize.complete", map[string]any{
-		"agentSlug":    agentSlug,
-		"providerSlug": providerSlug,
-		"modelSlug":    modelSlug,
+		"agentCode":    agentCode,
+		"providerCode": providerCode,
+		"modelCode":    modelCode,
 	})
 }
 
@@ -40,12 +40,12 @@ func (c *agentyClient) CreateAgent(ctx context.Context, input AgentCreateInput) 
 	)
 }
 
-func (c *agentyClient) GetAgent(ctx context.Context, slug string) (Agent, error) {
+func (c *agentyClient) GetAgent(ctx context.Context, code string) (Agent, error) {
 	return callResult[Agent](
 		ctx,
 		c.rpc,
 		"agent.get",
-		map[string]any{"slug": slug},
+		map[string]any{"code": code},
 	)
 }
 
@@ -67,12 +67,12 @@ func (c *agentyClient) UpdateAgent(ctx context.Context, input AgentUpdateInput) 
 	)
 }
 
-func (c *agentyClient) DeleteAgent(ctx context.Context, slug string) (DeleteResult, error) {
+func (c *agentyClient) DeleteAgent(ctx context.Context, code string) (DeleteResult, error) {
 	return callResult[DeleteResult](
 		ctx,
 		c.rpc,
 		"agent.delete",
-		map[string]any{"slug": slug},
+		map[string]any{"code": code},
 	)
 }
 
@@ -85,12 +85,12 @@ func (c *agentyClient) CreateProvider(ctx context.Context, input ProviderCreateI
 	)
 }
 
-func (c *agentyClient) GetProvider(ctx context.Context, slug string) (Provider, error) {
+func (c *agentyClient) GetProvider(ctx context.Context, code string) (Provider, error) {
 	return callResult[Provider](
 		ctx,
 		c.rpc,
 		"provider.get",
-		map[string]any{"slug": slug},
+		map[string]any{"code": code},
 	)
 }
 
@@ -112,12 +112,12 @@ func (c *agentyClient) UpdateProvider(ctx context.Context, input ProviderUpdateI
 	)
 }
 
-func (c *agentyClient) DeleteProvider(ctx context.Context, slug string) (DeleteResult, error) {
+func (c *agentyClient) DeleteProvider(ctx context.Context, code string) (DeleteResult, error) {
 	return callResult[DeleteResult](
 		ctx,
 		c.rpc,
 		"provider.delete",
-		map[string]any{"slug": slug},
+		map[string]any{"code": code},
 	)
 }
 
@@ -130,14 +130,14 @@ func (c *agentyClient) AddModel(ctx context.Context, input ModelInput) (Provider
 	)
 }
 
-func (c *agentyClient) RemoveModel(ctx context.Context, providerSlug, modelSlug string) (Provider, error) {
+func (c *agentyClient) RemoveModel(ctx context.Context, providerCode, modelCode string) (Provider, error) {
 	return callResult[Provider](
 		ctx,
 		c.rpc,
 		"provider.removeModel",
 		map[string]any{
-			"providerSlug": providerSlug,
-			"modelSlug":    modelSlug,
+			"providerCode": providerCode,
+			"modelCode":    modelCode,
 		},
 	)
 }
@@ -201,8 +201,8 @@ func (c *agentyClient) SetSessionModel(
 		"session.setModel",
 		map[string]any{
 			"id":           id,
-			"providerSlug": model.ProviderSlug,
-			"modelSlug":    model.ModelSlug,
+			"providerCode": model.ProviderCode,
+			"modelCode":    model.ModelCode,
 		},
 	)
 }

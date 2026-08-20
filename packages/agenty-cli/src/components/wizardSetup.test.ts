@@ -12,7 +12,7 @@ import {
 } from "../consts/providerPresets";
 import {
     persistWizardSetup,
-    selectedModelId,
+    selectedModelCode,
     type WizardSetupClient,
 } from "./wizardSetup";
 
@@ -27,10 +27,10 @@ function createModel(draft: ProviderDraft): ModelDraft {
     return modelDraftForProvider(draft, providerPresets[0]);
 }
 
-function createAgent(slug: string, isDefault: boolean): AgentDto {
+function createAgent(code: string, isDefault: boolean): AgentDto {
     return {
-        slug,
-        name: slug,
+        code,
+        name: code,
         soul: "",
         defaultContextWindow: 128_000,
         isDefault,
@@ -41,13 +41,13 @@ function createAgent(slug: string, isDefault: boolean): AgentDto {
 
 function createProvider(draft: ProviderDraft, model: ModelDraft = createModel(draft)): ModelProviderDto {
     return {
-        slug: draft.slug,
+        code: draft.code,
         name: draft.name,
         type: draft.type,
         baseUrl: draft.baseUrl,
         apiKey: draft.apiKey,
         models: [{
-            slug: model.slug,
+            code: model.code,
             name: model.name,
             contextWindow: model.contextWindow,
             maxOutputTokens: 8_192,
@@ -114,7 +114,7 @@ describe("first-run provider setup", () => {
             "anthropic",
             "gemini",
         ]);
-        expect(providerPresets.every((preset) => preset.model.slug.length > 0)).toBe(true);
+        expect(providerPresets.every((preset) => preset.model.code.length > 0)).toBe(true);
     });
 
     test("restores an existing provider and its preferred model", () => {
@@ -127,7 +127,7 @@ describe("first-run provider setup", () => {
             baseUrl: "https://gateway.example/v1",
             models: [{
                 ...createProvider(draft, existingModel).models[0],
-                slug: "gateway-model",
+                code: "gateway-model",
                 name: "Gateway model",
                 isDefault: true,
             }],
@@ -137,7 +137,7 @@ describe("first-run provider setup", () => {
 
         expect(restoredProvider.name).toBe("OpenAI gateway");
         expect(restoredProvider.baseUrl).toBe("https://gateway.example/v1");
-        expect(restoredModel.slug).toBe("gateway-model");
+        expect(restoredModel.code).toBe("gateway-model");
     });
 
     test("keeps provider validation separate from model validation", () => {
@@ -147,7 +147,7 @@ describe("first-run provider setup", () => {
         expect(validateProviderDraft({ ...draft, apiKey: "" })).toContain("API key");
         expect(validateProviderDraft(draft)).toBeNull();
         expect(validateModelDraft({ ...model, contextWindow: 0 })).toContain("Context window");
-        expect(validateModelDraft({ ...model, slug: "org/model_name[v2]" })).toBeNull();
+        expect(validateModelDraft({ ...model, code: "org/model_name[v2]" })).toBeNull();
     });
 
     test("creates resources in the core initialization order", async () => {
@@ -155,7 +155,7 @@ describe("first-run provider setup", () => {
         const model = createModel(draft);
         const client = fakeClient();
 
-        await persistWizardSetup(client, [draft], [model], selectedModelId(model));
+        await persistWizardSetup(client, [draft], [model], selectedModelCode(model));
 
         expect(client.calls).toEqual([
             "provider.list",
@@ -172,7 +172,7 @@ describe("first-run provider setup", () => {
         const model = createModel(draft);
         const client = fakeClient([createProvider(draft, model)], [createAgent("default", true)]);
 
-        await persistWizardSetup(client, [draft], [model], selectedModelId(model));
+        await persistWizardSetup(client, [draft], [model], selectedModelCode(model));
 
         expect(client.calls).toEqual([
             "provider.list",

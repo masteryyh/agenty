@@ -22,6 +22,7 @@ func TestRegisterAll(t *testing.T) {
 	}
 
 	wantNames := []string{
+		"apply_patch",
 		"delete_file",
 		"glob",
 		"grep",

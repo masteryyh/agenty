@@ -20,7 +20,7 @@ var (
 
 type Session struct {
 	ID                     uuid.UUID              `json:"id"`
-	AgentSlug              shared.Slug            `json:"agentSlug"`
+	AgentCode              shared.Code            `json:"agentCode"`
 	Title                  *string                `json:"title,omitempty"`
 	Cwd                    *string                `json:"cwd,omitempty"`
 	CurrentModel           *shared.ModelRef       `json:"currentModel,omitempty"`
@@ -44,11 +44,11 @@ type CompactionInput struct {
 	At                  time.Time
 }
 
-func StartSession(agentSlug shared.Slug, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
+func StartSession(agentCode shared.Code, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
 	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
 		SessionID:       shared.NewID(),
-		Agent:           agentSlug,
+		Agent:           agentCode,
 		Model:           model,
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
@@ -267,7 +267,7 @@ func (s *Session) apply(e shared.Event) {
 	switch ev := e.(type) {
 	case SessionStarted:
 		s.ID = ev.SessionID
-		s.AgentSlug = ev.Agent
+		s.AgentCode = ev.Agent
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
 		s.CurrentReasoningEffort = ev.ReasoningEffort

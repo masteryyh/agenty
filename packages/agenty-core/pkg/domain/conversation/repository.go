@@ -13,8 +13,8 @@ var ErrSessionNotFound = errors.New("conversation: session not found")
 
 // ListQuery filters and paginates a session listing built from the projection.
 type ListQuery struct {
-	// AgentSlug, when set, restricts results to one agent's sessions.
-	AgentSlug *shared.Slug
+	// AgentCode, when set, restricts results to one agent's sessions.
+	AgentCode *shared.Code
 	// Limit caps the number of rows returned; zero means the implementation's
 	// default.
 	Limit int

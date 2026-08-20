@@ -48,19 +48,19 @@ func NewCaller(
 	}
 
 	if strings.TrimSpace(provider.APIKey) == "" {
-		return nil, invalidRequest("provider %q has no API key", provider.Slug)
+		return nil, invalidRequest("provider %q has no API key", provider.Code)
 	}
-	if model.Slug.IsZero() {
-		return nil, invalidRequest("model slug must not be empty")
+	if model.Code.IsZero() {
+		return nil, invalidRequest("model code must not be empty")
 	}
 
 	switch provider.Type {
 	case catalog.APIOpenAI:
 		client := newOpenAIClient(provider, config)
 		return &openAIResponsesCaller{
-			client:      &client,
-			model:       model,
-			nativeShell: nativeOpenAIShellProvider(provider),
+			client:       &client,
+			model:        model,
+			nativeOpenAI: nativeOpenAIResponsesProvider(provider),
 		}, nil
 	case catalog.APIOpenAICompletions:
 		client := newOpenAIClient(provider, config)
@@ -79,8 +79,8 @@ func NewCaller(
 	}
 }
 
-func nativeOpenAIShellProvider(provider catalog.Provider) bool {
-	if provider.Slug.String() != "openai" {
+func nativeOpenAIResponsesProvider(provider catalog.Provider) bool {
+	if provider.Code.String() != "openai" {
 		return false
 	}
 	baseURL := strings.TrimSpace(provider.BaseURL)

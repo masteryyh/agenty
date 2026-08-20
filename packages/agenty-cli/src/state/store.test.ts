@@ -6,8 +6,8 @@ import { useAppStore } from "./store";
 
 const session: ChatSessionDto = {
     id: "session-1",
-    agentSlug: "default",
-    currentModel: { providerSlug: "provider", modelSlug: "model" },
+    agentCode: "default",
+    currentModel: { providerCode: "provider", modelCode: "model" },
     contextWindow: 32_000,
     rounds: [],
     createdAt: "2026-01-01T00:00:00Z",
@@ -255,8 +255,8 @@ describe("chat tool event projection", () => {
             },
             async resolveModel() {
                 return {
-                    slug: "model",
-                    providerSlug: "provider",
+                    code: "model",
+                    providerCode: "provider",
                     providerName: "Provider",
                     name: "Model",
                     contextWindow: 32_000,
@@ -284,5 +284,92 @@ describe("chat tool event projection", () => {
             isError: false,
         });
         expect(call?.result?.content).toContain("shell_call_output");
+    });
+
+    test("projects persisted apply patch calls and attaches results", async () => {
+        const persisted: ChatSessionDto = {
+            ...session,
+            rounds: [{
+                id: "round-patch",
+                sessionId: session.id,
+                sequence: 1,
+                status: "completed",
+                model: session.currentModel!,
+                contextWindow: session.contextWindow,
+                messages: [
+                    {
+                        id: "assistant-patch",
+                        roundId: "round-patch",
+                        role: "assistant",
+                        content: [{
+                            type: "apply_patch_call",
+                            id: "apc-1",
+                            callId: "call-patch",
+                            source: "native",
+                            operation: {
+                                type: "update_file",
+                                path: "notes.txt",
+                                diff: "@@\n-old\n+new",
+                            },
+                        }],
+                        createdAt: "2026-01-01T00:00:01Z",
+                    },
+                    {
+                        id: "tool-result-patch",
+                        roundId: "round-patch",
+                        role: "user",
+                        content: [{
+                            type: "tool_result",
+                            toolUseId: "call-patch",
+                            content: [{
+                                type: "text",
+                                text: "{\"operations\":[{\"type\":\"update_file\",\"path\":\"notes.txt\"}]}",
+                            }],
+                            isError: false,
+                        }],
+                        createdAt: "2026-01-01T00:00:02Z",
+                    },
+                ],
+                usage: { input: 10, output: 5, total: 15 },
+                startedAt: "2026-01-01T00:00:00Z",
+                endedAt: "2026-01-01T00:00:03Z",
+            }],
+        };
+        const client = {
+            async getSession() {
+                return persisted;
+            },
+            async resolveModel() {
+                return {
+                    code: "model",
+                    providerCode: "provider",
+                    providerName: "Provider",
+                    name: "Model",
+                    contextWindow: 32_000,
+                    maxOutputTokens: 8192,
+                    multiModal: false,
+                    light: false,
+                    isDefault: true,
+                };
+            },
+        } as unknown as AgentyClient;
+
+        useAppStore.setState({ client, session, history: [], current: null });
+        await useAppStore.getState().resumeSession(session);
+
+        const call = useAppStore.getState().history[0]?.toolCalls?.[0];
+        expect(call).toMatchObject({ id: "call-patch", name: "apply_patch" });
+        expect(JSON.parse(call?.arguments ?? "{}")).toEqual({
+            operation: {
+                type: "update_file",
+                path: "notes.txt",
+                diff: "@@\n-old\n+new",
+            },
+        });
+        expect(call?.result).toMatchObject({
+            callId: "call-patch",
+            name: "apply_patch",
+            isError: false,
+        });
     });
 });

@@ -19,7 +19,7 @@ func TestStdioJSONRPCSupportsClientTrafficPatterns(t *testing.T) {
 		JSONRPC: "2.0",
 		Method:  "agent.create",
 		Params: AgentCreateInput{
-			Slug: "notification-agent",
+			Code: "notification-agent",
 			Name: "通知创建的 Agent 🐈",
 			Soul: "line one\nline two",
 		},
@@ -28,7 +28,7 @@ func TestStdioJSONRPCSupportsClientTrafficPatterns(t *testing.T) {
 		JSONRPC: "2.0",
 		ID:      "barrier",
 		Method:  "agent.get",
-		Params:  map[string]any{"slug": "notification-agent"},
+		Params:  map[string]any{"code": "notification-agent"},
 	})
 	barrier := readSingleResponse(t, ctx, process)
 	if string(barrier.ID) != `"barrier"` || barrier.Error != nil {

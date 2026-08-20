@@ -3,9 +3,9 @@ import { describe, expect, test } from "bun:test";
 import { parseModelRef } from "./AgentOverlay";
 
 describe("parseModelRef", () => {
-    test("keeps slashes inside a model ID", () => {
+    test("keeps slashes inside a model code", () => {
         expect(parseModelRef("openai/org/model_name[v2]"))
-            .toEqual({ providerSlug: "openai", modelSlug: "org/model_name[v2]" });
+            .toEqual({ providerCode: "openai", modelCode: "org/model_name[v2]" });
     });
 
     test("rejects references without both sides", () => {

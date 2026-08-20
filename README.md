@@ -59,7 +59,7 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Configuration | `~/.agenty/config.json` |
 | Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | Session index | `~/.agenty/agenty.sqlite` |
-| Providers and models | `~/.agenty/providers/` |
+| Providers and models | `~/.agenty/providers/<provider-code>.json` (models embedded) |
 | Agents | `~/.agenty/agents/` |
 | Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 

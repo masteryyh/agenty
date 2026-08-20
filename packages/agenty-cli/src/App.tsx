@@ -1,14 +1,15 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
 import { useState } from "react";
 
-import type { ChatSessionDto, ModelDto } from "./api/types";
+import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
 import { AgentOverlay } from "./components/AgentOverlay";
-import { BottomDialog, useBottomDialogSize } from "./components/BottomDialog";
+import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
 import { MessageList } from "./components/MessageList";
+import { ModelOverlay } from "./components/ModelOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
@@ -24,7 +25,7 @@ const INPUT_TOP_GAP = 1;
 const PROVIDER_OVERLAY_HEIGHT = 18;
 const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
-const MODEL_OVERLAY_HEIGHT = 18;
+const MODEL_OVERLAY_HEIGHT = 20;
 
 function panelHeight(overlay: OverlayKind): number | null {
     switch (overlay) {
@@ -275,7 +276,7 @@ function ChatView() {
                     onTab={handleTab}
                     streaming={busy}
                     phrase={chat.phrase}
-                    modelName={`${app.model?.providerName ?? "?"}/${app.model?.name ?? "?"}`}
+                    modelName={`${app.model?.providerName ?? "?"} · ${app.model?.name ?? "?"}`}
                     cwd={app.session?.cwd ?? process.cwd()}
                     contextWindow={app.session?.contextWindow ?? 0}
                     tokenConsumed={chat.tokenConsumed}
@@ -303,12 +304,8 @@ function OverlayPanel({
 }: {
     kind: "provider" | "agents" | "status" | "model-select";
 }) {
-    const app = useApp();
     return kind === "model-select" ? (
-        <ModelSelectOverlay
-            onClose={() => app.setOverlay(null)}
-            onSelect={(model) => void app.switchModel(model)}
-        />
+        <ModelOverlay />
     ) : kind === "provider" ? (
         <ProviderOverlay />
     ) : kind === "agents" ? (
@@ -316,35 +313,6 @@ function OverlayPanel({
     ) : kind === "status" ? (
         <StatusOverlay />
     ) : <StatusOverlay />;
-}
-
-function ModelSelectOverlay({
-    onClose,
-    onSelect,
-}: {
-    onClose: () => void;
-    onSelect: (model: ModelDto) => void;
-}) {
-    const client = useAppStore((s) => s.client);
-    const dialogSize = useBottomDialogSize();
-    return (
-        <SelectOverlay<ModelDto>
-            title="Switch Model"
-            dialog
-            visibleOptionCount={Math.max(dialogSize.height - 2, 1)}
-            emptyHint="No switchable chat models found"
-            onClose={onClose}
-            onSelect={onSelect}
-            load={async () => {
-                const models = client ? await client.listModels() : [];
-                return models
-                    .map((m) => ({
-                        label: `${m.providerName}/${m.name}`,
-                        data: m,
-                    }));
-            }}
-        />
-    );
 }
 
 function SessionSelectOverlay({

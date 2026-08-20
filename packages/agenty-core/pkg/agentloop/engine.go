@@ -28,11 +28,11 @@ type ExecutionSessionRepository interface {
 }
 
 type ExecutionAgentRepository interface {
-	Get(ctx context.Context, slug shared.Slug) (*agent.Agent, error)
+	Get(ctx context.Context, code shared.Code) (*agent.Agent, error)
 }
 
 type ExecutionCatalogRepository interface {
-	Get(ctx context.Context, slug shared.Slug) (*catalog.Provider, error)
+	Get(ctx context.Context, code shared.Code) (*catalog.Provider, error)
 }
 
 type CallerFactory func(
@@ -251,18 +251,18 @@ func (engine *Engine) Compact(
 func (engine *Engine) SetModel(
 	ctx context.Context,
 	sessionID string,
-	providerSlug string,
-	modelSlug string,
+	providerCode string,
+	modelCode string,
 ) (*conversation.Session, error) {
 	id, err := uuid.Parse(sessionID)
 	if err != nil {
 		return nil, apperrors.Validation("invalid session id: " + err.Error())
 	}
-	providerID, err := shared.NewSlug(providerSlug)
+	providerCodeValue, err := shared.NewCode(providerCode)
 	if err != nil {
 		return nil, apperrors.Validation(err.Error())
 	}
-	modelID, err := shared.NewModelID(modelSlug)
+	modelCodeValue, err := shared.NewModelCode(modelCode)
 	if err != nil {
 		return nil, apperrors.Validation(err.Error())
 	}
@@ -281,8 +281,8 @@ func (engine *Engine) SetModel(
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
 	if session.CurrentModel != nil &&
-		session.CurrentModel.ProviderSlug == providerID &&
-		session.CurrentModel.ModelSlug == modelID {
+		session.CurrentModel.ProviderCode == providerCodeValue &&
+		session.CurrentModel.ModelCode == modelCodeValue {
 		return session.VisibleCopy(), nil
 	}
 
@@ -290,7 +290,7 @@ func (engine *Engine) SetModel(
 	if err != nil {
 		return nil, err
 	}
-	targetRef := shared.NewModelRef(providerID, modelID)
+	targetRef := shared.NewModelRef(providerCodeValue, modelCodeValue)
 	_, targetModel, err := engine.loadCatalogModel(ctx, targetRef)
 	if err != nil {
 		return nil, err
@@ -479,10 +479,10 @@ func (engine *Engine) loadResources(
 	runCtx context.Context,
 	session *conversation.Session,
 ) (*executionResources, error) {
-	agentDefinition, err := engine.agents.Get(ctx, session.AgentSlug)
+	agentDefinition, err := engine.agents.Get(ctx, session.AgentCode)
 	if err != nil {
 		if errors.Is(err, agent.ErrNotFound) {
-			return nil, apperrors.NotFound("agent " + session.AgentSlug.String() + " not found")
+			return nil, apperrors.NotFound("agent " + session.AgentCode.String() + " not found")
 		}
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load agent", err)
 	}
@@ -510,17 +510,17 @@ func (engine *Engine) loadCatalogModel(
 	ctx context.Context,
 	modelRef shared.ModelRef,
 ) (*catalog.Provider, *catalog.Model, error) {
-	provider, err := engine.catalog.Get(ctx, modelRef.ProviderSlug)
+	provider, err := engine.catalog.Get(ctx, modelRef.ProviderCode)
 	if err != nil {
 		if errors.Is(err, catalog.ErrProviderNotFound) {
-			return nil, nil, apperrors.NotFound("provider " + modelRef.ProviderSlug.String() + " not found")
+			return nil, nil, apperrors.NotFound("provider " + modelRef.ProviderCode.String() + " not found")
 		}
 		return nil, nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load provider", err)
 	}
-	model, err := provider.Model(modelRef.ModelSlug)
+	model, err := provider.Model(modelRef.ModelCode)
 	if err != nil {
 		if errors.Is(err, catalog.ErrModelNotFound) {
-			return nil, nil, apperrors.NotFound("model " + modelRef.ModelSlug.String() + " not found")
+			return nil, nil, apperrors.NotFound("model " + modelRef.ModelCode.String() + " not found")
 		}
 		return nil, nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load model", err)
 	}
@@ -811,6 +811,8 @@ func toolCalls(content conversation.Content) []conversation.ToolUseBlock {
 		case conversation.ToolUseBlock:
 			calls = append(calls, call)
 		case conversation.ShellCallBlock:
+			calls = append(calls, call.ToolUseBlock())
+		case conversation.ApplyPatchCallBlock:
 			calls = append(calls, call.ToolUseBlock())
 		}
 	}

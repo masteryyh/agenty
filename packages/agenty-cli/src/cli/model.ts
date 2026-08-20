@@ -46,12 +46,12 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
         return;
     }
     if (command === "add") {
-        const [, , modelSlug] = requirePositionals(args, 3, "model add <slug> --provider <ref> [options]");
+        const [, , modelCode] = requirePositionals(args, 3, "model add <code> --provider <ref> [options]");
         const provider = await resolveProvider(client, requireFlag(args, "provider"));
         const created = await client.createModel({
-            providerSlug: provider.slug,
-            modelSlug,
-            name: flag(args, "name")?.trim() || modelSlug,
+            providerCode: provider.code,
+            modelCode,
+            name: flag(args, "name")?.trim() || modelCode,
             contextWindow: positiveInteger(flag(args, "context-window") ?? "0", "--context-window", true),
             multiModal: booleanFlag(args, "multi-modal"),
             light: booleanFlag(args, "light"),
@@ -72,7 +72,7 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
             isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,
             reasoningEffortMapping: hasFlag(args, "reasoning-map") ? reasoningMapping(args) : current.reasoningEffortMapping,
         };
-        const updated = await client.updateModel(current.providerSlug, current.slug, update);
+        const updated = await client.updateModel(current.providerCode, current.code, update);
         action(args, updated, `Model updated: ${displayModel(updated)}`);
         return;
     }
@@ -82,8 +82,8 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
             throw new CliError("use --yes to remove a model non-interactively");
         }
         const current = await resolveModel(client, reference);
-        await client.deleteModel(current.providerSlug, current.slug);
-        action(args, { providerSlug: current.providerSlug, modelSlug: current.slug, deleted: true }, `Model removed: ${displayModel(current)}`);
+        await client.deleteModel(current.providerCode, current.code);
+        action(args, { providerCode: current.providerCode, modelCode: current.code, deleted: true }, `Model removed: ${displayModel(current)}`);
         return;
     }
     throw new CliError("usage: model <list|get|add|update|remove>");

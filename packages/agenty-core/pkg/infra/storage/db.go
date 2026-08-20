@@ -10,16 +10,16 @@ const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY NOT NULL,
 	title TEXT NOT NULL DEFAULT '',
-	agent_slug TEXT NOT NULL,
-	last_provider_slug TEXT NOT NULL DEFAULT '',
-	last_model_slug TEXT NOT NULL DEFAULT '',
+	agent_code TEXT NOT NULL,
+	last_provider_code TEXT NOT NULL DEFAULT '',
+	last_model_code TEXT NOT NULL DEFAULT '',
 	context_window INTEGER NOT NULL DEFAULT 0,
 	last_reasoning_effort TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_agent_slug ON sessions(agent_slug);
+CREATE INDEX IF NOT EXISTS idx_sessions_agent_code ON sessions(agent_code);
 CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
 `
 

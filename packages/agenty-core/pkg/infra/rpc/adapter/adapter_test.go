@@ -164,17 +164,17 @@ func TestAdapterAgentCreateAndGet(t *testing.T) {
 	d := newDispatcher(t)
 
 	create := call(t, d, request(1, "agent.create", map[string]any{
-		"slug": "coder", "name": "Code Assistant", "soul": "You code.",
+		"code": "coder", "name": "Code Assistant", "soul": "You code.",
 	}))
 	if errCode(create) != 0 {
 		t.Fatalf("create error: %+v", create["error"])
 	}
 	result := create["result"].(map[string]any)
-	if result["slug"] != "coder" {
-		t.Errorf("slug = %v, want coder", result["slug"])
+	if result["code"] != "coder" {
+		t.Errorf("code = %v, want coder", result["code"])
 	}
 
-	got := call(t, d, request(2, "agent.get", map[string]any{"slug": "coder"}))
+	got := call(t, d, request(2, "agent.get", map[string]any{"code": "coder"}))
 	if errCode(got) != 0 {
 		t.Fatalf("get error: %+v", got["error"])
 	}
@@ -210,15 +210,15 @@ func TestAdapterEmptyCollectionsUseArrays(t *testing.T) {
 
 func TestAdapterAgentNotFound(t *testing.T) {
 	d := newDispatcher(t)
-	resp := call(t, d, request(1, "agent.get", map[string]any{"slug": "missing"}))
+	resp := call(t, d, request(1, "agent.get", map[string]any{"code": "missing"}))
 	if code := errCode(resp); code != rpc.ErrCodeNotFound {
 		t.Errorf("code = %d, want %d (not found)", code, rpc.ErrCodeNotFound)
 	}
 }
 
-func TestAdapterAgentInvalidSlug(t *testing.T) {
+func TestAdapterAgentInvalidCode(t *testing.T) {
 	d := newDispatcher(t)
-	resp := call(t, d, request(1, "agent.create", map[string]any{"slug": "Bad Slug", "name": "x"}))
+	resp := call(t, d, request(1, "agent.create", map[string]any{"code": "Bad Code", "name": "x"}))
 	if code := errCode(resp); code != rpc.ErrCodeInvalidParams {
 		t.Errorf("code = %d, want %d (invalid params)", code, rpc.ErrCodeInvalidParams)
 	}
@@ -226,8 +226,8 @@ func TestAdapterAgentInvalidSlug(t *testing.T) {
 
 func TestAdapterAgentDuplicate(t *testing.T) {
 	d := newDispatcher(t)
-	call(t, d, request(1, "agent.create", map[string]any{"slug": "coder", "name": "A"}))
-	resp := call(t, d, request(2, "agent.create", map[string]any{"slug": "coder", "name": "B"}))
+	call(t, d, request(1, "agent.create", map[string]any{"code": "coder", "name": "A"}))
+	resp := call(t, d, request(2, "agent.create", map[string]any{"code": "coder", "name": "B"}))
 	if code := errCode(resp); code != rpc.ErrCodeAlreadyExists {
 		t.Errorf("code = %d, want %d (already exists)", code, rpc.ErrCodeAlreadyExists)
 	}
@@ -237,11 +237,11 @@ func TestAdapterProviderAddModel(t *testing.T) {
 	d := newDispatcher(t)
 
 	call(t, d, request(1, "provider.create", map[string]any{
-		"slug": "anthropic", "name": "Anthropic", "type": "anthropic",
+		"code": "anthropic", "name": "Anthropic", "type": "anthropic",
 	}))
 	resp := call(t, d, request(2, "provider.addModel", map[string]any{
-		"providerSlug":    "anthropic",
-		"modelSlug":       "claude-opus-4-8",
+		"providerCode":    "anthropic",
+		"modelCode":       "claude-opus-4-8",
 		"name":            "Claude Opus 4.8",
 		"contextWindow":   200000,
 		"maxOutputTokens": 32000,
@@ -276,19 +276,19 @@ func TestAdapterInitializeJourney(t *testing.T) {
 		params map[string]any
 	}{
 		{method: "provider.create", params: map[string]any{
-			"slug": "openai", "name": "OpenAI", "type": "openai", "apiKey": "test",
+			"code": "openai", "name": "OpenAI", "type": "openai", "apiKey": "test",
 		}},
 		{method: "provider.addModel", params: map[string]any{
-			"providerSlug": "openai", "modelSlug": "gpt-test", "name": "GPT Test",
+			"providerCode": "openai", "modelCode": "gpt-test", "name": "GPT Test",
 			"contextWindow": 128000, "maxOutputTokens": 16384, "isDefault": true,
 		}},
 		{method: "agent.create", params: map[string]any{
-			"slug": "default", "name": "Default", "soul": "Be helpful.", "isDefault": true,
+			"code": "default", "name": "Default", "soul": "Be helpful.", "isDefault": true,
 			"defaultContextWindow": 128000,
-			"defaultModel":         map[string]any{"providerSlug": "openai", "modelSlug": "gpt-test"},
+			"defaultModel":         map[string]any{"providerCode": "openai", "modelCode": "gpt-test"},
 		}},
 		{method: "initialize.complete", params: map[string]any{
-			"agentSlug": "default", "providerSlug": "openai", "modelSlug": "gpt-test",
+			"agentCode": "default", "providerCode": "openai", "modelCode": "gpt-test",
 		}},
 	} {
 		resp := call(t, d, request(id+2, step.method, step.params))
@@ -307,9 +307,9 @@ func TestAdapterSessionCreateAndGet(t *testing.T) {
 	d := newDispatcher(t)
 
 	create := call(t, d, request(1, "session.create", map[string]any{
-		"agentSlug":     "coder",
-		"providerSlug":  "anthropic",
-		"modelSlug":     "claude-opus-4-8",
+		"agentCode":     "coder",
+		"providerCode":  "anthropic",
+		"modelCode":     "claude-opus-4-8",
 		"contextWindow": 200000,
 	}))
 	if errCode(create) != 0 {
@@ -338,9 +338,9 @@ func TestAdapterSessionList(t *testing.T) {
 	d := newDispatcher(t)
 	for range 3 {
 		call(t, d, request(1, "session.create", map[string]any{
-			"agentSlug":    "coder",
-			"providerSlug": "anthropic",
-			"modelSlug":    "claude-opus-4-8",
+			"agentCode":    "coder",
+			"providerCode": "anthropic",
+			"modelCode":    "claude-opus-4-8",
 		}))
 	}
 	resp := call(t, d, request(2, "session.list", map[string]any{}))
@@ -435,7 +435,7 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 	t.Helper()
 
 	createAgent := call(t, d, request(1, "agent.create", map[string]any{
-		"slug": "coder",
+		"code": "coder",
 		"name": "Coder",
 		"soul": "Complete the task.",
 	}))
@@ -443,7 +443,7 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 		t.Fatalf("create agent error: %+v", createAgent["error"])
 	}
 	createProvider := call(t, d, request(2, "provider.create", map[string]any{
-		"slug":   "openai",
+		"code":   "openai",
 		"name":   "OpenAI",
 		"type":   "openai_completions",
 		"apiKey": "test-key",
@@ -452,8 +452,8 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 		t.Fatalf("create provider error: %+v", createProvider["error"])
 	}
 	addModel := call(t, d, request(3, "provider.addModel", map[string]any{
-		"providerSlug":    "openai",
-		"modelSlug":       "gpt-test",
+		"providerCode":    "openai",
+		"modelCode":       "gpt-test",
 		"name":            "GPT Test",
 		"contextWindow":   128000,
 		"maxOutputTokens": 100000,
@@ -462,9 +462,9 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 		t.Fatalf("add model error: %+v", addModel["error"])
 	}
 	created := call(t, d, request(4, "session.create", map[string]any{
-		"agentSlug":     "coder",
-		"providerSlug":  "openai",
-		"modelSlug":     "gpt-test",
+		"agentCode":     "coder",
+		"providerCode":  "openai",
+		"modelCode":     "gpt-test",
 		"contextWindow": 128000,
 	}))
 	if errCode(created) != 0 {
@@ -559,19 +559,19 @@ func TestAdapterChunkedAgentCreate(t *testing.T) {
 	rpc.RegisterChunkHandlers(d, asm)
 
 	resp := callChunked(t, d, 1, "agent.create", map[string]any{
-		"slug": "chunked", "name": "Chunked Agent", "soul": "You shard.",
+		"code": "chunked", "name": "Chunked Agent", "soul": "You shard.",
 	})
 	if errCode(resp) != 0 {
 		t.Fatalf("chunked create error: %+v", resp["error"])
 	}
 	result := resp["result"].(map[string]any)
-	if result["slug"] != "chunked" {
-		t.Errorf("slug = %v, want chunked", result["slug"])
+	if result["code"] != "chunked" {
+		t.Errorf("code = %v, want chunked", result["code"])
 	}
 
 	// The committed upload must be indistinguishable from a direct call: a
 	// subsequent agent.get reads back the same record.
-	got := call(t, d, request(2, "agent.get", map[string]any{"slug": "chunked"}))
+	got := call(t, d, request(2, "agent.get", map[string]any{"code": "chunked"}))
 	if errCode(got) != 0 {
 		t.Fatalf("get error: %+v", got["error"])
 	}

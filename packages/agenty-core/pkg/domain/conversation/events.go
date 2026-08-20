@@ -27,7 +27,7 @@ const (
 
 type SessionStarted struct {
 	SessionID       uuid.UUID              `json:"sessionId"`
-	Agent           shared.Slug            `json:"agent"`
+	Agent           shared.Code            `json:"agent"`
 	Model           shared.ModelRef        `json:"model"`
 	ContextWindow   int64                  `json:"contextWindow"`
 	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`

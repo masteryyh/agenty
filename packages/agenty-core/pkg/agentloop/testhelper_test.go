@@ -18,18 +18,18 @@ import (
 )
 
 type agentRepositoryFake struct {
-	agents map[shared.Slug]*agent.Agent
+	agents map[shared.Code]*agent.Agent
 }
 
 func newAgentRepositoryFake() *agentRepositoryFake {
-	return &agentRepositoryFake{agents: make(map[shared.Slug]*agent.Agent)}
+	return &agentRepositoryFake{agents: make(map[shared.Code]*agent.Agent)}
 }
 
 func (repository *agentRepositoryFake) Get(
 	_ context.Context,
-	slug shared.Slug,
+	code shared.Code,
 ) (*agent.Agent, error) {
-	definition, ok := repository.agents[slug]
+	definition, ok := repository.agents[code]
 	if !ok {
 		return nil, storage.ErrAgentNotFound
 	}
@@ -42,23 +42,23 @@ func (repository *agentRepositoryFake) Get(
 func (repository *agentRepositoryFake) Save(_ context.Context, definition *agent.Agent) error {
 	copy := *definition
 	copy.Metadata = maps.Clone(definition.Metadata)
-	repository.agents[definition.Slug] = &copy
+	repository.agents[definition.Code] = &copy
 	return nil
 }
 
 type providerRepositoryFake struct {
-	providers map[shared.Slug]*catalog.Provider
+	providers map[shared.Code]*catalog.Provider
 }
 
 func newProviderRepositoryFake() *providerRepositoryFake {
-	return &providerRepositoryFake{providers: make(map[shared.Slug]*catalog.Provider)}
+	return &providerRepositoryFake{providers: make(map[shared.Code]*catalog.Provider)}
 }
 
 func (repository *providerRepositoryFake) Get(
 	_ context.Context,
-	slug shared.Slug,
+	code shared.Code,
 ) (*catalog.Provider, error) {
-	provider, ok := repository.providers[slug]
+	provider, ok := repository.providers[code]
 	if !ok {
 		return nil, storage.ErrProviderNotFound
 	}
@@ -67,7 +67,7 @@ func (repository *providerRepositoryFake) Get(
 }
 
 func (repository *providerRepositoryFake) Save(_ context.Context, provider *catalog.Provider) error {
-	repository.providers[provider.Slug] = cloneProvider(provider)
+	repository.providers[provider.Code] = cloneProvider(provider)
 	return nil
 }
 

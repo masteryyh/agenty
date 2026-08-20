@@ -26,8 +26,8 @@ func fullMetadataXML(session *conversation.Session) (string, error) {
 
 	metadata := conversation.SessionMetadata{
 		Cwd:             cwd,
-		Model:           session.CurrentModel.ModelSlug.String(),
-		Provider:        session.CurrentModel.ProviderSlug.String(),
+		Model:           session.CurrentModel.ModelCode.String(),
+		Provider:        session.CurrentModel.ProviderCode.String(),
 		Timezone:        utils.TimezoneName(),
 		ReasoningEffort: string(session.CurrentReasoningEffort),
 	}
@@ -45,8 +45,8 @@ func metadataForRound(
 
 	current := conversation.SessionMetadata{
 		Cwd:             cwd,
-		Model:           round.Model.ModelSlug.String(),
-		Provider:        round.Model.ProviderSlug.String(),
+		Model:           round.Model.ModelCode.String(),
+		Provider:        round.Model.ProviderCode.String(),
 		Timezone:        utils.TimezoneName(),
 		ReasoningEffort: string(round.ReasoningEffort),
 	}
