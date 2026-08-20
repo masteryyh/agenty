@@ -124,7 +124,7 @@ func TestSessionLifecycleAndReplay(t *testing.T) {
 		t.Errorf("assistant message metadata = %+v", round.Messages[1])
 	}
 	summary := replayed.Summary()
-	if summary.Title != "greeting" || summary.LastProviderSlug != "anthropic" || summary.LastModelSlug != "claude-opus-4" {
+	if summary.Title != "greeting" || summary.LastProviderCode != "anthropic" || summary.LastModelCode != "claude-opus-4" {
 		t.Errorf("summary = %+v", summary)
 	}
 }
@@ -240,6 +240,10 @@ func TestSessionCompactionRetainsThreeUsersBeforeSummaryAndFiveAssistantsAfter(t
 			assistantContent = Content{
 				ReasoningBlock{Reasoning: "private"},
 				ToolUseBlock{ID: "lookup", Name: "read_file", Input: shared.RawJSON(`{"path":"README.md"}`)},
+				ApplyPatchCallBlock{
+					CallID: "patch", Source: ApplyPatchSourceCustom,
+					Patch: "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch",
+				},
 				TextBlock{Text: "assistant-6"},
 			}
 		}

@@ -37,6 +37,7 @@ const TOOL_LABELS: Record<string, string> = {
     glob: "Find files",
     ls: "List directory",
     shell: "Run shell",
+    apply_patch: "Apply patch",
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -442,6 +443,65 @@ function shellDisplay(
     };
 }
 
+function applyPatchDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
+    const operation = isRecord(input?.operation) ? input.operation : undefined;
+    const patch = stringValue(input?.patch);
+    const summaryLines: string[] = [];
+    if (operation) {
+        summaryLines.push(formatPatchOperation(operation));
+    } else if (patch) {
+        for (const line of splitLines(patch)) {
+            const summary = formatPatchEnvelopeHeader(line);
+            if (summary) {
+                summaryLines.push(summary);
+            }
+        }
+    }
+    if (summaryLines.length === 0) {
+        summaryLines.push("patch");
+    }
+    const visibleSummary = summaryLines.slice(0, MAX_SUMMARY_LINES);
+    if (summaryLines.length > visibleSummary.length) {
+        visibleSummary.push(`… ${summaryLines.length - visibleSummary.length} more operations`);
+    }
+    return {
+        label: TOOL_LABELS.apply_patch,
+        status: toolStatus(result),
+        summaryLines: visibleSummary,
+        detailLines: formatResultPreview(result),
+    };
+}
+
+function formatPatchOperation(operation: JsonRecord): string {
+    const path = formatPath(operation.path);
+    switch (operation.type) {
+        case "create_file":
+            return `create ${path}`;
+        case "delete_file":
+            return `delete ${path}`;
+        case "update_file": {
+            const moveTo = stringValue(operation.moveTo);
+            return moveTo ? `update ${path} → ${formatPath(moveTo)}` : `update ${path}`;
+        }
+        default:
+            return `modify ${path}`;
+    }
+}
+
+function formatPatchEnvelopeHeader(line: string): string {
+    const headers: Array<[string, string]> = [
+        ["*** Add File:", "create"],
+        ["*** Update File:", "update"],
+        ["*** Delete File:", "delete"],
+    ];
+    for (const [prefix, action] of headers) {
+        if (line.startsWith(prefix)) {
+            return `${action} ${formatPath(line.slice(prefix.length).trim())}`;
+        }
+    }
+    return "";
+}
+
 function unknownDisplay(name: string, input: JsonRecord | undefined, rawArguments: string, result: ToolResult | undefined): ToolDisplay {
     const details = formatResultPreview(result);
     const resultSummary = result
@@ -475,6 +535,8 @@ export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDis
                 return listDisplay(input, toolCall.result);
             case "shell":
                 return shellDisplay(input, toolCall.result, expanded);
+            case "apply_patch":
+                return applyPatchDisplay(input, toolCall.result);
             default:
                 return unknownDisplay(toolCall.name, input, toolCall.arguments, toolCall.result);
         }

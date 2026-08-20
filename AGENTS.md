@@ -45,7 +45,7 @@ Core data is local-first:
 - Config: `~/.agenty/config.json`
 - Sessions: append-only JSONL under `~/.agenty/sessions/`
 - Session projection: `~/.agenty/agenty.sqlite`
-- Providers/models: `~/.agenty/providers/`
+- Providers/models: `~/.agenty/providers/<provider-code>.json` (models embedded)
 - Agents: `~/.agenty/agents/`
 - Logs: `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log`
 

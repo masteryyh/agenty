@@ -11,9 +11,9 @@ import (
 type SessionSummary struct {
 	ID                  uuid.UUID              `json:"id"`
 	Title               string                 `json:"title"`
-	AgentSlug           shared.Slug            `json:"agentSlug"`
-	LastProviderSlug    shared.Slug            `json:"lastProviderSlug"`
-	LastModelSlug       shared.ModelID         `json:"lastModelSlug"`
+	AgentCode           shared.Code            `json:"agentCode"`
+	LastProviderCode    shared.Code            `json:"lastProviderCode"`
+	LastModelCode       shared.ModelCode       `json:"lastModelCode"`
 	ContextWindow       int64                  `json:"contextWindow"`
 	LastReasoningEffort shared.ReasoningEffort `json:"lastReasoningEffort"`
 	CreatedAt           time.Time              `json:"createdAt"`
@@ -23,7 +23,7 @@ type SessionSummary struct {
 func (s *Session) Summary() SessionSummary {
 	sum := SessionSummary{
 		ID:                  s.ID,
-		AgentSlug:           s.AgentSlug,
+		AgentCode:           s.AgentCode,
 		ContextWindow:       s.ContextWindow,
 		LastReasoningEffort: s.CurrentReasoningEffort,
 		CreatedAt:           s.CreatedAt,
@@ -34,8 +34,8 @@ func (s *Session) Summary() SessionSummary {
 		sum.Title = *s.Title
 	}
 	if s.CurrentModel != nil {
-		sum.LastProviderSlug = s.CurrentModel.ProviderSlug
-		sum.LastModelSlug = s.CurrentModel.ModelSlug
+		sum.LastProviderCode = s.CurrentModel.ProviderCode
+		sum.LastModelCode = s.CurrentModel.ModelCode
 	}
 
 	return sum

@@ -54,19 +54,19 @@ func createExecutionResources(
 	apiType string,
 	prefix string,
 ) (Session, error) {
-	agentSlug := prefix + "-agent"
-	providerSlug := prefix + "-provider"
-	modelSlug := prefix + "-model"
+	agentCode := prefix + "-agent"
+	providerCode := prefix + "-provider"
+	modelCode := prefix + "-model"
 
 	if _, err := client.CreateAgent(ctx, AgentCreateInput{
-		Slug: agentSlug,
+		Code: agentCode,
 		Name: "E2E Agent",
 		Soul: "Answer the user clearly.",
 	}); err != nil {
 		return Session{}, fmt.Errorf("create agent: %w", err)
 	}
 	if _, err := client.CreateProvider(ctx, ProviderCreateInput{
-		Slug:    providerSlug,
+		Code:    providerCode,
 		Name:    "E2E Provider",
 		Type:    apiType,
 		BaseURL: fixture.BaseURL(apiType),
@@ -75,8 +75,8 @@ func createExecutionResources(
 		return Session{}, fmt.Errorf("create provider: %w", err)
 	}
 	if _, err := client.AddModel(ctx, ModelInput{
-		ProviderSlug:    providerSlug,
-		ModelSlug:       modelSlug,
+		ProviderCode:    providerCode,
+		ModelCode:       modelCode,
 		Name:            "E2E Model",
 		ContextWindow:   128_000,
 		MaxOutputTokens: 8_192,
@@ -85,9 +85,9 @@ func createExecutionResources(
 	}
 
 	session, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     agentSlug,
-		ProviderSlug:  providerSlug,
-		ModelSlug:     modelSlug,
+		AgentCode:     agentCode,
+		ProviderCode:  providerCode,
+		ModelCode:     modelCode,
 		ContextWindow: 128_000,
 	})
 	if err != nil {

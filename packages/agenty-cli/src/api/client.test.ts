@@ -13,9 +13,9 @@ describe("AgentyClient session list", () => {
 
         await expect(client.isInitialized()).resolves.toBe(false);
         await expect(client.completeInitialization({
-            agentSlug: "default",
-            providerSlug: "openai",
-            modelSlug: "gpt-test",
+            agentCode: "default",
+            providerCode: "openai",
+            modelCode: "gpt-test",
         })).resolves.toEqual({ initialized: false });
     });
 
@@ -40,7 +40,7 @@ describe("AgentyClient session list", () => {
 
     test("normalizes null provider models before model projection", async () => {
         const provider = {
-            slug: "empty",
+            code: "empty",
             name: "Empty",
             type: "openai",
             baseUrl: "https://example.invalid",
@@ -93,7 +93,7 @@ describe("AgentyClient session list", () => {
     test("normalizes null session collections for old core responses", async () => {
         const session = {
             id: "session",
-            agentSlug: "default",
+            agentCode: "default",
             contextWindow: 128000,
             rounds: null,
             createdAt: "2026-01-01T00:00:00Z",
@@ -108,16 +108,16 @@ describe("AgentyClient session list", () => {
     });
 
     test("updates a resumed session when an explicit model is requested", async () => {
-        const agent = { slug: "default", name: "Default" } as AgentDto;
-        const currentModel = { providerSlug: "openai", modelSlug: "gpt-old" };
+        const agent = { code: "default", name: "Default" } as AgentDto;
+        const currentModel = { providerCode: "openai", modelCode: "gpt-old" };
         const requestedModel = {
-            slug: "gpt-new",
-            providerSlug: "openai",
+            code: "gpt-new",
+            providerCode: "openai",
             providerName: "OpenAI",
         } as ModelDto;
         const existing = {
             id: "session",
-            agentSlug: "default",
+            agentCode: "default",
             currentModel,
             rounds: [],
         } as unknown as ChatSessionDto;
@@ -128,7 +128,7 @@ describe("AgentyClient session list", () => {
         client.getLastSessionByAgent = async () => existing;
         client.setSessionModel = async (_id, model) => {
             updatedWith = model;
-            return { ...existing, currentModel: { providerSlug: model.providerSlug, modelSlug: model.slug } };
+            return { ...existing, currentModel: { providerCode: model.providerCode, modelCode: model.code } };
         };
 
         const prepared = await client.prepareSession({
@@ -139,6 +139,6 @@ describe("AgentyClient session list", () => {
 
         expect(updatedWith).toBe(requestedModel);
         expect(prepared.model).toBe(requestedModel);
-        expect(prepared.session.currentModel).toEqual({ providerSlug: "openai", modelSlug: "gpt-new" });
+        expect(prepared.session.currentModel).toEqual({ providerCode: "openai", modelCode: "gpt-new" });
     });
 });

@@ -14,7 +14,7 @@ const PROVIDER_TYPE_OPTIONS = providerTypes.map((t) => ({ label: t, value: t }))
 function buildCreateFields(formType: string): FormField[] {
     const baseUrl = providerDefaultBaseURLs[formType] ?? "";
     return [
-        { key: "slug", label: "Slug", kind: "text" as const, value: "", placeholder: "my-provider" },
+        { key: "code", label: "Provider Code", kind: "text" as const, value: "", placeholder: "my-provider" },
         { key: "name", label: "Name", kind: "text" as const, value: "", placeholder: "my-provider" },
         { key: "type", label: "Type", kind: "select" as const, value: formType, options: PROVIDER_TYPE_OPTIONS },
         { key: "baseUrl", label: "Base URL", kind: "text" as const, value: baseUrl },
@@ -24,7 +24,7 @@ function buildCreateFields(formType: string): FormField[] {
 
 function buildEditFields(target: ModelProviderDto): FormField[] {
     return [
-        { key: "slug", label: "Slug", kind: "text" as const, value: target.slug, readOnly: true },
+        { key: "code", label: "Provider Code", kind: "text" as const, value: target.code, readOnly: true },
         { key: "name", label: "Name", kind: "text" as const, value: target.name, placeholder: target.name },
         { key: "type", label: "Type", kind: "select" as const, value: target.type, options: PROVIDER_TYPE_OPTIONS },
         { key: "baseUrl", label: "Base URL", kind: "text" as const, value: target.baseUrl },
@@ -114,7 +114,7 @@ export function ProviderOverlay() {
         }
         try {
             await client.createProvider({
-                slug: values.slug.trim(),
+                code: values.code.trim(),
                 name: values.name.trim(),
                 type: values.type as APIType,
                 baseUrl: values.baseUrl.trim(),
@@ -141,7 +141,7 @@ export function ProviderOverlay() {
             if (values.apiKey && values.apiKey.trim() !== "") {
                 dto.apiKey = values.apiKey;
             }
-            await client.updateProvider(target.slug, dto);
+            await client.updateProvider(target.code, dto);
             setToast(`Provider updated: ${values.name.trim()}`);
             await reload();
         } catch (e) {
@@ -155,7 +155,7 @@ export function ProviderOverlay() {
             return;
         }
         try {
-            await client.deleteProvider(target.slug);
+            await client.deleteProvider(target.code);
             setToast(`Provider deleted: ${target.name}`);
             await reload();
         } catch (e) {
@@ -321,7 +321,7 @@ function ProviderList({
                     const url = pad(p.baseUrl, urlWidth);
                     return (
                         <Box
-                            key={p.slug}
+                            key={p.code}
                             onMouseOver={() => onCursor(i)}
                             onMouseClick={() => {
                                 onCursor(i);

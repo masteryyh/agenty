@@ -50,7 +50,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.AddModel(catalog.Model{
-		Slug:            mustModelID("claude-opus-4-8"),
+		Code:            mustModelCode("claude-opus-4-8"),
 		Name:            "Claude Opus 4.8",
 		ContextWindow:   200_000,
 		MaxOutputTokens: 32_000,
@@ -59,7 +59,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatalf("Save provider: %v", err)
 	}
 
-	modelRef := shared.NewModelRef(provider.Slug, mustModelID("claude-opus-4-8"))
+	modelRef := shared.NewModelRef(provider.Code, mustModelCode("claude-opus-4-8"))
 	a, err := agent.New("coder", "Code Assistant")
 	if err != nil {
 		t.Fatal(err)
@@ -71,14 +71,14 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Fatalf("Save agent: %v", err)
 	}
 
-	loadedProvider, err := repos.Catalog.Get(ctx, provider.Slug)
+	loadedProvider, err := repos.Catalog.Get(ctx, provider.Code)
 	if err != nil {
 		t.Fatalf("Get provider: %v", err)
 	}
 	if len(loadedProvider.Models) != 1 {
 		t.Errorf("loaded %d models, want 1", len(loadedProvider.Models))
 	}
-	loadedAgent, err := repos.Agent.Get(ctx, a.Slug)
+	loadedAgent, err := repos.Agent.Get(ctx, a.Code)
 	if err != nil {
 		t.Fatalf("Get agent: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 
 	// Conversation flow: the application layer resolves the agent's default
 	// configuration before constructing a session.
-	session := conversation.StartSession(loadedAgent.Slug, *loadedAgent.DefaultModel, loadedAgent.DefaultContextWindow, loadedAgent.DefaultReasoningEffort, nil)
+	session := conversation.StartSession(loadedAgent.Code, *loadedAgent.DefaultModel, loadedAgent.DefaultContextWindow, loadedAgent.DefaultReasoningEffort, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -140,16 +140,16 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	}
 }
 
-func mustSlug(s string) shared.Slug {
-	slug, err := shared.NewSlug(s)
+func mustCode(s string) shared.Code {
+	code, err := shared.NewCode(s)
 	if err != nil {
 		panic(err)
 	}
-	return slug
+	return code
 }
 
-func mustModelID(s string) shared.ModelID {
-	id, err := shared.NewModelID(s)
+func mustModelCode(s string) shared.ModelCode {
+	id, err := shared.NewModelCode(s)
 	if err != nil {
 		panic(err)
 	}

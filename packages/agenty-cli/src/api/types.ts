@@ -2,12 +2,12 @@ export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" |
 export type APIType = "openai" | "openai_completions" | "anthropic" | "gemini";
 
 export interface ModelRef {
-    providerSlug: string;
-    modelSlug: string;
+    providerCode: string;
+    modelCode: string;
 }
 
 export interface AgentDto {
-    slug: string;
+    code: string;
     name: string;
     description?: string;
     soul: string;
@@ -21,7 +21,7 @@ export interface AgentDto {
 }
 
 export interface CreateAgentDto {
-    slug: string;
+    code: string;
     name: string;
     description?: string;
     soul?: string;
@@ -32,11 +32,11 @@ export interface CreateAgentDto {
     metadata?: Record<string, unknown>;
 }
 
-export type UpdateAgentDto = Partial<Omit<CreateAgentDto, "slug">>;
+export type UpdateAgentDto = Partial<Omit<CreateAgentDto, "code">>;
 
 export interface ModelDto {
-    slug: string;
-    providerSlug: string;
+    code: string;
+    providerCode: string;
     providerName: string;
     name: string;
     contextWindow: number;
@@ -50,11 +50,11 @@ export interface ModelDto {
     updatedAt?: string;
 }
 
-export interface CoreModelDto extends Omit<ModelDto, "providerSlug" | "providerName"> {}
+export interface CoreModelDto extends Omit<ModelDto, "providerCode" | "providerName"> {}
 
 export interface CreateModelDto {
-    providerSlug: string;
-    modelSlug: string;
+    providerCode: string;
+    modelCode: string;
     name: string;
     contextWindow?: number;
     /** @deprecated Core ignores per-model output limits and uses 8192. */
@@ -65,10 +65,10 @@ export interface CreateModelDto {
     isDefault?: boolean;
 }
 
-export type UpdateModelDto = Omit<CreateModelDto, "providerSlug" | "modelSlug">;
+export type UpdateModelDto = Omit<CreateModelDto, "providerCode" | "modelCode">;
 
 export interface ModelProviderDto {
-    slug: string;
+    code: string;
     name: string;
     type: APIType;
     baseUrl: string;
@@ -80,7 +80,7 @@ export interface ModelProviderDto {
 }
 
 export interface CreateModelProviderDto {
-    slug: string;
+    code: string;
     name: string;
     type: APIType;
     baseUrl?: string;
@@ -88,7 +88,7 @@ export interface CreateModelProviderDto {
     metadata?: Record<string, unknown>;
 }
 
-export type UpdateModelProviderDto = Partial<Omit<CreateModelProviderDto, "slug">>;
+export type UpdateModelProviderDto = Partial<Omit<CreateModelProviderDto, "code">>;
 
 export type ContentBlock =
     | { type: "text"; text: string }
@@ -112,6 +112,19 @@ export type ContentBlock =
             stderr: string;
             outcome: { type: string; exitCode?: number };
         }>;
+    }
+    | {
+        type: "apply_patch_call";
+        id?: string;
+        callId: string;
+        source: "native" | "custom";
+        operation?: {
+            type: "create_file" | "update_file" | "delete_file";
+            path: string;
+            diff?: string;
+            moveTo?: string;
+        };
+        patch?: string;
     }
     | { type: "tool_result"; toolUseId: string; content: ContentBlock[]; isError: boolean }
     | { type: "image"; mediaType: string; data: string };
@@ -154,7 +167,7 @@ export interface RoundDto {
 
 export interface ChatSessionDto {
     id: string;
-    agentSlug: string;
+    agentCode: string;
     title?: string;
     cwd?: string;
     currentModel?: ModelRef;
@@ -168,9 +181,9 @@ export interface ChatSessionDto {
 export interface SessionSummaryDto {
     id: string;
     title: string;
-    agentSlug: string;
-    lastProviderSlug: string;
-    lastModelSlug: string;
+    agentCode: string;
+    lastProviderCode: string;
+    lastModelCode: string;
     contextWindow: number;
     lastReasoningEffort?: ReasoningEffort;
     createdAt: string;
@@ -217,9 +230,9 @@ export interface ExecutionStart {
 }
 
 export interface InitializeCompleteInput {
-    agentSlug: string;
-    providerSlug: string;
-    modelSlug: string;
+    agentCode: string;
+    providerCode: string;
+    modelCode: string;
 }
 
 export interface PagedResponse<T> {

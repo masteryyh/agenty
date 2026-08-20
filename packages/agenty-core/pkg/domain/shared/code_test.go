@@ -2,7 +2,7 @@ package shared
 
 import "testing"
 
-func TestNewSlug(t *testing.T) {
+func TestNewCode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -28,18 +28,18 @@ func TestNewSlug(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			slug, err := NewSlug(tt.value)
+			code, err := NewCode(tt.value)
 			if tt.valid {
 				if err != nil {
-					t.Fatalf("NewSlug(%q): %v", tt.value, err)
+					t.Fatalf("NewCode(%q): %v", tt.value, err)
 				}
-				if !slug.Valid() {
-					t.Errorf("Slug(%q).Valid() = false", tt.value)
+				if !code.Valid() {
+					t.Errorf("Code(%q).Valid() = false", tt.value)
 				}
 				return
 			}
 			if err == nil {
-				t.Errorf("NewSlug(%q) succeeded, want error", tt.value)
+				t.Errorf("NewCode(%q) succeeded, want error", tt.value)
 			}
 		})
 	}

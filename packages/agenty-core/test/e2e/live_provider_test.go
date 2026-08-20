@@ -73,25 +73,25 @@ func runLiveProviderConversation(t *testing.T, tt liveProviderCase) {
 	if apiKey == "" {
 		t.Skipf("%s is not set; skipping live %s E2E conversation", tt.keyEnv, tt.name)
 	}
-	modelSlug := strings.TrimSpace(os.Getenv(tt.modelEnv))
-	if modelSlug == "" {
-		modelSlug = tt.defaultModel
+	modelCode := strings.TrimSpace(os.Getenv(tt.modelEnv))
+	if modelCode == "" {
+		modelCode = tt.defaultModel
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	client := newAgentyClient(startCore(t))
-	agentSlug := tt.prefix + "-agent"
-	providerSlug := tt.prefix + "-provider"
+	agentCode := tt.prefix + "-agent"
+	providerCode := tt.prefix + "-provider"
 
 	_, err := client.CreateAgent(ctx, AgentCreateInput{
-		Slug: agentSlug,
+		Code: agentCode,
 		Name: "Live Provider E2E Agent",
 		Soul: "Follow the user's requested output format exactly.",
 	})
 	requireNoError(t, err)
 	_, err = client.CreateProvider(ctx, ProviderCreateInput{
-		Slug:    providerSlug,
+		Code:    providerCode,
 		Name:    tt.name,
 		Type:    tt.apiType,
 		BaseURL: strings.TrimSpace(os.Getenv(tt.baseURLEnv)),
@@ -99,17 +99,17 @@ func runLiveProviderConversation(t *testing.T, tt liveProviderCase) {
 	})
 	requireNoError(t, err)
 	_, err = client.AddModel(ctx, ModelInput{
-		ProviderSlug:    providerSlug,
-		ModelSlug:       modelSlug,
-		Name:            modelSlug,
+		ProviderCode:    providerCode,
+		ModelCode:       modelCode,
+		Name:            modelCode,
 		ContextWindow:   128_000,
 		MaxOutputTokens: 64,
 	})
 	requireNoError(t, err)
 	session, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentSlug:     agentSlug,
-		ProviderSlug:  providerSlug,
-		ModelSlug:     modelSlug,
+		AgentCode:     agentCode,
+		ProviderCode:  providerCode,
+		ModelCode:     modelCode,
 		ContextWindow: 128_000,
 	})
 	requireNoError(t, err)

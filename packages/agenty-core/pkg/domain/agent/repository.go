@@ -10,9 +10,9 @@ import (
 var ErrNotFound = errors.New("agent: not found")
 
 type Repository interface {
-	Get(ctx context.Context, slug shared.Slug) (*Agent, error)
+	Get(ctx context.Context, code shared.Code) (*Agent, error)
 	List(ctx context.Context) ([]*Agent, error)
 	Save(ctx context.Context, agent *Agent) error
-	Delete(ctx context.Context, slug shared.Slug) error
+	Delete(ctx context.Context, code shared.Code) error
 	Default(ctx context.Context) (*Agent, error)
 }

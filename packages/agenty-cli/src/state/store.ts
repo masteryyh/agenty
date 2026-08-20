@@ -139,6 +139,14 @@ function toolCallsFromBlocks(blocks: ContentBlock[]): UIToolCall[] {
                 name: "shell",
                 arguments: JSON.stringify(input),
             });
+        } else if (block.type === "apply_patch_call") {
+            calls.push({
+                id: block.callId,
+                name: "apply_patch",
+                arguments: JSON.stringify(block.source === "native"
+                    ? { operation: block.operation }
+                    : { patch: block.patch }),
+            });
         }
     }
     return calls;
@@ -634,7 +642,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 return;
             }
             try {
-                const session = await client.createSession(agent.slug, model, reasoningEffort(thinkingEnabled, thinkingLevel));
+                const session = await client.createSession(agent.code, model, reasoningEffort(thinkingEnabled, thinkingLevel));
                 set({ session, history: [], current: null, tokenConsumed: 0, overlay: null });
                 setToast("New session created.");
             } catch (error) {
@@ -658,7 +666,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     phrase: null,
                     activeSessionId: null,
                 });
-                setToast(`Switched to ${model.providerName}/${model.name}`);
+                setToast(`Switched to ${model.providerName} · ${model.name}`);
             } catch (error) {
                 set({ status: "idle", phrase: null, activeSessionId: null });
                 pushSystem(`switch model failed: ${(error as Error).message}`, true);
@@ -673,7 +681,7 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const full = await client.getSession(session.id);
                 const model = full.currentModel
-                    ? await client.resolveModel(`${full.currentModel.providerSlug}/${full.currentModel.modelSlug}`)
+                    ? await client.resolveModel(`${full.currentModel.providerCode}/${full.currentModel.modelCode}`)
                     : get().model;
                 set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
             } catch (error) {
@@ -688,9 +696,9 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const model = agent.defaultModel
-                    ? await client.resolveModel(`${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}`)
+                    ? await client.resolveModel(`${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}`)
                     : await client.getDefaultModel();
-                const session = await client.getLastSessionByAgent(agent.slug) ?? await client.createSession(agent.slug, model);
+                const session = await client.getLastSessionByAgent(agent.code) ?? await client.createSession(agent.code, model);
                 set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: actualContextSize(session), overlay: null });
                 setToast(`Switched to agent: ${agent.name}`);
             } catch (error) {

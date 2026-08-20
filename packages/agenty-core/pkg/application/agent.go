@@ -16,10 +16,10 @@ type AgentService struct {
 }
 
 type agentRepository interface {
-	Get(ctx context.Context, slug shared.Slug) (*agent.Agent, error)
+	Get(ctx context.Context, code shared.Code) (*agent.Agent, error)
 	List(ctx context.Context) ([]*agent.Agent, error)
 	Save(ctx context.Context, agent *agent.Agent) error
-	Delete(ctx context.Context, slug shared.Slug) error
+	Delete(ctx context.Context, code shared.Code) error
 }
 
 func NewAgentService(repo agentRepository) *AgentService {
@@ -37,20 +37,20 @@ type AgentInput struct {
 	Metadata               shared.Metadata        `json:"metadata,omitempty"`
 }
 
-func (s *AgentService) Create(ctx context.Context, slug string, in AgentInput) (*agent.Agent, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *AgentService) Create(ctx context.Context, code string, in AgentInput) (*agent.Agent, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
 
-	existing, err := s.repo.Get(ctx, slugVal)
+	existing, err := s.repo.Get(ctx, codeVal)
 	if err == nil && existing != nil {
-		return nil, AlreadyExists("agent " + slug + " already exists")
+		return nil, AlreadyExists("agent " + code + " already exists")
 	} else if err != nil && !errors.Is(err, storage.ErrAgentNotFound) {
 		return nil, Internal("failed to check existing agent: " + err.Error())
 	}
 
-	a, err := agent.New(slug, in.Name)
+	a, err := agent.New(code, in.Name)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
@@ -73,15 +73,15 @@ func (s *AgentService) Create(ctx context.Context, slug string, in AgentInput) (
 	return a, nil
 }
 
-func (s *AgentService) Get(ctx context.Context, slug string) (*agent.Agent, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *AgentService) Get(ctx context.Context, code string) (*agent.Agent, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	a, err := s.repo.Get(ctx, slugVal)
+	a, err := s.repo.Get(ctx, codeVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrAgentNotFound) {
-			return nil, NotFound("agent " + slug + " not found")
+			return nil, NotFound("agent " + code + " not found")
 		}
 		return nil, Internal("failed to get agent: " + err.Error())
 	}
@@ -110,15 +110,15 @@ type AgentUpdate struct {
 	Metadata               *shared.Metadata        `json:"metadata,omitempty"`
 }
 
-func (s *AgentService) Update(ctx context.Context, slug string, upd AgentUpdate) (*agent.Agent, error) {
-	slugVal, err := shared.NewSlug(slug)
+func (s *AgentService) Update(ctx context.Context, code string, upd AgentUpdate) (*agent.Agent, error) {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	a, err := s.repo.Get(ctx, slugVal)
+	a, err := s.repo.Get(ctx, codeVal)
 	if err != nil {
 		if errors.Is(err, storage.ErrAgentNotFound) {
-			return nil, NotFound("agent " + slug + " not found")
+			return nil, NotFound("agent " + code + " not found")
 		}
 		return nil, Internal("failed to get agent: " + err.Error())
 	}
@@ -158,14 +158,14 @@ func (s *AgentService) Update(ctx context.Context, slug string, upd AgentUpdate)
 	return a, nil
 }
 
-func (s *AgentService) Delete(ctx context.Context, slug string) error {
-	slugVal, err := shared.NewSlug(slug)
+func (s *AgentService) Delete(ctx context.Context, code string) error {
+	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return Validation(err.Error())
 	}
-	if err := s.repo.Delete(ctx, slugVal); err != nil {
+	if err := s.repo.Delete(ctx, codeVal); err != nil {
 		if errors.Is(err, storage.ErrAgentNotFound) {
-			return NotFound("agent " + slug + " not found")
+			return NotFound("agent " + code + " not found")
 		}
 		return Internal("failed to delete agent: " + err.Error())
 	}

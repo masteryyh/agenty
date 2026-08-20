@@ -22,8 +22,8 @@ func NewAgentRepository(agentsDir string) *AgentRepository {
 	return &AgentRepository{agentsDir: agentsDir}
 }
 
-func (r *AgentRepository) Get(ctx context.Context, slug shared.Slug) (*agent.Agent, error) {
-	path := filepath.Join(r.agentsDir, slug.String()+".json")
+func (r *AgentRepository) Get(ctx context.Context, code shared.Code) (*agent.Agent, error) {
+	path := filepath.Join(r.agentsDir, code.String()+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -54,13 +54,13 @@ func (r *AgentRepository) List(ctx context.Context) ([]*agent.Agent, error) {
 			continue
 		}
 
-		slugStr := entry.Name()[:len(entry.Name())-5]
-		slug, err := shared.NewSlug(slugStr)
+		codeStr := entry.Name()[:len(entry.Name())-5]
+		code, err := shared.NewCode(codeStr)
 		if err != nil {
 			continue
 		}
 
-		a, err := r.Get(ctx, slug)
+		a, err := r.Get(ctx, code)
 		if errors.Is(err, ErrAgentNotFound) {
 			continue
 		}
@@ -82,12 +82,12 @@ func (r *AgentRepository) Save(ctx context.Context, a *agent.Agent) error {
 		return err
 	}
 
-	path := filepath.Join(r.agentsDir, a.Slug.String()+".json")
+	path := filepath.Join(r.agentsDir, a.Code.String()+".json")
 	return os.WriteFile(path, data, 0600)
 }
 
-func (r *AgentRepository) Delete(ctx context.Context, slug shared.Slug) error {
-	path := filepath.Join(r.agentsDir, slug.String()+".json")
+func (r *AgentRepository) Delete(ctx context.Context, code shared.Code) error {
+	path := filepath.Join(r.agentsDir, code.String()+".json")
 	err := os.Remove(path)
 	if os.IsNotExist(err) {
 		return ErrAgentNotFound

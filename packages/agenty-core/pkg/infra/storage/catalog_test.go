@@ -18,12 +18,12 @@ func newCatalogRepo(t *testing.T) *CatalogRepository {
 	return NewCatalogRepository(filepath.Join(t.TempDir(), "providers"))
 }
 
-func mustCatalogModelID(value string) shared.ModelID {
-	modelID, err := shared.NewModelID(value)
+func mustCatalogModelCode(value string) shared.ModelCode {
+	modelCode, err := shared.NewModelCode(value)
 	if err != nil {
 		panic(err)
 	}
-	return modelID
+	return modelCode
 }
 
 func TestCatalogSaveAndGet(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	provider.APIKey = "sk-ant-test"
 
 	model1 := catalog.Model{
-		Slug:            mustCatalogModelID("org/claude-opus[fast]"),
+		Code:            mustCatalogModelCode(`org/claude\\claude-opus[fast]`),
 		Name:            "Claude Opus 4.8",
 		ContextWindow:   200000,
 		MaxOutputTokens: 32000,
@@ -51,7 +51,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		UpdatedAt: time.Now().UTC(),
 	}
 	model2 := catalog.Model{
-		Slug:            mustCatalogModelID("claude-haiku-4-5"),
+		Code:            mustCatalogModelCode("claude-haiku-4-5"),
 		Name:            "Claude Haiku 4.5",
 		ContextWindow:   200000,
 		MaxOutputTokens: 8000,
@@ -64,28 +64,28 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	modelData, err := os.ReadFile(filepath.Join(repo.providersDir, provider.Slug.String(), "models", modelFileName(model1.Slug)))
+	providerData, err := os.ReadFile(filepath.Join(repo.providersDir, provider.Code.String()+".json"))
 	if err != nil {
-		t.Fatalf("read model file: %v", err)
+		t.Fatalf("read provider file: %v", err)
 	}
-	var persistedModel map[string]shared.RawJSON
-	if err := json.Unmarshal(modelData, &persistedModel); err != nil {
-		t.Fatalf("decode model file: %v", err)
+	var persistedProvider catalog.Provider
+	if err := json.Unmarshal(providerData, &persistedProvider); err != nil {
+		t.Fatalf("decode provider file: %v", err)
 	}
-	if _, ok := persistedModel["reasoningEffortMapping"]; !ok {
-		t.Errorf("persisted model keys = %v, want reasoningEffortMapping", persistedModel)
+	if len(persistedProvider.Models) != 2 {
+		t.Fatalf("persisted %d models, want 2", len(persistedProvider.Models))
 	}
-	if _, ok := persistedModel["maxOutputTokens"]; !ok {
-		t.Errorf("persisted model keys = %v, want maxOutputTokens", persistedModel)
+	if persistedProvider.Models[0].Code != model1.Code && persistedProvider.Models[1].Code != model1.Code {
+		t.Errorf("persisted models = %+v, want model %s", persistedProvider.Models, model1.Code)
 	}
 
-	loaded, err := repo.Get(ctx, provider.Slug)
+	loaded, err := repo.Get(ctx, provider.Code)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	if loaded.Slug != provider.Slug {
-		t.Errorf("slug = %s, want %s", loaded.Slug, provider.Slug)
+	if loaded.Code != provider.Code {
+		t.Errorf("code = %s, want %s", loaded.Code, provider.Code)
 	}
 	if loaded.Name != provider.Name {
 		t.Errorf("name = %s, want %s", loaded.Name, provider.Name)
@@ -94,13 +94,13 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		t.Fatalf("loaded %d models, want 2", len(loaded.Models))
 	}
 
-	// Models may load in any order; find by slug.
+	// Models may load in any order; find by code.
 	var gotOpus, gotHaiku *catalog.Model
 	for i := range loaded.Models {
-		if loaded.Models[i].Slug == model1.Slug {
+		if loaded.Models[i].Code == model1.Code {
 			gotOpus = &loaded.Models[i]
 		}
-		if loaded.Models[i].Slug == model2.Slug {
+		if loaded.Models[i].Code == model2.Code {
 			gotHaiku = &loaded.Models[i]
 		}
 	}
@@ -176,63 +176,59 @@ func TestCatalogDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := repo.Delete(ctx, provider.Slug); err != nil {
+	if err := repo.Delete(ctx, provider.Code); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	_, err := repo.Get(ctx, provider.Slug)
+	_, err := repo.Get(ctx, provider.Code)
 	if err != ErrProviderNotFound {
 		t.Errorf("Get after Delete = %v, want ErrProviderNotFound", err)
 	}
-	if err := repo.Delete(ctx, provider.Slug); err != ErrProviderNotFound {
+	if err := repo.Delete(ctx, provider.Code); err != ErrProviderNotFound {
 		t.Errorf("Delete missing provider = %v, want ErrProviderNotFound", err)
 	}
 }
 
 func TestCatalogGetReturnsNotFoundWhenMissing(t *testing.T) {
 	repo := newCatalogRepo(t)
-	_, err := repo.Get(context.Background(), mustSlug("unknown"))
+	_, err := repo.Get(context.Background(), mustCode("unknown"))
 	if err != ErrProviderNotFound {
 		t.Errorf("Get() = %v, want ErrProviderNotFound", err)
 	}
 }
 
-func TestCatalogDeleteModel(t *testing.T) {
+func TestCatalogSaveAfterRemovingModel(t *testing.T) {
 	repo := newCatalogRepo(t)
 	ctx := context.Background()
 
 	provider, _ := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
 	now := time.Now().UTC()
 	provider.Models = []catalog.Model{
-		{Slug: mustCatalogModelID("claude-opus-4-8"), Name: "Opus", CreatedAt: now, UpdatedAt: now},
-		{Slug: mustCatalogModelID("claude-haiku-4-5"), Name: "Haiku", CreatedAt: now, UpdatedAt: now},
+		{Code: mustCatalogModelCode("claude-opus-4-8"), Name: "Opus", CreatedAt: now, UpdatedAt: now},
+		{Code: mustCatalogModelCode("claude-haiku-4-5"), Name: "Haiku", CreatedAt: now, UpdatedAt: now},
 	}
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := repo.DeleteModel(ctx, provider.Slug, mustCatalogModelID("claude-haiku-4-5")); err != nil {
-		t.Fatalf("DeleteModel: %v", err)
+	provider.RemoveModel(mustCatalogModelCode("claude-haiku-4-5"))
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatalf("Save after remove: %v", err)
 	}
 
-	loaded, err := repo.Get(ctx, provider.Slug)
+	loaded, err := repo.Get(ctx, provider.Code)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(loaded.Models) != 1 {
 		t.Fatalf("loaded %d models, want 1 after delete", len(loaded.Models))
 	}
-	if loaded.Models[0].Slug != mustCatalogModelID("claude-opus-4-8") {
-		t.Errorf("remaining model = %s, want claude-opus-4-8", loaded.Models[0].Slug)
+	if loaded.Models[0].Code != mustCatalogModelCode("claude-opus-4-8") {
+		t.Errorf("remaining model = %s, want claude-opus-4-8", loaded.Models[0].Code)
 	}
 
-	// Deleting the same model again surfaces model-not-found, not a silent no-op.
-	if err := repo.DeleteModel(ctx, provider.Slug, mustCatalogModelID("claude-haiku-4-5")); err != catalog.ErrModelNotFound {
-		t.Errorf("DeleteModel missing model = %v, want catalog.ErrModelNotFound", err)
-	}
-
-	// Deleting from a missing provider surfaces provider-not-found.
-	if err := repo.DeleteModel(ctx, mustSlug("nope"), mustCatalogModelID("x")); err != ErrProviderNotFound {
-		t.Errorf("DeleteModel missing provider = %v, want ErrProviderNotFound", err)
+	providerPath := filepath.Join(repo.providersDir, provider.Code.String()+".json")
+	if _, err := os.Stat(providerPath); err != nil {
+		t.Fatalf("provider file after remove: %v", err)
 	}
 }

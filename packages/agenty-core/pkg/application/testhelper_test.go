@@ -20,7 +20,7 @@ import (
 )
 
 type agentRepositoryFake struct {
-	agents    map[shared.Slug]*agent.Agent
+	agents    map[shared.Code]*agent.Agent
 	getErr    error
 	listErr   error
 	saveErr   error
@@ -28,14 +28,14 @@ type agentRepositoryFake struct {
 }
 
 func newAgentRepositoryFake() *agentRepositoryFake {
-	return &agentRepositoryFake{agents: make(map[shared.Slug]*agent.Agent)}
+	return &agentRepositoryFake{agents: make(map[shared.Code]*agent.Agent)}
 }
 
-func (r *agentRepositoryFake) Get(_ context.Context, slug shared.Slug) (*agent.Agent, error) {
+func (r *agentRepositoryFake) Get(_ context.Context, code shared.Code) (*agent.Agent, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	a, ok := r.agents[slug]
+	a, ok := r.agents[code]
 	if !ok {
 		return nil, storage.ErrAgentNotFound
 	}
@@ -57,18 +57,18 @@ func (r *agentRepositoryFake) Save(_ context.Context, a *agent.Agent) error {
 	if r.saveErr != nil {
 		return r.saveErr
 	}
-	r.agents[a.Slug] = cloneAgent(a)
+	r.agents[a.Code] = cloneAgent(a)
 	return nil
 }
 
-func (r *agentRepositoryFake) Delete(_ context.Context, slug shared.Slug) error {
+func (r *agentRepositoryFake) Delete(_ context.Context, code shared.Code) error {
 	if r.deleteErr != nil {
 		return r.deleteErr
 	}
-	if _, ok := r.agents[slug]; !ok {
+	if _, ok := r.agents[code]; !ok {
 		return storage.ErrAgentNotFound
 	}
-	delete(r.agents, slug)
+	delete(r.agents, code)
 	return nil
 }
 
@@ -83,23 +83,22 @@ func cloneAgent(a *agent.Agent) *agent.Agent {
 }
 
 type providerRepositoryFake struct {
-	providers      map[shared.Slug]*catalog.Provider
-	getErr         error
-	listErr        error
-	saveErr        error
-	deleteErr      error
-	deleteModelErr error
+	providers map[shared.Code]*catalog.Provider
+	getErr    error
+	listErr   error
+	saveErr   error
+	deleteErr error
 }
 
 func newProviderRepositoryFake() *providerRepositoryFake {
-	return &providerRepositoryFake{providers: make(map[shared.Slug]*catalog.Provider)}
+	return &providerRepositoryFake{providers: make(map[shared.Code]*catalog.Provider)}
 }
 
-func (r *providerRepositoryFake) Get(_ context.Context, slug shared.Slug) (*catalog.Provider, error) {
+func (r *providerRepositoryFake) Get(_ context.Context, code shared.Code) (*catalog.Provider, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	p, ok := r.providers[slug]
+	p, ok := r.providers[code]
 	if !ok {
 		return nil, storage.ErrProviderNotFound
 	}
@@ -121,36 +120,19 @@ func (r *providerRepositoryFake) Save(_ context.Context, p *catalog.Provider) er
 	if r.saveErr != nil {
 		return r.saveErr
 	}
-	r.providers[p.Slug] = cloneProvider(p)
+	r.providers[p.Code] = cloneProvider(p)
 	return nil
 }
 
-func (r *providerRepositoryFake) Delete(_ context.Context, slug shared.Slug) error {
+func (r *providerRepositoryFake) Delete(_ context.Context, code shared.Code) error {
 	if r.deleteErr != nil {
 		return r.deleteErr
 	}
-	if _, ok := r.providers[slug]; !ok {
+	if _, ok := r.providers[code]; !ok {
 		return storage.ErrProviderNotFound
 	}
-	delete(r.providers, slug)
+	delete(r.providers, code)
 	return nil
-}
-
-func (r *providerRepositoryFake) DeleteModel(_ context.Context, providerSlug shared.Slug, modelSlug shared.ModelID) error {
-	if r.deleteModelErr != nil {
-		return r.deleteModelErr
-	}
-	p, ok := r.providers[providerSlug]
-	if !ok {
-		return storage.ErrProviderNotFound
-	}
-	for i := range p.Models {
-		if p.Models[i].Slug == modelSlug {
-			p.Models = append(p.Models[:i], p.Models[i+1:]...)
-			return nil
-		}
-	}
-	return catalog.ErrModelNotFound
 }
 
 func cloneProvider(p *catalog.Provider) *catalog.Provider {
@@ -218,7 +200,7 @@ func (r *sessionRepositoryFake) List(_ context.Context, query conversation.ListQ
 	result := make([]conversation.SessionSummary, 0, len(r.events))
 	for _, events := range r.events {
 		summary := conversation.ReplaySession(events).Summary()
-		if query.AgentSlug == nil || summary.AgentSlug == *query.AgentSlug {
+		if query.AgentCode == nil || summary.AgentCode == *query.AgentCode {
 			result = append(result, summary)
 		}
 	}

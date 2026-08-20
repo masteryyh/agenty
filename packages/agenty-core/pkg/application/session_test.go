@@ -9,12 +9,12 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-func newSession(t *testing.T, sessionSvc *application.SessionService, agentSlug string) string {
+func newSession(t *testing.T, sessionSvc *application.SessionService, agentCode string) string {
 	t.Helper()
 	sess, err := sessionSvc.Create(context.Background(), application.SessionCreateInput{
-		AgentSlug:     agentSlug,
-		ProviderSlug:  "anthropic",
-		ModelSlug:     "claude-opus-4-8",
+		AgentCode:     agentCode,
+		ProviderCode:  "anthropic",
+		ModelCode:     "claude-opus-4-8",
 		ContextWindow: 200_000,
 	})
 	if err != nil {
@@ -28,9 +28,9 @@ func TestSessionCreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	sess, err := sessionSvc.Create(ctx, application.SessionCreateInput{
-		AgentSlug:       "coder",
-		ProviderSlug:    "anthropic",
-		ModelSlug:       "claude-opus-4-8",
+		AgentCode:       "coder",
+		ProviderCode:    "anthropic",
+		ModelCode:       "claude-opus-4-8",
 		ContextWindow:   200_000,
 		ReasoningEffort: shared.ReasoningHigh,
 		Cwd:             ptr("/tmp/work"),
@@ -41,7 +41,7 @@ func TestSessionCreateAndGet(t *testing.T) {
 	if sess.ID.String() == "" {
 		t.Error("session id is empty")
 	}
-	if sess.CurrentModel == nil || sess.CurrentModel.ModelSlug.String() != "claude-opus-4-8" {
+	if sess.CurrentModel == nil || sess.CurrentModel.ModelCode.String() != "claude-opus-4-8" {
 		t.Errorf("current model = %+v", sess.CurrentModel)
 	}
 	if sess.Cwd == nil || *sess.Cwd != "/tmp/work" {
@@ -104,10 +104,10 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 		name  string
 		input application.SessionCreateInput
 	}{
-		{name: "agent slug", input: application.SessionCreateInput{AgentSlug: "Bad Slug", ProviderSlug: "anthropic", ModelSlug: "claude-opus"}},
-		{name: "provider slug", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "Bad Slug", ModelSlug: "claude-opus"}},
-		{name: "model slug", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "Bad Slug"}},
-		{name: "reasoning effort", input: application.SessionCreateInput{AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "claude-opus", ReasoningEffort: "extreme"}},
+		{name: "agent code", input: application.SessionCreateInput{AgentCode: "Bad Code", ProviderCode: "anthropic", ModelCode: "claude-opus"}},
+		{name: "provider code", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "Bad Code", ModelCode: "claude-opus"}},
+		{name: "model code", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "Bad Code"}},
+		{name: "reasoning effort", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "claude-opus", ReasoningEffort: "extreme"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 func TestSessionCreateDefaultsReasoningOff(t *testing.T) {
 	_, _, sessionSvc := newServices(t)
 	sess, err := sessionSvc.Create(t.Context(), application.SessionCreateInput{
-		AgentSlug: "coder", ProviderSlug: "anthropic", ModelSlug: "claude-opus",
+		AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "claude-opus",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestSessionList(t *testing.T) {
 		t.Errorf("List all returned %d, want 3", len(all))
 	}
 
-	filtered, err := sessionSvc.List(ctx, application.SessionListQuery{AgentSlug: "coder"})
+	filtered, err := sessionSvc.List(ctx, application.SessionListQuery{AgentCode: "coder"})
 	if err != nil {
 		t.Fatalf("List filtered: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestSessionList(t *testing.T) {
 		t.Errorf("List paged returned %d, want 1", len(paged))
 	}
 
-	if _, err := sessionSvc.List(ctx, application.SessionListQuery{AgentSlug: "Bad Slug"}); appErrorCode(err) != application.CodeValidation {
+	if _, err := sessionSvc.List(ctx, application.SessionListQuery{AgentCode: "Bad Code"}); appErrorCode(err) != application.CodeValidation {
 		t.Errorf("invalid filter error = %v, want validation", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestSessionSetModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CurrentModel == nil || got.CurrentModel.ModelSlug.String() != "gpt-5.6" {
+	if got.CurrentModel == nil || got.CurrentModel.ModelCode.String() != "gpt-5.6" {
 		t.Errorf("current model = %+v, want gpt-5.6", got.CurrentModel)
 	}
 	if got.ContextWindow != 128_000 {

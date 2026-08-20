@@ -9,7 +9,7 @@ import (
 const DefaultMaxOutputTokens int64 = 8_192
 
 type Model struct {
-	Slug                   shared.ModelID                    `json:"slug"`
+	Code                   shared.ModelCode                  `json:"code"`
 	Name                   string                            `json:"name"`
 	ContextWindow          int                               `json:"contextWindow"`
 	MaxOutputTokens        int64                             `json:"maxOutputTokens"`

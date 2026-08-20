@@ -17,29 +17,29 @@ func TestLiveProviders(t *testing.T) {
 	tests := []struct {
 		name         string
 		apiType      catalog.APIType
-		providerSlug shared.Slug
+		providerCode shared.Code
 		keyEnv       string
 		baseURLEnv   string
 		modelEnv     string
-		defaultModel shared.ModelID
+		defaultModel shared.ModelCode
 	}{
 		{
-			name: "OpenAI Responses", apiType: catalog.APIOpenAI, providerSlug: "openai",
+			name: "OpenAI Responses", apiType: catalog.APIOpenAI, providerCode: "openai",
 			keyEnv: "OPENAI_API_KEY", baseURLEnv: "OPENAI_BASE_URL",
 			modelEnv: "OPENAI_RESPONSES_MODEL", defaultModel: "gpt-5-mini",
 		},
 		{
-			name: "OpenAI Chat Completions", apiType: catalog.APIOpenAICompletions, providerSlug: "openai-completions",
+			name: "OpenAI Chat Completions", apiType: catalog.APIOpenAICompletions, providerCode: "openai-completions",
 			keyEnv: "OPENAI_API_KEY", baseURLEnv: "OPENAI_BASE_URL",
 			modelEnv: "OPENAI_CHAT_MODEL", defaultModel: "gpt-4.1-mini",
 		},
 		{
-			name: "Anthropic Messages", apiType: catalog.APIAnthropic, providerSlug: "anthropic",
+			name: "Anthropic Messages", apiType: catalog.APIAnthropic, providerCode: "anthropic",
 			keyEnv: "ANTHROPIC_API_KEY", baseURLEnv: "ANTHROPIC_BASE_URL",
 			modelEnv: "ANTHROPIC_MODEL", defaultModel: "claude-haiku-4-5",
 		},
 		{
-			name: "Google GenAI", apiType: catalog.APIGemini, providerSlug: "google",
+			name: "Google GenAI", apiType: catalog.APIGemini, providerCode: "google",
 			keyEnv: "GEMINI_API_KEY", baseURLEnv: "GEMINI_BASE_URL",
 			modelEnv: "GEMINI_MODEL", defaultModel: "gemini-2.5-flash",
 		},
@@ -51,15 +51,15 @@ func TestLiveProviders(t *testing.T) {
 				t.Skipf("%s is not set; skipping live %s integration test", tt.keyEnv, tt.name)
 			}
 
-			modelSlug := tt.defaultModel
+			modelCode := tt.defaultModel
 			if configured := os.Getenv(tt.modelEnv); configured != "" {
-				modelSlug = shared.ModelID(configured)
+				modelCode = shared.ModelCode(configured)
 			}
 			provider := catalog.Provider{
-				Slug: tt.providerSlug, Type: tt.apiType,
+				Code: tt.providerCode, Type: tt.apiType,
 				APIKey: apiKey, BaseURL: os.Getenv(tt.baseURLEnv),
 			}
-			model := catalog.Model{Slug: modelSlug}
+			model := catalog.Model{Code: modelCode}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()

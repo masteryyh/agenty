@@ -38,7 +38,7 @@ var baseSystemPromptTemplate = template.Must(
 )
 
 type Agent struct {
-	Slug                   shared.Slug            `json:"slug"`
+	Code                   shared.Code            `json:"code"`
 	Name                   string                 `json:"name"`
 	Description            string                 `json:"description,omitempty"`
 	Soul                   string                 `json:"soul"`
@@ -51,15 +51,15 @@ type Agent struct {
 	UpdatedAt              time.Time              `json:"updatedAt"`
 }
 
-func New(slug, name string) (*Agent, error) {
-	s, err := shared.NewSlug(slug)
+func New(code, name string) (*Agent, error) {
+	s, err := shared.NewCode(code)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now().UTC()
 	return &Agent{
-		Slug:      s,
+		Code:      s,
 		Name:      name,
 		CreatedAt: now,
 		UpdatedAt: now,

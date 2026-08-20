@@ -18,6 +18,7 @@ const (
 	BlockImage       BlockType = "image"
 	BlockShellCall   BlockType = "shell_call"
 	BlockShellOutput BlockType = "shell_call_output"
+	BlockApplyPatch  BlockType = "apply_patch_call"
 )
 
 type ContentBlock interface {
@@ -157,6 +158,56 @@ type ShellCallOutputBlock struct {
 	Output          []ShellCommandOutput `json:"output"`
 }
 
+type ApplyPatchOperationType string
+
+const (
+	ApplyPatchCreateFile ApplyPatchOperationType = "create_file"
+	ApplyPatchUpdateFile ApplyPatchOperationType = "update_file"
+	ApplyPatchDeleteFile ApplyPatchOperationType = "delete_file"
+)
+
+type ApplyPatchOperation struct {
+	Type   ApplyPatchOperationType `json:"type"`
+	Path   string                  `json:"path"`
+	Diff   string                  `json:"diff,omitempty"`
+	MoveTo string                  `json:"moveTo,omitempty"`
+}
+
+type ApplyPatchCallSource string
+
+const (
+	ApplyPatchSourceNative ApplyPatchCallSource = "native"
+	ApplyPatchSourceCustom ApplyPatchCallSource = "custom"
+)
+
+type ApplyPatchCallBlock struct {
+	ID        string               `json:"id,omitempty"`
+	CallID    string               `json:"callId"`
+	Source    ApplyPatchCallSource `json:"source"`
+	Operation *ApplyPatchOperation `json:"operation,omitempty"`
+	Patch     string               `json:"patch,omitempty"`
+}
+
+func (b ApplyPatchCallBlock) ToolUseBlock() ToolUseBlock {
+	input, _ := json.Marshal(struct {
+		Operation *ApplyPatchOperation `json:"operation,omitempty"`
+		Patch     string               `json:"patch,omitempty"`
+	}{Operation: b.Operation, Patch: b.Patch})
+	return ToolUseBlock{ID: b.CallID, Name: "apply_patch", Input: shared.RawJSON(input)}
+}
+
+func (ApplyPatchCallBlock) BlockType() BlockType {
+	return BlockApplyPatch
+}
+
+func (b ApplyPatchCallBlock) MarshalJSON() ([]byte, error) {
+	type alias ApplyPatchCallBlock
+	return json.Marshal(struct {
+		Type BlockType `json:"type"`
+		alias
+	}{Type: BlockApplyPatch, alias: alias(b)})
+}
+
 func (ShellCallOutputBlock) BlockType() BlockType {
 	return BlockShellOutput
 }
@@ -241,6 +292,12 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 			block = b
 		case BlockShellOutput:
 			var b ShellCallOutputBlock
+			if err := json.Unmarshal(raw, &b); err != nil {
+				return err
+			}
+			block = b
+		case BlockApplyPatch:
+			var b ApplyPatchCallBlock
 			if err := json.Unmarshal(raw, &b); err != nil {
 				return err
 			}

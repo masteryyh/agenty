@@ -122,6 +122,54 @@ func TestShellBlocksRoundTrip(t *testing.T) {
 	}
 }
 
+func TestApplyPatchBlocksRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	operation := ApplyPatchOperation{
+		Type: ApplyPatchUpdateFile,
+		Path: "main.go",
+		Diff: "@@\n-old\n+new",
+	}
+	original := Content{
+		ApplyPatchCallBlock{
+			ID: "apc_1", CallID: "call_1", Source: ApplyPatchSourceNative,
+			Operation: &operation,
+		},
+		ApplyPatchCallBlock{
+			CallID: "call_2", Source: ApplyPatchSourceCustom,
+			Patch: "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch",
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Content
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	native, ok := decoded[0].(ApplyPatchCallBlock)
+	if !ok || native.Operation == nil || native.Operation.Diff != operation.Diff {
+		t.Fatalf("native block = %#v", decoded[0])
+	}
+	custom, ok := decoded[1].(ApplyPatchCallBlock)
+	if !ok || custom.Patch != original[1].(ApplyPatchCallBlock).Patch {
+		t.Fatalf("custom block = %#v", decoded[1])
+	}
+
+	nativeInput := native.ToolUseBlock()
+	if nativeInput.ID != "call_1" || nativeInput.Name != "apply_patch" ||
+		string(nativeInput.Input) != `{"operation":{"type":"update_file","path":"main.go","diff":"@@\n-old\n+new"}}` {
+		t.Errorf("native tool input = %#v", nativeInput)
+	}
+	customInput := custom.ToolUseBlock()
+	if customInput.ID != "call_2" ||
+		string(customInput.Input) != `{"patch":"*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"}` {
+		t.Errorf("custom tool input = %#v", customInput)
+	}
+}
+
 func int64Pointer(value int64) *int64 {
 	return &value
 }

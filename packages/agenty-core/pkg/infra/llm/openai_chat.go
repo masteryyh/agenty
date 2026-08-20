@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	openaishared "github.com/openai/openai-go/v3/shared"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -141,7 +142,7 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:               openaishared.ChatModel(caller.model.Slug.String()),
+		Model:               openaishared.ChatModel(caller.model.Code.String()),
 		Messages:            messages,
 		MaxCompletionTokens: openai.Int(request.MaxOutputTokens),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
@@ -159,6 +160,9 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 func openAIChatTools(definitions []modelToolDefinition) ([]openai.ChatCompletionToolUnionParam, error) {
 	tools := make([]openai.ChatCompletionToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
+		if definition.Type == agentloop.ToolTypeApplyPatch {
+			continue
+		}
 		tool, err := openAIChatToolDefinition(definition)
 		if err != nil {
 			return nil, err
@@ -241,6 +245,16 @@ func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMe
 			}
 			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{OfFunction: &call})
 		case conversation.ShellCallBlock:
+			call := value.ToolUseBlock()
+			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: call.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name: call.Name, Arguments: string(call.Input),
+					},
+				},
+			})
+		case conversation.ApplyPatchCallBlock:
 			call := value.ToolUseBlock()
 			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{

@@ -80,7 +80,7 @@ export class AgentyClient {
             return agents.find((agent) => agent.isDefault) ?? agents[0];
         }
         const lower = reference.toLowerCase();
-        const matched = agents.find((agent) => agent.slug === reference) ??
+        const matched = agents.find((agent) => agent.code === reference) ??
             agents.find((agent) => agent.name.toLowerCase() === lower);
         if (!matched) {
             throw new Error(`agent not found: ${reference}`);
@@ -96,16 +96,16 @@ export class AgentyClient {
         return agent;
     }
 
-    async updateAgent(slug: string, input: UpdateAgentDto): Promise<AgentDto> {
-        const agent = await this.rpc.call<AgentDto | null>("agent.update", { slug, ...input });
+    async updateAgent(code: string, input: UpdateAgentDto): Promise<AgentDto> {
+        const agent = await this.rpc.call<AgentDto | null>("agent.update", { code, ...input });
         if (!agent) {
-            throw new Error(`core returned an empty agent for ${slug}`);
+            throw new Error(`core returned an empty agent for ${code}`);
         }
         return agent;
     }
 
-    async deleteAgent(slug: string): Promise<void> {
-        await this.rpc.call("agent.delete", { slug });
+    async deleteAgent(code: string): Promise<void> {
+        await this.rpc.call("agent.delete", { code });
     }
 
     async listProviders(): Promise<ModelProviderDto[]> {
@@ -127,16 +127,16 @@ export class AgentyClient {
         return normalizeProvider(provider);
     }
 
-    async updateProvider(slug: string, input: UpdateModelProviderDto): Promise<ModelProviderDto> {
-        const provider = await this.rpc.call<ModelProviderDto | null>("provider.update", { slug, ...input });
+    async updateProvider(code: string, input: UpdateModelProviderDto): Promise<ModelProviderDto> {
+        const provider = await this.rpc.call<ModelProviderDto | null>("provider.update", { code, ...input });
         if (!provider) {
-            throw new Error(`core returned an empty provider for ${slug}`);
+            throw new Error(`core returned an empty provider for ${code}`);
         }
         return normalizeProvider(provider);
     }
 
-    async deleteProvider(slug: string): Promise<void> {
-        await this.rpc.call("provider.delete", { slug });
+    async deleteProvider(code: string): Promise<void> {
+        await this.rpc.call("provider.delete", { code });
     }
 
     async listModels(): Promise<ModelDto[]> {
@@ -164,9 +164,9 @@ export class AgentyClient {
         const models = await this.listModels();
         const lower = reference.toLowerCase();
         const matches = models.filter((model) =>
-            model.slug === reference ||
+            model.code === reference ||
             model.name.toLowerCase() === lower ||
-            `${model.providerSlug}/${model.slug}`.toLowerCase() === lower ||
+            `${model.providerCode}/${model.code}`.toLowerCase() === lower ||
             `${model.providerName}/${model.name}`.toLowerCase() === lower,
         );
         if (matches.length !== 1) {
@@ -177,27 +177,27 @@ export class AgentyClient {
 
     async createModel(input: CreateModelDto): Promise<ModelDto> {
         const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", input);
-        return findProjectedModel(provider, input.modelSlug);
+        return findProjectedModel(provider, input.modelCode);
     }
 
-    async updateModel(providerSlug: string, modelSlug: string, input: UpdateModelDto): Promise<ModelDto> {
+    async updateModel(providerCode: string, modelCode: string, input: UpdateModelDto): Promise<ModelDto> {
         const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", {
-            providerSlug,
-            modelSlug,
+            providerCode,
+            modelCode,
             ...input,
         });
-        return findProjectedModel(provider, modelSlug);
+        return findProjectedModel(provider, modelCode);
     }
 
-    async deleteModel(providerSlug: string, modelSlug: string): Promise<void> {
-        await this.rpc.call("provider.removeModel", { providerSlug, modelSlug });
+    async deleteModel(providerCode: string, modelCode: string): Promise<void> {
+        await this.rpc.call("provider.removeModel", { providerCode, modelCode });
     }
 
-    async createSession(agentSlug: string, model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
+    async createSession(agentCode: string, model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
-            agentSlug,
-            providerSlug: model.providerSlug,
-            modelSlug: model.slug,
+            agentCode,
+            providerCode: model.providerCode,
+            modelCode: model.code,
             contextWindow: model.contextWindow,
             reasoningEffort: effort,
         });
@@ -209,21 +209,21 @@ export class AgentyClient {
         return requireSession(session, `session.get ${id}`);
     }
 
-    async listSessionSummaries(agentSlug?: string): Promise<SessionSummaryDto[]> {
+    async listSessionSummaries(agentCode?: string): Promise<SessionSummaryDto[]> {
         const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>(
             "session.list",
-            agentSlug ? { agentSlug } : {},
+            agentCode ? { agentCode } : {},
         );
         return (summaries ?? []).filter((summary): summary is SessionSummaryDto => summary !== null);
     }
 
-    async listSessions(agentSlug?: string): Promise<ChatSessionDto[]> {
-        const summaries = await this.listSessionSummaries(agentSlug);
+    async listSessions(agentCode?: string): Promise<ChatSessionDto[]> {
+        const summaries = await this.listSessionSummaries(agentCode);
         return Promise.all(summaries.map((session) => this.getSession(session.id)));
     }
 
-    async getLastSessionByAgent(agentSlug: string): Promise<ChatSessionDto | null> {
-        const sessions = await this.listSessionSummaries(agentSlug);
+    async getLastSessionByAgent(agentCode: string): Promise<ChatSessionDto | null> {
+        const sessions = await this.listSessionSummaries(agentCode);
         return sessions.length > 0 ? this.getSession(sessions[0].id) : null;
     }
 
@@ -235,8 +235,8 @@ export class AgentyClient {
     async setSessionModel(id: string, model: ModelDto): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.setModel", {
             id,
-            providerSlug: model.providerSlug,
-            modelSlug: model.slug,
+            providerCode: model.providerCode,
+            modelCode: model.code,
         });
         return requireSession(session, `session.setModel ${id}`);
     }
@@ -271,11 +271,11 @@ export class AgentyClient {
     }): Promise<PreparedSession> {
         const agent = await this.resolveAgent(options.agentRef);
         const requestedModel = options.modelRef ? await this.resolveModel(options.modelRef) : undefined;
-        let session = options.newSession ? null : await this.getLastSessionByAgent(agent.slug);
+        let session = options.newSession ? null : await this.getLastSessionByAgent(agent.code);
         if (!session) {
             const model = requestedModel ?? await this.resolveAgentModel(agent);
             session = await this.createSession(
-                agent.slug,
+                agent.code,
                 model,
                 options.reasoningEffort ?? agent.defaultReasoningEffort ?? "off",
             );
@@ -283,8 +283,8 @@ export class AgentyClient {
         }
 
         if (requestedModel) {
-            const matchesCurrent = session.currentModel?.providerSlug === requestedModel.providerSlug &&
-                session.currentModel.modelSlug === requestedModel.slug;
+            const matchesCurrent = session.currentModel?.providerCode === requestedModel.providerCode &&
+                session.currentModel.modelCode === requestedModel.code;
             if (!matchesCurrent) {
                 session = await this.setSessionModel(session.id, requestedModel);
             }
@@ -293,7 +293,7 @@ export class AgentyClient {
 
         if (session.currentModel) {
             const model = await this.resolveModel(
-                `${session.currentModel.providerSlug}/${session.currentModel.modelSlug}`,
+                `${session.currentModel.providerCode}/${session.currentModel.modelCode}`,
             );
             return { agent, model, session };
         }
@@ -305,7 +305,7 @@ export class AgentyClient {
 
     private async resolveAgentModel(agent: AgentDto): Promise<ModelDto> {
         if (agent.defaultModel) {
-            return this.resolveModel(`${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}`);
+            return this.resolveModel(`${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}`);
         }
         return this.getDefaultModel();
     }
@@ -314,7 +314,7 @@ export class AgentyClient {
 function projectModel(provider: ModelProviderDto, model: CoreModelDto): ModelDto {
     return {
         ...model,
-        providerSlug: provider.slug,
+        providerCode: provider.code,
         providerName: provider.name,
     };
 }
@@ -386,14 +386,14 @@ function requireSession(session: ChatSessionDto | null, operation: string): Chat
     return normalizeSession(session);
 }
 
-function findProjectedModel(provider: ModelProviderDto | null, modelSlug: string): ModelDto {
+function findProjectedModel(provider: ModelProviderDto | null, modelCode: string): ModelDto {
     if (!provider) {
         throw new Error("core returned an empty provider while adding a model");
     }
     const normalizedProvider = normalizeProvider(provider);
-    const model = normalizedProvider.models.find((candidate) => candidate.slug === modelSlug);
+    const model = normalizedProvider.models.find((candidate) => candidate.code === modelCode);
     if (!model) {
-        throw new Error(`core did not return model ${normalizedProvider.slug}/${modelSlug}`);
+        throw new Error(`core did not return model ${normalizedProvider.code}/${modelCode}`);
     }
     return projectModel(normalizedProvider, model);
 }

@@ -13,23 +13,23 @@ func NewID() uuid.UUID {
 type Metadata map[string]any
 
 type ModelRef struct {
-	ProviderSlug Slug    `json:"providerSlug"`
-	ModelSlug    ModelID `json:"modelSlug"`
+	ProviderCode Code      `json:"providerCode"`
+	ModelCode    ModelCode `json:"modelCode"`
 }
 
-func NewModelRef(provider Slug, model ModelID) ModelRef {
+func NewModelRef(provider Code, model ModelCode) ModelRef {
 	return ModelRef{
-		ProviderSlug: provider,
-		ModelSlug:    model,
+		ProviderCode: provider,
+		ModelCode:    model,
 	}
 }
 
 func (r ModelRef) IsZero() bool {
-	return r.ProviderSlug.IsZero() && r.ModelSlug.IsZero()
+	return r.ProviderCode.IsZero() && r.ModelCode.IsZero()
 }
 
 func (r ModelRef) String() string {
-	return r.ProviderSlug.String() + "/" + r.ModelSlug.String()
+	return r.ProviderCode.String() + "/" + r.ModelCode.String()
 }
 
 type RawJSON = json.RawMessage

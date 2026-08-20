@@ -8,6 +8,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	json "github.com/bytedance/sonic"
 
+	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -126,7 +127,7 @@ func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNe
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(caller.model.Slug.String()),
+		Model:     anthropic.Model(caller.model.Code.String()),
 		Messages:  messages,
 		MaxTokens: request.MaxOutputTokens,
 		Tools:     tools,
@@ -151,6 +152,9 @@ func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNe
 func anthropicTools(definitions []modelToolDefinition) ([]anthropic.ToolUnionParam, error) {
 	tools := make([]anthropic.ToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
+		if definition.Type == agentloop.ToolTypeApplyPatch {
+			continue
+		}
 		tool, err := anthropicToolDefinition(definition)
 		if err != nil {
 			return nil, err
@@ -229,6 +233,12 @@ func anthropicMessage(message conversation.Message) (anthropic.MessageParam, err
 		case conversation.ShellCallBlock:
 			if message.Role != conversation.RoleAssistant {
 				return anthropic.MessageParam{}, unsupportedContent("Anthropic shell call requires assistant role")
+			}
+			call := value.ToolUseBlock()
+			content = append(content, anthropic.NewToolUseBlock(call.ID, call.Input, call.Name))
+		case conversation.ApplyPatchCallBlock:
+			if message.Role != conversation.RoleAssistant {
+				return anthropic.MessageParam{}, unsupportedContent("Anthropic apply patch call requires assistant role")
 			}
 			call := value.ToolUseBlock()
 			content = append(content, anthropic.NewToolUseBlock(call.ID, call.Input, call.Name))

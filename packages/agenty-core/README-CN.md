@@ -14,9 +14,8 @@ Agenty 的核心运行时。它围绕本地优先的存储模型（文件系统 
 | Session transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` | 写模型，即 append-only event log（真实数据源） |
 | Session index | `~/.agenty/agenty.sqlite` -> `sessions` | 读模型，用于快速列表和搜索的投影 |
 | 全局配置 | `~/.agenty/config.json` | 应用配置 |
-| Providers | `~/.agenty/providers/<slug>/provider.json` | Catalog aggregate |
-| Models | `~/.agenty/providers/<slug>/models/<model-slug>.json` | Catalog aggregate member |
-| Agents | `~/.agenty/agents/<slug>.json` | Agent aggregate |
+| Providers | `~/.agenty/providers/<provider-code>.json` | Catalog aggregate，包含其模型 |
+| Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | 结构化文本诊断信息（JSONL 模式下为 `core.jsonl`） |
 
 Session 的 messages 和 rounds 永远不会存入 SQLite；`sessions` 表是摘要投影，可以通过
@@ -26,11 +25,11 @@ reasoning effort。
 ## 领域层
 
 领域层按 bounded context 拆分。Aggregates 之间只通过 identity 相互引用（conversation
-系列使用 UUIDv7，agents、providers 和 models 使用 kebab-case slugs）。
+系列使用 UUIDv7，agents 和 providers 使用路径安全的 code，models 使用可保留上游字符的 code）。
 
 ```
 pkg/domain/
-├── shared/        Shared kernel: Slug, ModelRef, ReasoningEffort, Metadata, Event, ID
+├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session -> Round -> Message), content blocks, events
 ├── agent/         Agent aggregate
 └── catalog/       Provider aggregate (Provider -> Model)
@@ -103,7 +102,7 @@ pkg/infra/
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── agent.go        AgentRepository（agent JSON 文件）
-│   ├── catalog.go      CatalogRepository（provider/model JSON 文件、DeleteModel）
+│   ├── catalog.go      CatalogRepository（provider 聚合 JSON，内嵌 models）
 │   └── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
 └── rpc/                stdio JSON-RPC 2.0 接口层
     ├── message.go      Request/Response/Notification/Error/ID wire types
@@ -223,8 +222,8 @@ chunk payload too large。Application validation errors 映射为 `-32602`。
 示例：
 
 ```
-$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"slug":"dev","name":"Dev"}}' | go run ./cmd
-{"jsonrpc":"2.0","id":1,"result":{"slug":"dev","name":"Dev",...}}
+$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"code":"dev","name":"Dev"}}' | go run ./cmd
+{"jsonrpc":"2.0","id":1,"result":{"code":"dev","name":"Dev",...}}
 ```
 
 说明：`rpc` 和 `adapter` packages 使用 `encoding/json`（原生支持 RawMessage、无依赖），

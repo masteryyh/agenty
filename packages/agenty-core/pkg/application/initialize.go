@@ -39,34 +39,34 @@ func (s *InitializeService) Already(context.Context) InitializeAlreadyResult {
 }
 
 type InitializeCompleteInput struct {
-	AgentSlug    string `json:"agentSlug"`
-	ProviderSlug string `json:"providerSlug"`
-	ModelSlug    string `json:"modelSlug"`
+	AgentCode    string `json:"agentCode"`
+	ProviderCode string `json:"providerCode"`
+	ModelCode    string `json:"modelCode"`
 }
 
 func (s *InitializeService) Complete(
 	ctx context.Context,
 	in InitializeCompleteInput,
 ) (InitializeAlreadyResult, error) {
-	a, err := s.agents.Get(ctx, in.AgentSlug)
+	a, err := s.agents.Get(ctx, in.AgentCode)
 	if err != nil {
 		return InitializeAlreadyResult{}, err
 	}
-	p, err := s.providers.Get(ctx, in.ProviderSlug)
+	p, err := s.providers.Get(ctx, in.ProviderCode)
 	if err != nil {
 		return InitializeAlreadyResult{}, err
 	}
-	modelSlug, err := shared.NewModelID(in.ModelSlug)
+	modelCode, err := shared.NewModelCode(in.ModelCode)
 	if err != nil {
 		return InitializeAlreadyResult{}, Validation(err.Error())
 	}
-	m, err := p.Model(modelSlug)
+	m, err := p.Model(modelCode)
 	if err != nil {
 		return InitializeAlreadyResult{}, NotFound(
-			fmt.Sprintf("model %s not found in provider %s", in.ModelSlug, in.ProviderSlug),
+			fmt.Sprintf("model %s not found in provider %s", in.ModelCode, in.ProviderCode),
 		)
 	}
-	wantModel := shared.ModelRef{ProviderSlug: p.Slug, ModelSlug: m.Slug}
+	wantModel := shared.ModelRef{ProviderCode: p.Code, ModelCode: m.Code}
 	if a.DefaultModel == nil || *a.DefaultModel != wantModel {
 		return InitializeAlreadyResult{}, Validation("agent default model does not match the initialized provider and model")
 	}

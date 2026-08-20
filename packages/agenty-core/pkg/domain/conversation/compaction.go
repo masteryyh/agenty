@@ -79,7 +79,7 @@ func retainedAssistantMessage(message Message) (Message, bool) {
 	content := make(Content, 0, len(message.Content))
 	for _, block := range message.Content {
 		switch block.(type) {
-		case ReasoningBlock, ToolUseBlock, ShellCallBlock:
+		case ReasoningBlock, ToolUseBlock, ShellCallBlock, ApplyPatchCallBlock:
 			continue
 		default:
 			content = append(content, block)
@@ -166,8 +166,8 @@ func (s *Session) updateMetadataModel(model shared.ModelRef) {
 	if s.metadata == nil || !s.hasCompactionSummary() {
 		return
 	}
-	s.metadata.Model = model.ModelSlug.String()
-	s.metadata.Provider = model.ProviderSlug.String()
+	s.metadata.Model = model.ModelCode.String()
+	s.metadata.Provider = model.ProviderCode.String()
 }
 
 func (s *Session) updateMetadataReasoningEffort(effort shared.ReasoningEffort) {

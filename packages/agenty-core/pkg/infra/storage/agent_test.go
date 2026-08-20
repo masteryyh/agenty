@@ -23,11 +23,11 @@ func TestAgentSaveAndGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.Soul = "You are a helpful coding assistant."
-	modelID, err := shared.NewModelID("claude-opus")
+	modelCode, err := shared.NewModelCode("claude-opus")
 	if err != nil {
 		t.Fatal(err)
 	}
-	model := shared.NewModelRef(mustSlug("anthropic"), modelID)
+	model := shared.NewModelRef(mustCode("anthropic"), modelCode)
 	a.DefaultModel = &model
 	a.DefaultContextWindow = 200_000
 	a.DefaultReasoningEffort = shared.ReasoningHigh
@@ -36,13 +36,13 @@ func TestAgentSaveAndGet(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	loaded, err := repo.Get(ctx, a.Slug)
+	loaded, err := repo.Get(ctx, a.Code)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	if loaded.Slug != a.Slug {
-		t.Errorf("slug = %s, want %s", loaded.Slug, a.Slug)
+	if loaded.Code != a.Code {
+		t.Errorf("code = %s, want %s", loaded.Code, a.Code)
 	}
 	if loaded.Name != a.Name {
 		t.Errorf("name = %s, want %s", loaded.Name, a.Name)
@@ -108,11 +108,11 @@ func TestAgentDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := repo.Delete(ctx, a.Slug); err != nil {
+	if err := repo.Delete(ctx, a.Code); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	_, err := repo.Get(ctx, a.Slug)
+	_, err := repo.Get(ctx, a.Code)
 	if err != ErrAgentNotFound {
 		t.Errorf("Get after Delete = %v, want ErrAgentNotFound", err)
 	}
@@ -139,8 +139,8 @@ func TestAgentDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Default: %v", err)
 	}
-	if def.Slug != a2.Slug {
-		t.Errorf("Default returned %s, want %s", def.Slug, a2.Slug)
+	if def.Code != a2.Code {
+		t.Errorf("Default returned %s, want %s", def.Code, a2.Code)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestAgentDefaultReturnsNotFoundWhenNone(t *testing.T) {
 
 func TestAgentGetReturnsNotFoundWhenMissing(t *testing.T) {
 	repo := newAgentRepo(t)
-	_, err := repo.Get(context.Background(), mustSlug("unknown"))
+	_, err := repo.Get(context.Background(), mustCode("unknown"))
 	if err != ErrAgentNotFound {
 		t.Errorf("Get() = %v, want ErrAgentNotFound", err)
 	}

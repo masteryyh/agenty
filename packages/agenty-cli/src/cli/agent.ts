@@ -25,34 +25,34 @@ export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promi
         const result = await client.listAgentsPage(page, pageSize);
         render(args, result, () => result.data.length === 0
             ? process.stdout.write("No agents.\n")
-            : outputTable(["Slug", "Name", "Default", "Model"], result.data.map((agent) => [
-                agent.slug, agent.name, String(agent.isDefault), agent.defaultModel ? `${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}` : "",
+            : outputTable(["Agent Code", "Name", "Default", "Model"], result.data.map((agent) => [
+                agent.code, agent.name, String(agent.isDefault), agent.defaultModel ? `${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}` : "",
             ])));
         return;
     }
     if (command === "get") {
-        const [, , reference] = requirePositionals(args, 3, "agent get <slug-or-name>");
+        const [, , reference] = requirePositionals(args, 3, "agent get <code-or-name>");
         const agent = await client.resolveAgent(reference);
         render(args, agent, () => outputFields([
-            ["Slug", agent.slug], ["Name", agent.name], ["Soul", agent.soul], ["Default", String(agent.isDefault)],
-            ["Model", agent.defaultModel ? `${agent.defaultModel.providerSlug}/${agent.defaultModel.modelSlug}` : ""],
+            ["Agent Code", agent.code], ["Name", agent.name], ["Soul", agent.soul], ["Default", String(agent.isDefault)],
+            ["Model", agent.defaultModel ? `${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}` : ""],
         ]));
         return;
     }
     if (command === "add") {
-        const [, , slug] = requirePositionals(args, 3, "agent add <slug> [options]");
+        const [, , code] = requirePositionals(args, 3, "agent add <code> [options]");
         const model = flag(args, "model") ? await resolveModel(client, flag(args, "model")!) : undefined;
         const created = await client.createAgent({
-            slug, name: flag(args, "name")?.trim() || slug, soul: flag(args, "soul") ?? "",
+            code, name: flag(args, "name")?.trim() || code, soul: flag(args, "soul") ?? "",
             isDefault: hasFlag(args, "default") ? parseBoolean(flag(args, "default"), "--default") : false,
-            defaultModel: model ? { providerSlug: model.providerSlug, modelSlug: model.slug } : undefined,
+            defaultModel: model ? { providerCode: model.providerCode, modelCode: model.code } : undefined,
             defaultContextWindow: model?.contextWindow ?? 0,
         });
-        action(args, created, `Agent added: ${created.slug}`);
+        action(args, created, `Agent added: ${created.code}`);
         return;
     }
     if (command === "update") {
-        const [, , reference] = requirePositionals(args, 3, "agent update <slug-or-name> [options]");
+        const [, , reference] = requirePositionals(args, 3, "agent update <code-or-name> [options]");
         const current = await client.resolveAgent(reference);
         const update: UpdateAgentDto = {};
         if (hasFlag(args, "name")) {
@@ -66,24 +66,24 @@ export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promi
         }
         if (hasFlag(args, "model")) {
             const model = await resolveModel(client, flag(args, "model")!);
-            update.defaultModel = { providerSlug: model.providerSlug, modelSlug: model.slug };
+            update.defaultModel = { providerCode: model.providerCode, modelCode: model.code };
             update.defaultContextWindow = model.contextWindow;
         }
         if (Object.keys(update).length === 0) {
             throw new CliError("no changes specified");
         }
-        const updated = await client.updateAgent(current.slug, update);
-        action(args, updated, `Agent updated: ${updated.slug}`);
+        const updated = await client.updateAgent(current.code, update);
+        action(args, updated, `Agent updated: ${updated.code}`);
         return;
     }
     if (command === "remove") {
-        const [, , reference] = requirePositionals(args, 3, "agent remove <slug-or-name> --yes");
+        const [, , reference] = requirePositionals(args, 3, "agent remove <code-or-name> --yes");
         if (!hasFlag(args, "yes")) {
             throw new CliError("use --yes to remove an agent non-interactively");
         }
         const current = await client.resolveAgent(reference);
-        await client.deleteAgent(current.slug);
-        action(args, { slug: current.slug, deleted: true }, `Agent removed: ${current.slug}`);
+        await client.deleteAgent(current.code);
+        action(args, { code: current.code, deleted: true }, `Agent removed: ${current.code}`);
         return;
     }
     throw new CliError("usage: agent <list|get|add|update|remove>");

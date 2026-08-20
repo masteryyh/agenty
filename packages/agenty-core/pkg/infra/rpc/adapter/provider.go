@@ -20,7 +20,7 @@ func RegisterProviderHandlers(d *rpc.Dispatcher, svc *application.ProviderServic
 }
 
 type providerCreateParams struct {
-	Slug string `json:"slug"`
+	Code string `json:"code"`
 	application.ProviderInput
 }
 
@@ -30,17 +30,17 @@ func providerCreate(svc *application.ProviderService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Create(ctx, p.Slug, p.ProviderInput))
+		return wrap(svc.Create(ctx, p.Code, p.ProviderInput))
 	}
 }
 
 func providerGet(svc *application.ProviderService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p slugParams
+		var p codeParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Get(ctx, p.Slug))
+		return wrap(svc.Get(ctx, p.Code))
 	}
 }
 
@@ -55,7 +55,7 @@ func providerList(svc *application.ProviderService) rpc.Handler {
 }
 
 type providerUpdateParams struct {
-	Slug string `json:"slug"`
+	Code string `json:"code"`
 	application.ProviderUpdate
 }
 
@@ -65,32 +65,32 @@ func providerUpdate(svc *application.ProviderService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.Update(ctx, p.Slug, p.ProviderUpdate))
+		return wrap(svc.Update(ctx, p.Code, p.ProviderUpdate))
 	}
 }
 
 func providerDelete(svc *application.ProviderService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p slugParams
+		var p codeParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		if err := svc.Delete(ctx, p.Slug); err != nil {
+		if err := svc.Delete(ctx, p.Code); err != nil {
 			return nil, toRPCError(err)
 		}
-		return map[string]any{"slug": p.Slug, "deleted": true}, nil
+		return map[string]any{"code": p.Code, "deleted": true}, nil
 	}
 }
 
 // modelTargetParams identifies a model within a provider.
 type modelTargetParams struct {
-	ProviderSlug string `json:"providerSlug"`
-	ModelSlug    string `json:"modelSlug"`
+	ProviderCode string `json:"providerCode"`
+	ModelCode    string `json:"modelCode"`
 }
 
 type providerAddModelParams struct {
-	ProviderSlug string `json:"providerSlug"`
-	ModelSlug    string `json:"modelSlug"`
+	ProviderCode string `json:"providerCode"`
+	ModelCode    string `json:"modelCode"`
 	application.ModelInput
 }
 
@@ -100,7 +100,7 @@ func providerAddModel(svc *application.ProviderService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.AddModel(ctx, p.ProviderSlug, p.ModelSlug, p.ModelInput))
+		return wrap(svc.AddModel(ctx, p.ProviderCode, p.ModelCode, p.ModelInput))
 	}
 }
 
@@ -110,6 +110,6 @@ func providerRemoveModel(svc *application.ProviderService) rpc.Handler {
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.RemoveModel(ctx, p.ProviderSlug, p.ModelSlug))
+		return wrap(svc.RemoveModel(ctx, p.ProviderCode, p.ModelCode))
 	}
 }

@@ -46,7 +46,7 @@ export function StatusOverlay() {
     const rows: [string, string][] = [
         ["Session", session?.id ?? "?"],
         ["Agent", agent?.name ?? "?"],
-        ["Model", `${model?.providerName ?? "?"}/${model?.name ?? "?"}`],
+        ["Model", `${model?.providerName ?? "?"} · ${model?.name ?? "?"}`],
         ["Thinking", thinking],
         ["Messages", String(history.length)],
         ["Context", `${session?.contextWindow ?? 0}/${tokenConsumed}`],

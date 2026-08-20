@@ -72,6 +72,40 @@ describe("tool display", () => {
         });
     });
 
+    test("summarizes native and repeated custom apply patch operations in order", () => {
+        const nativeDisplay = buildToolDisplay(toolCall(
+            "apply_patch",
+            { operation: { type: "update_file", path: "src/main.go", diff: "@@\n-old\n+new" } },
+            JSON.stringify({ operations: [{ type: "update_file", path: "src/main.go" }] }),
+        ));
+        expect(nativeDisplay).toMatchObject({
+            label: "Apply patch",
+            status: "success",
+            summaryLines: ["update src/main.go"],
+        });
+
+        const customDisplay = buildToolDisplay(toolCall("apply_patch", {
+            patch: [
+                "*** Begin Patch",
+                "*** Update File: notes.txt",
+                "@@",
+                "-one",
+                "+two",
+                "*** Update File: notes.txt",
+                "@@",
+                "-two",
+                "+three",
+                "*** Delete File: old.txt",
+                "*** End Patch",
+            ].join("\n"),
+        }));
+        expect(customDisplay.summaryLines).toEqual([
+            "update notes.txt",
+            "update notes.txt",
+            "delete old.txt",
+        ]);
+    });
+
     test("marks a shell output that ends with a newline", () => {
         const display = buildToolDisplay(toolCall(
             "shell",

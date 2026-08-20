@@ -1,7 +1,7 @@
 import type { APIType, CoreModelDto, ModelProviderDto, ReasoningEffort } from "../api/types";
 
 export interface ModelPreset {
-    slug: string;
+    code: string;
     name: string;
     contextWindow: number;
     reasoningEffortMapping?: Record<string, ReasoningEffort>;
@@ -11,7 +11,7 @@ export interface ProviderPreset {
     key: string;
     label: string;
     description: string;
-    slug: string;
+    code: string;
     name: string;
     type: APIType;
     baseUrl: string;
@@ -23,12 +23,12 @@ export const providerPresets: readonly ProviderPreset[] = [
         key: "openai",
         label: "OpenAI",
         description: "Responses API",
-        slug: "openai",
+        code: "openai",
         name: "OpenAI",
         type: "openai",
         baseUrl: "https://api.openai.com/v1",
         model: {
-            slug: "gpt-5-mini",
+            code: "gpt-5-mini",
             name: "GPT-5 mini",
             contextWindow: 128_000,
             reasoningEffortMapping: {
@@ -43,12 +43,12 @@ export const providerPresets: readonly ProviderPreset[] = [
         key: "anthropic",
         label: "Anthropic",
         description: "Messages API",
-        slug: "anthropic",
+        code: "anthropic",
         name: "Anthropic",
         type: "anthropic",
         baseUrl: "https://api.anthropic.com",
         model: {
-            slug: "claude-haiku-4-5",
+            code: "claude-haiku-4-5",
             name: "Claude Haiku 4.5",
             contextWindow: 200_000,
             reasoningEffortMapping: {
@@ -63,12 +63,12 @@ export const providerPresets: readonly ProviderPreset[] = [
         key: "google",
         label: "Google",
         description: "Gemini API",
-        slug: "google",
+        code: "google",
         name: "Google",
         type: "gemini",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         model: {
-            slug: "gemini-2.5-flash",
+            code: "gemini-2.5-flash",
             name: "Gemini 2.5 Flash",
             contextWindow: 128_000,
             reasoningEffortMapping: {
@@ -79,6 +79,11 @@ export const providerPresets: readonly ProviderPreset[] = [
         },
     },
 ];
+
+export function isBuiltinProvider(provider: Pick<ModelProviderDto, "code"> | string): boolean {
+    const code = typeof provider === "string" ? provider : provider.code;
+    return providerPresets.some((preset) => preset.code === code);
+}
 
 export const compatibleProviderTypes: readonly { label: string; value: APIType }[] = [
     { label: "OpenAI Responses API", value: "openai" },
@@ -91,7 +96,7 @@ export interface ProviderDraft {
     id: string;
     source: "preset" | "custom";
     presetKey?: string;
-    slug: string;
+    code: string;
     name: string;
     type: APIType;
     baseUrl: string;
@@ -101,9 +106,9 @@ export interface ProviderDraft {
 export interface ModelDraft {
     id: string;
     providerId: string;
-    providerSlug: string;
+    providerCode: string;
     providerName: string;
-    slug: string;
+    code: string;
     name: string;
     contextWindow: number;
     reasoningEffortMapping?: Record<string, ReasoningEffort>;
@@ -122,7 +127,7 @@ export function createPresetDraft(
         id: `preset:${preset.key}`,
         source: "preset",
         presetKey: preset.key,
-        slug: existing?.slug ?? preset.slug,
+        code: existing?.code ?? preset.code,
         name: existing?.name ?? preset.name,
         type: existing?.type ?? preset.type,
         baseUrl: existing?.baseUrl ?? preset.baseUrl,
@@ -137,7 +142,7 @@ export function createCustomDraft(
     return {
         id,
         source: "custom",
-        slug: existing?.slug ?? "",
+        code: existing?.code ?? "",
         name: existing?.name ?? "",
         type: existing?.type ?? "openai_completions",
         baseUrl: existing?.baseUrl ?? "",
@@ -152,7 +157,7 @@ export function draftForProvider(
     if (preset) {
         return createPresetDraft(preset, provider);
     }
-    return createCustomDraft(`provider:${provider.slug}`, provider);
+    return createCustomDraft(`provider:${provider.code}`, provider);
 }
 
 export function modelDraftForProvider(
@@ -165,9 +170,9 @@ export function modelDraftForProvider(
     return {
         id: `${provider.id}:model`,
         providerId: provider.id,
-        providerSlug: provider.slug,
+        providerCode: provider.code,
         providerName: provider.name,
-        slug: model?.slug ?? fallback?.slug ?? "",
+        code: model?.code ?? fallback?.code ?? "",
         name: model?.name ?? fallback?.name ?? "",
         contextWindow: model?.contextWindow ?? fallback?.contextWindow ?? 128_000,
         reasoningEffortMapping: model?.reasoningEffortMapping ?? fallback?.reasoningEffortMapping,
@@ -175,8 +180,8 @@ export function modelDraftForProvider(
 }
 
 export function validateProviderDraft(draft: ProviderDraft): string | null {
-    if (!draft.slug.trim()) {
-        return "Provider slug is required.";
+    if (!draft.code.trim()) {
+        return "Provider code is required.";
     }
     if (!draft.name.trim()) {
         return "Provider name is required.";
@@ -191,11 +196,11 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
 }
 
 export function validateModelDraft(draft: ModelDraft): string | null {
-    if (!draft.slug.trim()) {
-        return `Model ID is required for ${draft.providerName.trim() || draft.providerSlug}.`;
+    if (!draft.code.trim()) {
+        return `Model Code is required for ${draft.providerName.trim() || draft.providerCode}.`;
     }
     if (!draft.name.trim()) {
-        return `Model name is required for ${draft.providerName.trim() || draft.providerSlug}.`;
+        return `Model name is required for ${draft.providerName.trim() || draft.providerCode}.`;
     }
     if (!Number.isSafeInteger(draft.contextWindow) || draft.contextWindow <= 0) {
         return `Context window for ${draft.name.trim()} must be a positive integer.`;

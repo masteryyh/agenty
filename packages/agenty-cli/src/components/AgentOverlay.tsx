@@ -31,9 +31,9 @@ export function parseModelRef(raw: string): ModelRef | undefined {
     if (separator <= 0 || separator === raw.length - 1) {
         return undefined;
     }
-    const providerSlug = raw.slice(0, separator);
-    const modelSlug = raw.slice(separator + 1);
-    return { providerSlug, modelSlug };
+    const providerCode = raw.slice(0, separator);
+    const modelCode = raw.slice(separator + 1);
+    return { providerCode, modelCode };
 }
 
 type Mode =
@@ -80,8 +80,8 @@ export function AgentOverlay() {
             setModels(models);
             setModelOptions(
                 models.map((m) => ({
-                    label: `${m.providerName}/${m.name}`,
-                    value: `${m.providerSlug}/${m.slug}`,
+                    label: `${m.providerName} · ${m.name}`,
+                    value: `${m.providerCode}/${m.code}`,
                 })),
             );
         } catch {
@@ -116,10 +116,10 @@ export function AgentOverlay() {
 
     const buildFields = (target?: AgentDto): FormField[] => {
         const modelRef = target?.defaultModel
-            ? `${target.defaultModel.providerSlug}/${target.defaultModel.modelSlug}`
+            ? `${target.defaultModel.providerCode}/${target.defaultModel.modelCode}`
             : modelOptions[0]?.value ?? "";
         return [
-            { key: "slug", label: "Slug", kind: "text" as const, value: target?.slug ?? "", placeholder: "my-agent", readOnly: !!target },
+            { key: "code", label: "Agent Code", kind: "text" as const, value: target?.code ?? "", placeholder: "my-agent", readOnly: !!target },
             { key: "name", label: "Name", kind: "text" as const, value: target?.name ?? "", placeholder: "my-agent" },
             { key: "soul", label: "Soul", kind: "text" as const, value: target?.soul ?? "", placeholder: "system prompt, leave blank for default" },
             { key: "isDefault", label: "Default", kind: "boolean" as const, value: target ? (target.isDefault ? "true" : "false") : "false" },
@@ -133,9 +133,9 @@ export function AgentOverlay() {
         }
         try {
             const defaultModel = parseModelRef(values.defaultModel);
-            const selectedModel = models.find((model) => `${model.providerSlug}/${model.slug}` === values.defaultModel);
+            const selectedModel = models.find((model) => `${model.providerCode}/${model.code}` === values.defaultModel);
             await client.createAgent({
-                slug: values.slug.trim(),
+                code: values.code.trim(),
                 name: values.name.trim(),
                 soul: values.soul.trim(),
                 isDefault: values.isDefault === "true",
@@ -156,8 +156,8 @@ export function AgentOverlay() {
         }
         try {
             const defaultModel = parseModelRef(values.defaultModel);
-            const selectedModel = models.find((model) => `${model.providerSlug}/${model.slug}` === values.defaultModel);
-            await client.updateAgent(target.slug, {
+            const selectedModel = models.find((model) => `${model.providerCode}/${model.code}` === values.defaultModel);
+            await client.updateAgent(target.code, {
                 name: values.name.trim(),
                 soul: values.soul.trim(),
                 isDefault: values.isDefault === "true",
@@ -177,7 +177,7 @@ export function AgentOverlay() {
             return;
         }
         try {
-            await client.deleteAgent(target.slug);
+            await client.deleteAgent(target.code);
             setToast(`Agent deleted: ${target.name}`);
             await reload();
         } catch (e) {
@@ -190,7 +190,7 @@ export function AgentOverlay() {
         if (!client) {
             return;
         }
-        if (currentAgent?.slug === target.slug) {
+        if (currentAgent?.code === target.code) {
             setToast("Already using this agent.");
             setOverlay(null);
             return;
@@ -254,7 +254,7 @@ export function AgentOverlay() {
             ) : (
                 <AgentList
                     agents={agents}
-                    currentAgentId={currentAgent?.slug}
+                    currentAgentCode={currentAgent?.code}
                     cursor={cursor}
                     onCursor={setCursor}
                     onSwitch={(a) => void handleSwitch(a)}
@@ -272,7 +272,7 @@ export function AgentOverlay() {
 
 function AgentList({
     agents,
-    currentAgentId,
+    currentAgentCode,
     cursor,
     onCursor,
     onSwitch,
@@ -282,7 +282,7 @@ function AgentList({
     onClose,
 }: {
     agents: AgentDto[];
-    currentAgentId?: string;
+    currentAgentCode?: string;
     cursor: number;
     onCursor: (i: number) => void;
     onSwitch: (a: AgentDto) => void;
@@ -352,11 +352,11 @@ function AgentList({
                     const i = agents.indexOf(a);
                     const selected = i === cursor;
                     const flags =
-                        `${a.isDefault ? "[default] " : ""}${a.slug === currentAgentId ? "← current" : ""}`.trim();
+                        `${a.isDefault ? "[default] " : ""}${a.code === currentAgentCode ? "← current" : ""}`.trim();
                     const name = pad(a.name, nameWidth);
                     return (
                         <Box
-                            key={a.slug}
+                            key={a.code}
                             onMouseOver={() => onCursor(i)}
                             onMouseClick={() => {
                                 onCursor(i);
@@ -384,7 +384,7 @@ function AgentList({
                 <Box height={1} overflow="hidden">
                     <Text dimColor wrap="truncate">
                         {trunc(
-                            `${agents[cursor]?.isDefault ? "[default] " : ""}${agents[cursor]?.slug === currentAgentId ? "← current" : ""}`.trim() || "No flags",
+                            `${agents[cursor]?.isDefault ? "[default] " : ""}${agents[cursor]?.code === currentAgentCode ? "← current" : ""}`.trim() || "No flags",
                             dialogSize.width,
                         )}
                     </Text>

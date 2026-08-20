@@ -270,6 +270,8 @@ func providerToolNames(request providerRequest, apiType string) []string {
 				names = append(names, name)
 			} else if apiType == "openai" && tool["type"] == "shell" {
 				names = append(names, "shell")
+			} else if apiType == "openai" && tool["type"] == "apply_patch" {
+				names = append(names, "apply_patch")
 			}
 		case "openai_completions":
 			function, _ := tool["function"].(map[string]any)

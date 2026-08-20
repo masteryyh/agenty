@@ -33,8 +33,9 @@ const (
 type ToolType string
 
 const (
-	ToolTypeFunction ToolType = "function"
-	ToolTypeShell    ToolType = "shell"
+	ToolTypeFunction   ToolType = "function"
+	ToolTypeShell      ToolType = "shell"
+	ToolTypeApplyPatch ToolType = "apply_patch"
 )
 
 type ToolDefinition struct {

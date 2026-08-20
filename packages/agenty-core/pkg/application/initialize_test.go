@@ -62,7 +62,7 @@ func TestInitializeServiceCompletesConfiguredResources(t *testing.T) {
 		t.Fatalf("models = %d, want 1", len(provider.Models))
 	}
 
-	modelRef := &shared.ModelRef{ProviderSlug: "openai", ModelSlug: "gpt-test"}
+	modelRef := &shared.ModelRef{ProviderCode: "openai", ModelCode: "gpt-test"}
 	agentResult, err := agents.Create(ctx, "default", application.AgentInput{
 		Name:                 "Default",
 		Soul:                 "Be helpful.",
@@ -78,9 +78,9 @@ func TestInitializeServiceCompletesConfiguredResources(t *testing.T) {
 	}
 
 	completed, err := svc.Complete(ctx, application.InitializeCompleteInput{
-		AgentSlug:    "default",
-		ProviderSlug: "openai",
-		ModelSlug:    "gpt-test",
+		AgentCode:    "default",
+		ProviderCode: "openai",
+		ModelCode:    "gpt-test",
 	})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
@@ -113,9 +113,9 @@ func TestInitializeServiceRejectsMismatchedAgentModel(t *testing.T) {
 	}
 
 	_, err = svc.Complete(ctx, application.InitializeCompleteInput{
-		AgentSlug:    "default",
-		ProviderSlug: "openai",
-		ModelSlug:    "gpt-test",
+		AgentCode:    "default",
+		ProviderCode: "openai",
+		ModelCode:    "gpt-test",
 	})
 	if code := appErrorCode(err); code != application.CodeValidation {
 		t.Fatalf("error code = %v, want validation: %v", code, err)

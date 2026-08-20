@@ -64,7 +64,7 @@ func providerToolType(tool modelToolDefinition) (agentloop.ToolType, error) {
 		return agentloop.ToolTypeFunction, nil
 	}
 	switch tool.Type {
-	case agentloop.ToolTypeFunction, agentloop.ToolTypeShell:
+	case agentloop.ToolTypeFunction, agentloop.ToolTypeShell, agentloop.ToolTypeApplyPatch:
 		return tool.Type, nil
 	default:
 		return "", invalidRequest("tool %q has unsupported type %q", tool.Name, tool.Type)

@@ -81,8 +81,8 @@ func (e *RPCError) Error() string {
 }
 
 type ModelRef struct {
-	ProviderSlug string `json:"providerSlug"`
-	ModelSlug    string `json:"modelSlug"`
+	ProviderCode string `json:"providerCode"`
+	ModelCode    string `json:"modelCode"`
 }
 
 type InitializeResult struct {
@@ -112,7 +112,7 @@ type StreamEvent struct {
 }
 
 type Agent struct {
-	Slug                   string         `json:"slug"`
+	Code                   string         `json:"code"`
 	Name                   string         `json:"name"`
 	Description            string         `json:"description"`
 	Soul                   string         `json:"soul"`
@@ -126,7 +126,7 @@ type Agent struct {
 }
 
 type Model struct {
-	Slug                   string            `json:"slug"`
+	Code                   string            `json:"code"`
 	Name                   string            `json:"name"`
 	ContextWindow          int               `json:"contextWindow"`
 	MaxOutputTokens        int64             `json:"maxOutputTokens"`
@@ -137,7 +137,7 @@ type Model struct {
 }
 
 type Provider struct {
-	Slug     string         `json:"slug"`
+	Code     string         `json:"code"`
 	Name     string         `json:"name"`
 	Type     string         `json:"type"`
 	BaseURL  string         `json:"baseUrl"`
@@ -148,7 +148,7 @@ type Provider struct {
 
 type Session struct {
 	ID                     string    `json:"id"`
-	AgentSlug              string    `json:"agentSlug"`
+	AgentCode              string    `json:"agentCode"`
 	Title                  *string   `json:"title"`
 	Cwd                    *string   `json:"cwd"`
 	CurrentModel           *ModelRef `json:"currentModel"`
@@ -162,9 +162,9 @@ type Session struct {
 type SessionSummary struct {
 	ID                  string `json:"id"`
 	Title               string `json:"title"`
-	AgentSlug           string `json:"agentSlug"`
-	LastProviderSlug    string `json:"lastProviderSlug"`
-	LastModelSlug       string `json:"lastModelSlug"`
+	AgentCode           string `json:"agentCode"`
+	LastProviderCode    string `json:"lastProviderCode"`
+	LastModelCode       string `json:"lastModelCode"`
 	ContextWindow       int64  `json:"contextWindow"`
 	LastReasoningEffort string `json:"lastReasoningEffort"`
 }
@@ -222,13 +222,13 @@ type ExecutionStop struct {
 }
 
 type DeleteResult struct {
-	Slug    string `json:"slug,omitempty"`
+	Code    string `json:"code,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Deleted bool   `json:"deleted"`
 }
 
 type AgentCreateInput struct {
-	Slug                   string         `json:"slug"`
+	Code                   string         `json:"code"`
 	Name                   string         `json:"name"`
 	Description            string         `json:"description,omitempty"`
 	Soul                   string         `json:"soul,omitempty"`
@@ -240,7 +240,7 @@ type AgentCreateInput struct {
 }
 
 type AgentUpdateInput struct {
-	Slug        string         `json:"slug"`
+	Code        string         `json:"code"`
 	Name        *string        `json:"name,omitempty"`
 	Description *string        `json:"description,omitempty"`
 	Soul        *string        `json:"soul,omitempty"`
@@ -248,7 +248,7 @@ type AgentUpdateInput struct {
 }
 
 type ProviderCreateInput struct {
-	Slug     string         `json:"slug"`
+	Code     string         `json:"code"`
 	Name     string         `json:"name"`
 	Type     string         `json:"type"`
 	BaseURL  string         `json:"baseUrl,omitempty"`
@@ -257,7 +257,7 @@ type ProviderCreateInput struct {
 }
 
 type ProviderUpdateInput struct {
-	Slug     string         `json:"slug"`
+	Code     string         `json:"code"`
 	Name     *string        `json:"name,omitempty"`
 	Type     *string        `json:"type,omitempty"`
 	BaseURL  *string        `json:"baseUrl,omitempty"`
@@ -266,8 +266,8 @@ type ProviderUpdateInput struct {
 }
 
 type ModelInput struct {
-	ProviderSlug           string            `json:"providerSlug"`
-	ModelSlug              string            `json:"modelSlug"`
+	ProviderCode           string            `json:"providerCode"`
+	ModelCode              string            `json:"modelCode"`
 	Name                   string            `json:"name"`
 	ContextWindow          int               `json:"contextWindow,omitempty"`
 	MaxOutputTokens        int64             `json:"maxOutputTokens"`
@@ -278,16 +278,16 @@ type ModelInput struct {
 }
 
 type SessionCreateInput struct {
-	AgentSlug       string  `json:"agentSlug"`
-	ProviderSlug    string  `json:"providerSlug"`
-	ModelSlug       string  `json:"modelSlug"`
+	AgentCode       string  `json:"agentCode"`
+	ProviderCode    string  `json:"providerCode"`
+	ModelCode       string  `json:"modelCode"`
 	ContextWindow   int64   `json:"contextWindow,omitempty"`
 	ReasoningEffort string  `json:"reasoningEffort,omitempty"`
 	Cwd             *string `json:"cwd,omitempty"`
 }
 
 type SessionListInput struct {
-	AgentSlug string `json:"agentSlug,omitempty"`
+	AgentCode string `json:"agentCode,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
 	Offset    int    `json:"offset,omitempty"`
 }
