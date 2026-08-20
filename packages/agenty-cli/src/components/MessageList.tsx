@@ -14,6 +14,19 @@ import { Box, Text } from "./ui";
 const HINT_BACKGROUND = "#24383f";
 const HINT_FOREGROUND = "#c7f5ff";
 
+function trimBoundaryBlankLines(content: string): string {
+    const lines = content.split("\n");
+    let start = 0;
+    let end = lines.length;
+    while (start < end && lines[start].trim() === "") {
+        start += 1;
+    }
+    while (end > start && lines[end - 1].trim() === "") {
+        end -= 1;
+    }
+    return lines.slice(start, end).join("\n");
+}
+
 interface MessageListProps {
     history: UIMessage[];
     current: UIMessage | null;
@@ -40,6 +53,10 @@ export function MessageList({
     const [unseen, setUnseen] = useState(0);
     const [allReasoningExpanded, setAllReasoningExpanded] = useState(false);
     const [expandedReasoningIds, setExpandedReasoningIds] = useState<Set<string>>(
+        () => new Set(),
+    );
+    const [allToolsExpanded, setAllToolsExpanded] = useState(false);
+    const [expandedToolIds, setExpandedToolIds] = useState<Set<string>>(
         () => new Set(),
     );
     const [now, setNow] = useState(() => Date.now());
@@ -103,9 +120,11 @@ export function MessageList({
     const renderItems: MessageRenderItem[] = useMemo(() => {
         const rendered: MessageRenderItem[] = [];
         for (const msg of messages) {
+            const groupId = msg.id;
             if (msg.role === "user" || msg.role === "system") {
                 rendered.push({
                     id: `${msg.id}:message`,
+                    groupId,
                     type: "message",
                     role: msg.role,
                     content: msg.content,
@@ -124,6 +143,7 @@ export function MessageList({
                         : 0);
                 rendered.push({
                     id,
+                    groupId,
                     type: "reasoning",
                     content: msg.reasoning,
                     durationSeconds: Math.max(0, durationMillis / 1000),
@@ -133,20 +153,26 @@ export function MessageList({
             }
 
             if (msg.content) {
-                rendered.push({
-                    id: `${msg.id}:content`,
-                    type: "message",
-                    role: "assistant",
-                    content: msg.content,
-                });
+                const content = trimBoundaryBlankLines(msg.content);
+                if (content) {
+                    rendered.push({
+                        id: `${msg.id}:content`,
+                        groupId,
+                        type: "message",
+                        role: "assistant",
+                        content,
+                    });
+                }
             }
 
             msg.toolCalls?.forEach((tc, index) => {
                 rendered.push({
                     id: `${msg.id}:tool:${tc.id || index}`,
+                    groupId,
                     type: "tool",
                     toolCall: tc,
                     blinkOn,
+                    expanded: allToolsExpanded || expandedToolIds.has(`${msg.id}:tool:${tc.id || index}`),
                 });
             });
         }
@@ -157,6 +183,8 @@ export function MessageList({
         blinkOn,
         allReasoningExpanded,
         expandedReasoningIds,
+        allToolsExpanded,
+        expandedToolIds,
     ]);
 
     const empty = renderItems.length === 0;
@@ -183,11 +211,13 @@ export function MessageList({
     };
 
     const scrollToBottom = () => {
-        const ref = listRef.current;
-        if (!ref) {
-            return;
-        }
-        ref.scrollTo(Math.max(0, ref.scrollHeight - ref.viewport.height));
+        queueMicrotask(() => {
+            const ref = listRef.current;
+            if (!ref) {
+                return;
+            }
+            ref.scrollTo(Math.max(0, ref.scrollHeight - ref.viewport.height));
+        });
     };
 
     const handleScrollPosition = (offset?: number) => {
@@ -228,8 +258,9 @@ export function MessageList({
     useEffect(() => {
         if (follow) {
             setUnseen(0);
+            scrollToBottom();
         }
-    }, [follow]);
+    }, [follow, renderItems]);
 
     const jumpToBottom = () => {
         attachToBottom();
@@ -259,11 +290,21 @@ export function MessageList({
     // natively by ScrollBox through OpenTUI's hit-test system.
     useInput(
         (input, key, event) => {
-            if (key.ctrl && input === "r") {
+            if (key.ctrl && (input === "r" || event.name === "r")) {
                 event.preventDefault();
                 setAllReasoningExpanded((expanded) => {
                     if (expanded) {
                         setExpandedReasoningIds(new Set());
+                    }
+                    return !expanded;
+                });
+                return;
+            }
+            if (key.ctrl && (input === "t" || event.name === "t")) {
+                event.preventDefault();
+                setAllToolsExpanded((expanded) => {
+                    if (expanded) {
+                        setExpandedToolIds(new Set());
                     }
                     return !expanded;
                 });
@@ -316,13 +357,15 @@ export function MessageList({
 
     return (
         <Box flexDirection="column" height={height} paddingX={1} overflow="hidden">
-            <Box height={listHeight} overflowY="hidden">
+            <Box width="100%" height={listHeight} flexShrink={0} overflowY="hidden">
                 <scrollbox
                     ref={listRef}
+                    width="100%"
                     height={listHeight}
+                    flexShrink={0}
                     stickyScroll
                     stickyStart="bottom"
-                    viewportCulling
+                    viewportCulling={false}
                     scrollY
                     onMouseScroll={() => {
                         queueMicrotask(() => handleScrollPosition());
@@ -330,33 +373,56 @@ export function MessageList({
                     verticalScrollbarOptions={{ showArrows: false }}
                 >
                     {header ? (
-                        <Box key="__logo__" flexDirection="column">
+                        <Box
+                            key="__logo__"
+                            width="100%"
+                            flexDirection="column"
+                            flexShrink={0}
+                        >
                             {header}
                         </Box>
                     ) : null}
-                    {renderItems.map((item, i) => (
-                        <Box
-                            key={item.id}
-                            flexDirection="column"
-                            marginTop={i === 0 ? (header ? 1 : 0) : 1}
-                        >
-                            <MessageItem
-                                item={item}
-                                themeMode={themeMode}
-                                onToggleReasoning={(id) => {
-                                    setExpandedReasoningIds((ids) => {
-                                        const next = new Set(ids);
-                                        if (next.has(id)) {
-                                            next.delete(id);
-                                        } else {
-                                            next.add(id);
-                                        }
-                                        return next;
-                                    });
-                                }}
-                            />
-                        </Box>
-                    ))}
+                    {renderItems.map((item, i) => {
+                        const previous = renderItems[i - 1];
+                        const isNewGroup = i > 0 && previous?.groupId !== item.groupId;
+                        const hasToolGap = i > 0 && item.type === "tool";
+                        return (
+                            <Box
+                                key={item.id}
+                                flexDirection="column"
+                                width="100%"
+                                flexShrink={0}
+                                marginTop={isNewGroup || hasToolGap ? 1 : 0}
+                            >
+                                <MessageItem
+                                    item={item}
+                                    themeMode={themeMode}
+                                    onToggleReasoning={(id) => {
+                                        setExpandedReasoningIds((ids) => {
+                                            const next = new Set(ids);
+                                            if (next.has(id)) {
+                                                next.delete(id);
+                                            } else {
+                                                next.add(id);
+                                            }
+                                            return next;
+                                        });
+                                    }}
+                                    onToggleTool={(id) => {
+                                        setExpandedToolIds((ids) => {
+                                            const next = new Set(ids);
+                                            if (next.has(id)) {
+                                                next.delete(id);
+                                            } else {
+                                                next.add(id);
+                                            }
+                                            return next;
+                                        });
+                                    }}
+                                />
+                            </Box>
+                        );
+                    })}
                 </scrollbox>
             </Box>
             {showHint ? (

@@ -28,8 +28,8 @@ type grepArguments struct {
 	Pattern       string `json:"pattern"`
 	Path          string `json:"path,omitempty"`
 	Glob          string `json:"glob,omitempty"`
-	CaseSensitive *bool  `json:"caseSensitive,omitempty"`
-	MaxResults    *int   `json:"maxResults,omitempty"`
+	CaseSensitive *bool  `json:"case_sensitive,omitempty"`
+	MaxResults    *int   `json:"max_results,omitempty"`
 }
 
 type grepMatch struct {
@@ -52,11 +52,11 @@ func (tool *grepTool) Definition() agentloop.ToolDefinition {
 			"An optional glob filters relative file paths, and results include path, line, column, and text.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{
-				"pattern":       stringSchema("Go regular expression to search for."),
-				"path":          stringSchema("File or directory to search. Defaults to the session working directory."),
-				"glob":          stringSchema("Optional relative path glob. Use ** as a complete segment for recursion."),
-				"caseSensitive": booleanSchema("Whether matching is case-sensitive. Defaults to true."),
-				"maxResults":    integerSchema("Maximum matching lines to return. Defaults to 200 and cannot exceed 1000.", 1),
+				"pattern":        stringSchema("Go regular expression to search for."),
+				"path":           stringSchema("File or directory to search. Defaults to the session working directory."),
+				"glob":           stringSchema("Optional relative path glob. Use ** as a complete segment for recursion."),
+				"case_sensitive": booleanSchema("Whether matching is case-sensitive. Defaults to true."),
+				"max_results":    integerSchema("Maximum matching lines to return. Defaults to 200 and cannot exceed 1000.", 1),
 			},
 			[]string{"pattern"},
 		),
@@ -259,7 +259,7 @@ type globTool struct {
 type globArguments struct {
 	Pattern    string `json:"pattern"`
 	Path       string `json:"path,omitempty"`
-	MaxResults *int   `json:"maxResults,omitempty"`
+	MaxResults *int   `json:"max_results,omitempty"`
 }
 
 type globResult struct {
@@ -275,9 +275,9 @@ func (tool *globTool) Definition() agentloop.ToolDefinition {
 			"Use ** as a complete path segment for recursive matching. Results are sorted.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{
-				"pattern":    stringSchema("Relative path glob, for example **/*.go or pkg/*/README.md."),
-				"path":       stringSchema("Directory to search. Defaults to the session working directory."),
-				"maxResults": integerSchema("Maximum paths to return. Defaults to 200 and cannot exceed 1000.", 1),
+				"pattern":     stringSchema("Relative path glob, for example **/*.go or pkg/*/README.md."),
+				"path":        stringSchema("Directory to search. Defaults to the session working directory."),
+				"max_results": integerSchema("Maximum paths to return. Defaults to 200 and cannot exceed 1000.", 1),
 			},
 			[]string{"pattern"},
 		),

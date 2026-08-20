@@ -94,6 +94,25 @@ export type ContentBlock =
     | { type: "text"; text: string }
     | { type: "reasoning"; text: string; signature?: string; redacted?: boolean }
     | { type: "tool_use"; id: string; name: string; input: unknown }
+    | {
+        type: "shell_call";
+        id?: string;
+        callId: string;
+        commands: string[];
+        timeoutMs?: number;
+        maxOutputLength?: number;
+    }
+    | {
+        type: "shell_call_output";
+        callId: string;
+        maxOutputLength: number;
+        openAINative?: boolean;
+        output: Array<{
+            stdout: string;
+            stderr: string;
+            outcome: { type: string; exitCode?: number };
+        }>;
+    }
     | { type: "tool_result"; toolUseId: string; content: ContentBlock[]; isError: boolean }
     | { type: "image"; mediaType: string; data: string };
 

@@ -217,6 +217,7 @@ func (engine *Engine) invokeCompaction(
 			RoundID:   compactionID,
 			Cwd:       sessionCwd(prepared.session),
 		}, calls)
+		markNativeShellResults(response.Content, results)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

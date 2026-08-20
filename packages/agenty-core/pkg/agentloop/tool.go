@@ -31,3 +31,28 @@ type ToolRuntime interface {
 		calls []conversation.ToolUseBlock,
 	) []conversation.ToolResultBlock
 }
+
+func markNativeShellResults(
+	calls conversation.Content,
+	results []conversation.ToolResultBlock,
+) {
+	nativeCallIDs := make(map[string]struct{})
+	for _, block := range calls {
+		call, ok := block.(conversation.ShellCallBlock)
+		if ok && call.CallID != "" {
+			nativeCallIDs[call.CallID] = struct{}{}
+		}
+	}
+
+	for resultIndex := range results {
+		_, native := nativeCallIDs[results[resultIndex].ToolUseID]
+		for blockIndex, block := range results[resultIndex].Content {
+			output, ok := block.(conversation.ShellCallOutputBlock)
+			if !ok {
+				continue
+			}
+			output.OpenAINative = &native
+			results[resultIndex].Content[blockIndex] = output
+		}
+	}
+}

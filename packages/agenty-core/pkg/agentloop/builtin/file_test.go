@@ -25,7 +25,7 @@ func TestReadFile(t *testing.T) {
 		newRegistry(t),
 		"read_file",
 		directory,
-		`{"path":"nested/example.txt","startLine":2,"endLine":3}`,
+		`{"path":"nested/example.txt","start_line":2,"end_line":3}`,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -64,17 +64,17 @@ func TestReadFileValidatesLineBounds(t *testing.T) {
 	}{
 		{
 			name:      "explicit zero start",
-			arguments: `{"path":"short.txt","startLine":0}`,
-			wantError: "startLine must be positive",
+			arguments: `{"path":"short.txt","start_line":0}`,
+			wantError: "start_line must be positive",
 		},
 		{
 			name:      "reversed range",
-			arguments: `{"path":"short.txt","startLine":2,"endLine":1}`,
-			wantError: "startLine must not exceed endLine",
+			arguments: `{"path":"short.txt","start_line":2,"end_line":1}`,
+			wantError: "start_line must not exceed end_line",
 		},
 		{
 			name:      "start after end of file",
-			arguments: `{"path":"short.txt","startLine":3}`,
+			arguments: `{"path":"short.txt","start_line":3}`,
 			wantError: "exceeds file length 2",
 		},
 	}
@@ -176,34 +176,34 @@ func TestPatchFile(t *testing.T) {
 		{
 			name:        "unique replacement",
 			original:    "before old after",
-			arguments:   `{"path":"file.txt","oldText":"old","newText":"new"}`,
+			arguments:   `{"path":"file.txt","old_text":"old","new_text":"new"}`,
 			wantContent: "before new after",
 			wantCount:   1,
 		},
 		{
 			name:        "replace all",
 			original:    "old and old",
-			arguments:   `{"path":"file.txt","oldText":"old","newText":"new","replaceAll":true}`,
+			arguments:   `{"path":"file.txt","old_text":"old","new_text":"new","replace_all":true}`,
 			wantContent: "new and new",
 			wantCount:   2,
 		},
 		{
 			name:      "reject missing new text",
 			original:  "old",
-			arguments: `{"path":"file.txt","oldText":"old"}`,
-			wantError: "newText is required",
+			arguments: `{"path":"file.txt","old_text":"old"}`,
+			wantError: "new_text is required",
 		},
 		{
 			name:      "reject ambiguous replacement",
 			original:  "old and old",
-			arguments: `{"path":"file.txt","oldText":"old","newText":"new"}`,
-			wantError: "oldText occurs 2 times",
+			arguments: `{"path":"file.txt","old_text":"old","new_text":"new"}`,
+			wantError: "old_text occurs 2 times",
 		},
 		{
 			name:      "reject missing text",
 			original:  "unchanged",
-			arguments: `{"path":"file.txt","oldText":"missing","newText":"new"}`,
-			wantError: "oldText was not found",
+			arguments: `{"path":"file.txt","old_text":"missing","new_text":"new"}`,
+			wantError: "old_text was not found",
 		},
 	}
 

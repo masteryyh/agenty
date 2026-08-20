@@ -658,6 +658,7 @@ func (engine *Engine) executeLoop(
 			RoundID:   prepared.roundID,
 			Cwd:       cwd,
 		}, toolCalls)
+		markNativeShellResults(response.Content, results)
 		if err := ctx.Err(); err != nil {
 			return totalUsage, err
 		}
@@ -806,9 +807,11 @@ func sessionMessages(session *conversation.Session) []conversation.Message {
 func toolCalls(content conversation.Content) []conversation.ToolUseBlock {
 	calls := make([]conversation.ToolUseBlock, 0)
 	for _, block := range content {
-		call, ok := block.(conversation.ToolUseBlock)
-		if ok {
+		switch call := block.(type) {
+		case conversation.ToolUseBlock:
 			calls = append(calls, call)
+		case conversation.ShellCallBlock:
+			calls = append(calls, call.ToolUseBlock())
 		}
 	}
 

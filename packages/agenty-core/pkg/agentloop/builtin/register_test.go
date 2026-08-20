@@ -2,6 +2,7 @@ package builtin_test
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	json "github.com/bytedance/sonic"
@@ -13,6 +14,7 @@ import (
 
 func TestRegisterAll(t *testing.T) {
 	t.Parallel()
+	snakeCase := regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
 
 	registry := agentloop.NewRegistry()
 	if err := builtin.RegisterAll(registry); err != nil {
@@ -26,6 +28,7 @@ func TestRegisterAll(t *testing.T) {
 		"ls",
 		"patch_file",
 		"read_file",
+		"shell",
 		"write_file",
 	}
 	definitions := registry.Definitions()
@@ -37,8 +40,14 @@ func TestRegisterAll(t *testing.T) {
 		if definition.Name != wantName {
 			t.Errorf("definition %d name = %q, want %q", index, definition.Name, wantName)
 		}
+		if !snakeCase.MatchString(definition.Name) {
+			t.Errorf("definition %q name is not snake_case", definition.Name)
+		}
 		if definition.InputSchema.Type != agentloop.JSONSchemaTypeObject {
 			t.Errorf("definition %q schema type = %q, want object", definition.Name, definition.InputSchema.Type)
+		}
+		if definition.Strict {
+			t.Errorf("definition %q strict = true, want false", definition.Name)
 		}
 		additional := definition.InputSchema.AdditionalProperties
 		if additional == nil || additional.Allowed == nil || *additional.Allowed {
@@ -46,6 +55,16 @@ func TestRegisterAll(t *testing.T) {
 		}
 		if _, err := agentloop.ToolSchemaMap(definition.InputSchema); err != nil {
 			t.Errorf("definition %q schema conversion: %v", definition.Name, err)
+		}
+		for property := range definition.InputSchema.Properties {
+			if !snakeCase.MatchString(property) {
+				t.Errorf("definition %q input property %q is not snake_case", definition.Name, property)
+			}
+		}
+		for _, property := range definition.InputSchema.Required {
+			if !snakeCase.MatchString(property) {
+				t.Errorf("definition %q required property %q is not snake_case", definition.Name, property)
+			}
 		}
 	}
 }

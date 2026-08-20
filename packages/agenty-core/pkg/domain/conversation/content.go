@@ -11,11 +11,13 @@ import (
 type BlockType string
 
 const (
-	BlockText       BlockType = "text"
-	BlockReasoning  BlockType = "reasoning"
-	BlockToolUse    BlockType = "tool_use"
-	BlockToolResult BlockType = "tool_result"
-	BlockImage      BlockType = "image"
+	BlockText        BlockType = "text"
+	BlockReasoning   BlockType = "reasoning"
+	BlockToolUse     BlockType = "tool_use"
+	BlockToolResult  BlockType = "tool_result"
+	BlockImage       BlockType = "image"
+	BlockShellCall   BlockType = "shell_call"
+	BlockShellOutput BlockType = "shell_call_output"
 )
 
 type ContentBlock interface {
@@ -106,6 +108,67 @@ func (b ToolResultBlock) MarshalJSON() ([]byte, error) {
 	}{Type: BlockToolResult, alias: alias(b)})
 }
 
+type ShellCallBlock struct {
+	ID              string   `json:"id,omitempty"`
+	CallID          string   `json:"callId"`
+	Commands        []string `json:"commands"`
+	TimeoutMs       int64    `json:"timeoutMs,omitempty"`
+	MaxOutputLength int64    `json:"maxOutputLength,omitempty"`
+}
+
+func (b ShellCallBlock) ToolUseBlock() ToolUseBlock {
+	input, _ := json.Marshal(struct {
+		Commands        []string `json:"commands"`
+		TimeoutMs       int64    `json:"timeout_ms,omitempty"`
+		MaxOutputLength int64    `json:"max_output_length,omitempty"`
+	}{
+		Commands: b.Commands, TimeoutMs: b.TimeoutMs, MaxOutputLength: b.MaxOutputLength,
+	})
+	return ToolUseBlock{ID: b.CallID, Name: "shell", Input: shared.RawJSON(input)}
+}
+
+func (ShellCallBlock) BlockType() BlockType {
+	return BlockShellCall
+}
+
+func (b ShellCallBlock) MarshalJSON() ([]byte, error) {
+	type alias ShellCallBlock
+	return json.Marshal(struct {
+		Type BlockType `json:"type"`
+		alias
+	}{Type: BlockShellCall, alias: alias(b)})
+}
+
+type ShellOutcome struct {
+	Type     string `json:"type"`
+	ExitCode *int64 `json:"exitCode,omitempty"`
+}
+
+type ShellCommandOutput struct {
+	Stdout  string       `json:"stdout"`
+	Stderr  string       `json:"stderr"`
+	Outcome ShellOutcome `json:"outcome"`
+}
+
+type ShellCallOutputBlock struct {
+	CallID          string               `json:"callId"`
+	MaxOutputLength int64                `json:"maxOutputLength"`
+	OpenAINative    *bool                `json:"openAINative,omitempty"`
+	Output          []ShellCommandOutput `json:"output"`
+}
+
+func (ShellCallOutputBlock) BlockType() BlockType {
+	return BlockShellOutput
+}
+
+func (b ShellCallOutputBlock) MarshalJSON() ([]byte, error) {
+	type alias ShellCallOutputBlock
+	return json.Marshal(struct {
+		Type BlockType `json:"type"`
+		alias
+	}{Type: BlockShellOutput, alias: alias(b)})
+}
+
 type ImageBlock struct {
 	MimeType string `json:"mimeType"`
 	Data     string `json:"data,omitempty"`
@@ -166,6 +229,18 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 			block = b
 		case BlockToolResult:
 			var b ToolResultBlock
+			if err := json.Unmarshal(raw, &b); err != nil {
+				return err
+			}
+			block = b
+		case BlockShellCall:
+			var b ShellCallBlock
+			if err := json.Unmarshal(raw, &b); err != nil {
+				return err
+			}
+			block = b
+		case BlockShellOutput:
+			var b ShellCallOutputBlock
 			if err := json.Unmarshal(raw, &b); err != nil {
 				return err
 			}

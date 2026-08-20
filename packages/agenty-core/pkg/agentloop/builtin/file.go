@@ -21,8 +21,8 @@ type readFileTool struct {
 
 type readFileArguments struct {
 	Path      string `json:"path"`
-	StartLine *int   `json:"startLine,omitempty"`
-	EndLine   *int   `json:"endLine,omitempty"`
+	StartLine *int   `json:"start_line,omitempty"`
+	EndLine   *int   `json:"end_line,omitempty"`
 }
 
 type readFileResult struct {
@@ -40,9 +40,9 @@ func (tool *readFileTool) Definition() agentloop.ToolDefinition {
 			"Relative paths resolve from the session working directory. The result contains numbered lines.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{
-				"path":      stringSchema("Absolute path or path relative to the session working directory."),
-				"startLine": integerSchema("Optional inclusive first line, using a 1-based index.", 1),
-				"endLine":   integerSchema("Optional inclusive last line, using a 1-based index.", 1),
+				"path":       stringSchema("Absolute path or path relative to the session working directory."),
+				"start_line": integerSchema("Optional inclusive first line, using a 1-based index.", 1),
+				"end_line":   integerSchema("Optional inclusive last line, using a 1-based index.", 1),
 			},
 			[]string{"path"},
 		),
@@ -63,18 +63,18 @@ func (tool *readFileTool) Execute(
 	if arguments.StartLine != nil {
 		startLine = *arguments.StartLine
 		if startLine < 1 {
-			return nil, fmt.Errorf("read_file: startLine must be positive")
+			return nil, fmt.Errorf("read_file: start_line must be positive")
 		}
 	}
 	endLine := 0
 	if arguments.EndLine != nil {
 		endLine = *arguments.EndLine
 		if endLine < 1 {
-			return nil, fmt.Errorf("read_file: endLine must be positive")
+			return nil, fmt.Errorf("read_file: end_line must be positive")
 		}
 	}
 	if startLine > 0 && endLine > 0 && startLine > endLine {
-		return nil, fmt.Errorf("read_file: startLine must not exceed endLine")
+		return nil, fmt.Errorf("read_file: start_line must not exceed end_line")
 	}
 
 	path, err := resolvePath(arguments.Path, callContext.Cwd, false)
@@ -152,7 +152,7 @@ func readTextFile(
 		return readFileResult{}, fmt.Errorf("scan %q: %w", path, err)
 	}
 	if lineNumber < start {
-		return readFileResult{}, fmt.Errorf("startLine %d exceeds file length %d", start, lineNumber)
+		return readFileResult{}, fmt.Errorf("start_line %d exceeds file length %d", start, lineNumber)
 	}
 
 	result.Content = builder.String()
@@ -300,9 +300,9 @@ type patchFileTool struct {
 
 type patchFileArguments struct {
 	Path       string  `json:"path"`
-	OldText    string  `json:"oldText"`
-	NewText    *string `json:"newText"`
-	ReplaceAll bool    `json:"replaceAll,omitempty"`
+	OldText    string  `json:"old_text"`
+	NewText    *string `json:"new_text"`
+	ReplaceAll bool    `json:"replace_all,omitempty"`
 }
 
 type patchFileResult struct {
@@ -314,16 +314,16 @@ type patchFileResult struct {
 func (tool *patchFileTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
 		Name: "patch_file",
-		Description: "Replace exact text in an existing file. By default oldText must occur exactly once; " +
-			"set replaceAll to replace every occurrence.",
+		Description: "Replace exact text in an existing file. By default old_text must occur exactly once; " +
+			"set replace_all to replace every occurrence.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{
-				"path":       stringSchema("Absolute path or path relative to the session working directory."),
-				"oldText":    stringSchema("Exact text that must already exist in the file."),
-				"newText":    stringSchema("Replacement text. May be empty to remove oldText."),
-				"replaceAll": booleanSchema("Replace all occurrences instead of requiring one unique occurrence."),
+				"path":        stringSchema("Absolute path or path relative to the session working directory."),
+				"old_text":    stringSchema("Exact text that must already exist in the file."),
+				"new_text":    stringSchema("Replacement text. May be empty to remove old_text."),
+				"replace_all": booleanSchema("Replace all occurrences instead of requiring one unique occurrence."),
 			},
-			[]string{"path", "oldText", "newText"},
+			[]string{"path", "old_text", "new_text"},
 		),
 	}
 }
@@ -339,10 +339,10 @@ func (tool *patchFileTool) Execute(
 	}
 
 	if arguments.OldText == "" {
-		return nil, fmt.Errorf("patch_file: oldText must not be empty")
+		return nil, fmt.Errorf("patch_file: old_text must not be empty")
 	}
 	if arguments.NewText == nil {
-		return nil, fmt.Errorf("patch_file: newText is required")
+		return nil, fmt.Errorf("patch_file: new_text is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -371,11 +371,11 @@ func (tool *patchFileTool) Execute(
 	content := string(data)
 	occurrences := strings.Count(content, arguments.OldText)
 	if occurrences == 0 {
-		return nil, fmt.Errorf("patch_file: oldText was not found in %q", path)
+		return nil, fmt.Errorf("patch_file: old_text was not found in %q", path)
 	}
 	if !arguments.ReplaceAll && occurrences != 1 {
 		return nil, fmt.Errorf(
-			"patch_file: oldText occurs %d times in %q; set replaceAll to replace every occurrence",
+			"patch_file: old_text occurs %d times in %q; set replace_all to replace every occurrence",
 			occurrences,
 			path,
 		)

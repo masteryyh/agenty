@@ -121,7 +121,7 @@ func normalizeMaxResults(value *int) (int, error) {
 		return defaultMaxResults, nil
 	}
 	if *value < 1 || *value > maxResults {
-		return 0, fmt.Errorf("maxResults must be between 1 and %d", maxResults)
+		return 0, fmt.Errorf("max_results must be between 1 and %d", maxResults)
 	}
 	return *value, nil
 }

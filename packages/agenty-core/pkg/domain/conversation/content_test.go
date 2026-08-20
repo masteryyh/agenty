@@ -82,6 +82,54 @@ func TestContentUnmarshalUnknownType(t *testing.T) {
 	}
 }
 
+func TestShellBlocksRoundTrip(t *testing.T) {
+	exitCode := int64(7)
+	original := Content{
+		ShellCallBlock{
+			ID: "sh_1", CallID: "call_1", Commands: []string{"pwd", "false"},
+			TimeoutMs: 1000, MaxOutputLength: 4096,
+		},
+		ToolResultBlock{
+			ToolUseID: "call_1",
+			Content: Content{ShellCallOutputBlock{
+				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: boolPointer(true),
+				Output: []ShellCommandOutput{
+					{Stdout: "/tmp\n", Outcome: ShellOutcome{Type: "exit", ExitCode: int64Pointer(0)}},
+					{Stderr: "failed\n", Outcome: ShellOutcome{Type: "exit", ExitCode: &exitCode}},
+				},
+			}},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Content
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded[0].(ShellCallBlock); !ok {
+		t.Fatalf("call block = %T, want ShellCallBlock", decoded[0])
+	}
+	result, ok := decoded[1].(ToolResultBlock)
+	if !ok || len(result.Content) != 1 {
+		t.Fatalf("result block = %#v", decoded[1])
+	}
+	if output, ok := result.Content[0].(ShellCallOutputBlock); !ok || len(output.Output) != 2 ||
+		output.OpenAINative == nil || !*output.OpenAINative {
+		t.Fatalf("shell output = %#v", result.Content)
+	}
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
 func TestContentUnmarshalNull(t *testing.T) {
 	c := Content{TextBlock{Text: "x"}}
 	if err := json.Unmarshal([]byte(`null`), &c); err != nil {

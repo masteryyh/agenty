@@ -17,7 +17,7 @@ func TestGrep(t *testing.T) {
 		newRegistry(t),
 		"grep",
 		directory,
-		`{"pattern":"needle","glob":"**/*.go","caseSensitive":false}`,
+		`{"pattern":"needle","glob":"**/*.go","case_sensitive":false}`,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -56,9 +56,9 @@ func TestGrepValidatesPatternAndLimitsResults(t *testing.T) {
 		registry,
 		"grep",
 		directory,
-		`{"pattern":"needle","maxResults":0}`,
+		`{"pattern":"needle","max_results":0}`,
 	); err == nil {
-		t.Error("grep accepted maxResults zero")
+		t.Error("grep accepted max_results zero")
 	}
 
 	encoded, err := executeTool(
@@ -66,7 +66,7 @@ func TestGrepValidatesPatternAndLimitsResults(t *testing.T) {
 		registry,
 		"grep",
 		directory,
-		`{"pattern":"(?i)needle","glob":"**/*.go","maxResults":1}`,
+		`{"pattern":"(?i)needle","glob":"**/*.go","max_results":1}`,
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -6,9 +6,6 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
 )
 
-// The agent loop owns the provider-neutral model contract. These aliases keep
-// the provider adapters focused on conversion while preserving one canonical
-// set of request, response, streaming, and schema types.
 type (
 	toolJSONSchema                     = agentloop.JSONSchema
 	toolJSONSchemaAdditionalProperties = agentloop.JSONSchemaAdditionalProperties
@@ -60,4 +57,16 @@ func toolSchemaMap(schema toolJSONSchema) (map[string]any, error) {
 	}
 
 	return converted, nil
+}
+
+func providerToolType(tool modelToolDefinition) (agentloop.ToolType, error) {
+	if tool.Type == "" {
+		return agentloop.ToolTypeFunction, nil
+	}
+	switch tool.Type {
+	case agentloop.ToolTypeFunction, agentloop.ToolTypeShell:
+		return tool.Type, nil
+	default:
+		return "", invalidRequest("tool %q has unsupported type %q", tool.Name, tool.Type)
+	}
 }

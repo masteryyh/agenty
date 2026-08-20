@@ -121,6 +121,14 @@ func (r *Registry) execute(
 		result.IsError = true
 		return result
 	}
+	for index, block := range content {
+		output, ok := block.(conversation.ShellCallOutputBlock)
+		if !ok {
+			continue
+		}
+		output.CallID = call.ID
+		content[index] = output
+	}
 
 	result.Content = content
 	return result
