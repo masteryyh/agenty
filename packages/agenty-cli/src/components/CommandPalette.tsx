@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { quoteArg } from "../commands/registry";
 import type { Palette } from "../hooks/useCommandPalette";
 import { useWindowSize } from "../hooks/useWindowSize";
-import { Box, Text } from "./ui";
+import { Box, Pressable, Text } from "./ui";
 
 const MAX_ITEMS = 8;
 const HIGHLIGHT = "#4FA8FF";
@@ -86,22 +86,26 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
                         const contentLen =
                             cursor.length + c.name.length + 3 + c.description.length;
                         return (
-                            <Text
+                            <Pressable
                                 key={c.name}
-                                onMouseClick={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
+                                width="100%"
+                                height={1}
+                                onPress={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
                             >
-                                <Text color={selected ? HIGHLIGHT : undefined}>
-                                    {cursor}
+                                <Text width="100%">
+                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                        {cursor}
+                                    </Text>
+                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                        {c.name}
+                                    </Text>
+                                    <Text color="gray">
+                                        {" — "}
+                                        {c.description}
+                                    </Text>
+                                    <Text>{padSpaces(contentLen)}</Text>
                                 </Text>
-                                <Text color={selected ? HIGHLIGHT : undefined}>
-                                    {c.name}
-                                </Text>
-                                <Text color="gray">
-                                    {" — "}
-                                    {c.description}
-                                </Text>
-                                <Text>{padSpaces(contentLen)}</Text>
-                            </Text>
+                            </Pressable>
                         );
                     }
                     const matchedPart = c.name.slice(0, matchPrefix.length);
@@ -109,30 +113,34 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
                     const contentLen =
                         cursor.length + c.name.length + 3 + c.description.length;
                     return (
-                        <Text
+                        <Pressable
                             key={c.name}
-                            onMouseClick={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
+                            width="100%"
+                            height={1}
+                            onPress={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
                         >
-                            <Text color={selected ? HIGHLIGHT : undefined}>
-                                {cursor}
-                            </Text>
-                            <Text
-                                color={HIGHLIGHT}
-                                bold={isFull}
-                            >
-                                {matchedPart}
-                            </Text>
-                            {unmatchedPart ? (
+                            <Text width="100%">
                                 <Text color={selected ? HIGHLIGHT : undefined}>
-                                    {unmatchedPart}
+                                    {cursor}
                                 </Text>
-                            ) : null}
-                            <Text color="gray">
-                                {" — "}
-                                {c.description}
+                                <Text
+                                    color={HIGHLIGHT}
+                                    bold={isFull}
+                                >
+                                    {matchedPart}
+                                </Text>
+                                {unmatchedPart ? (
+                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                        {unmatchedPart}
+                                    </Text>
+                                ) : null}
+                                <Text color="gray">
+                                    {" — "}
+                                    {c.description}
+                                </Text>
+                                <Text>{padSpaces(contentLen)}</Text>
                             </Text>
-                            <Text>{padSpaces(contentLen)}</Text>
-                        </Text>
+                        </Pressable>
                     );
                 })}
                 <Text dimColor>
@@ -181,17 +189,23 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
                     const prefix = ` ${selected ? "❯" : " "} `;
                     const contentLen = prefix.length + c.length;
                     return (
-                        <Text
+                        <Pressable
                             key={`${absIdx}-${c}`}
-                            color={selected ? HIGHLIGHT : "white"}
-                            dimColor={!selected}
-                            bold={selected}
-                            onMouseClick={() => onChoose(`${command.name} ${quoteArg(c)}`)}
+                            width="100%"
+                            height={1}
+                            onPress={() => onChoose(`${command.name} ${quoteArg(c)}`)}
                         >
-                            {prefix}
-                            {c}
-                            {padSpaces(contentLen)}
-                        </Text>
+                            <Text
+                                width="100%"
+                                color={selected ? HIGHLIGHT : "white"}
+                                dimColor={!selected}
+                                bold={selected}
+                            >
+                                {prefix}
+                                {c}
+                                {padSpaces(contentLen)}
+                            </Text>
+                        </Pressable>
                     );
                 })
             )}

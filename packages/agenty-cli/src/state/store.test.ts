@@ -253,7 +253,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return persisted;
             },
-            async resolveModel() {
+            async getModel() {
                 return {
                     code: "model",
                     providerCode: "provider",
@@ -339,7 +339,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return persisted;
             },
-            async resolveModel() {
+            async getModel() {
                 return {
                     code: "model",
                     providerCode: "provider",

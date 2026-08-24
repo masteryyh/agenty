@@ -461,7 +461,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const parsed = parseThinking(options.thinking);
         const prepared = await client.prepareSession({
             agentRef: options.agentRef,
-            modelRef: options.modelRef,
+            modelInput: options.modelInput,
             newSession: options.newSession,
             reasoningEffort: reasoningEffort(parsed.thinking, parsed.thinkingLevel),
         });
@@ -681,7 +681,7 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const full = await client.getSession(session.id);
                 const model = full.currentModel
-                    ? await client.resolveModel(`${full.currentModel.providerCode}/${full.currentModel.modelCode}`)
+                    ? await client.getModel(full.currentModel)
                     : get().model;
                 set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
             } catch (error) {
@@ -696,7 +696,7 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const model = agent.defaultModel
-                    ? await client.resolveModel(`${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}`)
+                    ? await client.getModel(agent.defaultModel)
                     : await client.getDefaultModel();
                 const session = await client.getLastSessionByAgent(agent.code) ?? await client.createSession(agent.code, model);
                 set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: actualContextSize(session), overlay: null });

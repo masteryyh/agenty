@@ -117,10 +117,10 @@ function ChatView() {
             return;
         }
         try {
-            const m = await client.resolveModel(ref);
+            const m = await client.resolveModelInput(ref);
             await app.switchModel(m);
         } catch (e) {
-            app.notify(`model not found: ${ref} (${(e as Error).message})`, true);
+            app.notify(`model input failed: ${ref} (${(e as Error).message})`, true);
         }
     };
 

@@ -1,4 +1,5 @@
 import type { AgentyClient } from "../api/client";
+import { formatModelRef, modelRefFromModel } from "../api/modelReference";
 
 export interface Command {
     name: string;
@@ -17,12 +18,12 @@ export const commands: Command[] = [
     {
         name: "/model",
         description: "Manage and switch chat models",
-        usage: "/model [provider/model]",
-        argHint: "provider/model",
+        usage: "/model [provider-code/model-code]",
+        argHint: "provider-code/model-code",
         completeArgs: async (client) => {
             const models = await client.listModels();
             return models
-                .map((m) => `${m.providerCode}/${m.code}`);
+                .map((m) => formatModelRef(modelRefFromModel(m)));
         },
     },
     {

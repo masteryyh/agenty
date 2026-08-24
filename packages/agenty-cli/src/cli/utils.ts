@@ -1,4 +1,5 @@
 import { AgentyClient } from "@/api/client";
+import { formatModelRef, modelRefFromModel } from "@/api/modelReference";
 import type { ModelDto, ModelProviderDto } from "@/api/types";
 import { loadOptions } from "@/config";
 import { startLocalCore } from "@/localCore";
@@ -125,25 +126,15 @@ export async function resolveProvider(client: AgentyClient, reference: string): 
 }
 
 export function displayModel(model: ModelDto): string {
-    return `${model.providerCode}/${model.code}`;
+    return formatModelRef(modelRefFromModel(model));
 }
 
-export async function resolveModel(client: AgentyClient, reference: string): Promise<ModelDto> {
-    const models = await listAll((page, pageSize) => client.listModelsPage(page, pageSize));
-    const lower = reference.toLowerCase();
-
-    const matched = models.filter((model) =>
-        model.code === reference ||
-        model.name.toLowerCase() === lower ||
-        displayModel(model).toLowerCase() === lower,
-    );
-    if (matched.length === 0) {
-        throw new CliError(`model not found: ${reference}`);
+export async function resolveModelInput(client: AgentyClient, reference: string): Promise<ModelDto> {
+    try {
+        return await client.resolveModelInput(reference);
+    } catch (error) {
+        throw new CliError((error as Error).message);
     }
-    if (matched.length > 1) {
-        throw new CliError(`model reference is ambiguous: ${reference}; use provider/name or model code instead`);
-    }
-    return matched[0];
 }
 
 export function configured(model: ModelDto): boolean {

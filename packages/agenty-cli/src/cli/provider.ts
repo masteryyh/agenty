@@ -9,6 +9,7 @@ import {
     outputFields,
     outputTable,
     pageOptions,
+    parseBoolean,
     type ParsedArgs,
     render,
     requireFlag,
@@ -36,18 +37,23 @@ export async function handleProvider(client: AgentyClient, args: ParsedArgs): Pr
         render(args, provider, () => outputFields([
             ["Provider Code", provider.code], ["Name", provider.name], ["Type", provider.type],
             ["Base URL", provider.baseUrl], ["API Key", provider.apiKey ? "<set>" : "<not set>"],
+            ["Free-form apply_patch", provider.freeFormTool === true ? "enabled" : "disabled"],
             ["Models", String(provider.models.length)],
         ]));
         return;
     }
     if (command === "add") {
         const [, , code] = requirePositionals(args, 3, "provider add <code> --type <type> [options]");
+        const type = requireFlag(args, "type") as APIType;
         const created = await client.createProvider({
             code,
             name: flag(args, "name")?.trim() || code,
-            type: requireFlag(args, "type") as APIType,
+            type,
             baseUrl: flag(args, "base-url")?.trim() || "",
             apiKey: secret(args, "api-key", "api-key-env", "provider API key") ?? "",
+            freeFormTool: type === "openai" && (hasFlag(args, "free-form-tool")
+                ? parseBoolean(flag(args, "free-form-tool"), "--free-form-tool")
+                : false),
         });
         action(args, created, `Provider added: ${created.code}`);
         return;
@@ -64,6 +70,9 @@ export async function handleProvider(client: AgentyClient, args: ParsedArgs): Pr
         }
         if (hasFlag(args, "base-url")) {
             update.baseUrl = flag(args, "base-url") ?? "";
+        }
+        if (hasFlag(args, "free-form-tool")) {
+            update.freeFormTool = parseBoolean(flag(args, "free-form-tool"), "--free-form-tool");
         }
         const apiKey = secret(args, "api-key", "api-key-env", "provider API key");
         if (apiKey !== undefined) {

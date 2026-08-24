@@ -3,11 +3,14 @@ import { describe, expect, test } from "bun:test";
 import type { CoreModelDto, ModelProviderDto } from "../api/types";
 import { isBuiltinProvider } from "../consts/providerPresets";
 import {
+    configuredProviders,
+    filterModelsByCodeLike,
     initialModelIndex,
     initialProviderIndex,
-    modelInputFromValues,
-    modelUpdateFromValues,
-    parseReasoningMapping,
+    isConfiguredProvider,
+    isModelSearchInput,
+    normalizeModelSearchInput,
+    sortModelsByCode,
 } from "./ModelOverlay";
 
 function model(code: string, isDefault = false): CoreModelDto {
@@ -22,13 +25,19 @@ function model(code: string, isDefault = false): CoreModelDto {
     };
 }
 
-function provider(code: string, models: CoreModelDto[] = []): ModelProviderDto {
+function provider(
+    code: string,
+    models: CoreModelDto[] = [],
+    apiKey = "test-key",
+): ModelProviderDto {
     return {
         code,
         name: code,
         type: "openai_completions",
         baseUrl: "https://example.invalid/v1",
-        apiKey: "test-key",
+        apiKey,
+        builtin: code === "openai",
+        official: code === "openai",
         models,
         createdAt: "",
         updatedAt: "",
@@ -41,8 +50,8 @@ describe("model overlay behavior", () => {
 
         expect(initialProviderIndex(providers, "openai")).toBe(1);
         expect(initialProviderIndex(providers, "missing")).toBe(0);
-        expect(isBuiltinProvider("openai")).toBe(true);
-        expect(isBuiltinProvider("custom")).toBe(false);
+        expect(isBuiltinProvider(provider("openai"))).toBe(true);
+        expect(isBuiltinProvider(provider("custom"))).toBe(false);
     });
 
     test("starts on the current model, then provider default, then first model", () => {
@@ -54,47 +63,65 @@ describe("model overlay behavior", () => {
         expect(initialModelIndex(provider("empty"))).toBe(0);
     });
 
-    test("parses and validates reasoning mappings", () => {
-        expect(parseReasoningMapping("{\"fast\":\"low\",\"deep\":\"high\"}")).toEqual({
-            fast: "low",
-            deep: "high",
-        });
-        expect(parseReasoningMapping("{}")).toEqual({});
-        expect(parseReasoningMapping(" ")).toBeUndefined();
-        expect(() => parseReasoningMapping("[]")).toThrow("JSON object");
-        expect(() => parseReasoningMapping("{\"fast\":\"unsupported\"}")).toThrow("Invalid reasoning effort");
+    test("sorts models by code without mutating the provider response", () => {
+        const models = [model("zeta"), model("Alpha"), model("beta")];
+
+        expect(sortModelsByCode(models).map((candidate) => candidate.code)).toEqual([
+            "Alpha",
+            "beta",
+            "zeta",
+        ]);
+        expect(models.map((candidate) => candidate.code)).toEqual(["zeta", "Alpha", "beta"]);
+        expect(configuredProviders([provider("custom", models)])[0]?.models.map(
+            (candidate) => candidate.code,
+        )).toEqual(["Alpha", "beta", "zeta"]);
     });
 
-    test("builds create and update payloads without changing model codes", () => {
-        const values = {
-            code: "org/model_name[v2]",
-            name: "Model v2",
-            contextWindow: "64000",
-            multiModal: "true",
-            light: "false",
-            isDefault: "true",
-            reasoningMapping: "{\"deep\":\"xhigh\"}",
-        };
-        const created = modelInputFromValues("custom", values);
-        expect(created).toMatchObject({
-            providerCode: "custom",
-            modelCode: "org/model_name[v2]",
-            contextWindow: 64_000,
-            multiModal: true,
-            isDefault: true,
-            reasoningEffortMapping: { deep: "xhigh" },
-        });
+    test("filters sorted model codes with a case-insensitive contains match", () => {
+        const models = sortModelsByCode([
+            model("gpt-5"),
+            model("GPT-4o"),
+            model("openrouter:google/gemini-2.5-pro"),
+            { ...model("claude-3"), name: "gpt display name" },
+        ]);
 
-        const updated = modelUpdateFromValues(model("old-id"), {
-            ...values,
-            name: "Updated model",
-            code: "new-id",
-        });
-        expect(updated).toMatchObject({
-            name: "Updated model",
-            contextWindow: 64_000,
-            multiModal: true,
-        });
+        expect(filterModelsByCodeLike(models, "pt-").map((candidate) => candidate.code)).toEqual([
+            "GPT-4o",
+            "gpt-5",
+        ]);
+        expect(filterModelsByCodeLike(models, "AUdE").map((candidate) => candidate.code)).toEqual([
+            "claude-3",
+        ]);
+        expect(filterModelsByCodeLike(models, ":GOOGLE/GEMINI-2.5").map(
+            (candidate) => candidate.code,
+        )).toEqual(["openrouter:google/gemini-2.5-pro"]);
+        expect(filterModelsByCodeLike(models, "display")).toEqual([]);
+        expect(filterModelsByCodeLike(models, "")).toBe(models);
+    });
+
+    test("only accepts model code characters as automatic search input", () => {
+        const namespacedCode = "openrouter:google/gemini-2.5-pro";
+
+        expect(isModelSearchInput("Az09-_ /\\:.".replace(" ", ""))).toBe(true);
+        expect(isModelSearchInput(namespacedCode)).toBe(true);
+        expect(normalizeModelSearchInput(namespacedCode)).toBe(namespacedCode);
+        expect(normalizeModelSearchInput("gpt 4.1")).toBe("gpt4.1");
+        expect(isModelSearchInput("model name")).toBe(false);
+        expect(isModelSearchInput("")).toBe(false);
+    });
+
+    test("only treats providers with a non-blank API key as configured", () => {
+        const providers = [
+            provider("configured"),
+            provider("empty", [], ""),
+            provider("blank", [], "   "),
+        ];
+
+        expect(isConfiguredProvider(providers[0]!)).toBe(true);
+        expect(isConfiguredProvider(providers[1]!)).toBe(false);
+        expect(configuredProviders(providers).map((candidate) => candidate.code)).toEqual([
+            "configured",
+        ]);
     });
 
 });

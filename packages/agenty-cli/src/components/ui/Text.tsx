@@ -2,6 +2,7 @@ import { createTextAttributes, type MouseEvent } from "@opentui/core";
 import { createContext, type ReactNode, useContext, useRef } from "react";
 
 const TextNestingContext = createContext(false);
+export const TextBackgroundContext = createContext<string | undefined>(undefined);
 
 export type TextProps = {
     children?: ReactNode;
@@ -38,6 +39,8 @@ export function Text({
     ...layout
 }: TextProps) {
     const nested = useContext(TextNestingContext);
+    const inheritedBackground = useContext(TextBackgroundContext);
+    const resolvedBackground = backgroundColor ?? inheritedBackground;
     const clickStart = useRef<{ x: number; y: number } | null>(null);
     const attributes = createTextAttributes({
         bold,
@@ -47,7 +50,7 @@ export function Text({
     });
     if (nested) {
         return (
-            <span fg={color} bg={backgroundColor} attributes={attributes}>
+            <span fg={color} bg={resolvedBackground} attributes={attributes}>
                 {children}
             </span>
         );
@@ -56,7 +59,7 @@ export function Text({
         <TextNestingContext.Provider value>
             <text
                 fg={color}
-                bg={backgroundColor}
+                bg={resolvedBackground}
                 attributes={attributes}
                 selectable={selectable ?? true}
                 wrapMode={wrap === "wrap" || !wrap ? "word" : "none"}

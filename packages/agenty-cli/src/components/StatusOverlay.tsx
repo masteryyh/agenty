@@ -1,27 +1,8 @@
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
-import { Box, Text } from "./ui";
-
-function pad(s: string, w: number): string {
-    if (s.length >= w) {
-        return s;
-    }
-    return s + " ".repeat(w - s.length);
-}
-
-function trunc(s: string, width: number): string {
-    if (width <= 0) {
-        return "";
-    }
-    if (s.length <= width) {
-        return s;
-    }
-    if (width === 1) {
-        return "…";
-    }
-    return `${s.slice(0, width - 1)}…`;
-}
+import { KeyValueList } from "./List";
+import { Panel } from "./Panel";
 
 export function StatusOverlay() {
     const dialogSize = useBottomDialogSize();
@@ -43,34 +24,18 @@ export function StatusOverlay() {
     const thinking = thinkingEnabled
         ? `on${thinkingLevel ? ` (${thinkingLevel} effort)` : ""}`
         : "off";
-    const rows: [string, string][] = [
-        ["Session", session?.id ?? "?"],
-        ["Agent", agent?.name ?? "?"],
-        ["Model", `${model?.providerName ?? "?"} · ${model?.name ?? "?"}`],
-        ["Thinking", thinking],
-        ["Messages", String(history.length)],
-        ["Context", `${session?.contextWindow ?? 0}/${tokenConsumed}`],
-        ["CWD", session?.cwd ?? process.cwd()],
+    const rows = [
+        { key: "Session", value: session?.id ?? "?" },
+        { key: "Agent", value: agent?.name ?? "?" },
+        { key: "Model", value: `${model?.providerName ?? "?"} · ${model?.name ?? "?"}` },
+        { key: "Thinking", value: thinking },
+        { key: "Messages", value: String(history.length) },
+        { key: "Context", value: `${session?.contextWindow ?? 0}/${tokenConsumed}` },
+        { key: "CWD", value: session?.cwd ?? process.cwd() },
     ];
-    const keyWidth = Math.min(10, Math.max(Math.floor(dialogSize.width / 4), 7));
-    const valueWidth = Math.max(dialogSize.width - keyWidth - 1, 1);
-
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Box marginBottom={1}>
-                <Text color="magenta" bold>Status</Text>
-            </Box>
-            <Box flexDirection="column" flexGrow={1}>
-                {rows.map(([k, v]) => (
-                    <Box key={k} gap={1}>
-                        <Text color="gray">{pad(k, keyWidth)}</Text>
-                        <Text color="white">{trunc(v, valueWidth)}</Text>
-                    </Box>
-                ))}
-            </Box>
-            <Box>
-                <Text dimColor>Esc to close</Text>
-            </Box>
-        </Box>
+        <Panel title="Status" hint="Esc to close">
+            <KeyValueList rows={rows} availableWidth={dialogSize.width} />
+        </Panel>
     );
 }

@@ -1,40 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AgentDto, ModelDto, ModelRef } from "../api/types";
+import { formatModelRef, modelRefFromModel } from "../api/modelReference";
+import type { AgentDto, ModelDto } from "../api/types";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { FormField, FormOption } from "./FormPanel";
 import { FormPanel } from "./FormPanel";
-import { Box, Spinner, Text } from "./ui";
-
-function trunc(s: string, width: number): string {
-    if (width <= 0) {
-        return "";
-    }
-    if (s.length <= width) {
-        return s;
-    }
-    if (width === 1) {
-        return "…";
-    }
-    return s.slice(0, width - 1) + "…";
-}
-
-function pad(s: string, width: number): string {
-    const clipped = trunc(s, width);
-    return clipped + " ".repeat(Math.max(width - clipped.length, 0));
-}
-
-export function parseModelRef(raw: string): ModelRef | undefined {
-    const separator = raw.indexOf("/");
-    if (separator <= 0 || separator === raw.length - 1) {
-        return undefined;
-    }
-    const providerCode = raw.slice(0, separator);
-    const modelCode = raw.slice(separator + 1);
-    return { providerCode, modelCode };
-}
+import { List, useListNavigation } from "./List";
+import { Panel } from "./Panel";
+import {
+    createTableLayout,
+    type TableColumn,
+    TableHeader,
+    TableRow,
+} from "./Table";
+import { ActionBar, Box, Spinner, Text } from "./ui";
 
 type Mode =
     | { kind: "list" }
@@ -81,7 +63,7 @@ export function AgentOverlay() {
             setModelOptions(
                 models.map((m) => ({
                     label: `${m.providerName} · ${m.name}`,
-                    value: `${m.providerCode}/${m.code}`,
+                    value: formatModelRef(modelRefFromModel(m)),
                 })),
             );
         } catch {
@@ -115,15 +97,15 @@ export function AgentOverlay() {
     });
 
     const buildFields = (target?: AgentDto): FormField[] => {
-        const modelRef = target?.defaultModel
-            ? `${target.defaultModel.providerCode}/${target.defaultModel.modelCode}`
+        const modelValue = target?.defaultModel
+            ? formatModelRef(target.defaultModel)
             : modelOptions[0]?.value ?? "";
         return [
             { key: "code", label: "Agent Code", kind: "text" as const, value: target?.code ?? "", placeholder: "my-agent", readOnly: !!target },
             { key: "name", label: "Name", kind: "text" as const, value: target?.name ?? "", placeholder: "my-agent" },
             { key: "soul", label: "Soul", kind: "text" as const, value: target?.soul ?? "", placeholder: "system prompt, leave blank for default" },
             { key: "isDefault", label: "Default", kind: "boolean" as const, value: target ? (target.isDefault ? "true" : "false") : "false" },
-            { key: "defaultModel", label: "Default model", kind: "select" as const, value: modelRef, options: modelOptions },
+            { key: "defaultModel", label: "Default model", kind: "select" as const, value: modelValue, options: modelOptions },
         ];
     };
 
@@ -132,8 +114,8 @@ export function AgentOverlay() {
             return;
         }
         try {
-            const defaultModel = parseModelRef(values.defaultModel);
-            const selectedModel = models.find((model) => `${model.providerCode}/${model.code}` === values.defaultModel);
+            const selectedModel = modelForValue(models, values.defaultModel);
+            const defaultModel = selectedModel ? modelRefFromModel(selectedModel) : undefined;
             await client.createAgent({
                 code: values.code.trim(),
                 name: values.name.trim(),
@@ -155,8 +137,8 @@ export function AgentOverlay() {
             return;
         }
         try {
-            const defaultModel = parseModelRef(values.defaultModel);
-            const selectedModel = models.find((model) => `${model.providerCode}/${model.code}` === values.defaultModel);
+            const selectedModel = modelForValue(models, values.defaultModel);
+            const defaultModel = selectedModel ? modelRefFromModel(selectedModel) : undefined;
             await client.updateAgent(target.code, {
                 name: values.name.trim(),
                 soul: values.soul.trim(),
@@ -243,10 +225,7 @@ export function AgentOverlay() {
     }
 
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Box marginBottom={1}>
-                <Text color="magenta" bold>Agents</Text>
-            </Box>
+        <Panel title="Agents">
             {agents === null ? (
                 <Spinner label="Loading..." />
             ) : agents.length === 0 ? (
@@ -264,8 +243,12 @@ export function AgentOverlay() {
                     onClose={close}
                 />
             )}
-        </Box>
+        </Panel>
     );
+}
+
+function modelForValue(models: readonly ModelDto[], value: string): ModelDto | undefined {
+    return models.find((model) => formatModelRef(modelRefFromModel(model)) === value);
 }
 
 // ─── Agent list table ───────────────────────────────────────────────
@@ -292,117 +275,100 @@ function AgentList({
     onClose: () => void;
 }) {
     const dialogSize = useBottomDialogSize();
-    const n = agents.length;
-    const compact = dialogSize.width < 44;
-    const flagsWidth = compact ? 0 : 24;
-    const nameWidth = compact
-        ? Math.max(dialogSize.width - 2, 8)
-        : Math.max(Math.min(dialogSize.width - flagsWidth - 4, 32), 12);
-    const maxVisible = Math.max(dialogSize.height - 6 - (compact ? 1 : 0), 1);
-    const maxVis = Math.min(maxVisible, n);
-    const half = Math.floor(maxVis / 2);
-    let start = cursor - half;
-    if (start < 0) {
-        start = 0;
-    }
-    if (start + maxVis > n) {
-        start = Math.max(n - maxVis, 0);
-    }
-    const visible = agents.slice(start, start + maxVis);
+    const maxVisible = Math.max(dialogSize.height - 5, 1);
+    const agentFlags = (agent: AgentDto): string =>
+        `${agent.isDefault ? "[default] " : ""}${agent.code === currentAgentCode ? "← current" : ""}`.trim();
+    const columns: Array<TableColumn<AgentDto>> = [
+        {
+            key: "name",
+            header: "Name",
+            value: (agent) => agent.name,
+            render: (agent, selected) => (
+                <Text color={selected ? "cyan" : "white"} bold={selected} wrap="truncate">
+                    {agent.name}
+                </Text>
+            ),
+        },
+        {
+            key: "flags",
+            header: "Flags",
+            value: agentFlags,
+            render: (agent, selected) => (
+                <Text color={selected ? "cyan" : "gray"} dimColor={!selected} wrap="truncate">
+                    {agentFlags(agent)}
+                </Text>
+            ),
+        },
+    ];
+    const tableLayout = createTableLayout(
+        columns,
+        agents,
+        Math.max(dialogSize.width - 2, 0),
+    );
 
-    useInput((input, key) => {
-        if (key.escape) {
-            onClose();
-            return;
-        }
-        if (key.upArrow) {
-            onCursor(Math.max(cursor - 1, 0));
-            return;
-        }
-        if (key.downArrow) {
-            onCursor(Math.min(cursor + 1, n - 1));
-            return;
-        }
-        const lower = input.toLowerCase();
-        const a = agents[cursor];
-        if (key.return || lower === "s") {
-            onSwitch(a);
-            return;
-        }
-        if (lower === "a") {
-            onAdd();
-        } else if (lower === "e") {
-            onEdit(a);
-        } else if (lower === "d") {
-            onDelete(a);
-        }
+    useListNavigation({
+        items: agents,
+        cursor,
+        onCursor,
+        onActivate: onSwitch,
+        onClose,
+        onInput: (input, _key, _event, agent) => {
+            const lower = input.toLowerCase();
+            if (lower === "s" && agent) {
+                onSwitch(agent);
+            } else if (lower === "a") {
+                onAdd();
+            } else if (lower === "e" && agent) {
+                onEdit(agent);
+            } else if (lower === "d" && agent) {
+                onDelete(agent);
+            }
+        },
     });
 
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Box marginBottom={1}>
-                <Text dimColor>
-                    {compact
-                        ? `  ${pad("Name", nameWidth)}`
-                        : `  ${pad("Name", nameWidth)}  ${pad("Flags", flagsWidth)}`}
-                </Text>
+        <Panel
+            footer={(
+                <ActionBar
+                    actions={[
+                        { key: "add", label: "Add" },
+                        { key: "edit", label: "Edit" },
+                        { key: "delete", label: "Delete", tone: "danger" },
+                    ]}
+                    onAction={(key) => {
+                        const agent = agents[cursor];
+                        if (key === "add") {
+                            onAdd();
+                        } else if (key === "edit" && agent) {
+                            onEdit(agent);
+                        } else if (key === "delete" && agent) {
+                            onDelete(agent);
+                        }
+                    }}
+                />
+            )}
+            hint="↑↓ navigate · Enter/s switch · e edit · d delete · Esc back"
+        >
+            <Box width="100%" height={1} marginBottom={1} overflow="hidden">
+                <Box width={2} height={1}><Text> </Text></Box>
+                <TableHeader columns={tableLayout} />
             </Box>
-            <Box flexDirection="column" flexGrow={1} overflow="hidden">
-                {visible.map((a) => {
-                    const i = agents.indexOf(a);
-                    const selected = i === cursor;
-                    const flags =
-                        `${a.isDefault ? "[default] " : ""}${a.code === currentAgentCode ? "← current" : ""}`.trim();
-                    const name = pad(a.name, nameWidth);
-                    return (
-                        <Box
-                            key={a.code}
-                            onMouseOver={() => onCursor(i)}
-                            onMouseClick={() => {
-                                onCursor(i);
-                                onSwitch(a);
-                            }}
-                        >
-                            <Text color={selected ? "cyan" : "gray"}>
-                                {selected ? "❯" : " "}
-                            </Text>
-                            <Text> </Text>
-                            <Text color={selected ? "cyan" : "white"} bold={selected}>
-                                {name}
-                            </Text>
-                            {compact ? null : <Text>  </Text>}
-                            {compact ? null : (
-                                <Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-                                    {pad(flags, flagsWidth)}
-                                </Text>
-                            )}
-                        </Box>
-                    );
-                })}
-            </Box>
-            {compact ? (
-                <Box height={1} overflow="hidden">
-                    <Text dimColor wrap="truncate">
-                        {trunc(
-                            `${agents[cursor]?.isDefault ? "[default] " : ""}${agents[cursor]?.code === currentAgentCode ? "← current" : ""}`.trim() || "No flags",
-                            dialogSize.width,
-                        )}
-                    </Text>
-                </Box>
-            ) : null}
-            <Box gap={2} height={1} overflow="hidden">
-                <Text color="cyan" onMouseClick={onAdd}>[Add]</Text>
-                <Text color="cyan" onMouseClick={() => onEdit(agents[cursor])}>[Edit]</Text>
-                <Text color="cyan" onMouseClick={() => onDelete(agents[cursor])}>[Delete]</Text>
-            </Box>
-            <Box height={1} overflow="hidden">
-                <Text dimColor wrap="truncate">
-                    {compact
-                        ? "↑↓ move · Enter switch · e edit · d del · Esc"
-                        : "↑↓ navigate · Enter/s switch · e edit · d delete · Esc back"}
-                </Text>
-            </Box>
-        </Box>
+            <List
+                items={agents}
+                cursor={cursor}
+                visibleCount={maxVisible}
+                getKey={(agent) => agent.code}
+                onCursor={onCursor}
+                onActivate={onSwitch}
+                renderItem={(agent, { selected }) => (
+                    <TableRow
+                        columns={tableLayout}
+                        row={agent}
+                        selected={selected}
+                    />
+                )}
+            />
+        </Panel>
     );
 }
 
@@ -417,29 +383,12 @@ function DeleteConfirm({
     onConfirm: () => void;
     onCancel: () => void;
 }) {
-    useInput((input, key) => {
-        if (key.escape) {
-            onCancel();
-            return;
-        }
-        const lower = input.toLowerCase();
-        if (lower === "y") {
-            onConfirm();
-        } else if (lower === "n") {
-            onCancel();
-        }
-    });
-
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Text color="red" bold>
-                Delete agent &quot;{target.name}&quot;?
-            </Text>
-            <Text dimColor>This also deletes all its sessions, messages and memories.</Text>
-            <Box marginTop={1} gap={2}>
-                <Text color="red" bold onMouseClick={onConfirm}>[Delete]</Text>
-                <Text color="cyan" onMouseClick={onCancel}>[Cancel]</Text>
-            </Box>
-        </Box>
+        <ConfirmDialog
+            title={`Delete agent "${target.name}"?`}
+            message="This also deletes all its sessions, messages and memories."
+            onConfirm={onConfirm}
+            onCancel={onCancel}
+        />
     );
 }
