@@ -3,7 +3,6 @@ package llm
 import (
 	"encoding/base64"
 	"fmt"
-	"sort"
 	"strings"
 
 	json "github.com/bytedance/sonic"
@@ -32,30 +31,11 @@ func validateRequest(request modelRequest) error {
 	return nil
 }
 
-func nativeReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) (string, error) {
-	if effort == "" || effort == shared.ReasoningOff {
-		return "", nil
+func modelReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) string {
+	if effort == "" || effort == shared.ReasoningOff || !model.SupportsReasoning() {
+		return ""
 	}
-	if native, ok := model.ReasoningEffortMapping[string(effort)]; ok && native == effort {
-		return string(effort), nil
-	}
-
-	matches := make([]string, 0, 1)
-	for native, mapped := range model.ReasoningEffortMapping {
-		if mapped == effort {
-			matches = append(matches, native)
-		}
-	}
-	sort.Strings(matches)
-
-	switch len(matches) {
-	case 0:
-		return "", invalidRequest("model %q does not support reasoning effort %q", model.Code, effort)
-	case 1:
-		return matches[0], nil
-	default:
-		return "", invalidRequest("model %q maps reasoning effort %q ambiguously to %s", model.Code, effort, strings.Join(matches, ", "))
-	}
+	return string(effort)
 }
 
 func systemPrompt(request modelRequest) (string, error) {

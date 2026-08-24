@@ -1,6 +1,9 @@
 package shared
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestReasoningEffort_ValidAndEnabled(t *testing.T) {
 	t.Parallel()
@@ -35,5 +38,34 @@ func TestReasoningEffort_ValidAndEnabled(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNormalizeReasoningEfforts(t *testing.T) {
+	t.Parallel()
+
+	wantDefault := []ReasoningEffort{
+		ReasoningLow,
+		ReasoningMedium,
+		ReasoningHigh,
+		ReasoningXHigh,
+		ReasoningMax,
+	}
+	if got := NormalizeReasoningEfforts(nil); !slices.Equal(got, wantDefault) {
+		t.Fatalf("NormalizeReasoningEfforts(nil) = %v, want %v", got, wantDefault)
+	}
+	if got := NormalizeReasoningEfforts([]ReasoningEffort{}); got == nil || len(got) != 0 {
+		t.Fatalf("NormalizeReasoningEfforts(empty) = %v, want empty non-nil slice", got)
+	}
+
+	got := NormalizeReasoningEfforts([]ReasoningEffort{
+		ReasoningMax,
+		"minimal",
+		ReasoningLow,
+		ReasoningLow,
+	})
+	want := []ReasoningEffort{ReasoningLow, ReasoningMax}
+	if !slices.Equal(got, want) {
+		t.Fatalf("NormalizeReasoningEfforts(filtered) = %v, want %v", got, want)
 	}
 }

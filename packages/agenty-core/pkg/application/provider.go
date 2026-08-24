@@ -3,10 +3,14 @@ package application
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	"github.com/masteryyh/agenty-core/pkg/infra/modelcatalog"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
 
@@ -19,6 +23,8 @@ type providerRepository interface {
 	List(ctx context.Context) ([]*catalog.Provider, error)
 	Save(ctx context.Context, provider *catalog.Provider) error
 	Delete(ctx context.Context, code shared.Code) error
+	NeedsModelDiscovery(ctx context.Context, code shared.Code) (bool, error)
+	ReplaceModels(ctx context.Context, code shared.Code, models []catalog.Model, expiresAt time.Time) error
 }
 
 func NewProviderService(repo providerRepository) *ProviderService {
@@ -26,11 +32,12 @@ func NewProviderService(repo providerRepository) *ProviderService {
 }
 
 type ProviderInput struct {
-	Name     string          `json:"name"`
-	Type     catalog.APIType `json:"type"`
-	BaseURL  string          `json:"baseUrl,omitempty"`
-	APIKey   string          `json:"apiKey,omitempty"`
-	Metadata shared.Metadata `json:"metadata,omitempty"`
+	Name         string          `json:"name"`
+	Type         catalog.APIType `json:"type"`
+	BaseURL      string          `json:"baseUrl,omitempty"`
+	APIKey       string          `json:"apiKey,omitempty"`
+	FreeFormTool bool            `json:"freeFormTool,omitempty"`
+	Metadata     shared.Metadata `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Create(ctx context.Context, code string, in ProviderInput) (*catalog.Provider, error) {
@@ -56,6 +63,7 @@ func (s *ProviderService) Create(ctx context.Context, code string, in ProviderIn
 
 	p.BaseURL = in.BaseURL
 	p.APIKey = in.APIKey
+	p.FreeFormTool = supportsFreeFormTool(in.Type, in.FreeFormTool)
 	p.Metadata = in.Metadata
 
 	if err := s.repo.Save(ctx, p); err != nil {
@@ -80,7 +88,7 @@ func (s *ProviderService) Get(ctx context.Context, code string) (*catalog.Provid
 	return p, nil
 }
 
-func (s *ProviderService) List(ctx context.Context) ([]*catalog.Provider, error) {
+func (s *ProviderService) List(ctx context.Context, targetCodes ...string) ([]*catalog.Provider, error) {
 	providers, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, Internal("failed to list providers: " + err.Error())
@@ -88,15 +96,132 @@ func (s *ProviderService) List(ctx context.Context) ([]*catalog.Provider, error)
 	if providers == nil {
 		providers = make([]*catalog.Provider, 0)
 	}
+	targetCode := ""
+	if len(targetCodes) > 0 {
+		targetCode = strings.TrimSpace(targetCodes[0])
+	}
+
+	toDiscover := make([]shared.Code, 0)
+	for _, provider := range providers {
+		if provider == nil || (targetCode != "" && provider.Code.String() != targetCode) {
+			continue
+		}
+		if strings.TrimSpace(provider.APIKey) == "" {
+			continue
+		}
+		needsDiscovery, err := s.repo.NeedsModelDiscovery(ctx, provider.Code)
+		if err != nil {
+			return nil, Internal("failed to inspect model cache for provider " + provider.Code.String() + ": " + err.Error())
+		}
+		if needsDiscovery {
+			toDiscover = append(toDiscover, provider.Code)
+		}
+	}
+
+	var waitGroup sync.WaitGroup
+	for _, code := range toDiscover {
+		waitGroup.Add(1)
+		go func(providerCode shared.Code) {
+			defer waitGroup.Done()
+			if _, err := s.ListModels(ctx, providerCode.String()); err != nil {
+				slog.WarnContext(ctx, "failed to discover provider models", "providerCode", providerCode, "error", err)
+			}
+		}(code)
+	}
+	waitGroup.Wait()
+	if len(toDiscover) > 0 {
+		providers, err = s.repo.List(ctx)
+		if err != nil {
+			return nil, Internal("failed to list providers after model discovery: " + err.Error())
+		}
+	}
 	return providers, nil
 }
 
+func (s *ProviderService) ListModels(ctx context.Context, code string) ([]catalog.AvailableModel, error) {
+	codeVal, err := shared.NewCode(code)
+	if err != nil {
+		return nil, Validation(err.Error())
+	}
+
+	provider, err := s.repo.Get(ctx, codeVal)
+	if err != nil {
+		if errors.Is(err, storage.ErrProviderNotFound) {
+			return nil, NotFound("provider " + code + " not found")
+		}
+		return nil, Internal("failed to get provider: " + err.Error())
+	}
+	if provider == nil {
+		return nil, Internal("provider repository returned an empty provider")
+	}
+	if strings.TrimSpace(provider.APIKey) == "" {
+		return nil, Validation("provider " + code + " has no API key")
+	}
+	needsDiscovery, err := s.repo.NeedsModelDiscovery(ctx, codeVal)
+	if err != nil {
+		return nil, Internal("failed to inspect model cache for provider " + code + ": " + err.Error())
+	}
+	if !needsDiscovery {
+		return availableModelsFromCatalog(provider.Models), nil
+	}
+	models, err := modelcatalog.List(ctx, *provider)
+	if err != nil {
+		return nil, Internal("failed to list models for provider " + code + ": " + err.Error())
+	}
+	if models == nil {
+		models = make([]catalog.AvailableModel, 0)
+	}
+	if err := s.repo.ReplaceModels(
+		ctx,
+		codeVal,
+		catalogModelsFromAvailable(models),
+		time.Now().UTC().Add(catalog.ModelDiscoveryCacheTTL),
+	); err != nil {
+		return nil, Internal("failed to cache models for provider " + code + ": " + err.Error())
+	}
+	return models, nil
+}
+
+func catalogModelsFromAvailable(models []catalog.AvailableModel) []catalog.Model {
+	now := time.Now().UTC()
+	result := make([]catalog.Model, 0, len(models))
+	for _, available := range models {
+		result = append(result, catalog.Model{
+			Code:             available.Code,
+			Name:             available.Name,
+			ContextWindow:    available.ContextWindow,
+			MaxOutputTokens:  available.MaxOutputTokens,
+			MultiModal:       available.MultiModal,
+			ReasoningEfforts: available.ReasoningEfforts,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+	}
+	return result
+}
+
+func availableModelsFromCatalog(models []catalog.Model) []catalog.AvailableModel {
+	result := make([]catalog.AvailableModel, 0, len(models))
+	for _, model := range models {
+		result = append(result, catalog.AvailableModel{
+			Code:             model.Code,
+			Name:             model.Name,
+			ContextWindow:    model.ContextWindow,
+			MaxOutputTokens:  model.MaxOutputTokens,
+			MultiModal:       model.MultiModal,
+			ReasoningEfforts: model.ReasoningEfforts,
+		})
+	}
+	return result
+}
+
 type ProviderUpdate struct {
-	Name     *string          `json:"name,omitempty"`
-	Type     *catalog.APIType `json:"type,omitempty"`
-	BaseURL  *string          `json:"baseUrl,omitempty"`
-	APIKey   *string          `json:"apiKey,omitempty"`
-	Metadata *shared.Metadata `json:"metadata,omitempty"`
+	Name         *string          `json:"name,omitempty"`
+	Type         *catalog.APIType `json:"type,omitempty"`
+	BaseURL      *string          `json:"baseUrl,omitempty"`
+	APIKey       *string          `json:"apiKey,omitempty"`
+	FreeFormTool *bool            `json:"freeFormTool,omitempty"`
+	Metadata     *shared.Metadata `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderUpdate) (*catalog.Provider, error) {
@@ -111,6 +236,19 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 			return nil, NotFound("provider " + code + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
+	}
+	if p.Builtin {
+		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.FreeFormTool != nil || upd.Metadata != nil {
+			return nil, Validation("built-in provider metadata is read-only; only the API key can be changed")
+		}
+		if upd.APIKey == nil {
+			return p, nil
+		}
+		p.APIKey = *upd.APIKey
+		if err := s.repo.Save(ctx, p); err != nil {
+			return nil, Internal("failed to save provider API key: " + err.Error())
+		}
+		return p, nil
 	}
 
 	if upd.Name != nil {
@@ -128,6 +266,10 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 	if upd.APIKey != nil {
 		p.APIKey = *upd.APIKey
 	}
+	if upd.FreeFormTool != nil {
+		p.FreeFormTool = *upd.FreeFormTool
+	}
+	p.FreeFormTool = supportsFreeFormTool(p.Type, p.FreeFormTool)
 	if upd.Metadata != nil {
 		p.Metadata = *upd.Metadata
 	}
@@ -139,10 +281,25 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 	return p, nil
 }
 
+func supportsFreeFormTool(apiType catalog.APIType, enabled bool) bool {
+	return apiType == catalog.APIOpenAI && enabled
+}
+
 func (s *ProviderService) Delete(ctx context.Context, code string) error {
 	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return Validation(err.Error())
+	}
+
+	p, err := s.repo.Get(ctx, codeVal)
+	if err != nil {
+		if errors.Is(err, storage.ErrProviderNotFound) {
+			return NotFound("provider " + code + " not found")
+		}
+		return Internal("failed to get provider: " + err.Error())
+	}
+	if p.Builtin {
+		return Validation("built-in provider is read-only; only the API key can be changed")
 	}
 
 	if err := s.repo.Delete(ctx, codeVal); err != nil {
@@ -155,15 +312,13 @@ func (s *ProviderService) Delete(ctx context.Context, code string) error {
 }
 
 type ModelInput struct {
-	Name          string `json:"name"`
-	ContextWindow int    `json:"contextWindow,omitempty"`
-	// MaxOutputTokens is retained for wire compatibility with older clients.
-	// The core ignores it and persists the single global output limit.
-	MaxOutputTokens        int64                             `json:"maxOutputTokens"`
-	MultiModal             bool                              `json:"multiModal,omitempty"`
-	Light                  bool                              `json:"light,omitempty"`
-	ReasoningEffortMapping map[string]shared.ReasoningEffort `json:"reasoningEffortMapping,omitempty"`
-	IsDefault              bool                              `json:"isDefault,omitempty"`
+	Name            string `json:"name"`
+	ContextWindow   int    `json:"contextWindow,omitempty"`
+	MaxOutputTokens int64  `json:"maxOutputTokens"`
+	MultiModal      bool   `json:"multiModal,omitempty"`
+	Light           bool   `json:"light,omitempty"`
+	Reasoning       *bool  `json:"reasoning,omitempty"`
+	IsDefault       bool   `json:"isDefault,omitempty"`
 }
 
 func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode string, in ModelInput) (*catalog.Provider, error) {
@@ -176,15 +331,6 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 	if err != nil {
 		return nil, Validation(err.Error())
 	}
-	for nativeEffort, agentyEffort := range in.ReasoningEffortMapping {
-		if nativeEffort == "" {
-			return nil, Validation("reasoning effort mapping contains an empty native effort")
-		}
-		if !agentyEffort.Valid() {
-			return nil, Validation("invalid agenty reasoning effort: " + string(agentyEffort))
-		}
-	}
-
 	p, err := s.repo.Get(ctx, ps)
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderNotFound) {
@@ -192,19 +338,34 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
+	if p.Builtin {
+		return nil, Validation("built-in provider models are read-only")
+	}
 
 	now := time.Now().UTC()
+	maxOutputTokens := in.MaxOutputTokens
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = catalog.DefaultMaxOutputTokens
+	}
+	reasoning := true
+	if in.Reasoning != nil {
+		reasoning = *in.Reasoning
+	}
+	reasoningEfforts := make([]shared.ReasoningEffort, 0)
+	if reasoning {
+		reasoningEfforts = shared.StandardReasoningEfforts()
+	}
 	p.AddModel(catalog.Model{
-		Code:                   ms,
-		Name:                   in.Name,
-		ContextWindow:          in.ContextWindow,
-		MaxOutputTokens:        catalog.DefaultMaxOutputTokens,
-		MultiModal:             in.MultiModal,
-		Light:                  in.Light,
-		ReasoningEffortMapping: in.ReasoningEffortMapping,
-		IsDefault:              in.IsDefault,
-		CreatedAt:              now,
-		UpdatedAt:              now,
+		Code:             ms,
+		Name:             in.Name,
+		ContextWindow:    in.ContextWindow,
+		MaxOutputTokens:  maxOutputTokens,
+		MultiModal:       in.MultiModal,
+		Light:            in.Light,
+		ReasoningEfforts: reasoningEfforts,
+		IsDefault:        in.IsDefault,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	})
 	p.UpdatedAt = now
 
@@ -231,6 +392,9 @@ func (s *ProviderService) RemoveModel(ctx context.Context, providerCode, modelCo
 			return nil, NotFound("provider " + providerCode + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
+	}
+	if p.Builtin {
+		return nil, Validation("built-in provider models are read-only")
 	}
 
 	if _, err := p.Model(ms); err != nil {

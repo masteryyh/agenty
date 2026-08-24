@@ -24,11 +24,9 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	}
 
 	p.AddModel(Model{
-		Code: "model-b",
-		Name: "B2",
-		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
-			"high": shared.ReasoningHigh,
-		},
+		Code:             "model-b",
+		Name:             "B2",
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningHigh},
 	})
 	if len(p.Models) != 2 {
 		t.Fatalf("models = %d, want 2 after upsert", len(p.Models))

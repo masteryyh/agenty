@@ -88,10 +88,7 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 	if err != nil {
 		return nil, nil, err
 	}
-	effort, err := nativeReasoningEffort(caller.model, request.ReasoningEffort)
-	if err != nil {
-		return nil, nil, err
-	}
+	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
 
 	toolNames := googleToolNames(request.Messages)
 	contents := make([]*genai.Content, 0, len(request.Messages))
@@ -123,11 +120,7 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 			budget := int32(request.ReasoningBudgetTokens)
 			thinking.ThinkingBudget = &budget
 		} else {
-			level, err := googleThinkingLevel(effort)
-			if err != nil {
-				return nil, nil, err
-			}
-			thinking.ThinkingLevel = level
+			thinking.ThinkingLevel = googleThinkingLevel(effort)
 		}
 		config.ThinkingConfig = thinking
 	}
@@ -304,19 +297,8 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 	return genai.NewContentFromParts(parts, role), nil
 }
 
-func googleThinkingLevel(effort string) (genai.ThinkingLevel, error) {
-	switch strings.ToUpper(effort) {
-	case "MINIMAL":
-		return genai.ThinkingLevelMinimal, nil
-	case "LOW":
-		return genai.ThinkingLevelLow, nil
-	case "MEDIUM":
-		return genai.ThinkingLevelMedium, nil
-	case "HIGH":
-		return genai.ThinkingLevelHigh, nil
-	default:
-		return "", invalidRequest("Google does not support native thinking level %q", effort)
-	}
+func googleThinkingLevel(effort string) genai.ThinkingLevel {
+	return genai.ThinkingLevel(strings.ToUpper(effort))
 }
 
 func googleResponse(result *genai.GenerateContentResponse) (*modelResponse, error) {

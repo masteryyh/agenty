@@ -20,6 +20,7 @@ type openAIResponsesCaller struct {
 	client       *openai.Client
 	model        catalog.Model
 	nativeOpenAI bool
+	freeFormTool bool
 }
 
 func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request modelRequest) (*modelResponse, error) {
@@ -165,17 +166,14 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-	effort, err := nativeReasoningEffort(caller.model, request.ReasoningEffort)
+	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
+
+	input, err := openAIResponsesMessages(request.Messages, caller.nativeOpenAI, caller.freeFormTool)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 
-	input, err := openAIResponsesMessages(request.Messages, caller.nativeOpenAI)
-	if err != nil {
-		return responses.ResponseNewParams{}, err
-	}
-
-	tools, err := openAIResponsesTools(request.Tools, caller.nativeOpenAI)
+	tools, err := openAIResponsesTools(request.Tools, caller.nativeOpenAI, caller.freeFormTool)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -200,13 +198,22 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 	return params, nil
 }
 
-func openAIResponsesTools(definitions []modelToolDefinition, nativeOpenAI bool) ([]responses.ToolUnionParam, error) {
+func openAIResponsesTools(
+	definitions []modelToolDefinition,
+	nativeOpenAI bool,
+	freeFormTool ...bool,
+) ([]responses.ToolUnionParam, error) {
+	useFreeFormTool := !nativeOpenAI
+	if len(freeFormTool) > 0 {
+		useFreeFormTool = freeFormTool[0]
+	}
+
 	tools := make([]responses.ToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
-		if isReplacedFileTool(definition.Name) {
+		if definition.Type == agentloop.ToolTypeApplyPatch && !useFreeFormTool {
 			continue
 		}
-		tool, err := openAIResponsesToolDefinition(definition, nativeOpenAI)
+		tool, err := openAIResponsesToolDefinitionWithFreeForm(definition, nativeOpenAI, useFreeFormTool)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +225,12 @@ func openAIResponsesTools(definitions []modelToolDefinition, nativeOpenAI bool) 
 func openAIResponsesMessages(
 	messages []conversation.Message,
 	nativeOpenAI bool,
+	freeFormTool ...bool,
 ) (responses.ResponseInputParam, error) {
+	useFreeFormTool := !nativeOpenAI
+	if len(freeFormTool) > 0 {
+		useFreeFormTool = freeFormTool[0]
+	}
 	callSources := openAIResponsesCallSources(messages)
 	input := make(responses.ResponseInputParam, 0, len(messages))
 	for index, message := range messages {
@@ -228,6 +240,7 @@ func openAIResponsesMessages(
 		items, err := openAIResponsesMessageWithNativeCallIDs(
 			message,
 			nativeOpenAI,
+			useFreeFormTool,
 			callSources,
 		)
 		if err != nil {
@@ -264,16 +277,15 @@ func openAIResponsesCallSources(messages []conversation.Message) map[string]open
 	return sources
 }
 
-func isReplacedFileTool(name string) bool {
-	switch name {
-	case "write_file", "patch_file", "delete_file":
-		return true
-	default:
-		return false
-	}
+func openAIResponsesToolDefinition(tool modelToolDefinition, nativeOpenAI bool) (responses.ToolUnionParam, error) {
+	return openAIResponsesToolDefinitionWithFreeForm(tool, nativeOpenAI, !nativeOpenAI)
 }
 
-func openAIResponsesToolDefinition(tool modelToolDefinition, nativeOpenAI bool) (responses.ToolUnionParam, error) {
+func openAIResponsesToolDefinitionWithFreeForm(
+	tool modelToolDefinition,
+	nativeOpenAI bool,
+	freeFormTool bool,
+) (responses.ToolUnionParam, error) {
 	toolType, err := providerToolType(tool)
 	if err != nil {
 		return responses.ToolUnionParam{}, err
@@ -286,7 +298,7 @@ func openAIResponsesToolDefinition(tool modelToolDefinition, nativeOpenAI bool) 
 		}}, nil
 	}
 	if toolType == agentloop.ToolTypeApplyPatch {
-		if nativeOpenAI {
+		if !freeFormTool {
 			return responses.ToolUnionParam{OfApplyPatch: &responses.ApplyPatchToolParam{}}, nil
 		}
 		return responses.ToolUnionParam{OfCustom: &responses.CustomToolParam{
@@ -310,13 +322,22 @@ func openAIResponsesToolDefinition(tool modelToolDefinition, nativeOpenAI bool) 
 	return responses.ToolUnionParam{OfFunction: &converted}, nil
 }
 
-func openAIResponsesMessage(message conversation.Message, nativeOpenAI bool) (responses.ResponseInputParam, error) {
-	return openAIResponsesMessageWithNativeCallIDs(message, nativeOpenAI, nil)
+func openAIResponsesMessage(
+	message conversation.Message,
+	nativeOpenAI bool,
+	freeFormTool ...bool,
+) (responses.ResponseInputParam, error) {
+	useFreeFormTool := !nativeOpenAI
+	if len(freeFormTool) > 0 {
+		useFreeFormTool = freeFormTool[0]
+	}
+	return openAIResponsesMessageWithNativeCallIDs(message, nativeOpenAI, useFreeFormTool, nil)
 }
 
 func openAIResponsesMessageWithNativeCallIDs(
 	message conversation.Message,
 	nativeOpenAI bool,
+	freeFormTool bool,
 	callSources map[string]openAIResponsesCallSource,
 ) (responses.ResponseInputParam, error) {
 	role := responses.EasyInputMessageRole(message.Role)
@@ -400,7 +421,7 @@ func openAIResponsesMessageWithNativeCallIDs(
 				return nil, unsupportedContent("OpenAI Responses apply patch call requires assistant role")
 			}
 			flush()
-			item, err := openAIResponsesApplyPatchCall(value, nativeOpenAI)
+			item, err := openAIResponsesApplyPatchCall(value, nativeOpenAI && !freeFormTool)
 			if err != nil {
 				return nil, err
 			}
@@ -412,7 +433,7 @@ func openAIResponsesMessageWithNativeCallIDs(
 				if err != nil {
 					return nil, err
 				}
-				if source == conversation.ApplyPatchSourceNative && nativeOpenAI {
+				if source == conversation.ApplyPatchSourceNative && nativeOpenAI && !freeFormTool {
 					status := "completed"
 					if value.IsError {
 						status = "failed"

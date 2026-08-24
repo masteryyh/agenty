@@ -23,3 +23,33 @@ func (r ReasoningEffort) Valid() bool {
 func (r ReasoningEffort) Enabled() bool {
 	return r != "" && r != ReasoningOff
 }
+
+func StandardReasoningEfforts() []ReasoningEffort {
+	return []ReasoningEffort{
+		ReasoningLow,
+		ReasoningMedium,
+		ReasoningHigh,
+		ReasoningXHigh,
+		ReasoningMax,
+	}
+}
+
+// NormalizeReasoningEfforts keeps supported Agenty levels in their canonical order.
+// A nil input means the upstream did not report capabilities and receives the defaults;
+// an explicit empty slice identifies a non-reasoning model.
+func NormalizeReasoningEfforts(efforts []ReasoningEffort) []ReasoningEffort {
+	if efforts == nil {
+		return StandardReasoningEfforts()
+	}
+
+	normalized := make([]ReasoningEffort, 0, len(efforts))
+	for _, supported := range StandardReasoningEfforts() {
+		for _, effort := range efforts {
+			if effort == supported {
+				normalized = append(normalized, supported)
+				break
+			}
+		}
+	}
+	return normalized
+}

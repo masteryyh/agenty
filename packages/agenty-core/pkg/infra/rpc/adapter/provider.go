@@ -13,6 +13,7 @@ func RegisterProviderHandlers(d *rpc.Dispatcher, svc *application.ProviderServic
 	d.Register("provider.create", providerCreate(svc))
 	d.Register("provider.get", providerGet(svc))
 	d.Register("provider.list", providerList(svc))
+	d.Register("provider.listModels", providerListModels(svc))
 	d.Register("provider.update", providerUpdate(svc))
 	d.Register("provider.delete", providerDelete(svc))
 	d.Register("provider.addModel", providerAddModel(svc))
@@ -22,6 +23,10 @@ func RegisterProviderHandlers(d *rpc.Dispatcher, svc *application.ProviderServic
 type providerCreateParams struct {
 	Code string `json:"code"`
 	application.ProviderInput
+}
+
+type providerListParams struct {
+	ProviderCode string `json:"providerCode,omitempty"`
 }
 
 func providerCreate(svc *application.ProviderService) rpc.Handler {
@@ -46,11 +51,25 @@ func providerGet(svc *application.ProviderService) rpc.Handler {
 
 func providerList(svc *application.ProviderService) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var p struct{}
+		var p providerListParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
-		return wrap(svc.List(ctx))
+		return wrap(svc.List(ctx, p.ProviderCode))
+	}
+}
+
+type providerListModelsParams struct {
+	ProviderCode string `json:"providerCode"`
+}
+
+func providerListModels(svc *application.ProviderService) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p providerListModelsParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(svc.ListModels(ctx, p.ProviderCode))
 	}
 }
 

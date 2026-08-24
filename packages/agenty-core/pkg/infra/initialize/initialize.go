@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/masteryyh/agenty-core/pkg/infra/catalogdata"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
@@ -35,16 +36,19 @@ func OpenRepositories(ctx context.Context) (*Repositories, error) {
 	if err != nil {
 		return nil, err
 	}
+	builtinProviders, err := catalogdata.LoadProviders()
+	if err != nil {
+		return nil, err
+	}
 
 	db, err := storage.OpenDB(paths.DatabaseFile)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Repositories{
 		Conversation: storage.NewConversationRepository(db, paths.SessionsDir),
 		Agent:        storage.NewAgentRepository(paths.AgentsDir),
-		Catalog:      storage.NewCatalogRepository(paths.ProvidersDir),
+		Catalog:      storage.NewCatalogRepository(paths.ProvidersDir, builtinProviders...),
 		db:           db,
 	}, nil
 }

@@ -103,10 +103,7 @@ func (caller *anthropicCaller) params(request modelRequest) (anthropic.MessageNe
 	if err != nil {
 		return anthropic.MessageNewParams{}, err
 	}
-	effort, err := nativeReasoningEffort(caller.model, request.ReasoningEffort)
-	if err != nil {
-		return anthropic.MessageNewParams{}, err
-	}
+	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
 
 	messages := make([]anthropic.MessageParam, 0, len(request.Messages))
 	for index, message := range request.Messages {

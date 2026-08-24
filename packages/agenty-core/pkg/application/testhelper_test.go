@@ -3,11 +3,11 @@ package application_test
 import (
 	"context"
 	"errors"
-	"maps"
 	"slices"
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -135,11 +135,35 @@ func (r *providerRepositoryFake) Delete(_ context.Context, code shared.Code) err
 	return nil
 }
 
+func (r *providerRepositoryFake) NeedsModelDiscovery(_ context.Context, code shared.Code) (bool, error) {
+	provider, ok := r.providers[code]
+	if !ok {
+		return false, storage.ErrProviderNotFound
+	}
+	return len(provider.Models) == 0, nil
+}
+
+func (r *providerRepositoryFake) ReplaceModels(
+	_ context.Context,
+	code shared.Code,
+	models []catalog.Model,
+	_ time.Time,
+) error {
+	provider, ok := r.providers[code]
+	if !ok {
+		return storage.ErrProviderNotFound
+	}
+	updated := cloneProvider(provider)
+	updated.Models = slices.Clone(models)
+	r.providers[code] = updated
+	return nil
+}
+
 func cloneProvider(p *catalog.Provider) *catalog.Provider {
 	copy := *p
 	copy.Models = slices.Clone(p.Models)
 	for i := range copy.Models {
-		copy.Models[i].ReasoningEffortMapping = maps.Clone(copy.Models[i].ReasoningEffortMapping)
+		copy.Models[i].ReasoningEfforts = slices.Clone(copy.Models[i].ReasoningEfforts)
 	}
 	copy.Metadata = cloneMetadata(p.Metadata)
 	return &copy
