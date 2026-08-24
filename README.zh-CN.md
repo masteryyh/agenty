@@ -3,7 +3,8 @@
 [English](./README.md)
 
 Agenty 是一个本地优先的 AI agent 应用。当前产品链路由 `agenty-cli`、
-`agenty-core` 和自解压 launcher `agenty-bootstrap` 组成。CLI 仅通过子进程
+`agenty-core`、Rust `patch-applier` helper 和自解压 launcher `agenty-bootstrap` 组成。
+CLI 仅通过子进程
 stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
 
 core 当前支持 provider/model/agent 管理、持久化会话、模型流式输出、agent 工具循环
@@ -22,18 +23,21 @@ agenty
 ```
 
 首次运行时，launcher 会校验并释放内置的 CLI 和 core 到
-`~/.agenty/bin/{cli,core}`。CLI 启动 core 子进程并打开初始化向导；向导通过
+`~/.agenty/bin/{cli,core,apply_patch}`。CLI 启动 core 子进程并打开初始化向导；向导通过
 已有的 `provider.*` 和 `agent.*` IPC methods 创建一个 provider、一个聊天 model 和一个默认 agent，
 最后调用 `initialize.complete` 标记初始化完成。
 
 ## 运行模型
 
-launcher 内含两个 XZ 压缩 payload 及其解压内容的 SHA3-256 摘要。已释放文件摘要一致时
+launcher 内含三个 XZ 压缩 payload 及其解压内容的 SHA3-256 摘要。已释放文件摘要一致时
 直接复用；缺失或不一致时会重新解压、校验并原子替换。CLI 按以下顺序查找 core：
 
 1. `AGENTY_CORE_BIN`
 2. 仓库开发环境中的 `packages/agenty-core/bin/agenty-core`
 3. launcher 释放的 `~/.agenty/bin/core`
+
+CLI 启动 core 前会把 core 所在目录放到 `PATH` 首位，使 core 和 shell 工具调用可以找到
+同目录中的 `apply_patch`。
 
 core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notification 写到 stdout。
 调用 `session.start` 后，core 会持续发送有序的 `session.event` 通知，覆盖 round 生命周期、
@@ -53,7 +57,7 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 配置 | `~/.agenty/config.json` |
 | 会话 transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | 会话索引 | `~/.agenty/agenty.sqlite` |
-| Providers 和 models | `~/.agenty/providers/<provider-code>.json`（模型内嵌） |
+| Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key；core 在获取 provider/model 列表时自动发现已配置的空模型 catalog，结果缓存于 `~/.agenty/providers/.models/`，有效期 8 小时 |
 | Agents | `~/.agenty/agents/` |
 | 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 

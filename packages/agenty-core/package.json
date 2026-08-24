@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "build": "mkdir -p \"${PACKAGE_DIR:-bin}\" && go build -o \"${PACKAGE_DIR:-bin}/${BIN_NAME:-agenty-core}\" ./cmd",
+        "build": "mkdir -p \"${PACKAGE_DIR:-bin}\" && go build -o \"${PACKAGE_DIR:-bin}/${BIN_NAME:-agenty-core}\" ./cmd && if [ \"${GOOS:-}\" = \"windows\" ]; then cp ../patch-applier/target/release/apply_patch.exe \"${PACKAGE_DIR:-bin}/apply_patch.exe\"; else cp ../patch-applier/target/release/apply_patch \"${PACKAGE_DIR:-bin}/apply_patch\"; fi",
         "test": "go test ./...",
         "test:integration": "go test -tags=integration ./...",
         "test:e2e": "go test -tags=e2e -count=1 -parallel=8 ./test/e2e",
@@ -13,5 +13,8 @@
         "vet": "go vet ./...",
         "fmt": "go fmt ./...",
         "clean": "rm -rf bin"
+    },
+    "devDependencies": {
+        "patch-applier": "workspace:*"
     }
 }

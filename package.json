@@ -8,6 +8,7 @@
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "clean": "rm -rf dist && turbo run clean",
+        "dev": "turbo run build --filter=agenty-bootstrap && pnpm --filter agenty-bootstrap exec bun -e \"const { join } = await import('node:path'); const { resolveArch, resolveOS } = await import('./scripts/target.ts'); const os = resolveOS(); const executable = join('bin', 'agenty-' + os + '-' + resolveArch() + (os === 'windows' ? '.exe' : '')); const child = Bun.spawn([executable, ...process.argv.slice(1)], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', env: process.env }); process.exit(await child.exited);\"",
         "deepclean": "pnpm clean && rm -rf node_modules packages/*/node_modules",
         "core:build": "turbo run build --filter=agenty-core",
         "core:test": "turbo run test --filter=agenty-core",
@@ -18,6 +19,10 @@
         "core:test:repeat": "pnpm --filter agenty-core test:repeat",
         "core:tidyup": "cd packages/agenty-core && go fmt ./... && go vet ./... && go mod tidy",
         "core:clean": "pnpm --filter agenty-core clean",
+        "patch-applier:build": "turbo run build --filter=patch-applier",
+        "patch-applier:test": "turbo run test --filter=patch-applier",
+        "patch-applier:lint": "pnpm --filter patch-applier lint",
+        "patch-applier:clean": "pnpm --filter patch-applier clean",
         "cli:build": "turbo run build --filter=agenty-cli",
         "cli:dev": "turbo run build --filter=agenty-core && pnpm --filter agenty-cli dev",
         "cli:typecheck": "pnpm --filter agenty-cli typecheck",
@@ -33,7 +38,7 @@
         "eslint-plugin-import-newlines": "^2.0.0",
         "eslint-plugin-jsonc": "^3.4.1",
         "eslint-plugin-simple-import-sort": "^14.0.0",
-        "turbo": "^2.10.10",
+        "turbo": "^2.10.11",
         "typescript-eslint": "^8.67.0"
     }
 }

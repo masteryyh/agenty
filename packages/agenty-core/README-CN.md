@@ -14,7 +14,7 @@ Agenty 的核心运行时。它围绕本地优先的存储模型（文件系统 
 | Session transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` | 写模型，即 append-only event log（真实数据源） |
 | Session index | `~/.agenty/agenty.sqlite` -> `sessions` | 读模型，用于快速列表和搜索的投影 |
 | 全局配置 | `~/.agenty/config.json` | 应用配置 |
-| Providers | `~/.agenty/providers/<provider-code>.json` | Catalog aggregate，包含其模型 |
+| Providers | 内置 catalog 固化在 core；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json` | 内置元数据/模型只读，内置 provider 文件仅保存 API key |
 | Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | 结构化文本诊断信息（JSONL 模式下为 `core.jsonl`） |
 
@@ -45,24 +45,18 @@ reasoning effort 和工作目录。
 ### Reasoning effort
 
 Agenty 对外提供且仅提供六个与 provider 无关的 reasoning effort 等级：`off`、`low`、
-`medium`、`high`、`xhigh` 和 `max`。模型通过 `reasoningEffortMapping` 对象保存映射，
-其中 key 是 provider 原生 effort 名称，value 是 Agenty effort 等级：
+`medium`、`high`、`xhigh` 和 `max`。reasoning 模型通过 `reasoningEfforts` 数组保存
+实际支持的启用等级：
 
 ```json
 {
-  "reasoningEffortMapping": {
-    "none": "off",
-    "minimal": "low",
-    "low": "low",
-    "medium": "medium",
-    "high": "high"
-  }
+  "reasoningEfforts": ["low", "medium", "high", "xhigh", "max"]
 }
 ```
 
-该映射允许多个原生 effort 归一化到同一个 Agenty effort。映射中没有启用任何 effort
-的模型不支持 reasoning。只有上述六个 Agenty 等级可以作为映射值；原生 effort 名称
-由 provider 自行定义。
+显式空数组表示非 reasoning 模型；上游未返回 capability 数据时默认使用五个启用等级。
+provider adapter 会原样发送选择的等级，不支持的等级通过正常 round error 流程返回。
+`minimal` 等 provider 特有等级不对外开放。
 
 ## Agent loop 运行时
 
@@ -73,8 +67,8 @@ session 的 `Engine`。不同 session 可以并行执行，同一 session 只允
 
 每次 loop 会解析 Agent system prompt，重建有效会话上下文，通过选定 provider adapter
 转换上游数据结构，调用 LLM、持久化 assistant 响应，并在返回 tool calls 时继续循环。
-所有 model 统一使用 `8192` 最大输出 token；旧的 model 级字段仅为兼容旧 wire
-客户端而保留，实际值会被忽略。估算上下文达到
+自定义 model 未填写时默认使用 `8192` 最大输出 token；内置 model 使用嵌入 catalog
+中的精确限制。估算上下文达到
 `contextWindow` 的 `90%` 时自动压缩；TUI 的 `/compact`
 可以手动触发同一流程。压缩会在 `session_compacted` 事件中只保存生成的总结和压缩审计数据；
 重放和构造模型请求时，再从 transcript 动态计算最多三条最近 user 消息、总结、metadata
@@ -85,9 +79,11 @@ session 的 `Engine`。不同 session 可以并行执行，同一 session 只允
 窗口的 90%，先使用当前 model 压缩，必要时裁剪保留消息以适配目标窗口，再写入 model
 切换事件。
 共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
-调用顺序返回。`pkg/agentloop/builtin/` 提供生产环境文件系统工具 `read_file`、
-`write_file`、`patch_file`、`delete_file`、`grep`、`glob` 和 `ls`，由 `cmd/main.go`
-显式注册。相对路径基于该 round 捕获的 session 工作目录解析，绝对路径保持有效。
+调用顺序返回。`pkg/agentloop/builtin/` 提供 `read_file`、`apply_patch`、`grep`、`glob`
+和 `ls`，由 `cmd/main.go` 显式注册。`apply_patch` 会调用同名 Rust 可执行文件完成 V4A
+解析和原子化文件修改。支持 free-form tool 的 provider 会收到模型工具定义；其他 provider
+会在 system prompt 中收到通过 `shell` 执行同一命令的说明。相对路径基于该 round 捕获的
+session 工作目录解析。
 
 ## 基础设施层
 
@@ -97,12 +93,13 @@ session 的 `Engine`。不同 session 可以并行执行，同一 session 只允
 pkg/infra/
 ├── config/             将配置文件和 env override 合并到单例中；解析 data-dir 路径
 ├── initialize/         OpenRepositories：一次性初始化所有 stores
+├── catalogdata/        内嵌的 provider/model JSON
 ├── llm/                实现 agentloop caller contract 的 provider SDK adapters
 ├── logging/            slog 初始化、环境配置解析和按日生成日志路径
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── agent.go        AgentRepository（agent JSON 文件）
-│   ├── catalog.go      CatalogRepository（provider 聚合 JSON，内嵌 models）
+│   ├── catalog.go      CatalogRepository（内置 provider 与自定义 provider JSON）
 │   └── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
 └── rpc/                stdio JSON-RPC 2.0 接口层
     ├── message.go      Request/Response/Notification/Error/ID wire types
@@ -174,9 +171,17 @@ Methods 使用 `resource.action` 命名：
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
-| Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
+| Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`provider.list` 可选接收 `{providerCode}`。不传时，core 会并行获取所有已配置且 catalog
+为空的 provider；传入时只会获取指定 provider。`provider.listModels` 接收同样的
+`{providerCode}`，供直接调用者使用 core 内置的发现流程。成功结果会缓存到
+`~/.agenty/providers/.models/<provider-code>.json`，有效期为 8 小时，JSON 中保存 `expiresAt`
+和标准化模型列表。过期缓存仍作为旧数据返回，下一次 list 时再刷新。它会兼容常见的 `id`、
+名称和 token 限制字段，自动跟随 provider 分页；上下文窗口或最大输出 token 缺失或不为正数时
+分别使用 `256000` 和 `65536`，缺少 reasoning 能力时返回空的 `reasoningEfforts` 数组。
 
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
 `running` 状态，完整 agent turn 由引擎异步继续执行。执行期间，core 会写出

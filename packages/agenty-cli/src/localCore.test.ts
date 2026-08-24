@@ -1,6 +1,8 @@
+import { delimiter } from "node:path";
+
 import { describe, expect, test } from "bun:test";
 
-import { pickCorePath } from "./localCore";
+import { pickCorePath, prependCoreDirectoryToPath } from "./localCore";
 
 const candidates = {
     repoBin: "/repo/packages/agenty-core/bin/agenty-core",
@@ -22,5 +24,13 @@ describe("pickCorePath", () => {
 
     test("returns null when no core binary exists", () => {
         expect(pickCorePath(candidates, () => false)).toBeNull();
+    });
+});
+
+describe("prependCoreDirectoryToPath", () => {
+    test("places the core directory before the inherited PATH", () => {
+        expect(prependCoreDirectoryToPath("/managed/bin/core", "/usr/bin")).toBe(
+            ["/managed/bin", "/usr/bin"].join(delimiter),
+        );
     });
 });

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { StdioRPCClient } from "./core/rpc";
 
@@ -38,6 +38,10 @@ export function pickCorePath(
     return null;
 }
 
+export function prependCoreDirectoryToPath(binary: string, currentPath?: string): string {
+    return [dirname(binary), currentPath].filter(Boolean).join(delimiter);
+}
+
 export interface LocalCore {
     rpc: StdioRPCClient;
     stop: () => Promise<void>;
@@ -61,6 +65,7 @@ export async function startLocalCore(options: { dataDir?: string } = {}): Promis
         stderr: "pipe",
         env: {
             ...process.env,
+            PATH: prependCoreDirectoryToPath(binary, process.env.PATH),
             ...(options.dataDir ? { AGENTY_DATA_DIR: options.dataDir } : {}),
         },
     });
