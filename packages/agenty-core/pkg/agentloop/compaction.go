@@ -105,7 +105,7 @@ func (engine *Engine) compactPreparedForWindow(
 	baseRequest := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        baseMessages,
-		Tools:           engine.tools.Definitions(),
+		Tools:           engine.toolDefinitions(prepared.freeFormTool),
 		MaxOutputTokens: prepared.maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}

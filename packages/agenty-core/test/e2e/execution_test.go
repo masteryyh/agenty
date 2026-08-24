@@ -200,9 +200,7 @@ func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 					tt.apiType,
 				)
 			}
-			wantTools := []string{
-				"delete_file", "glob", "grep", "ls", "patch_file", "read_file", "shell", "write_file",
-			}
+			wantTools := []string{"glob", "grep", "ls", "read_file", "shell"}
 			if tt.apiType == "openai" {
 				wantTools = []string{"apply_patch", "glob", "grep", "ls", "read_file", "shell"}
 			}

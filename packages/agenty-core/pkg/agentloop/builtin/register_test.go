@@ -23,14 +23,11 @@ func TestRegisterAll(t *testing.T) {
 
 	wantNames := []string{
 		"apply_patch",
-		"delete_file",
 		"glob",
 		"grep",
 		"ls",
-		"patch_file",
 		"read_file",
 		"shell",
-		"write_file",
 	}
 	definitions := registry.Definitions()
 	if len(definitions) != len(wantNames) {

@@ -9,7 +9,7 @@ import {
     type ShellOutputStream,
     type ToolDisplay,
 } from "./toolDisplay";
-import { Box, Text } from "./ui";
+import { Box, Pressable, Text } from "./ui";
 
 const USER_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
     dark: "#2a3f47",
@@ -155,11 +155,12 @@ function ToolCallLine({
     const hasShellDetails = (display.shellCommands?.length ?? 0) > 0;
     const hasDetails = display.detailLines.length > 0 || hasShellDetails;
     return (
-        <Box
+        <Pressable
             width="100%"
             flexDirection="column"
             flexShrink={0}
-            onMouseClick={hasDetails ? onToggle : undefined}
+            disabled={!hasDetails}
+            onPress={onToggle}
         >
             <Text width="100%" wrap="wrap">
                 <Text color={statusColor(display.status)}>
@@ -187,7 +188,7 @@ function ToolCallLine({
                     marginLeft={4}
                 />
             ) : null}
-        </Box>
+        </Pressable>
     );
 }
 
@@ -256,7 +257,7 @@ function Rail({
     onMouseClick?: () => void;
 }) {
     return (
-        <Box
+        <Pressable
             flexDirection="column"
             width="100%"
             flexShrink={0}
@@ -266,10 +267,11 @@ function Rail({
             borderRight={false}
             borderBottom={false}
             paddingLeft={1}
-            onMouseClick={onMouseClick}
+            disabled={!onMouseClick}
+            onPress={onMouseClick}
         >
             {children}
-        </Box>
+        </Pressable>
     );
 }
 
@@ -286,11 +288,12 @@ export const MessageItem = memo(({
 }) => {
     if (item.type === "reasoning") {
         return (
-            <Box
+            <Pressable
                 flexDirection="column"
                 width="100%"
                 paddingX={1}
-                onMouseClick={() => onToggleReasoning?.(item.id)}
+                disabled={!onToggleReasoning}
+                onPress={() => onToggleReasoning?.(item.id)}
             >
                 <Text width="100%" dimColor={!item.expanded} italic={!item.expanded} wrap="wrap">
                     {item.done
@@ -304,7 +307,7 @@ export const MessageItem = memo(({
                         </Text>
                     </Box>
                 ) : null}
-            </Box>
+            </Pressable>
         );
     }
 

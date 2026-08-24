@@ -9,7 +9,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useInput } from "../hooks/useInput";
 import type { UIMessage } from "../state/store";
 import { MessageItem, type MessageRenderItem } from "./MessageItem";
-import { Box, Text } from "./ui";
+import { Box, Pressable, Text } from "./ui";
 
 const HINT_BACKGROUND = "#24383f";
 const HINT_FOREGROUND = "#c7f5ff";
@@ -427,13 +427,9 @@ export function MessageList({
             </Box>
             {showHint ? (
                 <Box height={1} marginTop={-2} justifyContent="center" overflow="hidden">
-                    <Text
-                        color={HINT_FOREGROUND}
-                        backgroundColor={HINT_BACKGROUND}
-                        onMouseClick={jumpToBottom}
-                    >
-                        {` ${hintLabel} `}
-                    </Text>
+                    <Pressable backgroundColor={HINT_BACKGROUND} onPress={jumpToBottom}>
+                        <Text color={HINT_FOREGROUND}>{` ${hintLabel} `}</Text>
+                    </Pressable>
                 </Box>
             ) : null}
         </Box>

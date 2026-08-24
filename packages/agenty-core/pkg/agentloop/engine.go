@@ -232,7 +232,8 @@ func (engine *Engine) Compact(
 		model:           resources.model,
 		caller:          resources.caller,
 		systemPrompt:    resources.systemPrompt,
-		maxOutputTokens: DefaultMaxOutputTokens,
+		freeFormTool:    resources.freeFormTool,
+		maxOutputTokens: modelMaxOutputTokens(resources.model),
 	}
 	event, err := engine.compactPrepared(runCtx, prepared, conversation.CompactionTriggerManual)
 	if err != nil {
@@ -312,7 +313,8 @@ func (engine *Engine) SetModel(
 		model:           source.model,
 		caller:          source.caller,
 		systemPrompt:    source.systemPrompt,
-		maxOutputTokens: DefaultMaxOutputTokens,
+		freeFormTool:    source.freeFormTool,
+		maxOutputTokens: modelMaxOutputTokens(source.model),
 	}
 	request := engine.sessionRequestForWindow(prepared, targetContextWindow)
 	if ShouldCompact(estimateRequestTokens(request), targetContextWindow) {
@@ -405,6 +407,7 @@ type preparedExecution struct {
 	model           catalog.Model
 	caller          Caller
 	systemPrompt    string
+	freeFormTool    bool
 	maxOutputTokens int64
 	userMessage     conversation.Message
 	eventSequence   uint64
@@ -414,6 +417,7 @@ type executionResources struct {
 	model        catalog.Model
 	caller       Caller
 	systemPrompt string
+	freeFormTool bool
 }
 
 func (engine *Engine) prepare(
@@ -469,9 +473,17 @@ func (engine *Engine) prepare(
 		model:           resources.model,
 		caller:          resources.caller,
 		systemPrompt:    resources.systemPrompt,
-		maxOutputTokens: DefaultMaxOutputTokens,
+		freeFormTool:    resources.freeFormTool,
+		maxOutputTokens: modelMaxOutputTokens(resources.model),
 		userMessage:     userMessage,
 	}, nil
+}
+
+func modelMaxOutputTokens(model catalog.Model) int64 {
+	if model.MaxOutputTokens > 0 {
+		return model.MaxOutputTokens
+	}
+	return DefaultMaxOutputTokens
 }
 
 func (engine *Engine) loadResources(
@@ -495,7 +507,9 @@ func (engine *Engine) loadResources(
 		return nil, err
 	}
 
-	systemPrompt, err := agentDefinition.ResolveSystemPrompt()
+	systemPrompt, err := agentDefinition.ResolveSystemPrompt(agent.SystemPromptOptions{
+		UseApplyPatchShell: !provider.FreeFormTool,
+	})
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)
 	}
@@ -503,7 +517,12 @@ func (engine *Engine) loadResources(
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to create LLM caller", err)
 	}
-	return &executionResources{model: *model, caller: caller, systemPrompt: systemPrompt}, nil
+	return &executionResources{
+		model:        *model,
+		caller:       caller,
+		systemPrompt: systemPrompt,
+		freeFormTool: provider.FreeFormTool,
+	}, nil
 }
 
 func (engine *Engine) loadCatalogModel(
@@ -535,11 +554,26 @@ func (engine *Engine) sessionRequestForWindow(prepared *preparedExecution, conte
 	request := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        sessionMessages(prepared.session),
-		Tools:           engine.tools.Definitions(),
+		Tools:           engine.toolDefinitions(prepared.freeFormTool),
 		MaxOutputTokens: prepared.maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
 	return fitCompactedRequest(request, contextWindow)
+}
+
+func (engine *Engine) toolDefinitions(freeFormTool bool) []ToolDefinition {
+	definitions := engine.tools.Definitions()
+	if freeFormTool {
+		return definitions
+	}
+
+	filtered := make([]ToolDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition.Type != ToolTypeApplyPatch {
+			filtered = append(filtered, definition)
+		}
+	}
+	return filtered
 }
 
 func (engine *Engine) run(

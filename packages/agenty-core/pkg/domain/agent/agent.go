@@ -29,7 +29,11 @@ Sometimes there will be a piece of XML data that follows user's message, which c
 You will receive this at the very beginning of the session, and maybe more after if something has changed by user or harness. You must follow these messages and treat them as truth.
 </basic>
 
-<soul>
+{{ if .UseApplyPatchShell }}<file-editing>
+The current provider does not support the free-form apply_patch tool. For every file modification, call the shell tool and run the apply_patch command with a complete V4A patch envelope passed through a heredoc on stdin. Do not use cat, sed, printf, or ad hoc scripts to edit files.
+</file-editing>
+
+{{ end }}<soul>
 {{ .Soul }}
 </soul>`
 
@@ -51,6 +55,10 @@ type Agent struct {
 	UpdatedAt              time.Time              `json:"updatedAt"`
 }
 
+type SystemPromptOptions struct {
+	UseApplyPatchShell bool
+}
+
 func New(code, name string) (*Agent, error) {
 	s, err := shared.NewCode(code)
 	if err != nil {
@@ -66,10 +74,14 @@ func New(code, name string) (*Agent, error) {
 	}, nil
 }
 
-func (a *Agent) ResolveSystemPrompt() (string, error) {
+func (a *Agent) ResolveSystemPrompt(options SystemPromptOptions) (string, error) {
 	data := struct {
-		Soul string
-	}{Soul: a.Soul}
+		Soul               string
+		UseApplyPatchShell bool
+	}{
+		Soul:               a.Soul,
+		UseApplyPatchShell: options.UseApplyPatchShell,
+	}
 
 	var prompt strings.Builder
 	if err := baseSystemPromptTemplate.Execute(&prompt, data); err != nil {

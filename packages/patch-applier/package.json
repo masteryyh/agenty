@@ -1,0 +1,11 @@
+{
+    "name": "patch-applier",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "build": "cargo build --release",
+        "test": "cargo test",
+        "lint": "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings",
+        "clean": "cargo clean"
+    }
+}
