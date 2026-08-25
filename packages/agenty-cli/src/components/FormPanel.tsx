@@ -4,9 +4,18 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { InputKey } from "../hooks/useInput";
 import { useInput } from "../hooks/useInput";
 import { useBottomDialogSize } from "./BottomDialog";
+import { dropdownFieldMode, DropdownMenu, dropdownValueForField } from "./DropdownMenu";
 import { Panel } from "./Panel";
-import { allocateColumnWidths, textWidth, truncateText } from "./Table";
+import { textWidth, truncateText } from "./Table";
 import { ActionBar, Box, Pressable, Text, TextInput } from "./ui";
+
+const FORM_LABEL_MAX_WIDTH = 24;
+const FORM_VALUE_WIDTH = 48;
+const FORM_MIN_VALUE_WIDTH = 12;
+const FORM_COLUMN_GAP = 2;
+const FORM_MENU_BORDER_HEIGHT = 2;
+const FORM_MENU_MIN_ROWS = 4;
+const FORM_MENU_MAX_ROWS = 8;
 
 export interface FormOption {
     label: string;
@@ -16,7 +25,7 @@ export interface FormOption {
 export interface FormField {
     key: string;
     label: string;
-    kind: "text" | "select" | "boolean" | "multiselect";
+    kind: "text" | "select" | "boolean" | "multiselect" | "disclosure";
     value: string;
     options?: FormOption[];
     placeholder?: string;
@@ -50,6 +59,50 @@ export interface FormPanelProps {
     onClose: () => void;
 }
 
+export interface DropdownPlacement {
+    side: "above" | "below";
+    visibleRows: number;
+    height: number;
+}
+
+export function chooseDropdownPlacement(
+    fieldTop: number,
+    fieldHeight: number,
+    viewportHeight: number,
+    optionCount: number,
+    maxRows: number,
+): DropdownPlacement {
+    const boundedMaxRows = Math.max(Math.min(maxRows, optionCount), 1);
+    const belowSpace = Math.max(viewportHeight - fieldTop - fieldHeight, 0);
+    const aboveSpace = Math.max(fieldTop, 0);
+    const fullHeight = boundedMaxRows + FORM_MENU_BORDER_HEIGHT;
+    const side = belowSpace >= fullHeight
+        ? "below"
+        : aboveSpace >= fullHeight
+            ? "above"
+            : belowSpace >= aboveSpace
+                ? "below"
+                : "above";
+    const availableSpace = side === "below" ? belowSpace : aboveSpace;
+    const visibleRows = Math.max(
+        Math.min(boundedMaxRows, Math.max(availableSpace - FORM_MENU_BORDER_HEIGHT, 1)),
+        1,
+    );
+
+    return {
+        side,
+        visibleRows,
+        height: visibleRows + FORM_MENU_BORDER_HEIGHT,
+    };
+}
+
+export function preferredDropdownRows(viewportHeight: number): number {
+    return Math.max(
+        FORM_MENU_MIN_ROWS,
+        Math.min(FORM_MENU_MAX_ROWS, Math.floor(viewportHeight * 0.4)),
+    );
+}
+
 function maskValue(value: string): string {
     if (!value) {
         return "—";
@@ -77,15 +130,59 @@ function serializeMulti(values: Set<string>): string {
     return JSON.stringify(Array.from(values));
 }
 
+function splitWord(word: string, width: number): string[] {
+    const chunks: string[] = [];
+    let chunk = "";
+    let chunkWidth = 0;
+
+    for (const character of word) {
+        const characterWidth = textWidth(character);
+        if (chunk && chunkWidth + characterWidth > width) {
+            chunks.push(chunk);
+            chunk = "";
+            chunkWidth = 0;
+        }
+        chunk += character;
+        chunkWidth += characterWidth;
+    }
+    if (chunk) {
+        chunks.push(chunk);
+    }
+
+    return chunks;
+}
+
+export function wrapFormLabel(value: string, width: number): string[] {
+    if (width <= 0) {
+        return [""];
+    }
+
+    const lines: string[] = [];
+    let current = "";
+    for (const word of value.trim().split(/\s+/)) {
+        const chunks = textWidth(word) > width ? splitWord(word, width) : [word];
+        for (const chunk of chunks) {
+            const candidate = current ? `${current} ${chunk}` : chunk;
+            if (textWidth(candidate) <= width) {
+                current = candidate;
+                continue;
+            }
+            if (current) {
+                lines.push(current);
+            }
+            current = chunk;
+        }
+    }
+    if (current) {
+        lines.push(current);
+    }
+
+    return lines.length > 0 ? lines : [""];
+}
+
 type ChoiceState =
     | { kind: "idle" }
-    | { kind: "selecting"; visibleIndex: number; selection: number }
-    | {
-        kind: "multi-selecting";
-        visibleIndex: number;
-        selection: number;
-        chosen: Set<string>;
-    };
+    | { kind: "open"; visibleIndex: number };
 
 export function FormPanel({
     title,
@@ -125,19 +222,39 @@ export function FormPanel({
     const [choice, setChoice] = useState<ChoiceState>({ kind: "idle" });
     const textInputRef = useRef<InputRenderable | null>(null);
 
-    const formColumnBudget = Math.max(dialogSize.width - 3, 0);
+    const hasMeasuredDialog = dialogSize.width > 1;
+    const formColumnBudget = Math.max(dialogSize.width - 2, 1);
     const labelContentWidth = Math.max(
-        ...visibleFields.map((field) => textWidth(`${field.label}:`)),
-        0,
+        ...fields
+            .filter((field) => field.kind !== "disclosure")
+            .map((field) => textWidth(`${field.label}:`)),
+        1,
     );
-    const [keyWidth = 0] = allocateColumnWidths(
-        formColumnBudget,
-        [labelContentWidth, formColumnBudget],
-    );
-    const maxExpandedOptions = Math.max(
-        2,
-        Math.min(6, dialogSize.height - visibleFields.length - 4),
-    );
+    const preferredLabelWidth = Math.min(labelContentWidth, FORM_LABEL_MAX_WIDTH);
+    const labelWidth = hasMeasuredDialog
+        ? Math.min(
+            preferredLabelWidth,
+            Math.max(formColumnBudget - FORM_MIN_VALUE_WIDTH - FORM_COLUMN_GAP, 1),
+        )
+        : preferredLabelWidth;
+    const valueWidth = hasMeasuredDialog
+        ? Math.max(
+            Math.min(FORM_VALUE_WIDTH, formColumnBudget - labelWidth - FORM_COLUMN_GAP),
+            1,
+        )
+        : undefined;
+    const fieldLayouts = visibleFields.map((field) => {
+        const labelLines = field.kind === "disclosure"
+            ? [field.label]
+            : wrapFormLabel(`${field.label}:`, labelWidth);
+        return {
+            labelLines,
+            height: field.kind === "disclosure" ? 1 : labelLines.length,
+        };
+    });
+    const menuRowBudget = hasMeasuredDialog
+        ? preferredDropdownRows(Math.max(dialogSize.height - 4, 1))
+        : 6;
     const valuesRef = useRef(values);
     valuesRef.current = values;
     const cursorRef = useRef(cursor);
@@ -184,69 +301,10 @@ export function FormPanel({
             return;
         }
 
-        const current = valuesRef.current[field.key] ?? field.value;
-        if (field.kind === "select") {
-            const selected = options.findIndex((option) => option.value === current);
-            setChoice({
-                kind: "selecting",
-                visibleIndex,
-                selection: selected >= 0 ? selected : 0,
-            });
-        } else if (field.kind === "multiselect") {
-            const chosen = parseMulti(current);
-            const firstChosen = options.findIndex((option) => chosen.has(option.value));
-            setChoice({
-                kind: "multi-selecting",
-                visibleIndex,
-                selection: firstChosen >= 0 ? firstChosen : 0,
-                chosen,
-            });
+        if (field.kind === "select" || field.kind === "multiselect") {
+            setChoice({ kind: "open", visibleIndex });
         }
     }, []);
-
-    const commitSelect = useCallback((selection: number) => {
-        const state = choiceRef.current;
-        if (state.kind !== "selecting") {
-            return;
-        }
-        const field = visibleFieldsRef.current[state.visibleIndex];
-        const option = field?.options?.[selection];
-        if (field && option) {
-            updateValue(field.key, option.value);
-        }
-        setChoice({ kind: "idle" });
-    }, [updateValue]);
-
-    const toggleMultiSelect = useCallback((selection: number) => {
-        setChoice((state) => {
-            if (state.kind !== "multi-selecting") {
-                return state;
-            }
-            const option = visibleFieldsRef.current[state.visibleIndex]?.options?.[selection];
-            if (!option) {
-                return state;
-            }
-            const chosen = new Set(state.chosen);
-            if (chosen.has(option.value)) {
-                chosen.delete(option.value);
-            } else {
-                chosen.add(option.value);
-            }
-            return { ...state, selection, chosen };
-        });
-    }, []);
-
-    const commitMultiSelect = useCallback(() => {
-        const state = choiceRef.current;
-        if (state.kind !== "multi-selecting") {
-            return;
-        }
-        const field = visibleFieldsRef.current[state.visibleIndex];
-        if (field) {
-            updateValue(field.key, serializeMulti(state.chosen));
-        }
-        setChoice({ kind: "idle" });
-    }, [updateValue]);
 
     const runAction = useCallback((actionIndex: number) => {
         const action = actionDefsRef.current[actionIndex];
@@ -262,39 +320,7 @@ export function FormPanel({
 
     useInput((input, key, event) => {
         const state = choiceRef.current;
-        if (state.kind === "selecting") {
-            const options = visibleFieldsRef.current[state.visibleIndex]?.options ?? [];
-            if (key.escape) {
-                setChoice({ kind: "idle" });
-            } else if (key.upArrow) {
-                setChoice({ ...state, selection: Math.max(state.selection - 1, 0) });
-            } else if (key.downArrow) {
-                setChoice({
-                    ...state,
-                    selection: Math.min(state.selection + 1, Math.max(options.length - 1, 0)),
-                });
-            } else if (key.return) {
-                commitSelect(state.selection);
-            }
-            return;
-        }
-
-        if (state.kind === "multi-selecting") {
-            const options = visibleFieldsRef.current[state.visibleIndex]?.options ?? [];
-            if (key.escape) {
-                setChoice({ kind: "idle" });
-            } else if (key.upArrow) {
-                setChoice({ ...state, selection: Math.max(state.selection - 1, 0) });
-            } else if (key.downArrow) {
-                setChoice({
-                    ...state,
-                    selection: Math.min(state.selection + 1, Math.max(options.length - 1, 0)),
-                });
-            } else if (input === " ") {
-                toggleMultiSelect(state.selection);
-            } else if (key.return) {
-                commitMultiSelect();
-            }
+        if (state.kind === "open") {
             return;
         }
 
@@ -329,10 +355,21 @@ export function FormPanel({
             }
             return;
         }
-        if (!field || field.focusable === false || field.readOnly || editingText) {
+        if (!field || field.focusable === false || editingText) {
             return;
         }
-        if (field.kind === "boolean") {
+        if (field.kind === "disclosure") {
+            const expanded = (valuesRef.current[field.key] ?? field.value) === "true";
+            if (key.leftArrow && expanded) {
+                updateValue(field.key, "false");
+            } else if (key.rightArrow && !expanded) {
+                updateValue(field.key, "true");
+            } else if (key.return || input === " ") {
+                updateValue(field.key, expanded ? "false" : "true");
+            }
+        } else if (field.readOnly) {
+            return;
+        } else if (field.kind === "boolean") {
             if (key.leftArrow || key.rightArrow || key.return || input === " ") {
                 const value = valuesRef.current[field.key] ?? field.value;
                 updateValue(field.key, value === "true" ? "false" : "true");
@@ -342,30 +379,44 @@ export function FormPanel({
         }
     }, { isActive: active });
 
+    const hasDisclosure = visibleFields.some((field) => field.kind === "disclosure");
     const hint = hintOverride ?? (dialogSize.width < 60
-        ? "↑↓ move · Enter choose · Esc back"
-        : "↑↓ navigate · type to edit · Enter open/choose · Space toggle · Esc back");
+        ? hasDisclosure
+            ? "↑↓ move · ←→ expand/collapse · Enter choose · Esc back"
+            : "↑↓ move · Enter choose · Esc back"
+        : hasDisclosure
+            ? "↑↓ navigate · ←→ expand/collapse · type to edit · Enter open/choose · Space toggle · Esc back"
+            : "↑↓ navigate · type to edit · Enter open/choose · Space toggle · Esc back");
     const choiceField = choice.kind === "idle"
         ? undefined
         : visibleFields[choice.visibleIndex];
-    const choiceOptions = choiceField?.options ?? [];
-    const choiceSelection = choice.kind === "idle" ? 0 : choice.selection;
-    const choiceOptionStart = Math.max(
-        0,
-        Math.min(
-            choiceSelection - Math.floor(maxExpandedOptions / 2),
-            Math.max(choiceOptions.length - maxExpandedOptions, 0),
-        ),
-    );
-    const choiceVisibleOptions = choiceOptions.slice(
-        choiceOptionStart,
-        choiceOptionStart + maxExpandedOptions,
-    );
+    const choiceFieldTop = choiceField && choice.kind !== "idle"
+        ? fieldLayouts
+            .slice(0, choice.visibleIndex)
+            .reduce((total, layout) => total + layout.height, 0)
+        : 0;
+    const choiceIndex = choice.kind === "open" ? choice.visibleIndex : 0;
+    const dropdownPlacement = choiceField && choice.kind !== "idle"
+        ? hasMeasuredDialog
+            ? chooseDropdownPlacement(
+                choiceFieldTop,
+                fieldLayouts[choice.visibleIndex]?.height ?? 1,
+                Math.max(dialogSize.height - 4, 1),
+                choiceField.options?.length ?? 0,
+                menuRowBudget,
+            )
+            : {
+                side: "below" as const,
+                visibleRows: menuRowBudget,
+                height: menuRowBudget + FORM_MENU_BORDER_HEIGHT,
+            }
+        : undefined;
 
     return (
         <Panel
             title={title}
             error={error}
+            contentOverflow="visible"
             footer={(
                 <ActionBar
                     actions={actionDefs}
@@ -387,20 +438,26 @@ export function FormPanel({
                 flexGrow={1}
                 width="100%"
                 position="relative"
-                overflow="hidden"
+                overflow="visible"
             >
                 {visibleFields.map((field, visibleIndex) => {
                     const selected = cursor === visibleIndex;
                     const value = values[field.key] ?? field.value;
                     const options = field.options ?? [];
                     const editingText = active && selected && field.kind === "text" && !field.readOnly;
+                    const layout = fieldLayouts[visibleIndex];
+                    const rowHeight = layout?.height ?? 1;
+                    const labelLines = layout?.labelLines ?? [field.label];
+                    const choiceOpen = choice.kind !== "idle" && choice.visibleIndex === visibleIndex;
 
                     return (
                         <Pressable
                             key={field.key}
                             width="100%"
-                            height={1}
-                            overflow="hidden"
+                            height={rowHeight}
+                            position="relative"
+                            overflow="visible"
+                            alignItems="flex-start"
                             disabled={!active || field.focusable === false}
                             onPress={() => {
                                 if (field.focusable === false) {
@@ -408,138 +465,175 @@ export function FormPanel({
                                 }
                                 setCursor(visibleIndex);
                                 setChoice({ kind: "idle" });
-                                if (field.kind === "boolean" && !field.readOnly) {
+                                if (field.kind === "disclosure") {
+                                    updateValue(field.key, value === "true" ? "false" : "true");
+                                } else if (field.kind === "boolean" && !field.readOnly) {
                                     updateValue(field.key, value === "true" ? "false" : "true");
                                 }
                             }}
                         >
-                            <Box width={2} height={1}>
+                            <Box width={2} height={rowHeight}>
                                 <Text color={selected ? "cyan" : "gray"}>
                                     {selected ? "❯" : " "}
                                 </Text>
                             </Box>
-                            <Box
-                                width={keyWidth}
-                                height={1}
-                                justifyContent="flex-end"
-                                overflow="hidden"
-                            >
-                                <Text
-                                    color={selected ? "cyan" : "gray"}
-                                    bold={selected}
-                                    wrap="truncate"
+                            {field.kind === "disclosure" ? (
+                                <Box
+                                    flexGrow={1}
+                                    flexBasis={0}
+                                    height={rowHeight}
+                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
+                                    alignItems="flex-start"
+                                    overflow="hidden"
                                 >
-                                    {truncateText(`${field.label}:`, keyWidth)}
-                                </Text>
-                            </Box>
-                            <Text> </Text>
-                            <Box
-                                flexGrow={1}
-                                flexBasis={0}
-                                height={1}
-                                justifyContent="flex-start"
-                                overflow="hidden"
-                            >
-                                {editingText ? (
-                                    <TextInput
-                                        ref={textInputRef}
-                                        value={value}
-                                        onChange={(next) => updateValue(field.key, next)}
-                                        onSubmit={() => moveCursor(1, visibleIndex)}
-                                        placeholder={field.placeholder ?? ""}
-                                        focus={active}
-                                        onKeyDown={(event) => {
-                                            if (event.name === "up") {
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                moveCursor(-1, visibleIndex);
-                                            } else if (event.name === "down" || event.name === "tab") {
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                moveCursor(1, visibleIndex);
-                                            } else if (event.name === "escape") {
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                onClose();
-                                            }
-                                        }}
-                                    />
-                                ) : (
-                                    <Text wrap="truncate" color={selected ? "cyan" : "white"}>
-                                        {field.kind === "boolean"
-                                            ? renderBoolean(selected, value)
-                                            : field.kind === "select"
-                                                ? selectLabel(options, value)
-                                                : field.kind === "multiselect"
-                                                    ? renderMultiValue(value)
-                                                    : field.secret
-                                                        ? maskValue(value)
-                                                        : value || <Text dimColor>—</Text>}
-                                    </Text>
-                                )}
-                            </Box>
+                                    <Box
+                                        width={labelWidth}
+                                        height={1}
+                                        justifyContent="flex-end"
+                                        overflow="hidden"
+                                    >
+                                        <Text color={selected ? "cyan" : "gray"} bold={selected}>
+                                            {`${value === "true" ? "▾" : "▸"} ${field.label}`}
+                                        </Text>
+                                    </Box>
+                                    <Box width={valueWidth} height={1} flexShrink={0} />
+                                </Box>
+                            ) : (
+                                <Box
+                                    flexGrow={1}
+                                    flexBasis={0}
+                                    height={rowHeight}
+                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
+                                    alignItems="flex-start"
+                                    overflow="hidden"
+                                >
+                                    <Box
+                                        width={labelWidth}
+                                        height={rowHeight}
+                                        flexDirection="column"
+                                        overflow="hidden"
+                                    >
+                                        {labelLines.map((line, lineIndex) => (
+                                            <Box
+                                                key={`${field.key}:label:${lineIndex}`}
+                                                width={labelWidth}
+                                                height={1}
+                                                justifyContent="flex-end"
+                                                overflow="hidden"
+                                            >
+                                                <Text color={selected ? "cyan" : "gray"} bold={selected}>
+                                                    {line}
+                                                </Text>
+                                            </Box>
+                                        ))}
+                                    </Box>
+                                    <Box
+                                        width={valueWidth}
+                                        height={1}
+                                        flexGrow={valueWidth === undefined ? 1 : 0}
+                                        flexShrink={valueWidth === undefined ? 1 : 0}
+                                        justifyContent="flex-start"
+                                        overflow="hidden"
+                                    >
+                                        {editingText ? (
+                                            <TextInput
+                                                ref={textInputRef}
+                                                value={value}
+                                                onChange={(next) => updateValue(field.key, next)}
+                                                onSubmit={() => moveCursor(1, visibleIndex)}
+                                                placeholder={field.placeholder ?? ""}
+                                                focus={active}
+                                                onKeyDown={(event) => {
+                                                    if (event.name === "up") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        moveCursor(-1, visibleIndex);
+                                                    } else if (event.name === "down" || event.name === "tab") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        moveCursor(1, visibleIndex);
+                                                    } else if (event.name === "escape") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        onClose();
+                                                    }
+                                                }}
+                                            />
+                                        ) : (
+                                            <Text color={selected ? "cyan" : "white"}>
+                                                {field.kind === "boolean"
+                                                    ? renderBoolean(selected, value)
+                                                    : field.kind === "multiselect"
+                                                        ? renderMultiValue(value)
+                                                        : renderTextValue(field, value, options, valueWidth ?? 48)}
+                                            </Text>
+                                        )}
+                                    </Box>
+                                </Box>
+                            )}
                         </Pressable>
                     );
                 })}
-                {choice.kind === "idle" ? null : (
+                {choiceField && dropdownPlacement ? (
                     <Box
-                        key={`choice-menu:${choice.kind}`}
                         position="absolute"
-                        top={choice.visibleIndex + 1}
+                        top={dropdownPlacement.side === "above"
+                            ? choiceFieldTop - dropdownPlacement.height
+                            : choiceFieldTop + (fieldLayouts[choiceIndex]?.height ?? 1)}
                         left={0}
                         right={0}
-                        height={maxExpandedOptions}
+                        height={dropdownPlacement.height}
                         zIndex={10}
                         overflow="hidden"
                     >
-                        <Box width={keyWidth + 3} height={maxExpandedOptions} />
+                        <Box width={2} height={dropdownPlacement.height} />
                         <Box
-                            flexDirection="column"
                             flexGrow={1}
                             flexBasis={0}
-                            height={maxExpandedOptions}
-                            backgroundColor="#101417"
+                            height={dropdownPlacement.height}
+                            justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
+                            alignItems="flex-start"
                         >
-                            {Array.from({ length: maxExpandedOptions }, (_, localIndex) => {
-                                const option = choiceVisibleOptions[localIndex];
-                                const index = choiceOptionStart + localIndex;
-                                const activeOption = option !== undefined && choice.selection === index;
-                                const checked = option !== undefined && choice.kind === "multi-selecting" &&
-                                    choice.chosen.has(option.value);
-                                return (
-                                    <Pressable
-                                        key={localIndex}
-                                        width="100%"
-                                        height={1}
-                                        disabled={!option}
-                                        onPress={() => {
-                                            if (!option) {
-                                                return;
-                                            }
-                                            if (choice.kind === "selecting") {
-                                                commitSelect(index);
-                                            } else {
-                                                toggleMultiSelect(index);
-                                            }
-                                        }}
-                                    >
-                                        <Text color={activeOption ? "cyan" : "gray"}>
-                                            {option && activeOption ? "❯ " : "  "}
-                                        </Text>
-                                        <Text color={checked ? "cyan" : activeOption ? "cyan" : "white"} bold={checked || activeOption}>
-                                            {choice.kind === "multi-selecting"
-                                                ? `${checked ? "✓" : "☐"} ${option?.label ?? ""}`
-                                                : option?.label ?? ""}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
+                            <Box width={labelWidth} height={dropdownPlacement.height} />
+                            <DropdownMenu
+                                options={choiceField.options ?? []}
+                                mode={dropdownFieldMode(choiceField.kind === "select" ? "select" : "multiselect")}
+                                value={dropdownValueForField(
+                                    dropdownFieldMode(choiceField.kind === "select" ? "select" : "multiselect"),
+                                    values[choiceField.key] ?? choiceField.value,
+                                )}
+                                width={valueWidth ?? 48}
+                                maxVisible={dropdownPlacement.visibleRows}
+                                onSubmit={(next) => {
+                                    const submitted = Array.isArray(next) ? serializeMulti(new Set(next)) : next;
+                                    updateValue(choiceField.key, submitted);
+                                    setChoice({ kind: "idle" });
+                                }}
+                                onClose={() => setChoice({ kind: "idle" })}
+                            />
                         </Box>
                     </Box>
-                )}
+                ) : null}
             </Box>
         </Panel>
     );
+}
+
+function renderTextValue(
+    field: FormField,
+    value: string,
+    options: FormOption[],
+    width: number,
+): React.ReactNode {
+    const displayValue = field.kind === "select"
+        ? selectLabel(options, value)
+        : field.secret
+            ? maskValue(value)
+            : value;
+    if (!displayValue) {
+        return <Text dimColor>—</Text>;
+    }
+    return truncateText(displayValue, width);
 }
 
 function renderBoolean(selected: boolean, value: string): React.ReactNode {

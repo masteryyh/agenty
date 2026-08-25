@@ -33,3 +33,23 @@ func TestModelWithoutReasoningEffortsDoesNotSupportReasoning(t *testing.T) {
 		t.Fatal("SupportsReasoning() = true, want false")
 	}
 }
+
+func TestNormalizeReasoningCapabilitiesUsesDefaultsAndLegacyInference(t *testing.T) {
+	defaultModel := Model{Reasoning: true}
+	NormalizeReasoningCapabilities(&defaultModel)
+	if len(defaultModel.ReasoningEfforts) != len(shared.StandardReasoningEfforts()) {
+		t.Fatalf("default reasoning efforts = %v", defaultModel.ReasoningEfforts)
+	}
+
+	legacyModel := Model{ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow}}
+	NormalizeReasoningCapabilities(&legacyModel)
+	if !legacyModel.Reasoning || !legacyModel.SupportsReasoningEffort(shared.ReasoningLow) {
+		t.Fatalf("legacy reasoning capabilities = %+v", legacyModel)
+	}
+
+	disabledModel := Model{Reasoning: false, ReasoningEfforts: []shared.ReasoningEffort{}}
+	NormalizeReasoningCapabilities(&disabledModel)
+	if disabledModel.Reasoning || len(disabledModel.ReasoningEfforts) != 0 {
+		t.Fatalf("disabled reasoning capabilities = %+v", disabledModel)
+	}
+}

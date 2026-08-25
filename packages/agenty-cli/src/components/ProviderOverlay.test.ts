@@ -3,7 +3,9 @@ import { describe, expect, test } from "bun:test";
 import type { ModelProviderDto } from "../api/types";
 import {
     buildBuiltinProviderUpdate,
+    buildCreateModelFields,
     buildProviderFields,
+    parseModelValues,
 } from "./ProviderOverlay";
 
 function builtinProvider(): ModelProviderDto {
@@ -51,5 +53,35 @@ describe("provider overlay builtin configuration", () => {
 
         expect(freeFormField?.value).toBe("true");
         expect(freeFormField?.readOnly).toBe(false);
+    });
+});
+
+describe("provider overlay model advanced options", () => {
+    test("hides advanced model fields until expanded and supplies defaults", () => {
+        const collapsed = buildCreateModelFields(false);
+        expect(collapsed.find((field) => field.key === "maxOutputTokens")?.visible).toBe(false);
+        expect(collapsed.find((field) => field.key === "reasoningEfforts")?.visible).toBe(false);
+
+        const expanded = buildCreateModelFields(true);
+        expect(expanded.find((field) => field.key === "maxOutputTokens")?.value).toBe("8192");
+        expect(expanded.find((field) => field.key === "reasoningEfforts")?.kind).toBe("multiselect");
+
+        expect(parseModelValues({
+            code: "model",
+            name: "Model",
+            contextWindow: "128000",
+            multiModal: "false",
+            light: "false",
+            reasoning: "true",
+        })).toMatchObject({
+            maxOutputTokens: 8192,
+            reasoning: true,
+            reasoningEfforts: [],
+        });
+    });
+
+    test("uses the Light model label", () => {
+        expect(buildCreateModelFields(false).find((field) => field.key === "light")?.label)
+            .toBe("Light model");
     });
 });

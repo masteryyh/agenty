@@ -37,6 +37,7 @@ export interface ModelDraft {
     maxOutputTokens: number;
     multiModal: boolean;
     light: boolean;
+    reasoning?: boolean;
     reasoningEfforts: ReasoningEffort[];
     isDefault: boolean;
     isBuiltin: boolean;
@@ -96,7 +97,12 @@ export function createModelDraft(
         maxOutputTokens: existing?.maxOutputTokens ?? 8_192,
         multiModal: existing?.multiModal ?? false,
         light: existing?.light ?? false,
-        reasoningEfforts: existing?.reasoningEfforts ?? [...STANDARD_REASONING_EFFORTS],
+        reasoning: existing === undefined
+            ? true
+            : existing.reasoning !== false && (existing.reasoning === true || (existing.reasoningEfforts?.length ?? 0) > 0),
+        reasoningEfforts: existing?.reasoning === false
+            ? []
+            : existing?.reasoningEfforts ?? [...STANDARD_REASONING_EFFORTS],
         isDefault: existing?.isDefault ?? false,
         isBuiltin: provider.builtin === true,
     };

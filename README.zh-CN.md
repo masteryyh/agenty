@@ -44,7 +44,7 @@ core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notific
 已持久化消息、模型流式增量、工具调用和 round 终态。通知可能早于 `session.start` response
 到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
 
-TUI 当前开放 `/provider`、`/model`、`/agents`、`/cwd`、`/think`、`/status`、
+TUI 当前开放 `/provider`、`/model`、`/agents`、`/cwd`、`/effort`、`/status`、
 `/new`、`/resume`、`/help` 和 `/exit`。core 尚未实现的功能暂不展示。
 
 ## 配置与存储

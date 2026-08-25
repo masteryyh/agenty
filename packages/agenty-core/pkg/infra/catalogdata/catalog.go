@@ -43,9 +43,7 @@ func LoadProviders() ([]*catalog.Provider, error) {
 			provider.Models = make([]catalog.Model, 0)
 		}
 		for modelIndex := range provider.Models {
-			provider.Models[modelIndex].ReasoningEfforts = shared.NormalizeReasoningEfforts(
-				provider.Models[modelIndex].ReasoningEfforts,
-			)
+			catalog.NormalizeReasoningCapabilities(&provider.Models[modelIndex])
 		}
 	}
 	return providers, nil
@@ -86,15 +84,8 @@ func validateProvider(provider *catalog.Provider) error {
 }
 
 func validateReasoningEfforts(model *catalog.Model) error {
-	seen := make(map[shared.ReasoningEffort]struct{}, len(model.ReasoningEfforts))
-	for _, effort := range model.ReasoningEfforts {
-		if !effort.Valid() || !effort.Enabled() {
-			return fmt.Errorf("model %q has invalid reasoning effort %q", model.Code, effort)
-		}
-		if _, ok := seen[effort]; ok {
-			return fmt.Errorf("model %q repeats reasoning effort %q", model.Code, effort)
-		}
-		seen[effort] = struct{}{}
+	if err := shared.ValidateReasoningEfforts(model.ReasoningEfforts); err != nil {
+		return fmt.Errorf("model %q: %w", model.Code, err)
 	}
 	return nil
 }

@@ -6,7 +6,12 @@ import { act, useState } from "react";
 import { BottomDialog } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { FormField } from "./FormPanel";
-import { FormPanel } from "./FormPanel";
+import {
+    chooseDropdownPlacement,
+    FormPanel,
+    preferredDropdownRows,
+    wrapFormLabel,
+} from "./FormPanel";
 import { List } from "./List";
 import { Box, HOVER_BACKGROUND, Text } from "./ui";
 
@@ -59,6 +64,55 @@ function findInput(renderable: BaseRenderable): InputRenderable | null {
 }
 
 describe("common TUI components", () => {
+    test("places dropdowns above when there is not enough room below", () => {
+        expect(chooseDropdownPlacement(8, 1, 12, 5, 5)).toEqual({
+            side: "above",
+            visibleRows: 5,
+            height: 7,
+        });
+        expect(chooseDropdownPlacement(1, 1, 5, 5, 5).side).toBe("below");
+    });
+
+    test("grows dropdown rows from a four-row minimum to an eight-row maximum", () => {
+        expect(preferredDropdownRows(5)).toBe(4);
+        expect(preferredDropdownRows(16)).toBe(6);
+        expect(preferredDropdownRows(40)).toBe(8);
+    });
+
+    test("wraps labels at the shared maximum width", () => {
+        expect(wrapFormLabel("Supported reasoning efforts:", 12)).toEqual([
+            "Supported",
+            "reasoning",
+            "efforts:",
+        ]);
+    });
+
+    test("renders advanced options as a disclosure row", async () => {
+        const setup = await testRender(
+            <FormPanel
+                title="Model"
+                fields={[
+                    { key: "name", label: "Model name", kind: "text", value: "model" },
+                    { key: "advanced", label: "Advanced options", kind: "disclosure", value: "false" },
+                    { key: "max", label: "Max output tokens", kind: "text", value: "8192", visible: false },
+                ]}
+                onAction={() => undefined}
+                onClose={() => undefined}
+            />,
+            { width: 72, height: 12 },
+        );
+
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+
+            expect(setup.captureCharFrame()).toContain("▸ Advanced options");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
     test("highlights a hovered list row without selecting or activating it", async () => {
         const activated: string[] = [];
         const setup = await testRender(
@@ -167,6 +221,67 @@ describe("common TUI components", () => {
                 name: "Direct edit",
                 type: "first",
             });
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
+    test("opens a multi-select dropdown and commits temporary choices", async () => {
+        let saved: Record<string, string> | undefined;
+        const setup = await testRender(
+            <FormPanel
+                title="Model"
+                fields={[
+                    {
+                        key: "efforts",
+                        label: "Supported reasoning efforts",
+                        kind: "multiselect",
+                        value: JSON.stringify(["low"]),
+                        options: [
+                            { label: "Low", value: "low" },
+                            { label: "Medium", value: "medium" },
+                            { label: "High", value: "high" },
+                        ],
+                    },
+                ]}
+                onAction={(_action, values) => {
+                    saved = values;
+                }}
+                onClose={() => undefined}
+            />,
+            { width: 72, height: 14 },
+        );
+
+        try {
+            await act(async () => {
+                await setup.flush();
+                setup.mockInput.pressEnter();
+                await setup.flush();
+            });
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("Low");
+            expect(setup.captureCharFrame()).toContain("Medium");
+
+            await act(async () => {
+                setup.mockInput.pressArrow("down");
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressKey(" ");
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressEnter();
+                await setup.flush();
+            });
+            await act(async () => {
+                await setup.flush();
+            });
+
+            expect(saved).toBeUndefined();
+            expect(setup.captureCharFrame()).toContain("2 selected");
         } finally {
             act(() => setup.renderer.destroy());
         }

@@ -38,7 +38,10 @@ func TestModelReasoningEffort(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := modelReasoningEffort(model, tt.effort)
+			got, err := modelReasoningEffort(model, tt.effort)
+			if err != nil {
+				t.Fatalf("modelReasoningEffort() error = %v", err)
+			}
 			if got != tt.want {
 				t.Fatalf("modelReasoningEffort() = %q, want %q", got, tt.want)
 			}
@@ -46,20 +49,26 @@ func TestModelReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestModelReasoningEffortSendsUnsupportedLevelToUpstream(t *testing.T) {
+func TestModelReasoningEffortRejectsUnsupportedLevel(t *testing.T) {
 	model := catalog.Model{
 		Code:             "gpt-5-mini",
 		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh},
 	}
-	got := modelReasoningEffort(model, shared.ReasoningMax)
-	if got != "max" {
-		t.Fatalf("modelReasoningEffort() = %q, want max", got)
+	got, err := modelReasoningEffort(model, shared.ReasoningMax)
+	if got != "" {
+		t.Fatalf("modelReasoningEffort() = %q, want empty", got)
+	}
+	if !errors.Is(err, ErrUnsupportedReasoningEffort) {
+		t.Fatalf("modelReasoningEffort() error = %v, want unsupported effort", err)
 	}
 }
 
 func TestModelReasoningEffortIgnoresNonReasoningModel(t *testing.T) {
 	model := catalog.Model{Code: "gpt-4o", ReasoningEfforts: []shared.ReasoningEffort{}}
-	got := modelReasoningEffort(model, shared.ReasoningHigh)
+	got, err := modelReasoningEffort(model, shared.ReasoningHigh)
+	if err != nil {
+		t.Fatalf("modelReasoningEffort() error = %v", err)
+	}
 	if got != "" {
 		t.Fatalf("modelReasoningEffort() = %q, want empty", got)
 	}

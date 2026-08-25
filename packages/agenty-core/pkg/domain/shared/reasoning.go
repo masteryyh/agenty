@@ -1,5 +1,7 @@
 package shared
 
+import "fmt"
+
 type ReasoningEffort string
 
 const (
@@ -52,4 +54,27 @@ func NormalizeReasoningEfforts(efforts []ReasoningEffort) []ReasoningEffort {
 		}
 	}
 	return normalized
+}
+
+func IsStandardReasoningEffort(effort ReasoningEffort) bool {
+	for _, supported := range StandardReasoningEfforts() {
+		if supported == effort {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateReasoningEfforts(efforts []ReasoningEffort) error {
+	seen := make(map[ReasoningEffort]struct{}, len(efforts))
+	for _, effort := range efforts {
+		if !IsStandardReasoningEffort(effort) {
+			return fmt.Errorf("unsupported reasoning effort %q", effort)
+		}
+		if _, ok := seen[effort]; ok {
+			return fmt.Errorf("duplicate reasoning effort %q", effort)
+		}
+		seen[effort] = struct{}{}
+	}
+	return nil
 }

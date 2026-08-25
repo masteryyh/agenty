@@ -307,6 +307,7 @@ func (engine *Engine) SetModel(
 		}
 		return session.VisibleCopy(), nil
 	}
+	targetMaxOutputTokens := modelMaxOutputTokens(*targetModel)
 
 	prepared := &preparedExecution{
 		session:         session,
@@ -316,13 +317,19 @@ func (engine *Engine) SetModel(
 		freeFormTool:    source.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(source.model),
 	}
-	request := engine.sessionRequestForWindow(prepared, targetContextWindow)
-	if ShouldCompact(estimateRequestTokens(request), targetContextWindow) {
-		if _, err := engine.compactPreparedForWindow(runCtx, prepared, conversation.CompactionTriggerModelSwitch, targetContextWindow); err != nil {
+	request := engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
+	if ShouldCompact(estimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
+		if _, err := engine.compactPreparedForWindow(
+			runCtx,
+			prepared,
+			conversation.CompactionTriggerModelSwitch,
+			targetContextWindow,
+			targetMaxOutputTokens,
+		); err != nil {
 			return nil, fmt.Errorf("compact session before model switch: %w", err)
 		}
-		request = engine.sessionRequestForWindow(prepared, targetContextWindow)
-		if ShouldCompact(estimateRequestTokens(request), targetContextWindow) {
+		request = engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
+		if ShouldCompact(estimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
 			return nil, apperrors.Validation("session context remains too large for target model after compaction")
 		}
 	}
@@ -547,15 +554,19 @@ func (engine *Engine) loadCatalogModel(
 }
 
 func (engine *Engine) sessionRequest(prepared *preparedExecution) Request {
-	return engine.sessionRequestForWindow(prepared, modelContextWindow(prepared))
+	return engine.sessionRequestForWindow(prepared, modelContextWindow(prepared), prepared.maxOutputTokens)
 }
 
-func (engine *Engine) sessionRequestForWindow(prepared *preparedExecution, contextWindow int64) Request {
+func (engine *Engine) sessionRequestForWindow(
+	prepared *preparedExecution,
+	contextWindow int64,
+	maxOutputTokens int64,
+) Request {
 	request := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        sessionMessages(prepared.session),
 		Tools:           engine.toolDefinitions(prepared.freeFormTool),
-		MaxOutputTokens: prepared.maxOutputTokens,
+		MaxOutputTokens: maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
 	return fitCompactedRequest(request, contextWindow)
@@ -635,7 +646,11 @@ func (engine *Engine) executeLoop(
 		}
 
 		request := engine.sessionRequest(prepared)
-		if ShouldCompact(estimateRequestTokens(request), modelContextWindow(prepared)) && !lastCompacted {
+		if ShouldCompact(
+			estimateRequestTokens(request),
+			modelContextWindow(prepared),
+			prepared.maxOutputTokens,
+		) && !lastCompacted {
 			compaction, err := engine.compactPrepared(ctx, prepared, conversation.CompactionTriggerAuto)
 			if err != nil {
 				return totalUsage, fmt.Errorf("compact session before iteration %d: %w", iteration, err)

@@ -226,9 +226,7 @@ func (r *CatalogRepository) ReplaceModels(
 
 	normalized := slices.Clone(models)
 	for index := range normalized {
-		normalized[index].ReasoningEfforts = shared.NormalizeReasoningEfforts(
-			normalized[index].ReasoningEfforts,
-		)
+		catalog.NormalizeReasoningCapabilities(&normalized[index])
 		if normalized[index].MaxOutputTokens <= 0 {
 			normalized[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		}
@@ -289,9 +287,7 @@ func normalizeModelsForCache(cache *modelDiscoveryCache) {
 		cache.Models = make([]catalog.Model, 0)
 	}
 	for index := range cache.Models {
-		cache.Models[index].ReasoningEfforts = shared.NormalizeReasoningEfforts(
-			cache.Models[index].ReasoningEfforts,
-		)
+		catalog.NormalizeReasoningCapabilities(&cache.Models[index])
 		if cache.Models[index].MaxOutputTokens <= 0 {
 			cache.Models[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		}
@@ -315,9 +311,7 @@ func normalizeModels(provider *catalog.Provider) {
 		provider.Models = make([]catalog.Model, 0)
 	}
 	for index := range provider.Models {
-		provider.Models[index].ReasoningEfforts = shared.NormalizeReasoningEfforts(
-			provider.Models[index].ReasoningEfforts,
-		)
+		catalog.NormalizeReasoningCapabilities(&provider.Models[index])
 		if provider.Models[index].MaxOutputTokens <= 0 {
 			provider.Models[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		}
@@ -362,9 +356,7 @@ func cloneProvider(provider *catalog.Provider) *catalog.Provider {
 	copy.Models = make([]catalog.Model, len(provider.Models))
 	copy.Models = append(copy.Models[:0], provider.Models...)
 	for index := range copy.Models {
-		copy.Models[index].ReasoningEfforts = shared.NormalizeReasoningEfforts(
-			provider.Models[index].ReasoningEfforts,
-		)
+		catalog.NormalizeReasoningCapabilities(&copy.Models[index])
 	}
 	copy.Metadata = maps.Clone(provider.Metadata)
 	return &copy

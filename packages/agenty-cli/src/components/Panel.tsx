@@ -10,6 +10,7 @@ export interface PanelProps {
     footer?: ReactNode;
     hint?: ReactNode;
     gap?: number;
+    contentOverflow?: "visible" | "hidden";
 }
 
 export function Panel({
@@ -20,6 +21,7 @@ export function Panel({
     footer,
     hint,
     gap = 0,
+    contentOverflow = "hidden",
 }: PanelProps) {
     return (
         <Box flexDirection="column" flexGrow={1} width="100%" gap={gap}>
@@ -30,7 +32,7 @@ export function Panel({
                 </Box>
             ) : null}
             {error ? <Text color="red">{error}</Text> : null}
-            <Box flexDirection="column" flexGrow={1} width="100%" overflow="hidden">
+            <Box flexDirection="column" flexGrow={1} width="100%" overflow={contentOverflow}>
                 {children}
             </Box>
             {footer ? <Box width="100%">{footer}</Box> : null}

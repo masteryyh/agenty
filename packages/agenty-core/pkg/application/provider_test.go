@@ -428,6 +428,30 @@ func TestProviderAddModelDefaultsReasoningAndAllowsExplicitDisable(t *testing.T)
 	if got := reasoning.Models[0].ReasoningEfforts; !slices.Equal(got, shared.StandardReasoningEfforts()) {
 		t.Fatalf("default reasoning efforts = %v", got)
 	}
+	if !reasoning.Models[0].Reasoning {
+		t.Fatal("default reasoning model is not marked as reasoning")
+	}
+
+	custom, err := providerSvc.AddModel(ctx, "openai", "custom-reasoning", application.ModelInput{
+		Name:             "Custom reasoning",
+		Reasoning:        ptr(true),
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	customModel, err := custom.Model("custom-reasoning")
+	if err != nil || !slices.Equal(customModel.ReasoningEfforts, []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh}) {
+		t.Fatalf("custom reasoning model = %+v, err = %v", customModel, err)
+	}
+
+	if _, err := providerSvc.AddModel(ctx, "openai", "invalid-reasoning", application.ModelInput{
+		Name:             "Invalid reasoning",
+		Reasoning:        ptr(true),
+		ReasoningEfforts: []shared.ReasoningEffort{"off"},
+	}); appErrorCode(err) != application.CodeValidation {
+		t.Fatalf("invalid reasoning efforts error = %v, want validation", err)
+	}
 
 	disabled, err := providerSvc.AddModel(ctx, "openai", "non-reasoning", application.ModelInput{
 		Name: "Non-reasoning", Reasoning: ptr(false),

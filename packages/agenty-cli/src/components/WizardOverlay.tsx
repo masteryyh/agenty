@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { type APIType, type ModelProviderDto, STANDARD_REASONING_EFFORTS } from "../api/types";
+import {
+    type APIType,
+    type ModelProviderDto,
+    type ReasoningEffort,
+    STANDARD_REASONING_EFFORTS
+} from "../api/types";
 import {
     compatibleProviderTypes,
     createBuiltinDraft,
@@ -112,7 +117,9 @@ function providerFields(draft: ProviderDraft): FormField[] {
     ];
 }
 
-function modelFields(model: ModelDraft): FormField[] {
+const reasoningOptions: FormOption[] = STANDARD_REASONING_EFFORTS.map((effort) => ({ label: effort, value: effort }));
+
+function modelFields(model: ModelDraft, advancedOpen: boolean): FormField[] {
     return [
         {
             key: "code",
@@ -139,14 +146,6 @@ function modelFields(model: ModelDraft): FormField[] {
             readOnly: model.isBuiltin,
         },
         {
-            key: "maxOutputTokens",
-            label: "Max output tokens",
-            kind: "text",
-            value: String(model.maxOutputTokens),
-            placeholder: "8192",
-            readOnly: model.isBuiltin,
-        },
-        {
             key: "multiModal",
             label: "Multimodal",
             kind: "boolean",
@@ -155,7 +154,7 @@ function modelFields(model: ModelDraft): FormField[] {
         },
         {
             key: "light",
-            label: "Light",
+            label: "Light model",
             kind: "boolean",
             value: model.light ? "true" : "false",
             readOnly: model.isBuiltin,
@@ -164,10 +163,26 @@ function modelFields(model: ModelDraft): FormField[] {
             key: "reasoning",
             label: "Reasoning",
             kind: "boolean",
-            value: model.reasoningEfforts.length > 0 ? "true" : "false",
+            value: String(model.reasoning !== false),
             readOnly: model.isBuiltin,
         },
+        { key: "advanced", label: "Advanced options", kind: "disclosure", value: String(advancedOpen) },
+        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: String(model.maxOutputTokens), placeholder: "8192", readOnly: model.isBuiltin, visible: advancedOpen },
+        { key: "reasoningEfforts", label: "Supported reasoning efforts", kind: "multiselect", value: JSON.stringify(model.reasoningEfforts), options: reasoningOptions, readOnly: model.isBuiltin, visible: advancedOpen },
     ];
+}
+
+function parseReasoningEfforts(value: string | undefined): ReasoningEffort[] {
+    try {
+        const parsed: unknown = JSON.parse(value || "[]");
+        return Array.isArray(parsed)
+            ? parsed.filter((effort): effort is ReasoningEffort =>
+                typeof effort === "string" && (STANDARD_REASONING_EFFORTS as readonly string[]).includes(effort),
+            )
+            : [];
+    } catch {
+        return [];
+    }
 }
 
 export function WizardOverlay() {
@@ -193,6 +208,7 @@ function WizardContent() {
     const [editing, setEditing] = useState<ProviderDraft | null>(null);
     const [editingModel, setEditingModel] = useState<ModelDraft | null>(null);
     const [deletingModel, setDeletingModel] = useState<ModelDraft | null>(null);
+    const [advancedModelOptions, setAdvancedModelOptions] = useState(false);
     const [selectedModelDraftId, setSelectedModelDraftId] = useState<string | null>(null);
     const [providerFocus, setProviderFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
     const [modelFocus, setModelFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
@@ -358,6 +374,7 @@ function WizardContent() {
             `${provider.id}:draft-model:${modelCounter.current++}`,
         );
         setEditingModel(model);
+        setAdvancedModelOptions(false);
         setError(null);
         setStep("model-form");
     };
@@ -367,6 +384,7 @@ function WizardContent() {
             return;
         }
         setEditingModel(model);
+        setAdvancedModelOptions(false);
         setError(null);
         setStep("model-form");
     };
@@ -380,10 +398,11 @@ function WizardContent() {
             code: values.code.trim(),
             name: values.name.trim(),
             contextWindow: Number(values.contextWindow),
-            maxOutputTokens: Number(values.maxOutputTokens),
+            maxOutputTokens: Number(values.maxOutputTokens || editingModel.maxOutputTokens || 8192),
             multiModal: values.multiModal === "true",
             light: values.light === "true",
-            reasoningEfforts: values.reasoning === "true" ? [...STANDARD_REASONING_EFFORTS] : [],
+            reasoning: values.reasoning === "true",
+            reasoningEfforts: values.reasoning === "true" ? parseReasoningEfforts(values.reasoningEfforts) : [],
         };
         const validationError = validateModelDraft(next);
         if (validationError) {
@@ -481,7 +500,12 @@ function WizardContent() {
                     title={editingModel.originalCode
                         ? `Edit model: ${editingModel.name}`
                         : `Add model to ${editingModel.providerName || editingModel.providerCode}`}
-                    fields={modelFields(editingModel)}
+                    fields={modelFields(editingModel, advancedModelOptions)}
+                    onChange={(key, values) => {
+                        if (key === "advanced") {
+                            setAdvancedModelOptions(values.advanced === "true");
+                        }
+                    }}
                     active={!deletingModel}
                     error={error}
                     shortcutHint={editingModel.originalCode ? "d delete" : undefined}

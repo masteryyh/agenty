@@ -116,7 +116,10 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 	if err != nil {
 		return openai.ChatCompletionNewParams{}, err
 	}
-	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	effort, err := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	if err != nil {
+		return openai.ChatCompletionNewParams{}, err
+	}
 
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(request.Messages)+1)
 	if prompt != "" {

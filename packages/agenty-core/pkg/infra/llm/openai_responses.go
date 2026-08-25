@@ -166,7 +166,10 @@ func (caller *openAIResponsesCaller) params(request modelRequest) (responses.Res
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	effort, err := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
 
 	input, err := openAIResponsesMessages(request.Messages, caller.nativeOpenAI, caller.freeFormTool)
 	if err != nil {

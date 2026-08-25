@@ -60,7 +60,7 @@ func (p *Provider) Model(code shared.ModelCode) (*Model, error) {
 }
 
 func (p *Provider) AddModel(m Model) {
-	m.ReasoningEfforts = shared.NormalizeReasoningEfforts(m.ReasoningEfforts)
+	NormalizeReasoningCapabilities(&m)
 	if m.MaxOutputTokens <= 0 {
 		m.MaxOutputTokens = DefaultMaxOutputTokens
 	}

@@ -174,6 +174,70 @@ describe("AgentyClient session list", () => {
 });
 
 describe("AgentyClient provider model discovery", () => {
+    test("expands default efforts for a reasoning model with an empty list", async () => {
+        const rpc = {
+            call: async () => [{
+                code: "provider",
+                name: "Provider",
+                type: "openai",
+                baseUrl: "https://example.invalid",
+                apiKey: "configured",
+                models: [{
+                    code: "reasoning-model",
+                    name: "Reasoning model",
+                    contextWindow: 128000,
+                    maxOutputTokens: 8192,
+                    multiModal: false,
+                    light: false,
+                    reasoning: true,
+                    reasoningEfforts: [],
+                    isDefault: true,
+                }],
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+            }],
+        } as unknown as StdioRPCClient;
+        const client = new AgentyClient(rpc);
+
+        await expect(client.listModels()).resolves.toMatchObject([{
+            reasoning: true,
+            reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+        }]);
+    });
+
+    test("skips unconfigured providers when resolving the default model", async () => {
+        const provider = (code: string, apiKey: string, modelCode: string): ModelProviderDto => ({
+            code,
+            name: code,
+            type: "openai",
+            baseUrl: "https://example.invalid",
+            apiKey,
+            models: [{
+                code: modelCode,
+                name: modelCode,
+                contextWindow: 128000,
+                maxOutputTokens: 8192,
+                multiModal: false,
+                light: false,
+                isDefault: true,
+            }],
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+        });
+        const rpc = {
+            call: async () => [
+                provider("openai", "", "gpt-unconfigured"),
+                provider("anthropic", "configured", "claude-configured"),
+            ],
+        } as unknown as StdioRPCClient;
+        const client = new AgentyClient(rpc);
+
+        await expect(client.getDefaultModel()).resolves.toMatchObject({
+            providerCode: "anthropic",
+            code: "claude-configured",
+        });
+    });
+
     test("resolves structured references within the requested provider", async () => {
         let method = "";
         let params: unknown;

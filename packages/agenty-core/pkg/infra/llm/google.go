@@ -88,7 +88,10 @@ func (caller *googleCaller) params(request modelRequest) ([]*genai.Content, *gen
 	if err != nil {
 		return nil, nil, err
 	}
-	effort := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	effort, err := modelReasoningEffort(caller.model, request.ReasoningEffort)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	toolNames := googleToolNames(request.Messages)
 	contents := make([]*genai.Content, 0, len(request.Messages))

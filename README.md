@@ -50,7 +50,7 @@ and the terminal round status. Notifications may arrive before the `session.star
 response, so clients must subscribe before sending the request. Core exits when stdin
 reaches EOF.
 
-The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/think`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/effort`, `/status`,
 `/new`, `/resume`, `/help`, and `/exit`. Features not yet implemented by core are hidden.
 
 ## Configuration and storage

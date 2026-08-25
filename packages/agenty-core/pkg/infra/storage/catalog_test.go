@@ -129,6 +129,30 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	}
 }
 
+func TestCatalogReasoningModelWithEmptyEffortsUsesDefaults(t *testing.T) {
+	repo := newCatalogRepo(t)
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.Models = []catalog.Model{{
+		Code:      mustCatalogModelCode("reasoning-model"),
+		Name:      "Reasoning model",
+		Reasoning: true,
+	}}
+	if err := repo.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := repo.Get(t.Context(), provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Models[0].Reasoning || len(loaded.Models[0].ReasoningEfforts) != len(shared.StandardReasoningEfforts()) {
+		t.Fatalf("reasoning capabilities = %+v", loaded.Models[0])
+	}
+}
+
 func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
 	repo := newCatalogRepo(t)
 	builtins, err := catalogdata.LoadProviders()

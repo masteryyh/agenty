@@ -51,6 +51,7 @@ export interface ModelDto {
     maxOutputTokens: number;
     multiModal: boolean;
     light: boolean;
+    reasoning?: boolean;
     reasoningEfforts?: ReasoningEffort[];
     isDefault: boolean;
     createdAt?: string;
@@ -65,6 +66,7 @@ export interface AvailableModelDto {
     contextWindow: number;
     maxOutputTokens: number;
     multiModal: boolean;
+    reasoning?: boolean;
     reasoningEfforts: ReasoningEffort[];
 }
 
@@ -78,6 +80,7 @@ export interface CreateModelDto {
     multiModal?: boolean;
     light?: boolean;
     reasoning?: boolean;
+    reasoningEfforts?: ReasoningEffort[];
     isDefault?: boolean;
 }
 

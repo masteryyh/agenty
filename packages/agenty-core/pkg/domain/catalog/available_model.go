@@ -18,5 +18,6 @@ type AvailableModel struct {
 	ContextWindow    int                      `json:"contextWindow"`
 	MaxOutputTokens  int64                    `json:"maxOutputTokens"`
 	MultiModal       bool                     `json:"multiModal"`
+	Reasoning        bool                     `json:"reasoning"`
 	ReasoningEfforts []shared.ReasoningEffort `json:"reasoningEfforts"`
 }

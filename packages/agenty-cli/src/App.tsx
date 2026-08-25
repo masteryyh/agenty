@@ -177,14 +177,14 @@ function ChatView() {
                 case "/resume":
                     app.setOverlay("session-select");
                     return;
-                case "/think": {
+                case "/effort": {
                     const a = arg.toLowerCase();
                     if (!a) {
                         if (app.thinkingEnabled) {
                             const lvl = app.thinkingLevel || "on";
-                            app.setToast(`thinking: ${lvl}${app.thinkingLevel ? ` (${app.thinkingLevel} effort)` : ""}`);
+                            app.setToast(`effort: ${lvl}${app.thinkingLevel ? ` (${app.thinkingLevel})` : ""}`);
                         } else {
-                            app.setToast("thinking: off");
+                            app.setToast("effort: off");
                         }
                     } else if (a === "off") {
                         app.setThinking(false, "");
@@ -193,7 +193,7 @@ function ChatView() {
                     } else if (["low", "medium", "high", "xhigh", "max"].includes(a)) {
                         app.setThinking(true, a);
                     } else {
-                        app.notify(`invalid thinking effort: ${a}`, true);
+                        app.notify(`invalid effort: ${a}`, true);
                     }
                     return;
                 }

@@ -52,6 +52,9 @@ func TestLoadProviders(t *testing.T) {
 			if model.ReasoningEfforts == nil {
 				t.Errorf("model %s/%s has nil reasoning efforts", provider.Code, model.Code)
 			}
+			if model.Reasoning != (len(model.ReasoningEfforts) > 0) {
+				t.Errorf("model %s/%s reasoning = %v, efforts = %v", provider.Code, model.Code, model.Reasoning, model.ReasoningEfforts)
+			}
 		}
 	}
 }

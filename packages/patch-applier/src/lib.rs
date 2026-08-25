@@ -384,7 +384,17 @@ impl Transaction {
                         operation.path.display()
                     )));
                 }
-                let data = apply_update_diff(&current.data, &operation.diff)?;
+                let data = if is_binary_data(&current.data) {
+                    if operation.diff.is_empty() {
+                        current.data.clone()
+                    } else {
+                        return Err(PatchError::Invalid(
+                            "binary file updates must not contain a text diff".to_string(),
+                        ));
+                    }
+                } else {
+                    apply_update_diff(&current.data, &operation.diff)?
+                };
                 self.state.insert(
                     operation.path.clone(),
                     VirtualFile::regular(data, current.mode),
@@ -469,6 +479,15 @@ impl Transaction {
                 PatchError::Invalid(format!("missing final state for {}", path.display()))
             })?;
             if before.kind == after.kind && before.data == after.data {
+                continue;
+            }
+            if is_binary_snapshot(before) || is_binary_virtual(after) {
+                results.push(FileResult {
+                    path: relative_display(&self.cwd, path),
+                    diff: String::new(),
+                    added_lines: 0,
+                    removed_lines: 0,
+                });
                 continue;
             }
             let old_text = text_for_diff(before)?;
@@ -951,6 +970,18 @@ fn text_for_diff(file: &FileSnapshot) -> Result<String, PatchError> {
         .map_err(|_| PatchError::Invalid("file is not valid UTF-8".to_string()))
 }
 
+fn is_binary_data(data: &[u8]) -> bool {
+    std::str::from_utf8(data).is_err()
+}
+
+fn is_binary_snapshot(file: &FileSnapshot) -> bool {
+    file.kind == EntryKind::Regular && is_binary_data(&file.data)
+}
+
+fn is_binary_virtual(file: &VirtualFile) -> bool {
+    file.kind == EntryKind::Regular && is_binary_data(&file.data)
+}
+
 fn text_for_diff_virtual(file: &VirtualFile) -> Result<String, PatchError> {
     if file.kind == EntryKind::Missing {
         return Ok(String::new());
@@ -1272,6 +1303,38 @@ mod tests {
             fs::read_to_string(cwd.join("target.txt")).unwrap(),
             "target"
         );
+    }
+
+    #[test]
+    fn deletes_binary_files_without_text_diff() {
+        let cwd = temp_dir("binary-delete");
+        fs::write(cwd.join("image.bin"), [0, 159, 146, 150]).unwrap();
+
+        let patch = "*** Begin Patch\n*** Delete File: image.bin\n*** End Patch";
+        let result = apply_patch(&cwd, patch).unwrap();
+
+        assert!(result.success);
+        assert!(!cwd.join("image.bin").exists());
+        assert_eq!(result.files[0].diff, "");
+        assert_eq!(result.files[0].added_lines, 0);
+        assert_eq!(result.files[0].removed_lines, 0);
+    }
+
+    #[test]
+    fn moves_binary_files_without_text_diff() {
+        let cwd = temp_dir("binary-move");
+        fs::write(cwd.join("old.bin"), [0, 159, 146, 150]).unwrap();
+
+        let patch =
+            "*** Begin Patch\n*** Update File: old.bin\n*** Move to: new.bin\n*** End Patch";
+        let result = apply_patch(&cwd, patch).unwrap();
+
+        assert!(result.success);
+        assert!(!cwd.join("old.bin").exists());
+        assert_eq!(fs::read(cwd.join("new.bin")).unwrap(), [0, 159, 146, 150]);
+        assert!(result.files.iter().all(|file| {
+            file.diff.is_empty() && file.added_lines == 0 && file.removed_lines == 0
+        }));
     }
 
     #[test]

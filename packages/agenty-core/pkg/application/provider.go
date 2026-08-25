@@ -192,6 +192,7 @@ func catalogModelsFromAvailable(models []catalog.AvailableModel) []catalog.Model
 			ContextWindow:    available.ContextWindow,
 			MaxOutputTokens:  available.MaxOutputTokens,
 			MultiModal:       available.MultiModal,
+			Reasoning:        available.Reasoning,
 			ReasoningEfforts: available.ReasoningEfforts,
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -209,6 +210,7 @@ func availableModelsFromCatalog(models []catalog.Model) []catalog.AvailableModel
 			ContextWindow:    model.ContextWindow,
 			MaxOutputTokens:  model.MaxOutputTokens,
 			MultiModal:       model.MultiModal,
+			Reasoning:        model.Reasoning,
 			ReasoningEfforts: model.ReasoningEfforts,
 		})
 	}
@@ -312,13 +314,14 @@ func (s *ProviderService) Delete(ctx context.Context, code string) error {
 }
 
 type ModelInput struct {
-	Name            string `json:"name"`
-	ContextWindow   int    `json:"contextWindow,omitempty"`
-	MaxOutputTokens int64  `json:"maxOutputTokens"`
-	MultiModal      bool   `json:"multiModal,omitempty"`
-	Light           bool   `json:"light,omitempty"`
-	Reasoning       *bool  `json:"reasoning,omitempty"`
-	IsDefault       bool   `json:"isDefault,omitempty"`
+	Name             string                   `json:"name"`
+	ContextWindow    int                      `json:"contextWindow,omitempty"`
+	MaxOutputTokens  int64                    `json:"maxOutputTokens"`
+	MultiModal       bool                     `json:"multiModal,omitempty"`
+	Light            bool                     `json:"light,omitempty"`
+	Reasoning        *bool                    `json:"reasoning,omitempty"`
+	ReasoningEfforts []shared.ReasoningEffort `json:"reasoningEfforts,omitempty"`
+	IsDefault        bool                     `json:"isDefault,omitempty"`
 }
 
 func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode string, in ModelInput) (*catalog.Provider, error) {
@@ -351,9 +354,18 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 	if in.Reasoning != nil {
 		reasoning = *in.Reasoning
 	}
+	if err := shared.ValidateReasoningEfforts(in.ReasoningEfforts); err != nil {
+		return nil, Validation(err.Error())
+	}
+	if !reasoning && len(in.ReasoningEfforts) > 0 {
+		return nil, Validation("reasoning efforts require reasoning to be enabled")
+	}
 	reasoningEfforts := make([]shared.ReasoningEffort, 0)
 	if reasoning {
-		reasoningEfforts = shared.StandardReasoningEfforts()
+		reasoningEfforts = append(reasoningEfforts, in.ReasoningEfforts...)
+		if len(reasoningEfforts) == 0 {
+			reasoningEfforts = shared.StandardReasoningEfforts()
+		}
 	}
 	p.AddModel(catalog.Model{
 		Code:             ms,
@@ -362,6 +374,7 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 		MaxOutputTokens:  maxOutputTokens,
 		MultiModal:       in.MultiModal,
 		Light:            in.Light,
+		Reasoning:        reasoning,
 		ReasoningEfforts: reasoningEfforts,
 		IsDefault:        in.IsDefault,
 		CreatedAt:        now,

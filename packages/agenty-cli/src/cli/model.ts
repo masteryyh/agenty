@@ -1,5 +1,5 @@
 import type { AgentyClient } from "@/api/client";
-import type { UpdateModelDto } from "@/api/types";
+import { type ReasoningEffort, STANDARD_REASONING_EFFORTS, type UpdateModelDto } from "@/api/types";
 
 import {
     action,
@@ -42,7 +42,8 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
             ["Multimodal", String(model.multiModal)],
             ["Light", String(model.light)], ["Context window", String(model.contextWindow)],
             ["Max output tokens", String(model.maxOutputTokens)],
-            ["Reasoning", String((model.reasoningEfforts?.length ?? 0) > 0)],
+            ["Reasoning", String(model.reasoning === true || (model.reasoningEfforts?.length ?? 0) > 0)],
+            ["Reasoning efforts", (model.reasoningEfforts ?? []).join(", ")],
         ]));
         return;
     }
@@ -58,6 +59,7 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
             light: booleanFlag(args, "light"),
             isDefault: booleanFlag(args, "default"),
             reasoning: hasFlag(args, "reasoning") ? booleanFlag(args, "reasoning") : true,
+            reasoningEfforts: parseReasoningEfforts(flag(args, "reasoning-efforts")),
         });
         action(args, created, `Model added: ${displayModel(created)}`);
         return;
@@ -65,15 +67,19 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
     if (command === "update") {
         const [, , reference] = requirePositionals(args, 3, "model update <provider-code>/<model-code> [options]");
         const current = await resolveModelInput(client, reference);
+        const reasoning = hasFlag(args, "reasoning")
+            ? booleanFlag(args, "reasoning")
+            : current.reasoning === true || (current.reasoningEfforts?.length ?? 0) > 0;
         const update: UpdateModelDto = {
             name: hasFlag(args, "name") ? requireFlag(args, "name") : current.name,
             contextWindow: hasFlag(args, "context-window") ? positiveInteger(requireFlag(args, "context-window"), "--context-window", true) : current.contextWindow,
             multiModal: hasFlag(args, "multi-modal") ? booleanFlag(args, "multi-modal") : current.multiModal,
             light: hasFlag(args, "light") ? booleanFlag(args, "light") : current.light,
             isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,
-            reasoning: hasFlag(args, "reasoning")
-                ? booleanFlag(args, "reasoning")
-                : (current.reasoningEfforts?.length ?? 0) > 0,
+            reasoning,
+            reasoningEfforts: hasFlag(args, "reasoning-efforts")
+                ? parseReasoningEfforts(requireFlag(args, "reasoning-efforts"))
+                : reasoning ? current.reasoningEfforts : [],
         };
         const updated = await client.updateModel(current.providerCode, current.code, update);
         action(args, updated, `Model updated: ${displayModel(updated)}`);
@@ -102,4 +108,15 @@ function positiveInteger(raw: string, label: string, allowZero = false): number 
         throw new CliError(`${label} must be ${allowZero ? "a non-negative" : "a positive"} integer`);
     }
     return value;
+}
+
+function parseReasoningEfforts(raw?: string): ReasoningEffort[] {
+    if (!raw) {
+        return [];
+    }
+    const values = raw.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+    if (values.some((value) => !(STANDARD_REASONING_EFFORTS as readonly string[]).includes(value))) {
+        throw new CliError(`--reasoning-efforts must contain only ${STANDARD_REASONING_EFFORTS.join(", ")}`);
+    }
+    return Array.from(new Set(values)) as ReasoningEffort[];
 }

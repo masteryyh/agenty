@@ -5,8 +5,10 @@ import type {
     CoreModelDto,
     CreateModelDto,
     ModelProviderDto,
+    ReasoningEffort,
     UpdateModelProviderDto,
 } from "../api/types";
+import { STANDARD_REASONING_EFFORTS } from "../api/types";
 import { providerDefaultBaseURLs, providerTypes } from "../consts/providerTypes";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
@@ -122,21 +124,26 @@ export function buildBuiltinProviderUpdate(
     return apiKey ? { apiKey } : null;
 }
 
-function buildCreateModelFields(): FormField[] {
+const reasoningOptions = STANDARD_REASONING_EFFORTS.map((effort) => ({ label: effort, value: effort }));
+
+export function buildCreateModelFields(advancedOpen: boolean): FormField[] {
     return [
         { key: "code", label: "Model Code", kind: "text", value: "", placeholder: "model-code or org/model-code" },
         { key: "name", label: "Model name", kind: "text", value: "", placeholder: "Model name" },
         { key: "contextWindow", label: "Context window", kind: "text", value: "128000", placeholder: "128000" },
-        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: "8192", placeholder: "8192" },
         { key: "multiModal", label: "Multimodal", kind: "boolean", value: "false" },
-        { key: "light", label: "Light", kind: "boolean", value: "false" },
+        { key: "light", label: "Light model", kind: "boolean", value: "false" },
         { key: "reasoning", label: "Reasoning", kind: "boolean", value: "true" },
+        { key: "advanced", label: "Advanced options", kind: "disclosure", value: String(advancedOpen) },
+        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: "8192", placeholder: "8192", visible: advancedOpen },
+        { key: "reasoningEfforts", label: "Supported reasoning efforts", kind: "multiselect", value: JSON.stringify(STANDARD_REASONING_EFFORTS), options: reasoningOptions, visible: advancedOpen },
     ];
 }
 
 function buildModelFields(
     model: CoreModelDto,
     readOnly: boolean,
+    advancedOpen: boolean,
 ): FormField[] {
     return [
         { key: "code", label: "Model Code", kind: "text", value: model.code, readOnly: true },
@@ -148,30 +155,37 @@ function buildModelFields(
             value: String(model.contextWindow),
             readOnly,
         },
-        {
-            key: "maxOutputTokens",
-            label: "Max output tokens",
-            kind: "text",
-            value: String(model.maxOutputTokens),
-            readOnly,
-        },
         { key: "multiModal", label: "Multimodal", kind: "boolean", value: String(model.multiModal), readOnly },
-        { key: "light", label: "Light", kind: "boolean", value: String(model.light), readOnly },
+        { key: "light", label: "Light model", kind: "boolean", value: String(model.light), readOnly },
         {
             key: "reasoning",
             label: "Reasoning",
             kind: "boolean",
-            value: String((model.reasoningEfforts ?? []).length > 0),
+            value: String(model.reasoning === true || (model.reasoningEfforts ?? []).length > 0),
             readOnly,
         },
+        { key: "advanced", label: "Advanced options", kind: "disclosure", value: String(advancedOpen) },
+        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: String(model.maxOutputTokens), readOnly, visible: advancedOpen },
+        { key: "reasoningEfforts", label: "Supported reasoning efforts", kind: "multiselect", value: JSON.stringify(model.reasoningEfforts ?? []), options: reasoningOptions, readOnly, visible: advancedOpen },
     ];
 }
 
-function parseModelValues(values: Record<string, string>): CreateModelDto | string {
+export function parseModelValues(values: Record<string, string>): CreateModelDto | string {
     const modelCode = values.code?.trim() ?? "";
     const name = values.name?.trim() ?? "";
     const contextWindow = Number(values.contextWindow);
-    const maxOutputTokens = Number(values.maxOutputTokens);
+    const maxOutputTokens = Number(values.maxOutputTokens || "8192");
+    let reasoningEfforts: ReasoningEffort[] = [];
+    try {
+        const parsed: unknown = JSON.parse(values.reasoningEfforts || "[]");
+        if (Array.isArray(parsed)) {
+            reasoningEfforts = parsed.filter((value): value is ReasoningEffort =>
+                typeof value === "string" && (STANDARD_REASONING_EFFORTS as readonly string[]).includes(value),
+            );
+        }
+    } catch {
+        reasoningEfforts = [];
+    }
     if (!modelCode) {
         return "Model Code is required.";
     }
@@ -184,6 +198,7 @@ function parseModelValues(values: Record<string, string>): CreateModelDto | stri
     if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
         return "Max output tokens must be a positive integer.";
     }
+    const reasoning = values.reasoning === "true";
     return {
         providerCode: "",
         modelCode,
@@ -192,7 +207,8 @@ function parseModelValues(values: Record<string, string>): CreateModelDto | stri
         maxOutputTokens,
         multiModal: values.multiModal === "true",
         light: values.light === "true",
-        reasoning: values.reasoning === "true",
+        reasoning,
+        reasoningEfforts: reasoning ? reasoningEfforts : [],
     };
 }
 
@@ -219,6 +235,7 @@ export function ProviderOverlay() {
     const [mode, setMode] = useState<Mode>({ kind: "list" });
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [expandedProviderCodes, setExpandedProviderCodes] = useState<Set<string>>(new Set());
+    const [advancedModelOptions, setAdvancedModelOptions] = useState(false);
     const [formType, setFormType] = useState<string>(providerTypes[0]);
     const modeRef = useRef(mode);
     const expansionInitializedRef = useRef(false);
@@ -283,9 +300,11 @@ export function ProviderOverlay() {
                 setMode({ kind: "edit-provider", target: action.provider });
                 return;
             case "view-model":
+                setAdvancedModelOptions(false);
                 setMode({ kind: "view-model", provider: action.provider, target: action.model });
                 return;
             case "edit-model":
+                setAdvancedModelOptions(false);
                 setMode({ kind: "edit-model", provider: action.provider, target: action.model });
                 return;
             case "add-provider":
@@ -293,6 +312,7 @@ export function ProviderOverlay() {
                 setMode({ kind: "create-provider" });
                 return;
             case "add-model":
+                setAdvancedModelOptions(false);
                 setMode({ kind: "create-model", provider: action.provider });
                 return;
             case "none":
@@ -439,6 +459,7 @@ export function ProviderOverlay() {
                 multiModal: parsed.multiModal,
                 light: parsed.light,
                 reasoning: parsed.reasoning,
+                reasoningEfforts: parsed.reasoningEfforts,
             });
             setToast(`Model updated: ${parsed.name}`);
             await reload();
@@ -520,7 +541,12 @@ export function ProviderOverlay() {
         return (
             <FormPanel
                 title={`Add model to ${provider.name}`}
-                fields={buildCreateModelFields()}
+                fields={buildCreateModelFields(advancedModelOptions)}
+                onChange={(key, values) => {
+                    if (key === "advanced") {
+                        setAdvancedModelOptions(values.advanced === "true");
+                    }
+                }}
                 onAction={(action, values) => {
                     if (action === "save") {
                         void handleCreateModel(provider, values);
@@ -539,7 +565,12 @@ export function ProviderOverlay() {
         return (
             <FormPanel
                 title={`${readOnly ? "View" : "Edit"} model: ${target.name || target.code}`}
-                fields={buildModelFields(target, readOnly)}
+                fields={buildModelFields(target, readOnly, advancedModelOptions)}
+                onChange={(key, values) => {
+                    if (key === "advanced") {
+                        setAdvancedModelOptions(values.advanced === "true");
+                    }
+                }}
                 actions={readOnly ? [{ key: "back", label: "Back" }] : undefined}
                 hint={readOnly ? "↑↓ view · Esc back" : undefined}
                 shortcutHint={!readOnly ? "d delete" : undefined}

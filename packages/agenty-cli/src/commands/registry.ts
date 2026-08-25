@@ -57,9 +57,9 @@ export const commands: Command[] = [
         usage: "/exit",
     },
     {
-        name: "/think",
-        description: "Set thinking mode (off/on/low/medium/high/xhigh/max)",
-        usage: "/think [off|on|low|medium|high|xhigh|max]",
+        name: "/effort",
+        description: "Set reasoning effort (off/on/low/medium/high/xhigh/max)",
+        usage: "/effort [off|on|low|medium|high|xhigh|max]",
     },
     {
         name: "/status",

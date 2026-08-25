@@ -15,19 +15,30 @@ type Model struct {
 	MaxOutputTokens  int64                    `json:"maxOutputTokens"`
 	MultiModal       bool                     `json:"multiModal"`
 	Light            bool                     `json:"light"`
+	Reasoning        bool                     `json:"reasoning"`
 	ReasoningEfforts []shared.ReasoningEffort `json:"reasoningEfforts"`
 	IsDefault        bool                     `json:"isDefault"`
 	CreatedAt        time.Time                `json:"createdAt"`
 	UpdatedAt        time.Time                `json:"updatedAt"`
 }
 
-func (m *Model) SupportsReasoning() bool {
-	for _, effort := range m.ReasoningEfforts {
-		if effort.Enabled() {
-			return true
-		}
+func NormalizeReasoningCapabilities(model *Model) {
+	if !model.Reasoning && len(model.ReasoningEfforts) > 0 {
+		model.Reasoning = true
 	}
-	return false
+	if !model.Reasoning {
+		model.ReasoningEfforts = make([]shared.ReasoningEffort, 0)
+		return
+	}
+	if len(model.ReasoningEfforts) == 0 {
+		model.ReasoningEfforts = shared.StandardReasoningEfforts()
+		return
+	}
+	model.ReasoningEfforts = shared.NormalizeReasoningEfforts(model.ReasoningEfforts)
+}
+
+func (m *Model) SupportsReasoning() bool {
+	return m.Reasoning || len(m.ReasoningEfforts) > 0
 }
 
 func (m *Model) SupportsReasoningEffort(effort shared.ReasoningEffort) bool {

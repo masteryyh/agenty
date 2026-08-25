@@ -168,7 +168,8 @@ export async function persistWizardSetup(
                     maxOutputTokens: model.maxOutputTokens,
                     multiModal: model.multiModal,
                     light: model.light,
-                    reasoning: model.reasoningEfforts.length > 0,
+                    reasoning: model.reasoning !== false && (model.reasoning === true || model.reasoningEfforts.length > 0),
+                    reasoningEfforts: model.reasoningEfforts,
                     isDefault: selectedModelId(model) === selectedId,
                 });
             }

@@ -167,7 +167,10 @@ export class AgentyClient {
     }
 
     async getDefaultModel(): Promise<ModelDto> {
-        const models = await this.listModels();
+        const providers = await this.listProviders();
+        const models = providers
+            .filter((provider) => provider.apiKey.trim() !== "")
+            .flatMap((provider) => provider.models.map((model) => projectModel(provider, model)));
         const model = models.find((candidate) => candidate.isDefault) ?? models[0];
         if (!model) {
             throw new Error("no model available");
@@ -344,12 +347,21 @@ function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
         models: Array.isArray(provider.models)
             ? provider.models
                 .filter((model): model is CoreModelDto => model !== null)
-                .map((model) => ({
-                    ...model,
-                    reasoningEfforts: Array.isArray(model.reasoningEfforts)
+                .map((model) => {
+                    const configuredEfforts = Array.isArray(model.reasoningEfforts)
                         ? model.reasoningEfforts
-                        : [...STANDARD_REASONING_EFFORTS],
-                }))
+                        : [];
+                    const reasoning = model.reasoning === true || configuredEfforts.length > 0;
+                    return {
+                        ...model,
+                        reasoning,
+                        reasoningEfforts: reasoning
+                            ? configuredEfforts.length > 0
+                                ? configuredEfforts
+                                : [...STANDARD_REASONING_EFFORTS]
+                            : [],
+                    };
+                })
             : [],
     };
 }

@@ -31,11 +31,19 @@ func validateRequest(request modelRequest) error {
 	return nil
 }
 
-func modelReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) string {
+func modelReasoningEffort(model catalog.Model, effort shared.ReasoningEffort) (string, error) {
 	if effort == "" || effort == shared.ReasoningOff || !model.SupportsReasoning() {
-		return ""
+		return "", nil
 	}
-	return string(effort)
+	if !model.SupportsReasoningEffort(effort) {
+		return "", fmt.Errorf(
+			"%w: model %q does not support effort %q",
+			ErrUnsupportedReasoningEffort,
+			model.Code,
+			effort,
+		)
+	}
+	return string(effort), nil
 }
 
 func systemPrompt(request modelRequest) (string, error) {

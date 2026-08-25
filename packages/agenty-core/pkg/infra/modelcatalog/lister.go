@@ -462,6 +462,7 @@ func normalizeModel(
 		ContextWindow:    contextWindow,
 		MaxOutputTokens:  maxOutputTokens,
 		MultiModal:       multiModal,
+		Reasoning:        len(reasoningEfforts) > 0,
 		ReasoningEfforts: reasoningEfforts,
 	}, nil
 }
