@@ -394,7 +394,7 @@ impl Transaction {
                 }
             }
             OperationKind::Delete => {
-                if current.kind != EntryKind::Regular {
+                if !matches!(current.kind, EntryKind::Regular | EntryKind::Symlink) {
                     return Err(PatchError::Conflict(format!(
                         "operation at line {} deletes a missing or non-regular file {}",
                         operation.line,
@@ -523,10 +523,19 @@ impl Transaction {
             TRANSACTION_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
         let mut staged = Vec::new();
+        let mut installed = Vec::new();
         let mut backups = Vec::new();
         let mut created_dirs = Vec::new();
 
         let result = (|| -> Result<(), PatchError> {
+            for change in &changes {
+                if path_exists(&change.path)? {
+                    let backup = backup_path(&change.path, &transaction_id)?;
+                    fs::rename(&change.path, &backup)?;
+                    backups.push((change.path.clone(), backup));
+                }
+            }
+
             for change in &changes {
                 if let Some(file) = &change.after {
                     let parent = change.path.parent().unwrap_or(&self.cwd);
@@ -545,23 +554,16 @@ impl Transaction {
                 }
             }
 
-            for change in &changes {
-                if path_exists(&change.path)? {
-                    let backup = backup_path(&change.path, &transaction_id)?;
-                    fs::rename(&change.path, &backup)?;
-                    backups.push((change.path.clone(), backup));
-                }
-            }
-
             for (path, temp) in &staged {
                 fs::rename(temp, path)?;
+                installed.push(path.clone());
             }
             sync_parent_directories(&changes)?;
             Ok(())
         })();
 
         if result.is_err() {
-            for (path, _) in staged.iter().rev() {
+            for path in installed.iter().rev() {
                 let _ = fs::remove_file(path);
             }
             for (path, backup) in backups.iter().rev() {
@@ -937,6 +939,9 @@ fn text_for_diff(file: &FileSnapshot) -> Result<String, PatchError> {
     if file.kind == EntryKind::Missing {
         return Ok(String::new());
     }
+    if file.kind == EntryKind::Symlink {
+        return Ok(String::new());
+    }
     if file.kind != EntryKind::Regular {
         return Err(PatchError::Conflict(
             "diff result contains a non-regular file".to_string(),
@@ -1202,6 +1207,70 @@ mod tests {
         assert_eq!(
             fs::read_to_string(cwd.join("notes.txt")).unwrap(),
             "external"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restores_backups_when_staging_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cwd = temp_dir("staging-failure");
+        fs::write(cwd.join("notes.txt"), "one").unwrap();
+        let blocked = cwd.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n-one\n+two\n*** Add File: blocked/child.txt\n+child\n*** End Patch";
+        let error = apply_patch(&cwd, patch).unwrap_err();
+
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(error.to_string().contains("Permission denied"));
+        assert_eq!(fs::read_to_string(cwd.join("notes.txt")).unwrap(), "one");
+        assert!(!blocked.join("child.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restores_completed_backups_when_a_later_backup_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cwd = temp_dir("backup-failure");
+        fs::write(cwd.join("notes.txt"), "one").unwrap();
+        let blocked = cwd.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("child.txt"), "child").unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n-one\n+two\n*** Update File: blocked/child.txt\n@@\n-child\n+updated\n*** End Patch";
+        let error = apply_patch(&cwd, patch).unwrap_err();
+
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(error.to_string().contains("Permission denied"));
+        assert_eq!(fs::read_to_string(cwd.join("notes.txt")).unwrap(), "one");
+        assert_eq!(
+            fs::read_to_string(blocked.join("child.txt")).unwrap(),
+            "child"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletes_symbolic_links_without_following_targets() {
+        use std::os::unix::fs::symlink;
+
+        let cwd = temp_dir("symlink-delete");
+        fs::write(cwd.join("target.txt"), "target").unwrap();
+        symlink("target.txt", cwd.join("link.txt")).unwrap();
+
+        let patch = "*** Begin Patch\n*** Delete File: link.txt\n*** End Patch";
+        let result = apply_patch(&cwd, patch).unwrap();
+
+        assert!(result.success);
+        assert!(!cwd.join("link.txt").exists());
+        assert_eq!(
+            fs::read_to_string(cwd.join("target.txt")).unwrap(),
+            "target"
         );
     }
 

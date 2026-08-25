@@ -193,10 +193,10 @@ func TestListerGeminiPaginationAndThinking(t *testing.T) {
 			t.Errorf("key = %q", got)
 		}
 		if r.URL.Query().Get("pageToken") == "" {
-			_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-3-flash","displayName":"Gemini 3 Flash","inputTokenLimit":128000,"outputTokenLimit":8192,"thinking":true}],"nextPageToken":"next"}`))
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/text-embedding-004","displayName":"Text Embedding","supportedGenerationMethods":["embedContent"]},{"name":"models/gemini-3-flash","displayName":"Gemini 3 Flash","inputTokenLimit":128000,"outputTokenLimit":8192,"supportedGenerationMethods":["generateContent"],"thinking":true}],"nextPageToken":"next"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-3-pro"}],"nextPageToken":""}`))
+		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-3-pro","supportedGenerationMethods":["generateContent"]}],"nextPageToken":""}`))
 	}))
 	defer server.Close()
 

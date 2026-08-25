@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -296,7 +297,11 @@ func (l *Lister) listGemini(ctx context.Context, provider catalog.Provider) ([]c
 			return nil, err
 		}
 
-		for index, item := range response.Models {
+		for _, item := range response.Models {
+			if !slices.Contains(item.SupportedGenerationMethods, "generateContent") {
+				continue
+			}
+
 			code := strings.TrimPrefix(item.BaseModelID, "models/")
 			if code == "" {
 				code = strings.TrimPrefix(item.Name, "models/")
@@ -305,9 +310,10 @@ func (l *Lister) listGemini(ctx context.Context, provider catalog.Provider) ([]c
 			if item.Thinking != nil && *item.Thinking {
 				efforts = shared.StandardReasoningEfforts()
 			}
+
 			model, err := normalizeModel(
 				provider,
-				len(models)+index,
+				len(models),
 				code,
 				item.DisplayName,
 				item.InputTokenLimit,
