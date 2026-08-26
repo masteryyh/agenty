@@ -73,6 +73,7 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
         const update: UpdateModelDto = {
             name: hasFlag(args, "name") ? requireFlag(args, "name") : current.name,
             contextWindow: hasFlag(args, "context-window") ? positiveInteger(requireFlag(args, "context-window"), "--context-window", true) : current.contextWindow,
+            maxOutputTokens: current.maxOutputTokens,
             multiModal: hasFlag(args, "multi-modal") ? booleanFlag(args, "multi-modal") : current.multiModal,
             light: hasFlag(args, "light") ? booleanFlag(args, "light") : current.light,
             isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,

@@ -458,7 +458,7 @@ func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
 			if gotApplyPatch != test.wantApplyPatch {
 				t.Errorf("apply_patch registered = %v, want %v", gotApplyPatch, test.wantApplyPatch)
 			}
-			gotShellPrompt := strings.Contains(requests[0].SystemPrompt, "run the apply_patch command")
+			gotShellPrompt := strings.Contains(requests[0].SystemPrompt, "shell tool with one complete apply_patch command")
 			if gotShellPrompt != test.wantShellPrompt {
 				t.Errorf("shell fallback prompt present = %v, want %v", gotShellPrompt, test.wantShellPrompt)
 			}

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -142,13 +143,157 @@ pub fn apply_patch(cwd: &Path, patch: &str) -> Result<PatchResult, PatchError> {
     }
 
     let results = transaction.prepare_results()?;
-    transaction.commit()?;
+    let lock_paths = transaction.lock_paths()?;
+    let locks = FileLocks::acquire(&lock_paths, std::process::id())?;
+    let commit_result = transaction.commit();
+    let release_result = locks.release();
+    commit_result?;
+    release_result?;
 
     Ok(PatchResult {
         success: true,
         cwd: cwd.display().to_string(),
         files: results,
     })
+}
+
+struct FileLocks {
+    paths: Vec<PathBuf>,
+    created_dirs: Vec<PathBuf>,
+}
+
+impl FileLocks {
+    fn acquire(targets: &[PathBuf], pid: u32) -> Result<Self, PatchError> {
+        let mut targets = targets.to_vec();
+        targets.sort();
+        targets.dedup();
+
+        let mut locks = Self {
+            paths: Vec::with_capacity(targets.len()),
+            created_dirs: Vec::new(),
+        };
+        for target in targets {
+            let parent = target.parent().unwrap_or_else(|| Path::new("."));
+            match create_missing_dirs(parent) {
+                Ok(created) => locks.created_dirs.extend(created),
+                Err(error) => {
+                    locks.cleanup();
+                    return Err(error);
+                }
+            }
+
+            let lock_path = match lock_path(&target) {
+                Ok(path) => path,
+                Err(error) => {
+                    locks.cleanup();
+                    return Err(error);
+                }
+            };
+            let result = (|| -> Result<(), PatchError> {
+                let mut lock = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&lock_path)
+                    .map_err(|error| {
+                        if error.kind() == io::ErrorKind::AlreadyExists {
+                            let owner = read_lock_owner(&lock_path);
+                            return PatchError::Conflict(format!(
+                                "file {} is locked by apply_patch pid {owner} ({})",
+                                target.display(),
+                                lock_path.display(),
+                            ));
+                        }
+                        PatchError::Io(error)
+                    })?;
+                writeln!(lock, "{pid}")?;
+                lock.sync_all()?;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                locks.cleanup();
+                return Err(error);
+            }
+            locks.paths.push(lock_path);
+        }
+
+        Ok(locks)
+    }
+
+    fn release(self) -> Result<(), PatchError> {
+        let mut first_error = None;
+        for path in self.paths.iter().rev() {
+            if let Err(error) = fs::remove_file(path) {
+                if error.kind() != io::ErrorKind::NotFound {
+                    first_error.get_or_insert(PatchError::Io(error));
+                }
+            }
+        }
+        if let Err(error) = sync_lock_parent_directories(&self.paths) {
+            first_error.get_or_insert(error);
+        }
+        for directory in self.created_dirs.iter().rev() {
+            if let Err(error) = fs::remove_dir(directory) {
+                if error.kind() != io::ErrorKind::NotFound
+                    && error.kind() != io::ErrorKind::DirectoryNotEmpty
+                {
+                    first_error.get_or_insert(PatchError::Io(error));
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn cleanup(&mut self) {
+        for path in self.paths.drain(..).rev() {
+            let _ = fs::remove_file(path);
+        }
+        for directory in self.created_dirs.drain(..).rev() {
+            let _ = fs::remove_dir(directory);
+        }
+    }
+}
+
+fn lock_path(target: &Path) -> Result<PathBuf, PatchError> {
+    let file_name = target.file_name().ok_or_else(|| {
+        PatchError::Invalid(format!(
+            "cannot create a file lock for {}",
+            target.display()
+        ))
+    })?;
+    let mut lock_name = OsString::from(".");
+    lock_name.push(file_name);
+    lock_name.push(".lock");
+    Ok(target
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(lock_name))
+}
+
+fn read_lock_owner(path: &Path) -> String {
+    fs::read_to_string(path)
+        .map(|contents| contents.trim().to_string())
+        .ok()
+        .filter(|contents| !contents.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(unix)]
+fn sync_lock_parent_directories(paths: &[PathBuf]) -> Result<(), PatchError> {
+    let mut parents = HashSet::new();
+    for path in paths {
+        if let Some(parent) = path.parent() {
+            parents.insert(parent);
+        }
+    }
+    for parent in parents {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_lock_parent_directories(_paths: &[PathBuf]) -> Result<(), PatchError> {
+    Ok(())
 }
 
 fn parse_envelope(cwd: &Path, patch: &str) -> Result<Vec<Operation>, PatchError> {
@@ -513,6 +658,14 @@ impl Transaction {
             });
         }
         Ok(results)
+    }
+
+    fn lock_paths(&self) -> Result<Vec<PathBuf>, PatchError> {
+        Ok(self
+            .changes()?
+            .into_iter()
+            .map(|change| change.path)
+            .collect())
     }
 
     fn commit(&self) -> Result<(), PatchError> {
@@ -1239,6 +1392,45 @@ mod tests {
             fs::read_to_string(cwd.join("notes.txt")).unwrap(),
             "external"
         );
+    }
+
+    #[test]
+    fn creates_pid_lock_for_each_transaction_target_and_removes_it() {
+        let cwd = temp_dir("file-lock");
+        let target = cwd.join("notes.txt");
+        let locks = FileLocks::acquire(std::slice::from_ref(&target), 4242).unwrap();
+        let lock = cwd.join(".notes.txt.lock");
+        assert_eq!(fs::read_to_string(&lock).unwrap(), "4242\n");
+        locks.release().unwrap();
+        assert!(!lock.exists());
+    }
+
+    #[test]
+    fn rejects_a_target_with_an_existing_pid_lock_without_writing() {
+        let cwd = temp_dir("locked-target");
+        let target = cwd.join("notes.txt");
+        fs::write(&target, "one\n").unwrap();
+        fs::write(cwd.join(".notes.txt.lock"), "9876\n").unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n-one\n+two\n*** End Patch";
+        let error = apply_patch(&cwd, patch).unwrap_err().to_string();
+        assert!(error.contains("locked by apply_patch pid 9876"));
+        assert_eq!(fs::read_to_string(target).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn move_requires_locks_for_source_and_destination() {
+        let cwd = temp_dir("locked-move");
+        let source = cwd.join("old.txt");
+        let destination = cwd.join("new.txt");
+        fs::write(&source, "one\n").unwrap();
+        fs::write(cwd.join(".new.txt.lock"), "1111\n").unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n-one\n+two\n*** End Patch";
+        let error = apply_patch(&cwd, patch).unwrap_err().to_string();
+        assert!(error.contains("new.txt"));
+        assert_eq!(fs::read_to_string(source).unwrap(), "one\n");
+        assert!(!destination.exists());
     }
 
     #[cfg(unix)]

@@ -320,6 +320,14 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := providerSvc.AddModel(ctx, "anthropic", "too-large", application.ModelInput{
+		Name:            "Too large",
+		ContextWindow:   32_000,
+		MaxOutputTokens: 32_000,
+	}); appErrorCode(err) != application.CodeValidation {
+		t.Fatalf("equal output/context error = %v, want validation", err)
+	}
+
 	p, err := providerSvc.AddModel(ctx, "anthropic", "claude-opus-4-8", application.ModelInput{
 		Name:            "Claude Opus 4.8",
 		ContextWindow:   200_000,

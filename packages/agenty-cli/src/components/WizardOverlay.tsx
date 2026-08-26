@@ -395,6 +395,7 @@ function WizardContent() {
         }
         const next: ModelDraft = {
             ...editingModel,
+            source: editingModel.source === "cached" ? "configured" : editingModel.source,
             code: values.code.trim(),
             name: values.name.trim(),
             contextWindow: Number(values.contextWindow),

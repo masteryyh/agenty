@@ -2,7 +2,9 @@ package builtin_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -94,7 +96,7 @@ func TestShellDefinitionDocumentsRuntimeAndCommandLimit(t *testing.T) {
 	if maxItems == nil || *maxItems != wantMaxItems {
 		t.Fatalf("commands maxItems = %v, want %d", maxItems, wantMaxItems)
 	}
-	for _, phrase := range []string{"zsh on macOS", "bash on Linux", "sh as a fallback"} {
+	for _, phrase := range []string{"independent, complete shell commands in parallel", "commands array contains separate commands", "same file", "zsh on macOS", "bash on Linux", "sh as a fallback"} {
 		if !strings.Contains(definition.Description, phrase) {
 			t.Errorf("description %q does not mention %q", definition.Description, phrase)
 		}
@@ -115,10 +117,24 @@ func TestShellRejectsInvalidArguments(t *testing.T) {
 		`{"commands":["true"],"timeout_ms":0}`,
 		`{"commands":["true"],"max_output_length":0}`,
 		`{"commands":["true","true","true","true","true"]}`,
+		`{"commands":["true","true"],"stdin":"patch"}`,
 	} {
 		if _, err := tool.Execute(context.Background(), agentloop.CallContext{}, []byte(input)); err == nil {
 			t.Errorf("Execute(%s) succeeded", input)
 		}
+	}
+}
+
+func TestShellPassesStdinToSingleCommand(t *testing.T) {
+	t.Parallel()
+
+	command := "cat"
+	if runtime.GOOS == "windows" {
+		command = "more"
+	}
+	output := executeShell(t, fmt.Sprintf(`{"commands":[%q],"stdin":"patch input"}`, command))
+	if output.Output[0].Stdout != "patch input" {
+		t.Fatalf("stdin output = %q, want patch input", output.Output[0].Stdout)
 	}
 }
 

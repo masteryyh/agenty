@@ -39,13 +39,20 @@ func TestAgent_ResolveSystemPrompt(t *testing.T) {
 			if !strings.Contains(got, "<soul>\n"+tt.soul+"\n</soul>") {
 				t.Errorf("ResolveSystemPrompt() soul = %q", got)
 			}
-			gotApplyPatchShell := strings.Contains(got, "run the apply_patch command")
+			gotApplyPatchShell := strings.Contains(got, "shell tool with one complete apply_patch command")
 			if gotApplyPatchShell != tt.useApplyPatchShell {
 				t.Errorf(
 					"ResolveSystemPrompt() apply_patch shell prompt = %v, want %v",
 					gotApplyPatchShell,
 					tt.useApplyPatchShell,
 				)
+			}
+			if tt.useApplyPatchShell {
+				for _, phrase := range []string{"apply_patch <<'PATCH'", "@'", "'@ | apply_patch", "stdin field", "same file in parallel"} {
+					if !strings.Contains(got, phrase) {
+						t.Errorf("ResolveSystemPrompt() does not contain %q", phrase)
+					}
+				}
 			}
 			if strings.Contains(got, "{{") || strings.Contains(got, "}}") {
 				t.Errorf("ResolveSystemPrompt() contains unresolved template actions: %q", got)

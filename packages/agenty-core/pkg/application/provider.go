@@ -350,6 +350,9 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 	if maxOutputTokens <= 0 {
 		maxOutputTokens = catalog.DefaultMaxOutputTokens
 	}
+	if in.ContextWindow > 0 && maxOutputTokens >= int64(in.ContextWindow) {
+		return nil, Validation("max output tokens must be less than context window")
+	}
 	reasoning := true
 	if in.Reasoning != nil {
 		reasoning = *in.Reasoning

@@ -120,6 +120,10 @@ function fakeClient(
             calls.push("provider.list");
             return providers;
         },
+        listProviderModels: async () => {
+            calls.push("provider.listModels");
+            return [];
+        },
         listAgents: async () => {
             calls.push("agent.list");
             return agents;
@@ -224,7 +228,6 @@ describe("first-run provider setup", () => {
         expect(client.calls).toEqual([
             "provider.list",
             "agent.list",
-            "provider.update",
             "provider.addModel",
             "agent.update",
             "initialize.complete",
@@ -244,7 +247,6 @@ describe("first-run provider setup", () => {
         expect(client.calls).toEqual([
             "provider.list",
             "agent.list",
-            "provider.update",
             "provider.removeModel",
             "provider.addModel",
             "provider.addModel",
@@ -282,8 +284,26 @@ describe("first-run provider setup", () => {
         expect(client.calls).toEqual([
             "provider.list",
             "agent.list",
-            "provider.update",
             "agent.create",
+            "initialize.complete",
+        ]);
+    });
+
+    test("does not persist an untouched discovered model cache", async () => {
+        const draft = createDraft();
+        const provider = { ...createProvider(draft), modelsCached: true };
+        const models = modelDraftsForProvider(draft, provider);
+        const client = fakeClient([provider], [createAgent("default", true)]);
+
+        expect(models[0].source).toBe("cached");
+        await persistWizardSetup(client, [draft], models, selectedModelId(models[0]));
+
+        expect(client.createdModels).toEqual([]);
+        expect(client.deletedModels).toEqual([]);
+        expect(client.calls).toEqual([
+            "provider.list",
+            "agent.list",
+            "agent.update",
             "initialize.complete",
         ]);
     });

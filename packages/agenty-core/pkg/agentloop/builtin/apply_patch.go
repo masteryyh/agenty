@@ -3,7 +3,6 @@ package builtin
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -65,7 +64,10 @@ func (tool *applyPatchTool) Execute(
 	tool.fileSystem.mu.Lock()
 	defer tool.fileSystem.mu.Unlock()
 
-	command := exec.CommandContext(ctx, "apply_patch")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	command := exec.Command("apply_patch")
 	if strings.TrimSpace(callContext.Cwd) != "" {
 		command.Dir = callContext.Cwd
 	}
@@ -75,9 +77,6 @@ func (tool *applyPatchTool) Execute(
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, ctx.Err()
-		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())

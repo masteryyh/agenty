@@ -209,7 +209,11 @@ func TestListerGeminiPaginationAndThinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(models) != 2 || models[0].Code != "gemini-3-flash" || models[0].Name != "Gemini 3 Flash" || len(models[0].ReasoningEfforts) != len(shared.StandardReasoningEfforts()) {
+	if len(models) != 2 || models[0].Code != "gemini-3-flash" || models[0].Name != "Gemini 3 Flash" || !reflect.DeepEqual(models[0].ReasoningEfforts, []shared.ReasoningEffort{
+		shared.ReasoningLow,
+		shared.ReasoningMedium,
+		shared.ReasoningHigh,
+	}) {
 		t.Fatalf("models = %#v", models)
 	}
 	if models[1].Name != "gemini-3-pro" || len(models[1].ReasoningEfforts) != 0 {

@@ -448,8 +448,6 @@ export function FormPanel({
                     const layout = fieldLayouts[visibleIndex];
                     const rowHeight = layout?.height ?? 1;
                     const labelLines = layout?.labelLines ?? [field.label];
-                    const choiceOpen = choice.kind !== "idle" && choice.visibleIndex === visibleIndex;
-
                     return (
                         <Pressable
                             key={field.key}

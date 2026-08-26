@@ -26,6 +26,7 @@ export interface ProviderDraft {
 }
 
 export interface ModelDraft {
+    source: "configured" | "cached" | "new";
     id: string;
     providerId: string;
     providerCode: string;
@@ -84,8 +85,10 @@ export function createModelDraft(
     provider: ProviderDraft,
     id: string,
     existing?: CoreModelDto,
+    source: ModelDraft["source"] = existing === undefined ? "new" : "configured",
 ): ModelDraft {
     return {
+        source,
         id,
         providerId: provider.id,
         providerCode: provider.code,
@@ -112,8 +115,14 @@ export function modelDraftsForProvider(
     provider: ProviderDraft,
     existing?: ModelProviderDto,
 ): ModelDraft[] {
+    const source: ModelDraft["source"] = existing?.modelsCached === true ? "cached" : "configured";
     return (existing?.models ?? []).map((model) =>
-        createModelDraft(provider, `${provider.id}:model:${model.code}`, model),
+        createModelDraft(
+            provider,
+            `${provider.id}:model:${model.code}`,
+            model,
+            source,
+        ),
     );
 }
 

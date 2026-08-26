@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	json "github.com/bytedance/sonic"
 
@@ -67,6 +68,45 @@ func TestApplyPatchToolReportsHelperFailure(t *testing.T) {
 	_, err = tool.Execute(t.Context(), agentloop.CallContext{Cwd: directory}, input)
 	if err == nil || !strings.Contains(err.Error(), "conflicting operations") {
 		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestApplyPatchToolLetsStartedHelperFinishAfterCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture uses a POSIX script")
+	}
+
+	directory := t.TempDir()
+	started := filepath.Join(directory, "started")
+	installApplyPatchFixture(t, directory, "#!/bin/sh\ntouch started\nsleep 0.2\nprintf '%s\\n' '{\"success\":true,\"cwd\":\"/workspace\",\"files\":[]}'\n")
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tool := &applyPatchTool{fileSystem: &fileSystem{}}
+	input, err := json.Marshal(applyPatchArguments{Patch: "*** Begin Patch\n*** End Patch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, executeErr := tool.Execute(ctx, agentloop.CallContext{Cwd: directory}, input)
+		result <- executeErr
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, statErr := os.Stat(started); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("apply_patch helper did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if executeErr := <-result; executeErr != nil {
+		t.Fatalf("started helper returned error after cancellation: %v", executeErr)
 	}
 }
 

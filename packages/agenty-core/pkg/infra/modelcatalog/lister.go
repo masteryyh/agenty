@@ -308,7 +308,11 @@ func (l *Lister) listGemini(ctx context.Context, provider catalog.Provider) ([]c
 			}
 			efforts := []shared.ReasoningEffort{}
 			if item.Thinking != nil && *item.Thinking {
-				efforts = shared.StandardReasoningEfforts()
+				efforts = []shared.ReasoningEffort{
+					shared.ReasoningLow,
+					shared.ReasoningMedium,
+					shared.ReasoningHigh,
+				}
 			}
 
 			model, err := normalizeModel(

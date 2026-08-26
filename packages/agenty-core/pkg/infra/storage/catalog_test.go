@@ -58,7 +58,7 @@ func TestCatalogSaveAndGet(t *testing.T) {
 		UpdatedAt:        time.Now().UTC(),
 	}
 	provider.Models = []catalog.Model{model1, model2}
-	provider.ModelsCached = true
+	provider.ModelsCached = false
 
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -199,7 +199,7 @@ func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
 	}
 }
 
-func TestCatalogModelDiscoveryCacheUsesExpirationAndSurvivesRestart(t *testing.T) {
+func TestCatalogModelDiscoveryCacheUsesExpirationAndStaysInMemory(t *testing.T) {
 	dir := t.TempDir()
 	builtins, err := catalogdata.LoadProviders()
 	if err != nil {
@@ -232,16 +232,8 @@ func TestCatalogModelDiscoveryCacheUsesExpirationAndSurvivesRestart(t *testing.T
 	}
 
 	cachePath := filepath.Join(repo.providersDir, ".models", "openrouter.json")
-	cacheData, err := os.ReadFile(cachePath)
-	if err != nil {
-		t.Fatalf("read cache: %v", err)
-	}
-	var cache modelDiscoveryCache
-	if err := json.Unmarshal(cacheData, &cache); err != nil {
-		t.Fatalf("decode cache: %v", err)
-	}
-	if cache.ExpiresAt.Before(time.Now().UTC()) || len(cache.Models) != 1 {
-		t.Fatalf("cache = %+v", cache)
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("model discovery cache file exists: %v", err)
 	}
 
 	restarted := NewCatalogRepository(repo.providersDir, builtins...)
@@ -249,11 +241,11 @@ func TestCatalogModelDiscoveryCacheUsesExpirationAndSurvivesRestart(t *testing.T
 	if err != nil {
 		t.Fatalf("Get after restart: %v", err)
 	}
-	if len(restartedProvider.Models) != 1 {
-		t.Fatalf("restarted models = %#v", restartedProvider.Models)
+	if len(restartedProvider.Models) != 0 {
+		t.Fatalf("restarted models = %#v, want no in-memory cache", restartedProvider.Models)
 	}
-	if !restartedProvider.ModelsCached {
-		t.Fatal("restarted provider did not expose the transient cache marker")
+	if restartedProvider.ModelsCached {
+		t.Fatal("restarted provider exposed a cache that should not survive restart")
 	}
 
 	if err := repo.ReplaceModels(ctx, code, models, time.Now().UTC().Add(-time.Minute)); err != nil {
@@ -272,6 +264,58 @@ func TestCatalogModelDiscoveryCacheUsesExpirationAndSurvivesRestart(t *testing.T
 	}
 	if !needsDiscovery {
 		t.Fatal("expired cache did not request discovery")
+	}
+}
+
+func TestCatalogSaveDoesNotPersistDiscoveredModels(t *testing.T) {
+	repo := newCatalogRepo(t)
+	ctx := context.Background()
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+
+	model := catalog.Model{
+		Code:             mustCatalogModelCode("gateway/model"),
+		Name:             "Gateway model",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}
+	if err := repo.ReplaceModels(ctx, provider.Code, []catalog.Model{model}, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.ModelsCached || len(cached.Models) != 1 {
+		t.Fatalf("cached provider = %+v", cached)
+	}
+
+	if err := repo.Save(ctx, cached); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo.providersDir, "custom.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted catalog.Provider
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Models) != 0 {
+		t.Fatalf("persisted discovered models = %#v, want none", persisted.Models)
+	}
+	reloaded, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.ModelsCached || len(reloaded.Models) != 1 {
+		t.Fatalf("cache after Save = %+v", reloaded)
 	}
 }
 

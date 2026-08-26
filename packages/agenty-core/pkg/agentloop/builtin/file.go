@@ -35,7 +35,9 @@ func (tool *readFileTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
 		Name: "read_file",
 		Description: "Read a text file with optional inclusive 1-based line bounds. " +
-			"Relative paths resolve from the session working directory. The result contains numbered lines.",
+			"Environment variables are expanded before absolute-path detection. Absolute paths are read directly; " +
+			"relative paths resolve from the session working directory. " +
+			"The result contains numbered lines.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{
 				"path":       stringSchema("Absolute path or path relative to the session working directory."),

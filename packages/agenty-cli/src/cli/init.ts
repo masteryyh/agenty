@@ -5,6 +5,7 @@ import type { APIType } from "@/api/types";
 import {
     CliError,
     flag,
+    hasFlag,
     outputFields,
     type ParsedArgs,
     render,
@@ -20,13 +21,16 @@ export async function handleInit(client: AgentyClient, args: ParsedArgs): Promis
     const agentCode = flag(args, "agent")?.trim() || "default";
     const contextWindow = positiveInteger(flag(args, "context-window") ?? "128000", "--context-window");
     const apiKey = secret(args, "api-key", "api-key-env", "provider API key") ?? "";
+    const apiKeyProvided = hasFlag(args, "api-key") || hasFlag(args, "api-key-env");
     const providers = await client.listProviders();
     const existingProvider = providers.find((provider) => provider.code === providerCode);
     const existingModel = existingProvider?.models.find((model) => model.code === modelCode);
     const effectiveContextWindow = existingModel?.contextWindow ?? contextWindow;
 
     if (existingProvider?.builtin) {
-        await client.updateProvider(providerCode, { apiKey });
+        if (apiKeyProvided) {
+            await client.updateProvider(providerCode, { apiKey });
+        }
     } else {
         await client.createProvider({
             code: providerCode,
