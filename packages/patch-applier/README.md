@@ -10,6 +10,13 @@ snapshot, and rejects incompatible state transitions or path ownership conflicts
 commit phase stages all new contents before replacing or deleting targets and rolls back
 completed replacements if a later filesystem operation fails.
 
+Filesystem coordination uses persistent lock files under `AGENTY_DATA_DIR/locks`. Each patch
+holds shared advisory locks while reading and preparing its snapshot, then acquires exclusive
+locks for the paths it will change before revalidating and committing. Lock files are coordination
+artifacts and are intentionally retained after the process exits. Paths are acquired in sorted
+order, and conflicting acquisitions wait until the existing holder releases its lock. The
+operating system releases the advisory lock when the owning `File` handle closes.
+
 Success and failure both write one JSON object to stdout. A successful result includes
 the final unified diff and added/removed line counts for every changed path:
 
