@@ -177,11 +177,12 @@ Methods 使用 `resource.action` 命名：
 
 `provider.list` 可选接收 `{providerCode}`。不传时，core 会并行获取所有已配置且 catalog
 为空的 provider；传入时只会获取指定 provider。`provider.listModels` 接收同样的
-`{providerCode}`，供直接调用者使用 core 内置的发现流程。成功结果会缓存到
-`~/.agenty/providers/.models/<provider-code>.json`，有效期为 8 小时，JSON 中保存 `expiresAt`
-和标准化模型列表。过期缓存仍作为旧数据返回，下一次 list 时再刷新。它会兼容常见的 `id`、
-名称和 token 限制字段，自动跟随 provider 分页；上下文窗口或最大输出 token 缺失或不为正数时
-分别使用 `256000` 和 `65536`，缺少 reasoning 能力时返回空的 `reasoningEfforts` 数组。
+`{providerCode}`，供直接调用者使用 core 内置的发现流程。成功结果仅缓存于运行中的 core 进程，
+有效期为 8 小时，不写入磁盘，core 重启后不会保留。过期缓存仍作为旧数据返回，下一次 list 时
+再刷新。它会兼容常见的 `id`、名称和 token 限制字段，自动跟随 provider 分页；上下文窗口或最大
+输出 token 缺失或不为正数时分别使用 `256000` 和 `65536`，缺少 reasoning 能力时返回空的
+`reasoningEfforts` 数组。事务性 `apply_patch` 锁位于 `~/.agenty/locks/`，每个锁都会记录 helper
+进程 PID 和完整目标路径。
 
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
 `running` 状态，完整 agent turn 由引擎异步继续执行。执行期间，core 会写出

@@ -18,8 +18,10 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
 #[test]
 fn prints_complete_success_json() {
     let cwd = temp_dir("success");
+    let data_dir = cwd.join("data");
     let mut child = Command::new(env!("CARGO_BIN_EXE_apply_patch"))
         .current_dir(&cwd)
+        .env("AGENTY_DATA_DIR", &data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -56,8 +58,10 @@ fn prints_complete_success_json() {
 #[test]
 fn prints_complete_error_json() {
     let cwd = temp_dir("error");
+    let data_dir = cwd.join("data");
     let mut child = Command::new(env!("CARGO_BIN_EXE_apply_patch"))
         .current_dir(&cwd)
+        .env("AGENTY_DATA_DIR", &data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

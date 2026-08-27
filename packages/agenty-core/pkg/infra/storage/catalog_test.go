@@ -230,6 +230,9 @@ func TestCatalogModelDiscoveryCacheUsesExpirationAndStaysInMemory(t *testing.T) 
 	if !loaded.ModelsCached {
 		t.Fatal("cached provider did not expose the transient cache marker")
 	}
+	if !loaded.Models[0].Cached {
+		t.Fatal("discovered model did not expose the transient cache marker")
+	}
 
 	cachePath := filepath.Join(repo.providersDir, ".models", "openrouter.json")
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
@@ -295,6 +298,9 @@ func TestCatalogSaveDoesNotPersistDiscoveredModels(t *testing.T) {
 	if !cached.ModelsCached || len(cached.Models) != 1 {
 		t.Fatalf("cached provider = %+v", cached)
 	}
+	if !cached.Models[0].Cached {
+		t.Fatal("discovered model did not expose the transient cache marker")
+	}
 
 	if err := repo.Save(ctx, cached); err != nil {
 		t.Fatal(err)
@@ -316,6 +322,66 @@ func TestCatalogSaveDoesNotPersistDiscoveredModels(t *testing.T) {
 	}
 	if !reloaded.ModelsCached || len(reloaded.Models) != 1 {
 		t.Fatalf("cache after Save = %+v", reloaded)
+	}
+}
+
+func TestCatalogModelDiscoveryCacheMarksOnlyDiscoveredModels(t *testing.T) {
+	repo := newCatalogRepo(t)
+	ctx := context.Background()
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.Models = []catalog.Model{{
+		Code:             mustCatalogModelCode("configured"),
+		Name:             "Configured",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}}
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.ReplaceModels(ctx, provider.Code, []catalog.Model{{
+		Code:             mustCatalogModelCode("discovered"),
+		Name:             "Discovered",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}}, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, err := loaded.Model(mustCatalogModelCode("configured"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovered, err := loaded.Model(mustCatalogModelCode("discovered"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.Cached || !discovered.Cached {
+		t.Fatalf("cached flags = configured:%t discovered:%t, want false/true", configured.Cached, discovered.Cached)
+	}
+
+	if err := repo.Save(ctx, loaded); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo.providersDir, "custom.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted catalog.Provider
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Models) != 1 || persisted.Models[0].Code != configured.Code || persisted.Models[0].Cached {
+		t.Fatalf("persisted models = %#v", persisted.Models)
 	}
 }
 

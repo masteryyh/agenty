@@ -63,8 +63,10 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Configuration | `~/.agenty/config.json` |
 | Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | Session index | `~/.agenty/agenty.sqlite` |
-| Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, built-in provider files store only API keys; core automatically discovers empty configured catalogs when listing providers/models and caches them under `~/.agenty/providers/.models/` for 8 hours |
+| Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, while built-in provider files store only API keys |
+| Model discovery cache | Kept only in the running core process for 8 hours; it is refreshed on demand and does not survive a core restart |
 | Agents | `~/.agenty/agents/` |
+| Patch transaction locks | `~/.agenty/locks/` |
 | Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
 `AGENTY_LOG_LEVEL` accepts `debug`, `info`, `warn`, or `error`.

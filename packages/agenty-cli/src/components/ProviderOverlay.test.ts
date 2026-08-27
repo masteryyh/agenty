@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ModelProviderDto } from "../api/types";
+import type { CoreModelDto, ModelProviderDto } from "../api/types";
 import {
     buildBuiltinProviderUpdate,
     buildCreateModelFields,
+    buildModelUpdate,
     buildProviderFields,
     parseModelValues,
 } from "./ProviderOverlay";
@@ -83,5 +84,37 @@ describe("provider overlay model advanced options", () => {
     test("uses the Light model label", () => {
         expect(buildCreateModelFields(false).find((field) => field.key === "light")?.label)
             .toBe("Light model");
+    });
+
+    test("preserves a model default flag while editing unrelated fields", () => {
+        const target: CoreModelDto = {
+            code: "model",
+            name: "Model",
+            contextWindow: 128_000,
+            maxOutputTokens: 8_192,
+            multiModal: false,
+            light: false,
+            isDefault: true,
+        };
+        const parsed = parseModelValues({
+            code: "model",
+            name: "Renamed model",
+            contextWindow: "128000",
+            maxOutputTokens: "16384",
+            multiModal: "false",
+            light: "false",
+            reasoning: "true",
+            reasoningEfforts: "[\"low\", \"high\"]",
+        });
+
+        expect(typeof parsed).not.toBe("string");
+        if (typeof parsed === "string") {
+            throw new Error(parsed);
+        }
+        expect(buildModelUpdate(target, parsed)).toMatchObject({
+            isDefault: true,
+            maxOutputTokens: 16_384,
+            name: "Renamed model",
+        });
     });
 });

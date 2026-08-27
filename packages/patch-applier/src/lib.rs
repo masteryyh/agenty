@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use similar::{ChangeTag, TextDiff};
 
 const BEGIN_MARKER: &str = "*** Begin Patch";
@@ -144,7 +144,8 @@ pub fn apply_patch(cwd: &Path, patch: &str) -> Result<PatchResult, PatchError> {
 
     let results = transaction.prepare_results()?;
     let lock_paths = transaction.lock_paths()?;
-    let locks = FileLocks::acquire(&lock_paths, std::process::id())?;
+    let lock_directory = lock_directory()?;
+    let locks = FileLocks::acquire(&lock_directory, &lock_paths, std::process::id())?;
     let commit_result = transaction.commit();
     let release_result = locks.release();
     commit_result?;
@@ -159,36 +160,27 @@ pub fn apply_patch(cwd: &Path, patch: &str) -> Result<PatchResult, PatchError> {
 
 struct FileLocks {
     paths: Vec<PathBuf>,
-    created_dirs: Vec<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LockOwner {
+    pid: u32,
+    path: String,
 }
 
 impl FileLocks {
-    fn acquire(targets: &[PathBuf], pid: u32) -> Result<Self, PatchError> {
+    fn acquire(lock_directory: &Path, targets: &[PathBuf], pid: u32) -> Result<Self, PatchError> {
+        fs::create_dir_all(lock_directory)?;
+
         let mut targets = targets.to_vec();
         targets.sort();
         targets.dedup();
 
         let mut locks = Self {
             paths: Vec::with_capacity(targets.len()),
-            created_dirs: Vec::new(),
         };
         for target in targets {
-            let parent = target.parent().unwrap_or_else(|| Path::new("."));
-            match create_missing_dirs(parent) {
-                Ok(created) => locks.created_dirs.extend(created),
-                Err(error) => {
-                    locks.cleanup();
-                    return Err(error);
-                }
-            }
-
-            let lock_path = match lock_path(&target) {
-                Ok(path) => path,
-                Err(error) => {
-                    locks.cleanup();
-                    return Err(error);
-                }
-            };
+            let lock_path = lock_path(lock_directory, &target);
             let result = (|| -> Result<(), PatchError> {
                 let mut lock = OpenOptions::new()
                     .write(true)
@@ -198,14 +190,22 @@ impl FileLocks {
                         if error.kind() == io::ErrorKind::AlreadyExists {
                             let owner = read_lock_owner(&lock_path);
                             return PatchError::Conflict(format!(
-                                "file {} is locked by apply_patch pid {owner} ({})",
+                                "file {} is locked by apply_patch {owner} ({})",
                                 target.display(),
                                 lock_path.display(),
                             ));
                         }
                         PatchError::Io(error)
                     })?;
-                writeln!(lock, "{pid}")?;
+                let owner = LockOwner {
+                    pid,
+                    path: target.display().to_string(),
+                };
+                let data = serde_json::to_vec(&owner).map_err(|error| {
+                    PatchError::Invalid(format!("serialize lock owner: {error}"))
+                })?;
+                lock.write_all(&data)?;
+                lock.write_all(b"\n")?;
                 lock.sync_all()?;
                 Ok(())
             })();
@@ -231,15 +231,6 @@ impl FileLocks {
         if let Err(error) = sync_lock_parent_directories(&self.paths) {
             first_error.get_or_insert(error);
         }
-        for directory in self.created_dirs.iter().rev() {
-            if let Err(error) = fs::remove_dir(directory) {
-                if error.kind() != io::ErrorKind::NotFound
-                    && error.kind() != io::ErrorKind::DirectoryNotEmpty
-                {
-                    first_error.get_or_insert(PatchError::Io(error));
-                }
-            }
-        }
         first_error.map_or(Ok(()), Err)
     }
 
@@ -247,33 +238,43 @@ impl FileLocks {
         for path in self.paths.drain(..).rev() {
             let _ = fs::remove_file(path);
         }
-        for directory in self.created_dirs.drain(..).rev() {
-            let _ = fs::remove_dir(directory);
-        }
     }
 }
 
-fn lock_path(target: &Path) -> Result<PathBuf, PatchError> {
-    let file_name = target.file_name().ok_or_else(|| {
-        PatchError::Invalid(format!(
-            "cannot create a file lock for {}",
-            target.display()
-        ))
-    })?;
-    let mut lock_name = OsString::from(".");
-    lock_name.push(file_name);
-    lock_name.push(".lock");
-    Ok(target
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(lock_name))
+fn lock_directory() -> Result<PathBuf, PatchError> {
+    let data_directory = std::env::var_os("AGENTY_DATA_DIR")
+        .filter(|directory| !directory.is_empty())
+        .ok_or_else(|| {
+            PatchError::Invalid("AGENTY_DATA_DIR is required for apply_patch locks".to_string())
+        })?;
+    let data_directory = PathBuf::from(data_directory);
+    if !data_directory.is_absolute() {
+        return Err(PatchError::Invalid(
+            "AGENTY_DATA_DIR must be an absolute path for apply_patch locks".to_string(),
+        ));
+    }
+    Ok(data_directory.join("locks"))
+}
+
+fn lock_path(lock_directory: &Path, target: &Path) -> PathBuf {
+    let mut digest = Sha3_256::new();
+    digest.update(target.as_os_str().as_encoded_bytes());
+    let digest = digest.finalize();
+    let mut name = String::with_capacity(digest.len() * 2 + ".lock".len());
+    for byte in digest {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        name.push(HEX[(byte >> 4) as usize] as char);
+        name.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    name.push_str(".lock");
+    lock_directory.join(name)
 }
 
 fn read_lock_owner(path: &Path) -> String {
-    fs::read_to_string(path)
-        .map(|contents| contents.trim().to_string())
+    fs::read(path)
         .ok()
-        .filter(|contents| !contents.is_empty())
+        .and_then(|contents| serde_json::from_slice::<LockOwner>(&contents).ok())
+        .map(|owner| format!("pid {} ({})", owner.pid, owner.path))
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -1262,9 +1263,26 @@ impl MetadataMode for fs::Metadata {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn test_data_dir() -> &'static PathBuf {
+        static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+        DATA_DIR.get_or_init(|| {
+            let suffix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("agenty-patch-data-{suffix}"));
+            fs::create_dir_all(&path).unwrap();
+            std::env::set_var("AGENTY_DATA_DIR", &path);
+            path
+        })
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
+        let _ = test_data_dir();
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1398,9 +1416,13 @@ mod tests {
     fn creates_pid_lock_for_each_transaction_target_and_removes_it() {
         let cwd = temp_dir("file-lock");
         let target = cwd.join("notes.txt");
-        let locks = FileLocks::acquire(std::slice::from_ref(&target), 4242).unwrap();
-        let lock = cwd.join(".notes.txt.lock");
-        assert_eq!(fs::read_to_string(&lock).unwrap(), "4242\n");
+        let lock_directory = test_data_dir().join("locks");
+        let locks =
+            FileLocks::acquire(&lock_directory, std::slice::from_ref(&target), 4242).unwrap();
+        let lock = lock_path(&lock_directory, &target);
+        let owner: LockOwner = serde_json::from_slice(&fs::read(&lock).unwrap()).unwrap();
+        assert_eq!(owner.pid, 4242);
+        assert_eq!(owner.path, target.display().to_string());
         locks.release().unwrap();
         assert!(!lock.exists());
     }
@@ -1410,7 +1432,18 @@ mod tests {
         let cwd = temp_dir("locked-target");
         let target = cwd.join("notes.txt");
         fs::write(&target, "one\n").unwrap();
-        fs::write(cwd.join(".notes.txt.lock"), "9876\n").unwrap();
+        let lock_directory = test_data_dir().join("locks");
+        fs::create_dir_all(&lock_directory).unwrap();
+        let lock = lock_path(&lock_directory, &target);
+        fs::write(
+            &lock,
+            serde_json::to_vec(&LockOwner {
+                pid: 9876,
+                path: target.display().to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
 
         let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n-one\n+two\n*** End Patch";
         let error = apply_patch(&cwd, patch).unwrap_err().to_string();
@@ -1424,13 +1457,42 @@ mod tests {
         let source = cwd.join("old.txt");
         let destination = cwd.join("new.txt");
         fs::write(&source, "one\n").unwrap();
-        fs::write(cwd.join(".new.txt.lock"), "1111\n").unwrap();
+        let lock_directory = test_data_dir().join("locks");
+        fs::create_dir_all(&lock_directory).unwrap();
+        let lock = lock_path(&lock_directory, &destination);
+        fs::write(
+            &lock,
+            serde_json::to_vec(&LockOwner {
+                pid: 1111,
+                path: destination.display().to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
 
         let patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n-one\n+two\n*** End Patch";
         let error = apply_patch(&cwd, patch).unwrap_err().to_string();
         assert!(error.contains("new.txt"));
         assert_eq!(fs::read_to_string(source).unwrap(), "one\n");
         assert!(!destination.exists());
+    }
+
+    #[test]
+    fn allows_repository_files_with_the_old_lock_name() {
+        let cwd = temp_dir("repository-lock-name");
+        let target = cwd.join("notes.txt");
+        let repository_file = cwd.join(".notes.txt.lock");
+        fs::write(&target, "one\n").unwrap();
+        fs::write(&repository_file, "repository data\n").unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n-one\n+two\n*** End Patch";
+        apply_patch(&cwd, patch).unwrap();
+
+        assert_eq!(fs::read_to_string(target).unwrap(), "two\n");
+        assert_eq!(
+            fs::read_to_string(repository_file).unwrap(),
+            "repository data\n"
+        );
     }
 
     #[cfg(unix)]

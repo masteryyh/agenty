@@ -60,6 +60,7 @@ export function SelectOverlay<T>({
         onActivate: (entry) => onSelect(entry.data),
         onClose,
         active: entries !== null && entries.length > 0,
+        closeWhenInactive: true,
     });
 
     return (

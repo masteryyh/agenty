@@ -724,8 +724,8 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 	if len(caller.Requests()) != 1 {
 		t.Fatalf("model switch LLM requests = %d, want 1 compaction request", len(caller.Requests()))
 	}
-	if caller.Requests()[0].MaxOutputTokens != 1_024 {
-		t.Fatalf("model switch compaction max output = %d, want 1024", caller.Requests()[0].MaxOutputTokens)
+	if caller.Requests()[0].MaxOutputTokens != 8_192 {
+		t.Fatalf("model switch compaction max output = %d, want 8192", caller.Requests()[0].MaxOutputTokens)
 	}
 
 	events := fixture.sessions.events[session.ID]

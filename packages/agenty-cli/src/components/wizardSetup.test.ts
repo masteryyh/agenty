@@ -291,7 +291,11 @@ describe("first-run provider setup", () => {
 
     test("does not persist an untouched discovered model cache", async () => {
         const draft = createDraft();
-        const provider = { ...createProvider(draft), modelsCached: true };
+        const provider = {
+            ...createProvider(draft),
+            models: [{ ...createProvider(draft).models[0], cached: true }],
+            modelsCached: true,
+        };
         const models = modelDraftsForProvider(draft, provider);
         const client = fakeClient([provider], [createAgent("default", true)]);
 
@@ -305,6 +309,54 @@ describe("first-run provider setup", () => {
             "agent.list",
             "agent.update",
             "initialize.complete",
+        ]);
+    });
+
+    test("removes configured models while preserving discovered cache entries", async () => {
+        const draft = createDraft();
+        const provider = {
+            ...createProvider(draft),
+            models: [
+                { ...createProvider(draft).models[0], code: "configured", name: "Configured", isDefault: false },
+                { ...createProvider(draft).models[0], code: "cached", name: "Cached", cached: true, isDefault: true },
+            ],
+            modelsCached: true,
+        };
+        const models = modelDraftsForProvider(draft, provider);
+        const cached = models.find((model) => model.code === "cached");
+        const client = fakeClient([provider], [createAgent("default", true)]);
+
+        expect(models.map((model) => ({ code: model.code, source: model.source }))).toEqual([
+            { code: "configured", source: "configured" },
+            { code: "cached", source: "cached" },
+        ]);
+        expect(cached).toBeDefined();
+        await persistWizardSetup(client, [draft], [cached!], selectedModelId(cached!));
+
+        expect(client.deletedModels).toEqual([{ providerCode: "custom", modelCode: "configured" }]);
+        expect(client.createdModels).toEqual([]);
+    });
+
+    test("preserves a default model for each provider", async () => {
+        const firstDraft = createDraft();
+        const secondDraft = {
+            ...createDraft(),
+            id: "custom:1",
+            code: "second",
+            name: "Second",
+        };
+        const first = { ...createModel(firstDraft), id: "custom:0:first", code: "first", isDefault: true };
+        const second = { ...createModel(secondDraft), id: "custom:1:second", code: "second", isDefault: true };
+        const client = fakeClient(
+            [createProvider(firstDraft, first), createProvider(secondDraft, second)],
+            [createAgent("default", true)],
+        );
+
+        await persistWizardSetup(client, [firstDraft, secondDraft], [first, second], selectedModelId(first));
+
+        expect(client.createdModels.map(({ modelCode, isDefault }) => ({ modelCode, isDefault }))).toEqual([
+            { modelCode: "first", isDefault: true },
+            { modelCode: "second", isDefault: true },
         ]);
     });
 });

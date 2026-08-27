@@ -168,14 +168,15 @@ export async function persistWizardSetup(
 
         if (!draft.builtin) {
             const providerModels = modelsByProvider.get(draft.id) ?? [];
-            if (existing?.modelsCached !== true) {
-                const desiredModelCodes = new Set(providerModels.map((model) => model.code.trim()));
-                for (const model of existing?.models ?? []) {
-                    if (!desiredModelCodes.has(model.code)) {
-                        await client.deleteModel(providerCode, model.code);
-                    }
+            const desiredModelCodes = new Set(providerModels.map((model) => model.code.trim()));
+            for (const model of existing?.models ?? []) {
+                if (model.cached !== true && !desiredModelCodes.has(model.code)) {
+                    await client.deleteModel(providerCode, model.code);
                 }
             }
+
+            const selectedProviderModel = providerModels.find((model) => selectedModelId(model) === selectedId);
+            const persistSelectedProviderDefault = selectedProviderModel !== undefined && selectedProviderModel.source !== "cached";
 
             for (const model of providerModels) {
                 if (model.source === "cached") {
@@ -191,7 +192,9 @@ export async function persistWizardSetup(
                     light: model.light,
                     reasoning: model.reasoning !== false && (model.reasoning === true || model.reasoningEfforts.length > 0),
                     reasoningEfforts: model.reasoningEfforts,
-                    isDefault: selectedModelId(model) === selectedId,
+                    isDefault: persistSelectedProviderDefault
+                        ? selectedModelId(model) === selectedId
+                        : model.isDefault,
                 });
             }
 

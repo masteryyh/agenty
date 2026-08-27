@@ -64,6 +64,13 @@ func (p *Provider) AddModel(m Model) {
 	if m.MaxOutputTokens <= 0 {
 		m.MaxOutputTokens = DefaultMaxOutputTokens
 	}
+	if m.IsDefault {
+		for index := range p.Models {
+			if p.Models[index].Code != m.Code {
+				p.Models[index].IsDefault = false
+			}
+		}
+	}
 	for i := range p.Models {
 		if p.Models[i].Code == m.Code {
 			p.Models[i] = m

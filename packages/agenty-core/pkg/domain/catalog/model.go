@@ -18,6 +18,7 @@ type Model struct {
 	Reasoning        bool                     `json:"reasoning"`
 	ReasoningEfforts []shared.ReasoningEffort `json:"reasoningEfforts"`
 	IsDefault        bool                     `json:"isDefault"`
+	Cached           bool                     `json:"cached,omitempty"`
 	CreatedAt        time.Time                `json:"createdAt"`
 	UpdatedAt        time.Time                `json:"updatedAt"`
 }

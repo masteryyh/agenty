@@ -54,6 +54,7 @@ export interface ModelDto {
     reasoning?: boolean;
     reasoningEfforts?: ReasoningEffort[];
     isDefault: boolean;
+    cached?: boolean;
     createdAt?: string;
     updatedAt?: string;
 }

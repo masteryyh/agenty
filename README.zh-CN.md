@@ -57,8 +57,10 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 配置 | `~/.agenty/config.json` |
 | 会话 transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | 会话索引 | `~/.agenty/agenty.sqlite` |
-| Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key；core 在获取 provider/model 列表时自动发现已配置的空模型 catalog，结果缓存于 `~/.agenty/providers/.models/`，有效期 8 小时 |
+| Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key |
+| 模型发现缓存 | 仅保存在运行中的 core 进程内，有效期 8 小时；按需刷新，core 重启后不会保留 |
 | Agents | `~/.agenty/agents/` |
+| Patch 事务锁 | `~/.agenty/locks/` |
 | 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
 `AGENTY_LOG_LEVEL` 接受 `debug`、`info`、`warn` 或 `error`；

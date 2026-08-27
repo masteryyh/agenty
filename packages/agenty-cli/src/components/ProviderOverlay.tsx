@@ -6,6 +6,7 @@ import type {
     CreateModelDto,
     ModelProviderDto,
     ReasoningEffort,
+    UpdateModelDto,
     UpdateModelProviderDto,
 } from "../api/types";
 import { STANDARD_REASONING_EFFORTS } from "../api/types";
@@ -209,6 +210,19 @@ export function parseModelValues(values: Record<string, string>): CreateModelDto
         light: values.light === "true",
         reasoning,
         reasoningEfforts: reasoning ? reasoningEfforts : [],
+    };
+}
+
+export function buildModelUpdate(target: CoreModelDto, input: CreateModelDto): UpdateModelDto {
+    return {
+        name: input.name,
+        contextWindow: input.contextWindow,
+        maxOutputTokens: input.maxOutputTokens,
+        multiModal: input.multiModal,
+        light: input.light,
+        reasoning: input.reasoning,
+        reasoningEfforts: input.reasoningEfforts,
+        isDefault: target.isDefault,
     };
 }
 
@@ -452,15 +466,7 @@ export function ProviderOverlay() {
             return;
         }
         try {
-            await client.updateModel(provider.code, target.code, {
-                name: parsed.name,
-                contextWindow: parsed.contextWindow,
-                maxOutputTokens: parsed.maxOutputTokens,
-                multiModal: parsed.multiModal,
-                light: parsed.light,
-                reasoning: parsed.reasoning,
-                reasoningEfforts: parsed.reasoningEfforts,
-            });
+            await client.updateModel(provider.code, target.code, buildModelUpdate(target, parsed));
             setToast(`Model updated: ${parsed.name}`);
             await reload();
             returnToList();

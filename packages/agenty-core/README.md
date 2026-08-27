@@ -199,12 +199,13 @@ Methods follow a `resource.action` naming:
 `provider.list` accepts an optional `{providerCode}`. Without it, core discovers all
 configured providers whose catalog is empty in parallel; with it, only that provider is
 eligible for discovery. `provider.listModels` accepts `{providerCode}` and exposes the same
-core-owned discovery path for direct callers. Successful discovery is cached under
-`~/.agenty/providers/.models/<provider-code>.json` for 8 hours; the JSON stores an `expiresAt`
-timestamp and the normalized models. Expired entries remain available as stale data while a
-subsequent list refreshes them. It maps common `id`/name/token-limit fields, follows provider
-pagination, defaults missing or non-positive context/output limits to `256000` and `65536`,
-and represents missing reasoning capability as an empty `reasoningEfforts` array.
+core-owned discovery path for direct callers. Successful discovery is cached in the running
+core process for 8 hours. It is not written to disk and does not survive a core
+restart. Expired entries remain available as stale data while a subsequent list refreshes them.
+It maps common `id`/name/token-limit fields, follows provider pagination, defaults missing or
+non-positive context/output limits to `256000` and `65536`, and represents missing reasoning
+capability as an empty `reasoningEfforts` array. Transactional `apply_patch` locks live under
+`~/.agenty/locks/`; each lock records its helper PID and full target path.
 
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
 and `running` status immediately; the engine continues the full agent turn

@@ -115,13 +115,12 @@ export function modelDraftsForProvider(
     provider: ProviderDraft,
     existing?: ModelProviderDto,
 ): ModelDraft[] {
-    const source: ModelDraft["source"] = existing?.modelsCached === true ? "cached" : "configured";
     return (existing?.models ?? []).map((model) =>
         createModelDraft(
             provider,
             `${provider.id}:model:${model.code}`,
             model,
-            source,
+            model.cached === true ? "cached" : "configured",
         ),
     );
 }

@@ -121,7 +121,7 @@ func (engine *Engine) compactPreparedForWindow(
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        baseMessages,
 		Tools:           engine.toolDefinitions(prepared.freeFormTool),
-		MaxOutputTokens: maxOutputTokens,
+		MaxOutputTokens: prepared.maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
 	contextTokensBefore := estimateRequestTokens(baseRequest)

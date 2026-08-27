@@ -4,11 +4,11 @@
     "private": true,
     "scripts": {
         "build": "turbo run build && mkdir -p dist && (cp packages/agenty-bootstrap/bin/* dist/ 2>/dev/null || true)",
-        "test": "turbo run test",
+        "test": "node --test scripts/dev.test.mjs && turbo run test",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "clean": "rm -rf dist && turbo run clean",
-        "dev": "turbo run build --filter=agenty-bootstrap && pnpm --filter agenty-bootstrap exec bun -e \"const { join } = await import('node:path'); const { resolveArch, resolveOS } = await import('./scripts/target.ts'); const os = resolveOS(); const executable = join('bin', 'agenty-' + os + '-' + resolveArch() + (os === 'windows' ? '.exe' : '')); const child = Bun.spawn([executable, ...process.argv.slice(1)], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', env: process.env }); process.exit(await child.exited);\"",
+        "dev": "node scripts/dev.mjs",
         "deepclean": "pnpm clean && rm -rf node_modules packages/*/node_modules",
         "core:build": "turbo run build --filter=agenty-core",
         "core:test": "turbo run test --filter=agenty-core",

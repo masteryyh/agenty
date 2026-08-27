@@ -105,6 +105,7 @@ export interface ListNavigationOptions<T> {
         item: T | undefined,
     ) => void;
     active?: boolean;
+    closeWhenInactive?: boolean;
 }
 
 export function useListNavigation<T>({
@@ -115,10 +116,14 @@ export function useListNavigation<T>({
     onClose,
     onInput,
     active = true,
+    closeWhenInactive = false,
 }: ListNavigationOptions<T>) {
     useInput((input, key, event) => {
         if (key.escape && onClose) {
             onClose();
+            return;
+        }
+        if (!active) {
             return;
         }
         if (key.upArrow) {
@@ -138,7 +143,7 @@ export function useListNavigation<T>({
             return;
         }
         onInput?.(input, key, event, item);
-    }, { isActive: active });
+    }, { isActive: active || (closeWhenInactive && onClose !== undefined) });
 }
 
 export interface KeyValueRow {

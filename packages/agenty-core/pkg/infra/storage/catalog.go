@@ -88,6 +88,7 @@ func (r *CatalogRepository) getLocked(code shared.Code, includeDiscoveryCache bo
 		return nil, err
 	}
 	provider.ModelsCached = false
+	clearCachedModelMarkers(&provider)
 	normalizeModels(&provider)
 	if includeDiscoveryCache {
 		r.applyModelDiscoveryCache(&provider)
@@ -195,6 +196,7 @@ func (r *CatalogRepository) Save(_ context.Context, provider *catalog.Provider) 
 		delete(r.modelCache, provider.Code)
 	}
 	providerToPersist.ModelsCached = false
+	clearCachedModelMarkers(providerToPersist)
 	normalizeModels(providerToPersist)
 	providerData, err := json.MarshalIndent(providerToPersist, "", "  ")
 	if err != nil {
@@ -280,7 +282,9 @@ func (r *CatalogRepository) applyModelDiscoveryCache(provider *catalog.Provider)
 		if _, exists := configuredCodes[model.Code]; exists {
 			continue
 		}
-		provider.Models = append(provider.Models, cloneModel(model))
+		cachedModel := cloneModel(model)
+		cachedModel.Cached = true
+		provider.Models = append(provider.Models, cachedModel)
 		provider.ModelsCached = true
 	}
 }
@@ -380,6 +384,12 @@ func normalizeModels(provider *catalog.Provider) {
 		if provider.Models[index].MaxOutputTokens <= 0 {
 			provider.Models[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		}
+	}
+}
+
+func clearCachedModelMarkers(provider *catalog.Provider) {
+	for index := range provider.Models {
+		provider.Models[index].Cached = false
 	}
 }
 

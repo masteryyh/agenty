@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
@@ -28,6 +29,15 @@ func main() {
 func run() (exitCode int) {
 	if _, err := config.Init(); err != nil {
 		fmt.Fprintln(os.Stderr, "agenty-core: failed to initialize config:", err)
+		return 1
+	}
+	dataDir, err := filepath.Abs(config.Get().Paths().DataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "agenty-core: failed to resolve data directory:", err)
+		return 1
+	}
+	if err := os.Setenv(config.EnvDataDir, dataDir); err != nil {
+		fmt.Fprintln(os.Stderr, "agenty-core: failed to set data directory environment:", err)
 		return 1
 	}
 
@@ -59,7 +69,7 @@ func run() (exitCode int) {
 		}
 	}()
 
-	slog.InfoContext(ctx, "agenty-core started", "dataDir", config.Get().Paths().DataDir)
+	slog.InfoContext(ctx, "agenty-core started", "dataDir", dataDir)
 	toolRegistry := agentloop.NewRegistry()
 	if err := builtin.RegisterAll(toolRegistry); err != nil {
 		slog.ErrorContext(ctx, "failed to register built-in tools", "error", err)
