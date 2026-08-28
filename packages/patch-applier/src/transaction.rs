@@ -69,10 +69,9 @@ impl Transaction {
                 } else {
                     apply_update_diff(&current.data, &operation.diff)?
                 };
-                self.state.insert(
-                    operation.path.clone(),
-                    VirtualFile::regular(data, current.mode),
-                );
+                let mut updated = VirtualFile::regular(data, current.mode);
+                updated.origin = current.origin.clone();
+                self.state.insert(operation.path.clone(), updated);
                 if let Some(destination) = operation.move_to {
                     self.move_file(&operation.path, &destination, operation.line)?;
                 }
@@ -102,6 +101,7 @@ impl Transaction {
             kind: snapshot.kind,
             data: snapshot.data.clone(),
             mode: snapshot.mode,
+            origin: (snapshot.kind == EntryKind::Regular).then(|| path.to_path_buf()),
         };
         self.original.insert(path.to_path_buf(), snapshot);
         self.state.insert(path.to_path_buf(), state);
@@ -226,6 +226,8 @@ impl Transaction {
         let mut staged = Vec::new();
         let mut installed = Vec::new();
         let mut backups = Vec::new();
+        let mut backup_by_path = HashMap::new();
+        let mut consumed_backups = HashSet::new();
         let mut created_dirs = Vec::new();
 
         let result = (|| -> Result<(), PatchError> {
@@ -233,6 +235,7 @@ impl Transaction {
                 if path_exists(&change.path)? {
                     let backup = backup_path(&change.path, &transaction_id)?;
                     fs::rename(&change.path, &backup)?;
+                    backup_by_path.insert(change.path.clone(), backup.clone());
                     backups.push((change.path.clone(), backup));
                 }
             }
@@ -241,37 +244,111 @@ impl Transaction {
                 if let Some(file) = &change.after {
                     let parent = change.path.parent().unwrap_or(&self.cwd);
                     created_dirs.extend(create_missing_dirs(parent)?);
-                    let temp = parent.join(format!(".{transaction_id}.stage"));
-                    let temp = unique_path(&temp)?;
-                    let mut output = OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&temp)?;
-                    output.write_all(&file.data)?;
-                    output.flush()?;
-                    set_mode(&output, file.mode)?;
-                    output.sync_all()?;
-                    staged.push((change.path.clone(), temp));
+                    // Reuse the source inode for moves so ACLs, xattrs, ownership,
+                    // and other filesystem metadata follow the moved file.
+                    if let Some(origin) = file.origin.as_ref().filter(|origin| {
+                        origin.as_path() != change.path.as_path()
+                            && backup_by_path.contains_key(*origin)
+                    }) {
+                        if !consumed_backups.insert(origin.clone()) {
+                            return Err(PatchError::Conflict(format!(
+                                "multiple files reuse the backup for {}",
+                                origin.display()
+                            )));
+                        }
+                        let backup = backup_by_path.get(origin).ok_or_else(|| {
+                            PatchError::Invalid(format!(
+                                "missing backup for metadata source {}",
+                                origin.display()
+                            ))
+                        })?;
+                        let original = self.original.get(origin).ok_or_else(|| {
+                            PatchError::Invalid(format!(
+                                "missing original snapshot for metadata source {}",
+                                origin.display()
+                            ))
+                        })?;
+                        let rewritten = file.data != original.data || file.mode != original.mode;
+                        staged.push(StagedFile::Backup {
+                            path: change.path.clone(),
+                            origin: origin.clone(),
+                            backup: backup.clone(),
+                            rewritten,
+                        });
+                        if rewritten {
+                            rewrite_file(backup, file)?;
+                        }
+                    } else {
+                        let temp = parent.join(format!(".{transaction_id}.stage"));
+                        let temp = unique_path(&temp)?;
+                        staged.push(StagedFile::Temporary {
+                            path: change.path.clone(),
+                            temp: temp.clone(),
+                        });
+                        let mut output = OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&temp)?;
+                        output.write_all(&file.data)?;
+                        output.flush()?;
+                        set_mode(&output, file.mode)?;
+                        output.sync_all()?;
+                    }
                 }
             }
 
-            for (path, temp) in &staged {
-                fs::rename(temp, path)?;
-                installed.push(path.clone());
+            for stage in &staged {
+                match stage {
+                    StagedFile::Temporary { path, temp } => {
+                        fs::rename(temp, path)?;
+                        installed.push(InstalledFile::Temporary { path: path.clone() });
+                    }
+                    StagedFile::Backup { path, backup, .. } => {
+                        fs::rename(backup, path)?;
+                        installed.push(InstalledFile::Backup {
+                            path: path.clone(),
+                            backup: backup.clone(),
+                        });
+                    }
+                }
             }
             sync_parent_directories(&changes)?;
             Ok(())
         })();
 
         if result.is_err() {
-            for path in installed.iter().rev() {
-                let _ = fs::remove_file(path);
+            for installed_file in installed.iter().rev() {
+                match installed_file {
+                    InstalledFile::Temporary { path } => {
+                        let _ = fs::remove_file(path);
+                    }
+                    InstalledFile::Backup { path, backup } => {
+                        let _ = fs::rename(path, backup);
+                    }
+                }
+            }
+            for stage in &staged {
+                match stage {
+                    StagedFile::Temporary { temp, .. } => {
+                        let _ = fs::remove_file(temp);
+                    }
+                    StagedFile::Backup {
+                        origin,
+                        backup,
+                        rewritten,
+                        ..
+                    } => {
+                        if *rewritten {
+                            if let Some(original) = self.original.get(origin) {
+                                let _ =
+                                    rewrite_file_contents(backup, &original.data, original.mode);
+                            }
+                        }
+                    }
+                }
             }
             for (path, backup) in backups.iter().rev() {
                 let _ = fs::rename(backup, path);
-            }
-            for temp in staged.iter().map(|(_, temp)| temp) {
-                let _ = fs::remove_file(temp);
             }
             for directory in &created_dirs {
                 let _ = fs::remove_dir(directory);
@@ -328,6 +405,59 @@ impl Transaction {
 struct Change {
     path: PathBuf,
     after: Option<VirtualFile>,
+}
+
+enum StagedFile {
+    Temporary {
+        path: PathBuf,
+        temp: PathBuf,
+    },
+    Backup {
+        path: PathBuf,
+        origin: PathBuf,
+        backup: PathBuf,
+        rewritten: bool,
+    },
+}
+
+enum InstalledFile {
+    Temporary { path: PathBuf },
+    Backup { path: PathBuf, backup: PathBuf },
+}
+
+fn rewrite_file(path: &Path, file: &VirtualFile) -> Result<(), PatchError> {
+    rewrite_file_contents(path, &file.data, file.mode)
+}
+
+fn rewrite_file_contents(path: &Path, data: &[u8], mode: u32) -> Result<(), PatchError> {
+    let mut output = match OpenOptions::new().write(true).open(path) {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            make_writable(path, mode)?;
+            OpenOptions::new().write(true).open(path)?
+        }
+        Err(error) => return Err(error.into()),
+    };
+    output.set_len(0)?;
+    output.write_all(data)?;
+    output.flush()?;
+    set_mode(&output, mode)?;
+    output.sync_all()?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn make_writable(path: &Path, mode: u32) -> Result<(), PatchError> {
+    use std::os::unix::fs::PermissionsExt;
+    if mode & 0o200 == 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode((mode | 0o600) & 0o7777))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn make_writable(_path: &Path, _mode: u32) -> Result<(), PatchError> {
+    Ok(())
 }
 
 #[cfg(unix)]

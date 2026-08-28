@@ -91,6 +91,7 @@ struct VirtualFile {
     kind: EntryKind,
     data: Vec<u8>,
     mode: u32,
+    origin: Option<PathBuf>,
 }
 
 impl VirtualFile {
@@ -99,6 +100,7 @@ impl VirtualFile {
             kind: EntryKind::Missing,
             data: Vec::new(),
             mode: 0,
+            origin: None,
         }
     }
 
@@ -107,6 +109,7 @@ impl VirtualFile {
             kind: EntryKind::Regular,
             data,
             mode,
+            origin: None,
         }
     }
 }
@@ -853,6 +856,50 @@ mod tests {
         apply_patch(&cwd, patch).unwrap();
         assert!(!cwd.join("old.txt").exists());
         assert_eq!(fs::read_to_string(cwd.join("new.txt")).unwrap(), "three\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn moves_file_by_reusing_the_source_inode_and_metadata() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let cwd = temp_dir("move-metadata");
+        let source = cwd.join("old.txt");
+        let destination = cwd.join("new.txt");
+        fs::write(&source, "one\n").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o751)).unwrap();
+        let source_metadata = fs::metadata(&source).unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n-one\n+two\n*** End Patch";
+        apply_patch(&cwd, patch).unwrap();
+
+        let destination_metadata = fs::metadata(&destination).unwrap();
+        assert_eq!(destination_metadata.ino(), source_metadata.ino());
+        assert_eq!(MetadataExt::mode(&destination_metadata) & 0o7777, 0o751);
+        assert_eq!(fs::read_to_string(destination).unwrap(), "two\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restores_a_moved_inode_when_later_staging_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cwd = temp_dir("move-staging-failure");
+        let source = cwd.join("old.txt");
+        let destination = cwd.join("new.txt");
+        fs::write(&source, "one").unwrap();
+        let blocked = cwd.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n-one\n+two\n*** Add File: blocked/child.txt\n+child\n*** End Patch";
+        let error = apply_patch(&cwd, patch).unwrap_err();
+
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(error.to_string().contains("Permission denied"));
+        assert_eq!(fs::read_to_string(source).unwrap(), "one");
+        assert!(!destination.exists());
+        assert!(!blocked.join("child.txt").exists());
     }
 
     #[test]
