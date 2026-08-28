@@ -210,7 +210,8 @@ type openRouterModel struct {
 }
 
 type openRouterArchitecture struct {
-	InputModalities []string `json:"input_modalities"`
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
 }
 
 type openRouterTopProvider struct {
@@ -228,8 +229,13 @@ func (l *Lister) listOpenAICompatible(ctx context.Context, provider catalog.Prov
 		return nil, err
 	}
 
+	isOpenRouter := provider.Code.String() == "openrouter"
 	models := make([]catalog.AvailableModel, 0, len(response.Data))
 	for index, item := range response.Data {
+		if isOpenRouter && !slices.Contains(item.Architecture.OutputModalities, "text") {
+			continue
+		}
+
 		contextWindow := item.ContextLength
 		if contextWindow <= 0 {
 			contextWindow = item.TopProvider.ContextLength

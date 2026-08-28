@@ -131,11 +131,25 @@ func TestListerOpenRouterFieldsAndReasoning(t *testing.T) {
 					"id":             "openai/gpt-test",
 					"name":           "",
 					"context_length": 128000,
-					"architecture":   map[string]any{"input_modalities": []string{"text", "image"}},
-					"top_provider":   map[string]any{"max_completion_tokens": 32768},
-					"reasoning":      map[string]any{"supported_efforts": []string{"high", "minimal", "low"}},
+					"architecture": map[string]any{
+						"input_modalities":  []string{"text", "image"},
+						"output_modalities": []string{"text"},
+					},
+					"top_provider": map[string]any{"max_completion_tokens": 32768},
+					"reasoning":    map[string]any{"supported_efforts": []string{"high", "minimal", "low"}},
 				},
-				{"id": "plain-model"},
+				{
+					"id": "embed-model",
+					"architecture": map[string]any{
+						"output_modalities": []string{"embeddings"},
+					},
+				},
+				{
+					"id": "image-model",
+					"architecture": map[string]any{
+						"output_modalities": []string{"image"},
+					},
+				},
 			},
 		}
 		if err := json.NewEncoder(w).Encode(payload); err != nil {
@@ -153,7 +167,7 @@ func TestListerOpenRouterFieldsAndReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(models) != 2 {
+	if len(models) != 1 {
 		t.Fatalf("models = %#v", models)
 	}
 	if models[0].Name != "openai/gpt-test" || models[0].ContextWindow != 128000 || models[0].MaxOutputTokens != 32768 || !models[0].MultiModal {
@@ -162,14 +176,11 @@ func TestListerOpenRouterFieldsAndReasoning(t *testing.T) {
 	if !reflect.DeepEqual(models[0].ReasoningEfforts, []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh}) {
 		t.Errorf("first reasoning efforts = %#v", models[0].ReasoningEfforts)
 	}
-	if models[1].ContextWindow != catalog.DefaultAvailableModelContextWindow || models[1].MaxOutputTokens != catalog.DefaultAvailableModelMaxOutputTokens || len(models[1].ReasoningEfforts) != 0 {
-		t.Errorf("second model = %#v", models[1])
-	}
 }
 
 func TestListerOpenRouterNullReasoningMeansAllStandardEfforts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-model","reasoning":{"supported_efforts":null}}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-model","architecture":{"output_modalities":["text"]},"reasoning":{"supported_efforts":null}}]}`))
 	}))
 	defer server.Close()
 
