@@ -3,10 +3,11 @@
 ## Project overview
 
 Agenty is a local-first AI agent application organized as a pnpm + Turborepo monorepo.
-The active product path has three workspaces:
+The active product path has four workspaces:
 
 - `packages/agenty-core`: Go 1.26 core process and stdio JSON-RPC 2.0 server.
 - `packages/agenty-cli`: Bun/TypeScript/React OpenTUI client.
+- `packages/patch-applier`: Rust V4A parser and transactional filesystem patch helper.
 - `packages/agenty-bootstrap`: Rust self-extracting launcher.
 
 The CLI starts core as a child process and communicates only through NDJSON messages on
@@ -45,7 +46,9 @@ Core data is local-first:
 - Config: `~/.agenty/config.json`
 - Sessions: append-only JSONL under `~/.agenty/sessions/`
 - Session projection: `~/.agenty/agenty.sqlite`
-- Providers/models: `~/.agenty/providers/<provider-code>.json` (models embedded)
+- Built-in providers/models: embedded in the core binary; custom providers use
+  `~/.agenty/providers/<provider-code>.json`, while built-in provider files contain
+  only the API key.
 - Agents: `~/.agenty/agents/`
 - Logs: `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log`
 
@@ -79,17 +82,17 @@ and breaks terminal capability handshakes.
 
 The bootstrap artifact layout is:
 
-`[bootstrap stub][xz CLI][xz core][108-byte footer]`
+`[bootstrap stub][xz CLI][xz core][xz apply_patch][156-byte footer]`
 
-The footer stores offsets, lengths, and SHA3-256 digests of decompressed payloads.
+The footer stores offsets, lengths, and SHA3-256 digests of the three decompressed payloads.
 `src/lib.rs` and `scripts/footer.ts` are one wire contract; changing the layout requires
 updating both golden tests and incrementing `FORMAT_VERSION`. Compression uses
 `@napi-rs/lzma`; Rust decompression uses statically linked vendored liblzma. Code signing
 must happen after payload packing.
 
 pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun builds the
-CLI and packs payloads, Go builds core, and Cargo builds the launcher. Do not add an npm
-`workspaces` field. The dependency graph builds core, then CLI, then bootstrap.
+CLI and packs payloads, Go builds core, and Cargo builds the patch helper and launcher. Do not add an npm
+`workspaces` field. The dependency graph builds the patch helper before core, then CLI and bootstrap.
 
 Root `.env` is the single `AGENTY_VERSION` source and stays ignored; only
 `.env.example` is committed. Release CI passes target-specific `GOOS`, `GOARCH`, `CC`,

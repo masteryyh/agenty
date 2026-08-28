@@ -1,9 +1,11 @@
 import type { AgentyClient } from "@/api/client";
+import { formatModelRef } from "@/api/modelReference";
 import type { APIType } from "@/api/types";
 
 import {
     CliError,
     flag,
+    hasFlag,
     outputFields,
     type ParsedArgs,
     render,
@@ -19,34 +21,45 @@ export async function handleInit(client: AgentyClient, args: ParsedArgs): Promis
     const agentCode = flag(args, "agent")?.trim() || "default";
     const contextWindow = positiveInteger(flag(args, "context-window") ?? "128000", "--context-window");
     const apiKey = secret(args, "api-key", "api-key-env", "provider API key") ?? "";
+    const apiKeyProvided = hasFlag(args, "api-key") || hasFlag(args, "api-key-env");
+    const providers = await client.listProviders();
+    const existingProvider = providers.find((provider) => provider.code === providerCode);
+    const existingModel = existingProvider?.models.find((model) => model.code === modelCode);
+    const effectiveContextWindow = existingModel?.contextWindow ?? contextWindow;
 
-    await client.createProvider({
-        code: providerCode,
-        name: flag(args, "provider-name")?.trim() || providerCode,
-        type: requireFlag(args, "type") as APIType,
-        baseUrl: flag(args, "base-url")?.trim() || "",
-        apiKey,
-    });
-    await client.createModel({
-        providerCode,
-        modelCode,
-        name: flag(args, "model-name")?.trim() || modelCode,
-        contextWindow,
-        isDefault: true,
-    });
+    if (existingProvider?.builtin) {
+        if (apiKeyProvided) {
+            await client.updateProvider(providerCode, { apiKey });
+        }
+    } else {
+        await client.createProvider({
+            code: providerCode,
+            name: flag(args, "provider-name")?.trim() || providerCode,
+            type: requireFlag(args, "type") as APIType,
+            baseUrl: flag(args, "base-url")?.trim() || "",
+            apiKey,
+        });
+        await client.createModel({
+            providerCode,
+            modelCode,
+            name: flag(args, "model-name")?.trim() || modelCode,
+            contextWindow,
+            isDefault: true,
+        });
+    }
     await client.createAgent({
         code: agentCode,
         name: flag(args, "agent-name")?.trim() || agentCode,
         soul: flag(args, "soul") ?? "",
         defaultModel: { providerCode, modelCode },
-        defaultContextWindow: contextWindow,
+        defaultContextWindow: effectiveContextWindow,
         isDefault: true,
     });
     const result = await client.completeInitialization({ agentCode, providerCode, modelCode });
     render(args, result, () => outputFields([
         ["Initialized", String(result.initialized)],
         ["Provider", providerCode],
-        ["Model", `${providerCode}/${modelCode}`],
+        ["Model", formatModelRef({ providerCode, modelCode })],
         ["Agent", agentCode],
     ]));
 }

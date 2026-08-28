@@ -15,9 +15,6 @@ func RegisterAll(registry *agentloop.Registry) error {
 	tools := []agentloop.Tool{
 		&shellTool{},
 		&readFileTool{fileSystem: fileSystem},
-		&writeFileTool{fileSystem: fileSystem},
-		&patchFileTool{fileSystem: fileSystem},
-		&deleteFileTool{fileSystem: fileSystem},
 		&applyPatchTool{fileSystem: fileSystem},
 		&grepTool{fileSystem: fileSystem},
 		&globTool{fileSystem: fileSystem},

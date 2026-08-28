@@ -10,7 +10,8 @@ import { encodeFooter, FOOTER_SIZE } from "./footer";
 const GOLDEN_FOOTER_HEX =
     "88776655443322110807060504030201000102030405060708090a0b0c0d0e0f" +
     "101112131415161718191a1b1c1d1e1f1122334455667788010203040506070820212223242526" +
-    "2728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f01000000cafebabe10136666";
+    "2728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f08090a0b0c0d0e0f1011121314151617" +
+    "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f02000000cafebabe10136666";
 
 function toHex(bytes: Uint8Array): string {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -29,6 +30,11 @@ describe("encodeFooter", () => {
                 len: 0x0807060504030201n,
                 sha3_256: Uint8Array.from({ length: 32 }, (_, i) => 0x20 + i),
             },
+            {
+                offset: 0x0f0e0d0c0b0a0908n,
+                len: 0x1716151413121110n,
+                sha3_256: Uint8Array.from({ length: 32 }, (_, i) => 0x40 + i),
+            },
         );
 
         expect(footer.length).toBe(FOOTER_SIZE);
@@ -37,6 +43,6 @@ describe("encodeFooter", () => {
 
     test("rejects non-32-byte digests", () => {
         const spec = { offset: 0n, len: 0n, sha3_256: new Uint8Array(31) };
-        expect(() => encodeFooter(spec, spec)).toThrow("32 bytes");
+        expect(() => encodeFooter(spec, spec, spec)).toThrow("32 bytes");
     });
 });

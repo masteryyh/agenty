@@ -43,6 +43,9 @@ type Paths struct {
 	// ProvidersDir is DataDir/providers, where provider directories live.
 	ProvidersDir string
 
+	// LocksDir is DataDir/locks, where apply_patch transaction locks live.
+	LocksDir string
+
 	// DatabaseFile is DataDir/agenty.sqlite.
 	DatabaseFile string
 }

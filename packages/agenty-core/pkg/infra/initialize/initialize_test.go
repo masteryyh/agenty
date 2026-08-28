@@ -27,6 +27,35 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	defer repos.Close()
 
 	ctx := context.Background()
+	builtinProviders, err := repos.Catalog.List(ctx)
+	if err != nil {
+		t.Fatalf("List built-in providers: %v", err)
+	}
+	if len(builtinProviders) != 5 {
+		t.Fatalf("built-in providers = %d, want 5", len(builtinProviders))
+	}
+	openRouter, err := repos.Catalog.Get(ctx, mustCode("openrouter"))
+	if err != nil {
+		t.Fatalf("Get OpenRouter provider: %v", err)
+	}
+	if openRouter.Models == nil || len(openRouter.Models) != 0 {
+		t.Fatalf("OpenRouter embedded models = %#v, want empty", openRouter.Models)
+	}
+	builtin, err := repos.Catalog.Get(ctx, mustCode("openai_legacy"))
+	if err != nil {
+		t.Fatalf("Get built-in provider: %v", err)
+	}
+	builtin.APIKey = "secret"
+	if err := repos.Catalog.Save(ctx, builtin); err != nil {
+		t.Fatalf("Save built-in API key: %v", err)
+	}
+	credentialData, err := os.ReadFile(filepath.Join(tmpDir, "providers", "openai_legacy.json"))
+	if err != nil {
+		t.Fatalf("read built-in credentials: %v", err)
+	}
+	if string(credentialData) != "{\n  \"apiKey\": \"secret\"\n}" {
+		t.Fatalf("built-in credentials = %s", credentialData)
+	}
 
 	// Directory structure, config and SQLite database were created.
 	for _, dir := range []string{"sessions", "agents", "providers"} {
@@ -45,7 +74,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	}
 
 	// Create and persist the catalog and an agent with its default session model.
-	provider, err := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
+	provider, err := catalog.NewProvider("integration-anthropic", "Anthropic", catalog.APIAnthropic)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,70 +1,259 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { APIType, ModelProviderDto, UpdateModelProviderDto } from "../api/types";
+import type {
+    APIType,
+    CoreModelDto,
+    CreateModelDto,
+    ModelProviderDto,
+    ReasoningEffort,
+    UpdateModelDto,
+    UpdateModelProviderDto,
+} from "../api/types";
+import { STANDARD_REASONING_EFFORTS } from "../api/types";
 import { providerDefaultBaseURLs, providerTypes } from "../consts/providerTypes";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { FormField } from "./FormPanel";
 import { FormPanel } from "./FormPanel";
+import { List, useListNavigation } from "./List";
+import { Panel } from "./Panel";
+import {
+    buildProviderRows,
+    defaultExpandedProviderCodes,
+    type ProviderListRow,
+    type ProviderRowEnterAction,
+    providerRowEnterAction,
+    providerRowLabel,
+    providerRowState,
+    shouldExpandProvider,
+} from "./providerRows";
+import {
+    createTableLayout,
+    type TableColumn,
+    TableHeader,
+    TableRow,
+} from "./Table";
 import { Box, Spinner, Text } from "./ui";
 
-const PROVIDER_TYPE_OPTIONS = providerTypes.map((t) => ({ label: t, value: t }));
+const PROVIDER_TYPE_OPTIONS = providerTypes.map((type) => ({ label: type, value: type }));
 
-function buildCreateFields(formType: string): FormField[] {
+function buildCreateProviderFields(formType: string): FormField[] {
     const baseUrl = providerDefaultBaseURLs[formType] ?? "";
     return [
-        { key: "code", label: "Provider Code", kind: "text" as const, value: "", placeholder: "my-provider" },
-        { key: "name", label: "Name", kind: "text" as const, value: "", placeholder: "my-provider" },
-        { key: "type", label: "Type", kind: "select" as const, value: formType, options: PROVIDER_TYPE_OPTIONS },
-        { key: "baseUrl", label: "Base URL", kind: "text" as const, value: baseUrl },
-        { key: "apiKey", label: "API Key", kind: "text" as const, value: "", placeholder: "sk-...", secret: true },
+        { key: "code", label: "Provider Code", kind: "text", value: "", placeholder: "my-provider" },
+        { key: "name", label: "Name", kind: "text", value: "", placeholder: "my-provider" },
+        { key: "type", label: "Type", kind: "select", value: formType, options: PROVIDER_TYPE_OPTIONS },
+        { key: "baseUrl", label: "Base URL", kind: "text", value: baseUrl },
+        {
+            key: "freeFormTool",
+            label: "Free-form apply_patch",
+            kind: "boolean",
+            value: "false",
+            visible: formType === "openai",
+        },
+        { key: "apiKey", label: "API Key", kind: "text", value: "", placeholder: "sk-...", secret: true },
     ];
 }
 
-function buildEditFields(target: ModelProviderDto): FormField[] {
+type ProviderFormMode = "edit" | "configure";
+
+export function buildProviderFields(
+    target: ModelProviderDto,
+    mode: ProviderFormMode,
+): FormField[] {
+    const configuringBuiltin = mode === "configure";
     return [
-        { key: "code", label: "Provider Code", kind: "text" as const, value: target.code, readOnly: true },
-        { key: "name", label: "Name", kind: "text" as const, value: target.name, placeholder: target.name },
-        { key: "type", label: "Type", kind: "select" as const, value: target.type, options: PROVIDER_TYPE_OPTIONS },
-        { key: "baseUrl", label: "Base URL", kind: "text" as const, value: target.baseUrl },
-        { key: "apiKey", label: "API Key", kind: "text" as const, value: "", placeholder: "leave blank to keep", secret: true },
+        {
+            key: "code",
+            label: "Provider Code",
+            kind: "text",
+            value: target.code,
+            readOnly: true,
+            focusable: !configuringBuiltin,
+        },
+        {
+            key: "name",
+            label: "Name",
+            kind: "text",
+            value: target.name,
+            readOnly: configuringBuiltin,
+            focusable: !configuringBuiltin,
+        },
+        {
+            key: "type",
+            label: "Type",
+            kind: "select",
+            value: target.type,
+            options: PROVIDER_TYPE_OPTIONS,
+            readOnly: configuringBuiltin,
+            focusable: !configuringBuiltin,
+        },
+        {
+            key: "baseUrl",
+            label: "Base URL",
+            kind: "text",
+            value: target.baseUrl,
+            readOnly: configuringBuiltin,
+            focusable: !configuringBuiltin,
+        },
+        {
+            key: "apiKey",
+            label: "API Key",
+            kind: "text",
+            value: "",
+            placeholder: "leave blank to keep",
+            secret: true,
+        },
+        {
+            key: "freeFormTool",
+            label: "Free-form apply_patch",
+            kind: "boolean",
+            value: String(target.freeFormTool === true),
+            readOnly: configuringBuiltin || target.type !== "openai",
+            focusable: !configuringBuiltin && target.type === "openai",
+            visible: target.type === "openai",
+        },
     ];
 }
 
-function trunc(s: string, width: number): string {
-    if (width <= 0) {
-        return "";
-    }
-    if (s.length <= width) {
-        return s;
-    }
-    if (width === 1) {
-        return "\u2026";
-    }
-    return s.slice(0, width - 1) + "\u2026";
+export function buildBuiltinProviderUpdate(
+    values: Record<string, string>,
+): UpdateModelProviderDto | null {
+    const apiKey = values.apiKey?.trim() ?? "";
+    return apiKey ? { apiKey } : null;
 }
 
-function pad(s: string, width: number): string {
-    const clipped = trunc(s, width);
-    return clipped + " ".repeat(Math.max(width - clipped.length, 0));
+const reasoningOptions = STANDARD_REASONING_EFFORTS.map((effort) => ({ label: effort, value: effort }));
+
+export function buildCreateModelFields(advancedOpen: boolean): FormField[] {
+    return [
+        { key: "code", label: "Model Code", kind: "text", value: "", placeholder: "model-code or org/model-code" },
+        { key: "name", label: "Model name", kind: "text", value: "", placeholder: "Model name" },
+        { key: "contextWindow", label: "Context window", kind: "text", value: "128000", placeholder: "128000" },
+        { key: "multiModal", label: "Multimodal", kind: "boolean", value: "false" },
+        { key: "light", label: "Light model", kind: "boolean", value: "false" },
+        { key: "reasoning", label: "Reasoning", kind: "boolean", value: "true" },
+        { key: "advanced", label: "Advanced options", kind: "disclosure", value: String(advancedOpen) },
+        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: "8192", placeholder: "8192", visible: advancedOpen },
+        { key: "reasoningEfforts", label: "Supported reasoning efforts", kind: "multiselect", value: JSON.stringify(STANDARD_REASONING_EFFORTS), options: reasoningOptions, visible: advancedOpen },
+    ];
+}
+
+function buildModelFields(
+    model: CoreModelDto,
+    readOnly: boolean,
+    advancedOpen: boolean,
+): FormField[] {
+    return [
+        { key: "code", label: "Model Code", kind: "text", value: model.code, readOnly: true },
+        { key: "name", label: "Model name", kind: "text", value: model.name, readOnly },
+        {
+            key: "contextWindow",
+            label: "Context window",
+            kind: "text",
+            value: String(model.contextWindow),
+            readOnly,
+        },
+        { key: "multiModal", label: "Multimodal", kind: "boolean", value: String(model.multiModal), readOnly },
+        { key: "light", label: "Light model", kind: "boolean", value: String(model.light), readOnly },
+        {
+            key: "reasoning",
+            label: "Reasoning",
+            kind: "boolean",
+            value: String(model.reasoning === true || (model.reasoningEfforts ?? []).length > 0),
+            readOnly,
+        },
+        { key: "advanced", label: "Advanced options", kind: "disclosure", value: String(advancedOpen) },
+        { key: "maxOutputTokens", label: "Max output tokens", kind: "text", value: String(model.maxOutputTokens), readOnly, visible: advancedOpen },
+        { key: "reasoningEfforts", label: "Supported reasoning efforts", kind: "multiselect", value: JSON.stringify(model.reasoningEfforts ?? []), options: reasoningOptions, readOnly, visible: advancedOpen },
+    ];
+}
+
+export function parseModelValues(values: Record<string, string>): CreateModelDto | string {
+    const modelCode = values.code?.trim() ?? "";
+    const name = values.name?.trim() ?? "";
+    const contextWindow = Number(values.contextWindow);
+    const maxOutputTokens = Number(values.maxOutputTokens || "8192");
+    let reasoningEfforts: ReasoningEffort[] = [];
+    try {
+        const parsed: unknown = JSON.parse(values.reasoningEfforts || "[]");
+        if (Array.isArray(parsed)) {
+            reasoningEfforts = parsed.filter((value): value is ReasoningEffort =>
+                typeof value === "string" && (STANDARD_REASONING_EFFORTS as readonly string[]).includes(value),
+            );
+        }
+    } catch {
+        reasoningEfforts = [];
+    }
+    if (!modelCode) {
+        return "Model Code is required.";
+    }
+    if (!name) {
+        return "Model name is required.";
+    }
+    if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+        return "Context window must be a positive integer.";
+    }
+    if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
+        return "Max output tokens must be a positive integer.";
+    }
+    const reasoning = values.reasoning === "true";
+    return {
+        providerCode: "",
+        modelCode,
+        name,
+        contextWindow,
+        maxOutputTokens,
+        multiModal: values.multiModal === "true",
+        light: values.light === "true",
+        reasoning,
+        reasoningEfforts: reasoning ? reasoningEfforts : [],
+    };
+}
+
+export function buildModelUpdate(target: CoreModelDto, input: CreateModelDto): UpdateModelDto {
+    return {
+        name: input.name,
+        contextWindow: input.contextWindow,
+        maxOutputTokens: input.maxOutputTokens,
+        multiModal: input.multiModal,
+        light: input.light,
+        reasoning: input.reasoning,
+        reasoningEfforts: input.reasoningEfforts,
+        isDefault: target.isDefault,
+    };
 }
 
 type Mode =
     | { kind: "list" }
-    | { kind: "create" }
-    | { kind: "edit"; target: ModelProviderDto }
-    | { kind: "confirm-delete"; target: ModelProviderDto };
+    | { kind: "create-provider" }
+    | { kind: "edit-provider"; target: ModelProviderDto }
+    | { kind: "configure-provider"; target: ModelProviderDto }
+    | { kind: "confirm-delete-provider"; target: ModelProviderDto }
+    | { kind: "create-model"; provider: ModelProviderDto }
+    | { kind: "edit-model"; provider: ModelProviderDto; target: CoreModelDto }
+    | { kind: "view-model"; provider: ModelProviderDto; target: CoreModelDto }
+    | { kind: "confirm-delete-model"; provider: ModelProviderDto; target: CoreModelDto };
+
+function errorMessage(cause: unknown): string {
+    return cause instanceof Error ? cause.message : String(cause);
+}
 
 export function ProviderOverlay() {
-    const client = useAppStore((s) => s.client);
-    const setToast = useAppStore((s) => s.setToast);
-    const setOverlay = useAppStore((s) => s.setOverlay);
-
+    const client = useAppStore((state) => state.client);
+    const setToast = useAppStore((state) => state.setToast);
+    const setOverlay = useAppStore((state) => state.setOverlay);
     const [providers, setProviders] = useState<ModelProviderDto[] | null>(null);
-    const [cursor, setCursor] = useState(0);
     const [mode, setMode] = useState<Mode>({ kind: "list" });
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+    const [expandedProviderCodes, setExpandedProviderCodes] = useState<Set<string>>(new Set());
+    const [advancedModelOptions, setAdvancedModelOptions] = useState(false);
+    const [formType, setFormType] = useState<string>(providerTypes[0]);
     const modeRef = useRef(mode);
+    const expansionInitializedRef = useRef(false);
+    const previousProviderCodesRef = useRef<Set<string>>(new Set());
     modeRef.current = mode;
 
     const reload = useCallback(async () => {
@@ -74,9 +263,31 @@ export function ProviderOverlay() {
         try {
             const list = await client.listProviders();
             setProviders(list);
-            setCursor((c) => Math.min(c, Math.max(list.length - 1, 0)));
-        } catch (e) {
-            setToast(`failed to load providers: ${(e as Error).message}`, true);
+            const providerCodes = new Set(list.map((provider) => provider.code));
+            setExpandedProviderCodes((current) => {
+                if (!expansionInitializedRef.current) {
+                    expansionInitializedRef.current = true;
+                    previousProviderCodesRef.current = providerCodes;
+                    return defaultExpandedProviderCodes(list);
+                }
+                const next = new Set(
+                    list
+                        .filter((provider) => current.has(provider.code))
+                        .map((provider) => provider.code),
+                );
+                for (const provider of list) {
+                    if (
+                        !previousProviderCodesRef.current.has(provider.code) &&
+                        shouldExpandProvider(provider)
+                    ) {
+                        next.add(provider.code);
+                    }
+                }
+                previousProviderCodesRef.current = providerCodes;
+                return next;
+            });
+        } catch (cause: unknown) {
+            setToast(`failed to load providers: ${errorMessage(cause)}`, true);
             setProviders([]);
         }
     }, [client, setToast]);
@@ -85,322 +296,447 @@ export function ProviderOverlay() {
         void reload();
     }, [reload]);
 
-    // track provider type for auto baseUrl
-    const [formType, setFormType] = useState<string>(providerTypes[0]);
-
-    const close = () => setOverlay(null);
-
-    // Top-level input handler — ensures empty / loading list states respond to keyboard.
-    useInput((input, key) => {
-        if (modeRef.current.kind !== "list") {
-            return;
-        }
-        if (providers !== null && providers.length > 0) {
-            return;
-        }
-        if (key.escape) {
-            close();
-            return;
-        }
-        if (input === "a") {
-            setMode({ kind: "create" });
-            return;
+    useInput((_input, key) => {
+        if (modeRef.current.kind === "list" && providers === null && key.escape) {
+            setOverlay(null);
         }
     });
 
-    const handleCreate = async (values: Record<string, string>) => {
+    const close = () => setOverlay(null);
+    const returnToList = () => setMode({ kind: "list" });
+
+    const openAction = (action: ProviderRowEnterAction) => {
+        switch (action.kind) {
+            case "configure-provider":
+                setMode({ kind: "configure-provider", target: action.provider });
+                return;
+            case "edit-provider":
+                setMode({ kind: "edit-provider", target: action.provider });
+                return;
+            case "view-model":
+                setAdvancedModelOptions(false);
+                setMode({ kind: "view-model", provider: action.provider, target: action.model });
+                return;
+            case "edit-model":
+                setAdvancedModelOptions(false);
+                setMode({ kind: "edit-model", provider: action.provider, target: action.model });
+                return;
+            case "add-provider":
+                setFormType(providerTypes[0]);
+                setMode({ kind: "create-provider" });
+                return;
+            case "add-model":
+                setAdvancedModelOptions(false);
+                setMode({ kind: "create-model", provider: action.provider });
+                return;
+            case "none":
+                return;
+        }
+    };
+
+    const toggleProvider = (providerCode: string, expanded: boolean) => {
+        setExpandedProviderCodes((current) => {
+            const next = new Set(current);
+            if (expanded) {
+                next.add(providerCode);
+            } else {
+                next.delete(providerCode);
+            }
+            return next;
+        });
+    };
+
+    const handleCreateProvider = async (values: Record<string, string>) => {
         if (!client) {
             return;
         }
         try {
+            const type = values.type as APIType;
             await client.createProvider({
                 code: values.code.trim(),
                 name: values.name.trim(),
-                type: values.type as APIType,
+                type,
                 baseUrl: values.baseUrl.trim(),
-                apiKey: values.apiKey,
+                apiKey: values.apiKey.trim(),
+                freeFormTool: type === "openai" && values.freeFormTool === "true",
             });
             setToast(`Provider created: ${values.name.trim()}`);
             await reload();
-        } catch (e) {
-            setToast(`create failed: ${(e as Error).message}`, true);
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`create provider failed: ${errorMessage(cause)}`, true);
         }
-        setMode({ kind: "list" });
     };
 
-    const handleEdit = async (target: ModelProviderDto, values: Record<string, string>) => {
-        if (!client) {
+    const handleEditProvider = async (target: ModelProviderDto, values: Record<string, string>) => {
+        if (!client || target.builtin === true) {
+            returnToList();
             return;
         }
         try {
-            const dto: UpdateModelProviderDto = {
+            const type = values.type as APIType;
+            const update: UpdateModelProviderDto = {
                 name: values.name.trim(),
-                type: values.type as APIType,
+                type,
                 baseUrl: values.baseUrl.trim(),
+                freeFormTool: type === "openai" && values.freeFormTool === "true",
             };
-            if (values.apiKey && values.apiKey.trim() !== "") {
-                dto.apiKey = values.apiKey;
+            if (values.apiKey.trim()) {
+                update.apiKey = values.apiKey.trim();
             }
-            await client.updateProvider(target.code, dto);
+            await client.updateProvider(target.code, update);
             setToast(`Provider updated: ${values.name.trim()}`);
             await reload();
-        } catch (e) {
-            setToast(`update failed: ${(e as Error).message}`, true);
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`update provider failed: ${errorMessage(cause)}`, true);
         }
-        setMode({ kind: "list" });
     };
 
-    const handleDelete = async (target: ModelProviderDto) => {
-        if (!client) {
+    const handleConfigureProvider = async (
+        target: ModelProviderDto,
+        values: Record<string, string>,
+    ) => {
+        if (!client || target.builtin !== true) {
+            returnToList();
+            return;
+        }
+        const update = buildBuiltinProviderUpdate(values);
+        if (!update) {
+            returnToList();
+            return;
+        }
+        try {
+            await client.updateProvider(target.code, update);
+            setToast(`Provider API key updated: ${target.name}`);
+            await reload();
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`update provider API key failed: ${errorMessage(cause)}`, true);
+        }
+    };
+
+    const handleDeleteProvider = async (target: ModelProviderDto) => {
+        if (!client || target.builtin === true) {
+            returnToList();
             return;
         }
         try {
             await client.deleteProvider(target.code);
             setToast(`Provider deleted: ${target.name}`);
             await reload();
-        } catch (e) {
-            setToast(`delete failed: ${(e as Error).message}`, true);
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`delete provider failed: ${errorMessage(cause)}`, true);
         }
-        setMode({ kind: "list" });
     };
 
-    if (mode.kind === "create") {
+    const handleCreateModel = async (provider: ModelProviderDto, values: Record<string, string>) => {
+        if (!client || provider.builtin === true) {
+            returnToList();
+            return;
+        }
+        const parsed = parseModelValues(values);
+        if (typeof parsed === "string") {
+            setToast(parsed, true);
+            return;
+        }
+        try {
+            await client.createModel({ ...parsed, providerCode: provider.code });
+            setToast(`Model created: ${parsed.name}`);
+            await reload();
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`create model failed: ${errorMessage(cause)}`, true);
+        }
+    };
+
+    const handleEditModel = async (
+        provider: ModelProviderDto,
+        target: CoreModelDto,
+        values: Record<string, string>,
+    ) => {
+        if (!client || provider.builtin === true) {
+            returnToList();
+            return;
+        }
+        const parsed = parseModelValues(values);
+        if (typeof parsed === "string") {
+            setToast(parsed, true);
+            return;
+        }
+        try {
+            await client.updateModel(provider.code, target.code, buildModelUpdate(target, parsed));
+            setToast(`Model updated: ${parsed.name}`);
+            await reload();
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`update model failed: ${errorMessage(cause)}`, true);
+        }
+    };
+
+    const handleDeleteModel = async (provider: ModelProviderDto, target: CoreModelDto) => {
+        if (!client || provider.builtin === true) {
+            returnToList();
+            return;
+        }
+        try {
+            await client.deleteModel(provider.code, target.code);
+            setToast(`Model deleted: ${target.name || target.code}`);
+            await reload();
+            returnToList();
+        } catch (cause: unknown) {
+            setToast(`delete model failed: ${errorMessage(cause)}`, true);
+        }
+    };
+
+    if (mode.kind === "create-provider") {
         return (
             <FormPanel
                 title="Add Provider"
-                fields={buildCreateFields(formType)}
-                onChange={(key, allValues) => {
+                fields={buildCreateProviderFields(formType)}
+                onChange={(key, values) => {
                     if (key === "type") {
-                        setFormType(allValues.type);
+                        setFormType(values.type);
                     }
                 }}
                 onAction={(action, values) => {
                     if (action === "save") {
-                        handleCreate(values);
+                        void handleCreateProvider(values);
                     } else {
-                        setMode({ kind: "list" });
+                        returnToList();
                     }
                 }}
-                onClose={() => setMode({ kind: "list" })}
+                onClose={returnToList}
             />
         );
     }
 
-    if (mode.kind === "edit") {
+    if (mode.kind === "edit-provider" || mode.kind === "configure-provider") {
+        const configuringBuiltin = mode.kind === "configure-provider";
+        const target = mode.target;
         return (
             <FormPanel
-                title={`Edit: ${mode.target.name}`}
-                fields={buildEditFields(mode.target)}
+                title={`${configuringBuiltin ? "Configure" : "Edit"}: ${target.name}`}
+                fields={buildProviderFields(target, configuringBuiltin ? "configure" : "edit")}
+                hint={configuringBuiltin ? "↑↓ navigate · type to edit · Esc back" : undefined}
+                shortcutHint={!configuringBuiltin ? "d delete" : undefined}
+                onShortcut={(input) => {
+                    if (!configuringBuiltin && input.toLowerCase() === "d") {
+                        setMode({ kind: "confirm-delete-provider", target });
+                        return true;
+                    }
+                    return false;
+                }}
                 onAction={(action, values) => {
-                    if (action === "save") {
-                        void handleEdit(mode.target, values);
+                    if (action !== "save") {
+                        returnToList();
+                    } else if (configuringBuiltin) {
+                        void handleConfigureProvider(target, values);
                     } else {
-                        setMode({ kind: "list" });
+                        void handleEditProvider(target, values);
                     }
                 }}
-                onClose={() => setMode({ kind: "list" })}
+                onClose={returnToList}
             />
         );
     }
 
-    if (mode.kind === "confirm-delete") {
+    if (mode.kind === "create-model") {
+        const provider = mode.provider;
         return (
-            <DeleteConfirm
-                target={mode.target}
-                onConfirm={() => void handleDelete(mode.target)}
-                onCancel={() => setMode({ kind: "list" })}
+            <FormPanel
+                title={`Add model to ${provider.name}`}
+                fields={buildCreateModelFields(advancedModelOptions)}
+                onChange={(key, values) => {
+                    if (key === "advanced") {
+                        setAdvancedModelOptions(values.advanced === "true");
+                    }
+                }}
+                onAction={(action, values) => {
+                    if (action === "save") {
+                        void handleCreateModel(provider, values);
+                    } else {
+                        returnToList();
+                    }
+                }}
+                onClose={returnToList}
+            />
+        );
+    }
+
+    if (mode.kind === "edit-model" || mode.kind === "view-model") {
+        const readOnly = mode.kind === "view-model";
+        const { provider, target } = mode;
+        return (
+            <FormPanel
+                title={`${readOnly ? "View" : "Edit"} model: ${target.name || target.code}`}
+                fields={buildModelFields(target, readOnly, advancedModelOptions)}
+                onChange={(key, values) => {
+                    if (key === "advanced") {
+                        setAdvancedModelOptions(values.advanced === "true");
+                    }
+                }}
+                actions={readOnly ? [{ key: "back", label: "Back" }] : undefined}
+                hint={readOnly ? "↑↓ view · Esc back" : undefined}
+                shortcutHint={!readOnly ? "d delete" : undefined}
+                onShortcut={(input) => {
+                    if (!readOnly && input.toLowerCase() === "d") {
+                        setMode({ kind: "confirm-delete-model", provider, target });
+                        return true;
+                    }
+                    return false;
+                }}
+                onAction={(action, values) => {
+                    if (readOnly || action !== "save") {
+                        returnToList();
+                    } else {
+                        void handleEditModel(provider, target, values);
+                    }
+                }}
+                onClose={returnToList}
+            />
+        );
+    }
+
+    if (mode.kind === "confirm-delete-provider") {
+        return (
+            <ConfirmDialog
+                title={`Delete provider "${mode.target.name}"?`}
+                message="This also deletes all its models."
+                onConfirm={() => void handleDeleteProvider(mode.target)}
+                onCancel={returnToList}
+            />
+        );
+    }
+
+    if (mode.kind === "confirm-delete-model") {
+        return (
+            <ConfirmDialog
+                title={`Delete model "${mode.target.name || mode.target.code}"?`}
+                message={`This removes it from ${mode.provider.name}.`}
+                onConfirm={() => void handleDeleteModel(mode.provider, mode.target)}
+                onCancel={returnToList}
             />
         );
     }
 
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Box marginBottom={1}>
-                <Text color="magenta" bold>Providers</Text>
-            </Box>
+        <Panel title="Providers" hint="↑↓ navigate · ←→ expand/collapse · Enter open · Esc back">
             {providers === null ? (
                 <Spinner label="Loading..." />
-            ) : providers.length === 0 ? (
-                <Text dimColor>No providers. Press `a` to add one.</Text>
             ) : (
                 <ProviderList
                     providers={providers}
-                    cursor={cursor}
-                    onCursor={setCursor}
-                    onSelect={(t) => setMode({ kind: "edit", target: t })}
-                    onAdd={() => setMode({ kind: "create" })}
-                    onDelete={(t) => {
-                        setMode({ kind: "confirm-delete", target: t });
-                    }}
+                    expandedProviderCodes={expandedProviderCodes}
+                    selectedKey={selectedKey}
+                    onSelectedKey={setSelectedKey}
+                    onToggleProvider={toggleProvider}
+                    onActivate={openAction}
                     onClose={close}
                 />
             )}
-        </Box>
+        </Panel>
     );
 }
-
-// ─── Provider list table ───────────────────────────────────────────
 
 function ProviderList({
     providers,
-    cursor,
-    onCursor,
-    onSelect,
-    onAdd,
-    onDelete,
+    expandedProviderCodes,
+    selectedKey,
+    onSelectedKey,
+    onToggleProvider,
+    onActivate,
     onClose,
 }: {
     providers: ModelProviderDto[];
-    cursor: number;
-    onCursor: (i: number) => void;
-    onSelect: (p: ModelProviderDto) => void;
-    onAdd: () => void;
-    onDelete: (p: ModelProviderDto) => void;
+    expandedProviderCodes: ReadonlySet<string>;
+    selectedKey: string | null;
+    onSelectedKey: (key: string | null) => void;
+    onToggleProvider: (code: string, expanded: boolean) => void;
+    onActivate: (action: ProviderRowEnterAction) => void;
     onClose: () => void;
 }) {
     const dialogSize = useBottomDialogSize();
-    const n = providers.length;
-    const compact = dialogSize.width < 46;
-    const nameWidth = compact
-        ? Math.max(dialogSize.width - 2, 8)
-        : Math.max(Math.min(Math.floor(dialogSize.width * 0.28), 30), 14);
-    const urlWidth = compact
-        ? 0
-        : Math.max(dialogSize.width - nameWidth - 4, 8);
-    const maxVisible = Math.max(dialogSize.height - 7 - (compact ? 1 : 0), 1);
-    const maxVis = Math.min(maxVisible, n);
-    const half = Math.floor(maxVis / 2);
-    let start = cursor - half;
-    if (start < 0) {
-        start = 0;
-    }
-    if (start + maxVis > n) {
-        start = Math.max(n - maxVis, 0);
-    }
-    const visible = providers.slice(start, start + maxVis);
-
-    useInput((input, key) => {
-        if (key.escape) {
-            onClose();
-            return;
-        }
-        if (key.upArrow) {
-            onCursor(Math.max(cursor - 1, 0));
-            return;
-        }
-        if (key.downArrow) {
-            onCursor(Math.min(cursor + 1, n - 1));
-            return;
-        }
-        if (key.return) {
-            onSelect(providers[cursor]);
-            return;
-        }
-        const lower = input.toLowerCase();
-        if (lower === "a") {
-            onAdd();
-        } else if (lower === "d") {
-            onDelete(providers[cursor]);
-        }
-    });
-
-    return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Box marginBottom={1}>
-                <Text dimColor>
-                    {compact
-                        ? `  ${pad("Name", nameWidth)}`
-                        : `  ${pad("Name", nameWidth)}  ${pad("Base URL", urlWidth)}`}
-                </Text>
-            </Box>
-            <Box flexDirection="column" flexGrow={1} overflow="hidden">
-                {visible.map((p) => {
-                    const i = providers.indexOf(p);
-                    const selected = i === cursor;
-                    const name = pad(p.name, nameWidth);
-                    const url = pad(p.baseUrl, urlWidth);
-                    return (
-                        <Box
-                            key={p.code}
-                            onMouseOver={() => onCursor(i)}
-                            onMouseClick={() => {
-                                onCursor(i);
-                                onSelect(p);
-                            }}
-                        >
-                            <Text color={selected ? "cyan" : "gray"}>
-                                {selected ? "\u276f" : " "}
-                            </Text>
-                            <Text> </Text>
-                            <Text color={selected ? "cyan" : "white"} bold={selected}>
-                                {name}
-                            </Text>
-                            {compact ? null : <Text>  </Text>}
-                            {compact ? null : (
-                                <Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
-                                    {url}
-                                </Text>
-                            )}
-                        </Box>
-                    );
-                })}
-            </Box>
-            {compact ? (
-                <Box height={1} overflow="hidden">
-                    <Text dimColor wrap="truncate">
-                        {trunc(`Base URL: ${providers[cursor]?.baseUrl ?? "—"}`, dialogSize.width)}
-                    </Text>
-                </Box>
-            ) : null}
-            <Box gap={3} height={1} marginTop={1} overflow="hidden">
-                <Text color="cyan" onMouseClick={onAdd}>Add</Text>
-                <Text color="cyan" onMouseClick={() => onDelete(providers[cursor])}>Delete</Text>
-            </Box>
-            <Box height={1} overflow="hidden">
-                <Text dimColor wrap="truncate">
-                    {compact
-                        ? "\u2191\u2193 move · Enter edit · d del · Esc close"
-                        : "\u2191\u2193 navigate · Enter edit · d delete · Esc back"}
-                </Text>
-            </Box>
-        </Box>
+    const rows = useMemo(
+        () => buildProviderRows(providers, expandedProviderCodes),
+        [providers, expandedProviderCodes],
     );
-}
+    const cursor = Math.max(rows.findIndex((row) => row.key === selectedKey), 0);
+    const columns: Array<TableColumn<ProviderListRow>> = [
+        {
+            key: "resource",
+            header: "Provider / model",
+            value: providerRowLabel,
+            render: (row, selected) => (
+                <Text
+                    color={selected ? "cyan" : row.kind === "provider" ? "white" : "gray"}
+                    bold={selected || row.kind === "provider"}
+                    wrap="truncate"
+                >
+                    {providerRowLabel(row)}
+                </Text>
+            ),
+        },
+        {
+            key: "state",
+            header: "State",
+            value: providerRowState,
+            render: (row) => (
+                <Text
+                    color={providerRowState(row) === "configured" ? "green" : "gray"}
+                    dimColor={row.kind === "add-provider" || row.kind === "add-model"}
+                >
+                    {providerRowState(row)}
+                </Text>
+            ),
+        },
+    ];
+    const tableLayout = createTableLayout(
+        columns,
+        rows,
+        Math.max(dialogSize.width - 2, 0),
+    );
 
-// ─── Delete confirm ─────────────────────────────────────────────────
-
-function DeleteConfirm({
-    target,
-    onConfirm,
-    onCancel,
-}: {
-    target: ModelProviderDto;
-    onConfirm: () => void;
-    onCancel: () => void;
-}) {
-    useInput((input, key) => {
-        if (key.escape) {
-            onCancel();
-            return;
-        }
-        const lower = input.toLowerCase();
-        if (lower === "y") {
-            onConfirm();
-        } else if (lower === "n") {
-            onCancel();
-        }
+    useListNavigation({
+        items: rows,
+        cursor,
+        onCursor: (index) => onSelectedKey(rows[index]?.key ?? null),
+        onActivate: (row) => onActivate(providerRowEnterAction(row)),
+        onClose,
+        onInput: (_input, key, _event, row) => {
+            if (row?.kind !== "provider") {
+                return;
+            }
+            if (key.leftArrow) {
+                onToggleProvider(row.provider.code, false);
+            } else if (key.rightArrow) {
+                onToggleProvider(row.provider.code, true);
+            }
+        },
     });
 
     return (
-        <Box flexDirection="column" flexGrow={1}>
-            <Text color="red" bold>
-                Delete provider "{target.name}"?
-            </Text>
-            <Text dimColor>This also deletes all its models.</Text>
-            <Box marginTop={1} gap={2}>
-                <Text color="red" bold onMouseClick={onConfirm}>[Delete]</Text>
-                <Text color="cyan" onMouseClick={onCancel}>[Cancel]</Text>
+        <Box flexDirection="column" flexGrow={1} width="100%">
+            <Box width="100%" height={1} marginBottom={1} overflow="hidden">
+                <Box width={2} height={1}><Text> </Text></Box>
+                <TableHeader columns={tableLayout} />
             </Box>
+            <List
+                items={rows}
+                cursor={cursor}
+                visibleCount={Math.max(dialogSize.height - 6, 1)}
+                getKey={(row) => row.key}
+                onCursor={(index) => onSelectedKey(rows[index]?.key ?? null)}
+                onActivate={(row) => onActivate(providerRowEnterAction(row))}
+                renderItem={(row, { selected }) => (
+                    <TableRow
+                        columns={tableLayout}
+                        row={row}
+                        selected={selected}
+                    />
+                )}
+            />
         </Box>
     );
 }

@@ -1,5 +1,6 @@
 import type {
     AgentDto,
+    CreateModelDto,
     CreateModelProviderDto,
     ModelProviderDto,
     ReasoningEffort,
@@ -19,17 +20,12 @@ const DEFAULT_AGENT_SOUL = "Be helpful, concise, and accurate.";
 
 export interface WizardSetupClient {
     listProviders(): Promise<ModelProviderDto[]>;
+    listProviderModels(providerCode: string): Promise<unknown>;
     listAgents(): Promise<AgentDto[]>;
     createProvider(input: CreateModelProviderDto): Promise<ModelProviderDto>;
     updateProvider(code: string, input: UpdateModelProviderDto): Promise<ModelProviderDto>;
-    createModel(input: {
-        providerCode: string;
-        modelCode: string;
-        name: string;
-        contextWindow?: number;
-        reasoningEffortMapping?: Record<string, ReasoningEffort>;
-        isDefault?: boolean;
-    }): Promise<unknown>;
+    createModel(input: CreateModelDto): Promise<unknown>;
+    deleteModel(providerCode: string, modelCode: string): Promise<void>;
     createAgent(input: {
         code: string;
         name: string;
@@ -47,8 +43,8 @@ export interface WizardSetupClient {
     }): Promise<{ initialized: boolean }>;
 }
 
-export function selectedModelCode(model: ModelDraft): string {
-    return `${model.providerId}:${model.code.trim()}`;
+export function selectedModelId(model: ModelDraft): string {
+    return model.id;
 }
 
 export function validateWizardDrafts(
@@ -59,12 +55,12 @@ export function validateWizardDrafts(
     if (drafts.length === 0) {
         return "Configure at least one provider to continue.";
     }
-    if (models.length !== drafts.length) {
-        return "Configure one model for each provider to continue.";
+    if (models.length === 0) {
+        return "Configure or select at least one model to continue.";
     }
 
     const providerCodes = new Set<string>();
-    const providerIds = new Set(drafts.map((draft) => draft.id));
+    const providersById = new Map(drafts.map((draft) => [draft.id, draft]));
     for (const draft of drafts) {
         const providerError = validateProviderDraft(draft);
         if (providerError) {
@@ -77,23 +73,30 @@ export function validateWizardDrafts(
         providerCodes.add(code);
     }
 
-    const modelCodes = new Set<string>();
+    const modelCodesByProvider = new Map<string, Set<string>>();
     for (const model of models) {
-        if (!providerIds.has(model.providerId)) {
+        const provider = providersById.get(model.providerId);
+        if (!provider) {
             return "A model is attached to an unknown provider.";
+        }
+        if (model.providerCode.trim() !== provider.code.trim()) {
+            return `Model provider does not match ${provider.name.trim() || provider.code.trim()}.`;
         }
         const modelError = validateModelDraft(model);
         if (modelError) {
             return modelError;
         }
-        const modelCode = selectedModelCode(model);
+
+        const modelCodes = modelCodesByProvider.get(model.providerId) ?? new Set<string>();
+        const modelCode = model.code.trim();
         if (modelCodes.has(modelCode)) {
             return `Model Code already configured: ${model.code.trim()}`;
         }
         modelCodes.add(modelCode);
+        modelCodesByProvider.set(model.providerId, modelCodes);
     }
 
-    if (!modelCodes.has(selectedId)) {
+    if (!models.some((model) => selectedModelId(model) === selectedId)) {
         return "Select a default model to continue.";
     }
     return null;
@@ -112,55 +115,96 @@ export async function persistWizardSetup(
 
     const existingProviders = (await client.listProviders()) ?? [];
     const existingAgents = (await client.listAgents()) ?? [];
-    const modelsByProvider = new Map(models.map((model) => [model.providerId, model]));
-    let selectedModel: ModelDraft | undefined;
-
-    for (const draft of drafts) {
-        const model = modelsByProvider.get(draft.id);
-        if (!model) {
-            throw new Error(`No model configured for provider ${draft.name || draft.code}.`);
-        }
-
-        const providerCode = draft.code.trim();
-        const providerInput: CreateModelProviderDto = {
-            code: providerCode,
-            name: draft.name.trim(),
-            type: draft.type,
-            baseUrl: draft.baseUrl.trim(),
-            apiKey: draft.apiKey.trim(),
-        };
-        const existing = existingProviders.find((provider) => provider.code === providerCode);
-        if (existing) {
-            await client.updateProvider(providerCode, {
-                name: providerInput.name,
-                type: providerInput.type,
-                baseUrl: providerInput.baseUrl,
-                apiKey: providerInput.apiKey,
-            });
-        } else {
-            await client.createProvider(providerInput);
-        }
-
-        const modelCode = model.code.trim();
-        const isSelected = selectedModelCode(model) === selectedId;
-        if (isSelected) {
-            selectedModel = model;
-        }
-        await client.createModel({
-            providerCode,
-            modelCode,
-            name: model.name.trim(),
-            contextWindow: model.contextWindow,
-            reasoningEffortMapping: model.reasoningEffortMapping,
-            isDefault: isSelected,
-        });
+    const modelsByProvider = new Map<string, ModelDraft[]>();
+    for (const model of models) {
+        const providerModels = modelsByProvider.get(model.providerId) ?? [];
+        providerModels.push(model);
+        modelsByProvider.set(model.providerId, providerModels);
     }
-
+    const selectedModel = models.find((model) => selectedModelId(model) === selectedId);
     if (!selectedModel) {
         throw new Error("Select a default model to continue.");
     }
 
-    const selectedProvider = drafts.find((draft) => draft.id === selectedModel?.providerId);
+    for (const draft of drafts) {
+        const providerCode = draft.code.trim();
+        const existing = existingProviders.find((provider) => provider.code === providerCode);
+        let providerChanged = false;
+        if (draft.builtin) {
+            providerChanged = existing?.apiKey !== draft.apiKey.trim();
+            if (providerChanged) {
+                await client.updateProvider(providerCode, { apiKey: draft.apiKey.trim() });
+            }
+        } else if (existing) {
+            providerChanged = existing.name !== draft.name.trim() ||
+                existing.type !== draft.type ||
+                existing.baseUrl !== draft.baseUrl.trim() ||
+                existing.apiKey !== draft.apiKey.trim() ||
+                (existing.freeFormTool === true) !== (draft.type === "openai" && draft.freeFormTool);
+            if (providerChanged) {
+                await client.updateProvider(providerCode, {
+                    name: draft.name.trim(),
+                    type: draft.type,
+                    baseUrl: draft.baseUrl.trim(),
+                    apiKey: draft.apiKey.trim(),
+                    freeFormTool: draft.type === "openai" && draft.freeFormTool,
+                });
+            }
+        } else {
+            const providerInput: CreateModelProviderDto = {
+                code: providerCode,
+                name: draft.name.trim(),
+                type: draft.type,
+                baseUrl: draft.baseUrl.trim(),
+                apiKey: draft.apiKey.trim(),
+                freeFormTool: draft.type === "openai" && draft.freeFormTool,
+            };
+            await client.createProvider(providerInput);
+        }
+
+        if (existing?.modelsCached === true && providerChanged) {
+            await client.listProviderModels(providerCode);
+        }
+
+        if (!draft.builtin) {
+            const providerModels = modelsByProvider.get(draft.id) ?? [];
+            const desiredModelCodes = new Set(providerModels.map((model) => model.code.trim()));
+            for (const model of existing?.models ?? []) {
+                if (model.cached !== true && !desiredModelCodes.has(model.code)) {
+                    await client.deleteModel(providerCode, model.code);
+                }
+            }
+
+            const selectedProviderModel = providerModels.find((model) => selectedModelId(model) === selectedId);
+            const persistSelectedProviderDefault = selectedProviderModel !== undefined && selectedProviderModel.source !== "cached";
+
+            for (const model of providerModels) {
+                if (model.source === "cached") {
+                    continue;
+                }
+                await client.createModel({
+                    providerCode,
+                    modelCode: model.code.trim(),
+                    name: model.name.trim(),
+                    contextWindow: model.contextWindow,
+                    maxOutputTokens: model.maxOutputTokens,
+                    multiModal: model.multiModal,
+                    light: model.light,
+                    reasoning: model.reasoning !== false && (model.reasoning === true || model.reasoningEfforts.length > 0),
+                    reasoningEfforts: model.reasoningEfforts,
+                    isDefault: persistSelectedProviderDefault
+                        ? selectedModelId(model) === selectedId
+                        : model.isDefault,
+                });
+            }
+
+            if (existing?.modelsCached === true && !providerChanged && providerModels.some((model) => model.source !== "cached")) {
+                await client.listProviderModels(providerCode);
+            }
+        }
+    }
+
+    const selectedProvider = drafts.find((draft) => draft.id === selectedModel.providerId);
     if (!selectedProvider) {
         throw new Error("Selected model provider is missing.");
     }

@@ -27,6 +27,7 @@ const (
 
 type shellArguments struct {
 	Commands        []string `json:"commands"`
+	Stdin           *string  `json:"stdin,omitempty"`
 	TimeoutMs       *int64   `json:"timeout_ms,omitempty"`
 	MaxOutputLength *int64   `json:"max_output_length,omitempty"`
 }
@@ -37,15 +38,19 @@ func (tool *shellTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
 		Type: agentloop.ToolTypeShell,
 		Name: "shell",
-		Description: "Execute up to 4 shell commands in parallel. " +
+		Description: "Execute up to 4 independent, complete shell commands in parallel. The commands array contains separate commands, not fragments of one command. Do not run commands in parallel when they perform the same kind of operation or modify the same file; combine dependent steps into one command. " +
 			"Uses zsh on macOS, bash on Linux, and sh as a fallback when the preferred shell is unavailable. " +
-			"On Windows, uses pwsh.exe or powershell.exe when available, then cmd.exe.",
+			"On Windows, uses pwsh.exe or powershell.exe when available, then cmd.exe. Use stdin only with one command when the command reads patch data.",
 		InputSchema: objectSchema(map[string]agentloop.JSONSchema{
 			"commands": {
 				Type:     agentloop.JSONSchemaTypeArray,
 				MinItems: new(uint64(1)),
 				MaxItems: new(uint64(maxShellCommands)),
 				Items:    &agentloop.JSONSchema{Type: agentloop.JSONSchemaTypeString},
+			},
+			"stdin": {
+				Type:        agentloop.JSONSchemaTypeString,
+				Description: "Optional standard input for the single command that reads it, such as cmd.exe apply_patch.",
 			},
 			"timeout_ms": {
 				Type:        agentloop.JSONSchemaTypeInteger,
@@ -76,6 +81,9 @@ func (tool *shellTool) Execute(
 	if err != nil {
 		return nil, err
 	}
+	if arguments.Stdin != nil && len(arguments.Commands) != 1 {
+		return nil, fmt.Errorf("stdin requires exactly one command")
+	}
 
 	results := make([]conversation.ShellCommandOutput, len(arguments.Commands))
 	jobs := make(chan shellJob)
@@ -86,7 +94,7 @@ func (tool *shellTool) Execute(
 		go func() {
 			defer waitGroup.Done()
 			for job := range jobs {
-				results[job.index] = executeShellCommand(ctx, callContext.Cwd, job.command, timeout, outputLimit)
+				results[job.index] = executeShellCommand(ctx, callContext.Cwd, job.command, arguments.Stdin, timeout, outputLimit)
 			}
 		}()
 	}
@@ -143,6 +151,7 @@ func executeShellCommand(
 	parent context.Context,
 	cwd string,
 	command string,
+	stdin *string,
 	timeout time.Duration,
 	outputLimit int64,
 ) conversation.ShellCommandOutput {
@@ -151,6 +160,9 @@ func executeShellCommand(
 
 	process := newShellCommand(commandContext, command)
 	prepareShellProcess(process)
+	if stdin != nil {
+		process.Stdin = strings.NewReader(*stdin)
+	}
 	if strings.TrimSpace(cwd) != "" {
 		process.Dir = cwd
 	}

@@ -9,9 +9,9 @@ use sha3::{Digest, Sha3_256};
 
 pub const MAGIC: [u8; 8] = [0xca, 0xfe, 0xba, 0xbe, 0x10, 0x13, 0x66, 0x66];
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
-pub const FOOTER_SIZE: usize = 108;
+pub const FOOTER_SIZE: usize = 156;
 
 const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -26,6 +26,7 @@ pub struct PayloadSpec {
 pub struct Footer {
     pub cli: PayloadSpec,
     pub core: PayloadSpec,
+    pub patch_applier: PayloadSpec,
 }
 
 impl Footer {
@@ -37,20 +38,23 @@ impl Footer {
         out[48..56].copy_from_slice(&self.core.offset.to_le_bytes());
         out[56..64].copy_from_slice(&self.core.len.to_le_bytes());
         out[64..96].copy_from_slice(&self.core.sha3_256);
-        out[96..100].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-        out[100..108].copy_from_slice(&MAGIC);
+        out[96..104].copy_from_slice(&self.patch_applier.offset.to_le_bytes());
+        out[104..112].copy_from_slice(&self.patch_applier.len.to_le_bytes());
+        out[112..144].copy_from_slice(&self.patch_applier.sha3_256);
+        out[144..148].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+        out[148..156].copy_from_slice(&MAGIC);
         out
     }
 
     pub fn decode(bytes: &[u8; FOOTER_SIZE]) -> Result<Self> {
-        if bytes[100..108] != MAGIC {
+        if bytes[148..156] != MAGIC {
             return Err(BootstrapError::CorruptFooter(
                 "magic trailer not found; this binary carries no payloads".to_string(),
             ));
         }
 
         let mut version = [0u8; 4];
-        version.copy_from_slice(&bytes[96..100]);
+        version.copy_from_slice(&bytes[144..148]);
         if u32::from_le_bytes(version) != FORMAT_VERSION {
             return Err(BootstrapError::CorruptFooter(format!(
                 "unsupported footer format version {}",
@@ -67,6 +71,8 @@ impl Footer {
         cli_sha.copy_from_slice(&bytes[16..48]);
         let mut core_sha = [0u8; 32];
         core_sha.copy_from_slice(&bytes[64..96]);
+        let mut patch_applier_sha = [0u8; 32];
+        patch_applier_sha.copy_from_slice(&bytes[112..144]);
 
         Ok(Footer {
             cli: PayloadSpec {
@@ -78,6 +84,11 @@ impl Footer {
                 offset: read_u64(48),
                 len: read_u64(56),
                 sha3_256: core_sha,
+            },
+            patch_applier: PayloadSpec {
+                offset: read_u64(96),
+                len: read_u64(104),
+                sha3_256: patch_applier_sha,
             },
         })
     }
@@ -213,13 +224,21 @@ pub fn managed_bin_dir(home: &Path) -> PathBuf {
     home.join(".agenty").join("bin")
 }
 
-pub fn artifact_paths(home: &Path) -> (PathBuf, PathBuf) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPaths {
+    pub cli: PathBuf,
+    pub core: PathBuf,
+    pub patch_applier: PathBuf,
+}
+
+pub fn artifact_paths(home: &Path) -> ArtifactPaths {
     let dir = managed_bin_dir(home);
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    (
-        dir.join(format!("cli{ext}")),
-        dir.join(format!("core{ext}")),
-    )
+    ArtifactPaths {
+        cli: dir.join(format!("cli{ext}")),
+        core: dir.join(format!("core{ext}")),
+        patch_applier: dir.join(format!("apply_patch{ext}")),
+    }
 }
 
 fn temp_path_for(target: &Path) -> PathBuf {
@@ -303,7 +322,9 @@ mod tests {
     const GOLDEN_FOOTER_HEX: &str =
         "88776655443322110807060504030201000102030405060708090a0b0c0d0e0f\
         101112131415161718191a1b1c1d1e1f1122334455667788010203040506070820212223242526\
-        2728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f01000000cafebabe10136666";
+        2728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f08090a0b0c0d0e0f1011121314\
+        151617404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f02000000\
+        cafebabe10136666";
 
     const INTEROP_XZ_HEX: &str = "fd377a585a000004e6d6b4460200210116000000742fe5a3e0087f00355d003099c8db4efc244eb58cf58f4699c115ba2fbad7ad9c231199c49368b315728a5421d1340068b4b68fd6e65bef9dbfedfd1f52190000000000154019c351bd7ee70001518011000000e78fc45db1c467fb020000000004595a";
     const INTEROP_RAW_SHA3: &str =
@@ -312,7 +333,7 @@ mod tests {
 
     fn unhex(s: &str) -> Vec<u8> {
         let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(s.len() % 2 == 0, "odd-length hex string");
+        assert!(s.len().is_multiple_of(2), "odd-length hex string");
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("invalid hex"))
@@ -332,6 +353,10 @@ mod tests {
         for (i, b) in core_sha.iter_mut().enumerate() {
             *b = 0x20 + i as u8;
         }
+        let mut patch_applier_sha = [0u8; 32];
+        for (i, b) in patch_applier_sha.iter_mut().enumerate() {
+            *b = 0x40 + i as u8;
+        }
         Footer {
             cli: PayloadSpec {
                 offset: 0x1122334455667788,
@@ -342,6 +367,11 @@ mod tests {
                 offset: 0x8877665544332211,
                 len: 0x0807060504030201,
                 sha3_256: core_sha,
+            },
+            patch_applier: PayloadSpec {
+                offset: 0x0f0e0d0c0b0a0908,
+                len: 0x1716151413121110,
+                sha3_256: patch_applier_sha,
             },
         }
     }
@@ -377,6 +407,7 @@ mod tests {
         let footer = Footer {
             cli: spec.clone(),
             core: spec.clone(),
+            patch_applier: spec.clone(),
         };
 
         let path = dir.join("packed");
@@ -411,7 +442,7 @@ mod tests {
     #[test]
     fn footer_rejects_bad_magic() {
         let mut bytes = golden_footer().encode();
-        bytes[107] ^= 0xff;
+        bytes[155] ^= 0xff;
         let err = Footer::decode(&bytes).unwrap_err();
         assert!(matches!(err, BootstrapError::CorruptFooter(_)));
     }
@@ -419,7 +450,7 @@ mod tests {
     #[test]
     fn footer_rejects_unknown_version() {
         let mut bytes = golden_footer().encode();
-        bytes[96] = 0x7f;
+        bytes[144] = 0x7f;
         let err = Footer::decode(&bytes).unwrap_err();
         assert!(matches!(err, BootstrapError::CorruptFooter(_)));
     }
@@ -559,14 +590,25 @@ mod tests {
         let footer = read_footer(&mut packed).unwrap();
         assert_eq!(footer.cli, spec);
         assert_eq!(footer.core, spec);
+        assert_eq!(footer.patch_applier, spec);
     }
 
     #[test]
     fn artifact_paths_use_agenty_bin_dir() {
         let home = Path::new("/home/tester");
-        let (cli, core) = artifact_paths(home);
+        let paths = artifact_paths(home);
         let ext = if cfg!(windows) { ".exe" } else { "" };
-        assert_eq!(cli, home.join(".agenty/bin").join(format!("cli{ext}")));
-        assert_eq!(core, home.join(".agenty/bin").join(format!("core{ext}")));
+        assert_eq!(
+            paths.cli,
+            home.join(".agenty/bin").join(format!("cli{ext}"))
+        );
+        assert_eq!(
+            paths.core,
+            home.join(".agenty/bin").join(format!("core{ext}"))
+        );
+        assert_eq!(
+            paths.patch_applier,
+            home.join(".agenty/bin").join(format!("apply_patch{ext}"))
+        );
     }
 }

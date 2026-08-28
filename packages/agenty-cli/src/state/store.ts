@@ -230,7 +230,46 @@ function reasoningEffort(enabled: boolean, level: string): ReasoningEffort {
     if (level === "low" || level === "medium" || level === "high" || level === "xhigh" || level === "max") {
         return level;
     }
-    return "medium";
+    return "high";
+}
+
+function modelReasoningEfforts(model: Pick<ModelDto, "reasoning" | "reasoningEfforts">): ReasoningEffort[] {
+    if (model.reasoning === false) {
+        return [];
+    }
+    if (model.reasoningEfforts && model.reasoningEfforts.length > 0) {
+        return model.reasoningEfforts;
+    }
+    return model.reasoning === true ? ["low", "medium", "high", "xhigh", "max"] : [];
+}
+
+function isDefaultReasoningEfforts(efforts: readonly ReasoningEffort[]): boolean {
+    return efforts.length === 5 && efforts.every((effort, index) => effort === ["low", "medium", "high", "xhigh", "max"][index]);
+}
+
+export function resolveReasoningEffortForModel(
+    model: Pick<ModelDto, "name" | "reasoning" | "reasoningEfforts">,
+    requested: ReasoningEffort,
+): { effort: ReasoningEffort; notice?: string } {
+    if (requested === "off") {
+        return { effort: requested };
+    }
+    const efforts = modelReasoningEfforts(model);
+    if (efforts.length === 0) {
+        return { effort: "off", notice: `Model ${model.name} does not support reasoning; effort disabled.` };
+    }
+    if (efforts.includes(requested)) {
+        return { effort: requested };
+    }
+    const fallback = isDefaultReasoningEfforts(efforts) ? "high" : efforts[efforts.length - 1];
+    return {
+        effort: fallback,
+        notice: `Reasoning effort "${requested}" is not supported by ${model.name}; using "${fallback}" instead.`,
+    };
+}
+
+function isUnsupportedReasoningEffortError(message: string): boolean {
+    return message.includes("unsupported reasoning effort");
 }
 
 function fallbackToolCallId(event: SessionEvent): string {
@@ -461,22 +500,31 @@ export const useAppStore = create<AppState>((set, get) => {
         const parsed = parseThinking(options.thinking);
         const prepared = await client.prepareSession({
             agentRef: options.agentRef,
-            modelRef: options.modelRef,
+            modelInput: options.modelInput,
             newSession: options.newSession,
             reasoningEffort: reasoningEffort(parsed.thinking, parsed.thinkingLevel),
         });
+        const requestedEffort = reasoningEffort(parsed.thinking, parsed.thinkingLevel);
+        const resolvedEffort = resolveReasoningEffortForModel(prepared.model, requestedEffort);
+        let session = prepared.session;
+        if (session.currentReasoningEffort !== resolvedEffort.effort) {
+            session = await client.setSessionReasoningEffort(session.id, resolvedEffort.effort);
+        }
         set({
             phase: "ready",
             client,
             agent: prepared.agent,
             model: prepared.model,
-            session: prepared.session,
-            history: buildHistory(prepared.session),
-            tokenConsumed: actualContextSize(prepared.session),
-            thinkingEnabled: parsed.thinking,
-            thinkingLevel: parsed.thinkingLevel,
+            session,
+            history: buildHistory(session),
+            tokenConsumed: actualContextSize(session),
+            thinkingEnabled: resolvedEffort.effort !== "off",
+            thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
             initError: null,
         });
+        if (resolvedEffort.notice) {
+            setToast(resolvedEffort.notice);
+        }
     };
 
     return {
@@ -535,7 +583,7 @@ export const useAppStore = create<AppState>((set, get) => {
             if (!trimmed || (state.status !== "idle" && state.status !== "error") || !state.client || !state.session) {
                 return;
             }
-            const { client, session } = state;
+            const { client, model, session } = state;
             set((currentState) => ({
                 history: [...currentState.history, { id: nextId(), role: "user", content: trimmed }],
                 current: newAssistantMessage(),
@@ -568,14 +616,30 @@ export const useAppStore = create<AppState>((set, get) => {
             });
 
             try {
+                const requestedEffort = reasoningEffort(state.thinkingEnabled, state.thinkingLevel);
+                const resolvedEffort = model
+                    ? resolveReasoningEffortForModel(model, requestedEffort)
+                    : { effort: requestedEffort };
+                if (resolvedEffort.notice) {
+                    set({ thinkingEnabled: resolvedEffort.effort !== "off", thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort });
+                    setToast(resolvedEffort.notice);
+                }
                 await client.setSessionReasoningEffort(
                     session.id,
-                    reasoningEffort(state.thinkingEnabled, state.thinkingLevel),
+                    resolvedEffort.effort,
                 );
                 await client.startSession(session.id, trimmed);
                 const ended = await terminal;
                 if (ended.status === "failed" || ended.error) {
                     const message = ended.error ?? "agent round failed";
+                    if (isUnsupportedReasoningEffortError(message) && model) {
+                        const fallback = resolveReasoningEffortForModel(model, requestedEffort);
+                        if (fallback.notice) {
+                            set({ thinkingEnabled: fallback.effort !== "off", thinkingLevel: fallback.effort === "off" ? "" : fallback.effort });
+                            setToast(fallback.notice);
+                            await client.setSessionReasoningEffort(session.id, fallback.effort);
+                        }
+                    }
                     set({ chatError: message });
                     pushSystem(message, true);
                 }
@@ -642,9 +706,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 return;
             }
             try {
-                const session = await client.createSession(agent.code, model, reasoningEffort(thinkingEnabled, thinkingLevel));
+                const requestedEffort = reasoningEffort(thinkingEnabled, thinkingLevel);
+                const resolvedEffort = resolveReasoningEffortForModel(model, requestedEffort);
+                const session = await client.createSession(agent.code, model, resolvedEffort.effort);
                 set({ session, history: [], current: null, tokenConsumed: 0, overlay: null });
-                setToast("New session created.");
+                setToast(resolvedEffort.notice ?? "New session created.");
             } catch (error) {
                 pushSystem(`new session failed: ${(error as Error).message}`, true);
             }
@@ -656,17 +722,24 @@ export const useAppStore = create<AppState>((set, get) => {
                 return;
             }
             try {
-                const updated = await client.setSessionModel(session.id, model);
+                let updated = await client.setSessionModel(session.id, model);
+                const currentEffort = updated.currentReasoningEffort ?? "off";
+                const resolvedEffort = resolveReasoningEffortForModel(model, currentEffort);
+                if (resolvedEffort.effort !== currentEffort) {
+                    updated = await client.setSessionReasoningEffort(session.id, resolvedEffort.effort);
+                }
                 set({
                     model,
                     session: updated,
+                    thinkingEnabled: resolvedEffort.effort !== "off",
+                    thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
                     tokenConsumed: actualContextSize(updated),
                     overlay: null,
                     status: "idle",
                     phrase: null,
                     activeSessionId: null,
                 });
-                setToast(`Switched to ${model.providerName} · ${model.name}`);
+                setToast(resolvedEffort.notice ?? `Switched to ${model.providerName} · ${model.name}`);
             } catch (error) {
                 set({ status: "idle", phrase: null, activeSessionId: null });
                 pushSystem(`switch model failed: ${(error as Error).message}`, true);
@@ -681,7 +754,7 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const full = await client.getSession(session.id);
                 const model = full.currentModel
-                    ? await client.resolveModel(`${full.currentModel.providerCode}/${full.currentModel.modelCode}`)
+                    ? await client.getModel(full.currentModel)
                     : get().model;
                 set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
             } catch (error) {
@@ -696,7 +769,7 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const model = agent.defaultModel
-                    ? await client.resolveModel(`${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}`)
+                    ? await client.getModel(agent.defaultModel)
                     : await client.getDefaultModel();
                 const session = await client.getLastSessionByAgent(agent.code) ?? await client.createSession(agent.code, model);
                 set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: actualContextSize(session), overlay: null });
@@ -710,8 +783,18 @@ export const useAppStore = create<AppState>((set, get) => {
         setToast,
         notify: (text, error = false) => pushSystem(text, error),
         setThinking: (enabled, level) => {
-            set({ thinkingEnabled: enabled, thinkingLevel: level });
-            setToast(enabled ? `thinking enabled (${level || "medium"} effort)` : "thinking disabled");
+            const model = get().model;
+            const requested = reasoningEffort(enabled, level);
+            const resolved = model ? resolveReasoningEffortForModel(model, requested) : { effort: requested };
+            if (enabled && level !== "" && resolved.effort !== requested) {
+                setToast(`Effort "${requested}" is not supported by ${model?.name ?? "the current model"}.`, true);
+                return;
+            }
+            set({
+                thinkingEnabled: resolved.effort !== "off",
+                thinkingLevel: resolved.effort === "off" ? "" : resolved.effort,
+            });
+            setToast(resolved.notice ?? (resolved.effort !== "off" ? `effort set to ${resolved.effort}` : "effort disabled"));
         },
         setCwd: async (path) => {
             const { client, session } = get();

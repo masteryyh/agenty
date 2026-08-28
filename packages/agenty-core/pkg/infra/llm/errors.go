@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	ErrInvalidRequest     = errors.New("llm: invalid request")
-	ErrUnsupportedAPI     = errors.New("llm: unsupported API type")
-	ErrUnsupportedContent = errors.New("llm: unsupported content")
+	ErrInvalidRequest             = errors.New("llm: invalid request")
+	ErrUnsupportedAPI             = errors.New("llm: unsupported API type")
+	ErrUnsupportedContent         = errors.New("llm: unsupported content")
+	ErrUnsupportedReasoningEffort = errors.New("llm: unsupported reasoning effort")
 )
 
 func invalidRequest(format string, args ...any) error {

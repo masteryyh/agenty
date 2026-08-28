@@ -116,7 +116,7 @@ func (caller *openAIChatCaller) params(request modelRequest) (openai.ChatComplet
 	if err != nil {
 		return openai.ChatCompletionNewParams{}, err
 	}
-	effort, err := nativeReasoningEffort(caller.model, request.ReasoningEffort)
+	effort, err := modelReasoningEffort(caller.model, request.ReasoningEffort)
 	if err != nil {
 		return openai.ChatCompletionNewParams{}, err
 	}

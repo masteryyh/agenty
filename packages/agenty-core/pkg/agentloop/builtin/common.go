@@ -48,13 +48,21 @@ func resolvePath(path, cwd string, allowEmpty bool) (string, error) {
 		path = "."
 	}
 
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path), nil
+	path, err := expandEnvironmentVariables(path)
+	if err != nil {
+		return "", err
+	}
+
+	absolutePath, isAbsolute, err := normalizeAbsolutePath(path)
+	if err != nil {
+		return "", err
+	}
+	if isAbsolute {
+		return filepath.Clean(absolutePath), nil
 	}
 
 	base := cwd
 	if strings.TrimSpace(base) == "" {
-		var err error
 		base, err = os.Getwd()
 		if err != nil {
 			return "", fmt.Errorf("resolve process working directory: %w", err)
@@ -66,6 +74,147 @@ func resolvePath(path, cwd string, allowEmpty bool) (string, error) {
 		return "", fmt.Errorf("resolve path %q: %w", path, err)
 	}
 	return filepath.Clean(resolved), nil
+}
+
+func normalizeAbsolutePath(path string) (string, bool, error) {
+	if strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false, fmt.Errorf("resolve user home directory: %w", err)
+		}
+		return filepath.Join(home, strings.TrimLeft(path[1:], `/\\`)), true, nil
+	}
+
+	return path, filepath.IsAbs(path) || isWindowsAbsolutePath(path), nil
+}
+
+func expandEnvironmentVariables(path string) (string, error) {
+	path, err := expandWindowsStyleEnvironmentVariables(path)
+	if err != nil {
+		return "", err
+	}
+
+	path, err = expandPowerShellEnvironmentVariables(path)
+	if err != nil {
+		return "", err
+	}
+
+	return expandPOSIXEnvironmentVariables(path)
+}
+
+func expandWindowsStyleEnvironmentVariables(path string) (string, error) {
+	var builder strings.Builder
+	for offset := 0; offset < len(path); {
+		opening := strings.IndexByte(path[offset:], '%')
+		if opening < 0 {
+			builder.WriteString(path[offset:])
+			break
+		}
+
+		start := offset + opening
+		builder.WriteString(path[offset:start])
+		closing := strings.IndexByte(path[start+1:], '%')
+		if closing < 0 {
+			builder.WriteString(path[start:])
+			break
+		}
+
+		end := start + closing + 1
+		variable := path[start+1 : end]
+		if variable == "" {
+			builder.WriteString("%%")
+		} else {
+			value, err := environmentVariable(variable)
+			if err != nil {
+				return "", err
+			}
+			builder.WriteString(value)
+		}
+		offset = end + 1
+	}
+	return builder.String(), nil
+}
+
+func expandPowerShellEnvironmentVariables(path string) (string, error) {
+	const prefix = "$env:"
+
+	var builder strings.Builder
+	for offset := 0; offset < len(path); {
+		start := powerShellEnvironmentVariableStart(path, offset, prefix)
+		if start < 0 {
+			builder.WriteString(path[offset:])
+			break
+		}
+
+		builder.WriteString(path[offset:start])
+		variableStart := start + len(prefix)
+		variableEnd := variableStart
+		for variableEnd < len(path) && path[variableEnd] != '/' && path[variableEnd] != '\\' {
+			variableEnd++
+		}
+		if variableEnd == variableStart {
+			return "", fmt.Errorf("resolve PowerShell environment variable: name must not be empty")
+		}
+
+		value, err := environmentVariable(path[variableStart:variableEnd])
+		if err != nil {
+			return "", err
+		}
+		builder.WriteString(value)
+		offset = variableEnd
+	}
+	return builder.String(), nil
+}
+
+func powerShellEnvironmentVariableStart(path string, offset int, prefix string) int {
+	for index := offset; index+len(prefix) <= len(path); index++ {
+		if strings.EqualFold(path[index:index+len(prefix)], prefix) {
+			return index
+		}
+	}
+	return -1
+}
+
+func expandPOSIXEnvironmentVariables(path string) (string, error) {
+	var expandErr error
+	expanded := os.Expand(path, func(name string) string {
+		if expandErr != nil {
+			return ""
+		}
+		if name == "" {
+			expandErr = fmt.Errorf("resolve environment variable: name must not be empty")
+			return ""
+		}
+
+		value, err := environmentVariable(name)
+		if err != nil {
+			expandErr = err
+			return ""
+		}
+		return value
+	})
+	if expandErr != nil {
+		return "", expandErr
+	}
+	return expanded, nil
+}
+
+func environmentVariable(name string) (string, error) {
+	value, found := os.LookupEnv(name)
+	if !found {
+		return "", fmt.Errorf("resolve environment variable %q: not set", name)
+	}
+	return value, nil
+}
+
+func isWindowsAbsolutePath(path string) bool {
+	if strings.HasPrefix(path, `\\`) {
+		return true
+	}
+
+	return len(path) >= 2 &&
+		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) &&
+		path[1] == ':'
 }
 
 func regularFileInfo(path string) (os.FileInfo, error) {

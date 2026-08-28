@@ -1,4 +1,5 @@
 import type { AgentyClient } from "@/api/client";
+import { formatModelRef } from "@/api/modelReference";
 import type { UpdateAgentDto } from "@/api/types";
 
 import {
@@ -14,7 +15,7 @@ import {
     type ParsedArgs,
     render,
     requirePositionals,
-    resolveModel
+    resolveModelInput
 } from "./utils";
 
 export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promise<void> {
@@ -26,7 +27,7 @@ export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promi
         render(args, result, () => result.data.length === 0
             ? process.stdout.write("No agents.\n")
             : outputTable(["Agent Code", "Name", "Default", "Model"], result.data.map((agent) => [
-                agent.code, agent.name, String(agent.isDefault), agent.defaultModel ? `${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}` : "",
+                agent.code, agent.name, String(agent.isDefault), agent.defaultModel ? formatModelRef(agent.defaultModel) : "",
             ])));
         return;
     }
@@ -35,13 +36,13 @@ export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promi
         const agent = await client.resolveAgent(reference);
         render(args, agent, () => outputFields([
             ["Agent Code", agent.code], ["Name", agent.name], ["Soul", agent.soul], ["Default", String(agent.isDefault)],
-            ["Model", agent.defaultModel ? `${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}` : ""],
+            ["Model", agent.defaultModel ? formatModelRef(agent.defaultModel) : ""],
         ]));
         return;
     }
     if (command === "add") {
         const [, , code] = requirePositionals(args, 3, "agent add <code> [options]");
-        const model = flag(args, "model") ? await resolveModel(client, flag(args, "model")!) : undefined;
+        const model = flag(args, "model") ? await resolveModelInput(client, flag(args, "model")!) : undefined;
         const created = await client.createAgent({
             code, name: flag(args, "name")?.trim() || code, soul: flag(args, "soul") ?? "",
             isDefault: hasFlag(args, "default") ? parseBoolean(flag(args, "default"), "--default") : false,
@@ -65,7 +66,7 @@ export async function handleAgent(client: AgentyClient, args: ParsedArgs): Promi
             update.isDefault = parseBoolean(flag(args, "default"), "--default");
         }
         if (hasFlag(args, "model")) {
-            const model = await resolveModel(client, flag(args, "model")!);
+            const model = await resolveModelInput(client, flag(args, "model")!);
             update.defaultModel = { providerCode: model.providerCode, modelCode: model.code };
             update.defaultContextWindow = model.contextWindow;
         }

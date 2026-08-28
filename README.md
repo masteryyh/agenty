@@ -3,7 +3,8 @@
 [简体中文](./README.zh-CN.md)
 
 Agenty is a local-first AI agent application. The current product path consists of
-`agenty-cli`, `agenty-core`, and the self-extracting `agenty-bootstrap` launcher.
+`agenty-cli`, `agenty-core`, the Rust `patch-applier` helper, and the self-extracting
+`agenty-bootstrap` launcher.
 The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 over
 the child process's stdin/stdout; it does not start an HTTP server.
 
@@ -24,20 +25,23 @@ sudo install -m 755 agenty /usr/local/bin/agenty
 agenty
 ```
 
-On first run, the launcher verifies and extracts the bundled CLI and core into
-`~/.agenty/bin/{cli,core}`. The CLI starts core as a child process and opens a setup
+On first run, the launcher verifies and extracts the bundled CLI, core, and patch helper into
+`~/.agenty/bin/{cli,core,apply_patch}`. The CLI starts core as a child process and opens a setup
 wizard. The wizard creates one provider, one chat model, and one default agent through
 the existing `provider.*` and `agent.*` IPC methods, then calls `initialize.complete`.
 
 ## Runtime model
 
-The launcher contains two XZ-compressed payloads and their decompressed SHA3-256
+The launcher contains three XZ-compressed payloads and their decompressed SHA3-256
 digests. Matching extracted files are reused; missing or mismatched files are verified
 and atomically replaced. The CLI resolves core in this order:
 
 1. `AGENTY_CORE_BIN`
 2. `packages/agenty-core/bin/agenty-core` during repository development
 3. `~/.agenty/bin/core` from the launcher
+
+Before starting core, the CLI prepends core's directory to `PATH`, making the bundled
+`apply_patch` command available to core and shell tool calls.
 
 Core reads one compact JSON-RPC message per stdin line and writes responses and
 notifications to stdout. After `session.start`, core sends ordered `session.event`
@@ -46,7 +50,7 @@ and the terminal round status. Notifications may arrive before the `session.star
 response, so clients must subscribe before sending the request. Core exits when stdin
 reaches EOF.
 
-The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/think`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/effort`, `/status`,
 `/new`, `/resume`, `/help`, and `/exit`. Features not yet implemented by core are hidden.
 
 ## Configuration and storage
@@ -59,8 +63,10 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Configuration | `~/.agenty/config.json` |
 | Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | Session index | `~/.agenty/agenty.sqlite` |
-| Providers and models | `~/.agenty/providers/<provider-code>.json` (models embedded) |
+| Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, while built-in provider files store only API keys |
+| Model discovery cache | Kept only in the running core process for 8 hours; it is refreshed on demand and does not survive a core restart |
 | Agents | `~/.agenty/agents/` |
+| Patch transaction locks | `~/.agenty/locks/` |
 | Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
 `AGENTY_LOG_LEVEL` accepts `debug`, `info`, `warn`, or `error`.

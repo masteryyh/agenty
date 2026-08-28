@@ -19,40 +19,64 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-func TestNativeReasoningEffort(t *testing.T) {
+func TestModelReasoningEffort(t *testing.T) {
 	t.Parallel()
 
 	model := testModel()
 	tests := []struct {
-		name    string
-		effort  shared.ReasoningEffort
-		want    string
-		wantErr bool
+		name   string
+		effort shared.ReasoningEffort
+		want   string
 	}{
 		{name: "empty", effort: "", want: ""},
 		{name: "off", effort: shared.ReasoningOff, want: ""},
 		{name: "exact", effort: shared.ReasoningLow, want: "low"},
-		{name: "mapped", effort: shared.ReasoningHigh, want: "HIGH"},
-		{name: "unsupported", effort: shared.ReasoningMax, wantErr: true},
+		{name: "high", effort: shared.ReasoningHigh, want: "high"},
+		{name: "max", effort: shared.ReasoningMax, want: "max"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := nativeReasoningEffort(model, tt.effort)
-			if tt.wantErr {
-				if !errors.Is(err, ErrInvalidRequest) {
-					t.Fatalf("nativeReasoningEffort() error = %v, want ErrInvalidRequest", err)
-				}
-				return
-			}
+			got, err := modelReasoningEffort(model, tt.effort)
 			if err != nil {
-				t.Fatalf("nativeReasoningEffort() error = %v", err)
+				t.Fatalf("modelReasoningEffort() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("nativeReasoningEffort() = %q, want %q", got, tt.want)
+				t.Fatalf("modelReasoningEffort() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestModelReasoningEffortRejectsUnsupportedLevel(t *testing.T) {
+	model := catalog.Model{
+		Code:             "gpt-5-mini",
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh},
+	}
+	got, err := modelReasoningEffort(model, shared.ReasoningMax)
+	if got != "" {
+		t.Fatalf("modelReasoningEffort() = %q, want empty", got)
+	}
+	if !errors.Is(err, ErrUnsupportedReasoningEffort) {
+		t.Fatalf("modelReasoningEffort() error = %v, want unsupported effort", err)
+	}
+}
+
+func TestModelReasoningEffortIgnoresNonReasoningModel(t *testing.T) {
+	model := catalog.Model{Code: "gpt-4o", ReasoningEfforts: []shared.ReasoningEffort{}}
+	got, err := modelReasoningEffort(model, shared.ReasoningHigh)
+	if err != nil {
+		t.Fatalf("modelReasoningEffort() error = %v", err)
+	}
+	if got != "" {
+		t.Fatalf("modelReasoningEffort() = %q, want empty", got)
+	}
+}
+
+func TestGoogleThinkingLevelPassesStandardEffortThrough(t *testing.T) {
+	if got := googleThinkingLevel("max"); got != genai.ThinkingLevel("MAX") {
+		t.Fatalf("googleThinkingLevel(max) = %q, want MAX", got)
 	}
 }
 
@@ -70,7 +94,7 @@ func TestProviderRequestConversions(t *testing.T) {
 	t.Run("OpenAI Responses", func(t *testing.T) {
 		t.Parallel()
 
-		params, err := (&openAIResponsesCaller{model: modelWithReasoningNative("high")}).params(request)
+		params, err := (&openAIResponsesCaller{model: reasoningModel()}).params(request)
 		if err != nil {
 			t.Fatalf("convert request: %v", err)
 		}
@@ -99,7 +123,7 @@ func TestProviderRequestConversions(t *testing.T) {
 	t.Run("OpenAI Chat Completions", func(t *testing.T) {
 		t.Parallel()
 
-		params, err := (&openAIChatCaller{model: modelWithReasoningNative("high")}).params(request)
+		params, err := (&openAIChatCaller{model: reasoningModel()}).params(request)
 		if err != nil {
 			t.Fatalf("convert request: %v", err)
 		}
@@ -121,7 +145,7 @@ func TestProviderRequestConversions(t *testing.T) {
 	t.Run("Anthropic Messages", func(t *testing.T) {
 		t.Parallel()
 
-		params, err := (&anthropicCaller{model: modelWithReasoningNative("high")}).params(request)
+		params, err := (&anthropicCaller{model: reasoningModel()}).params(request)
 		if err != nil {
 			t.Fatalf("convert request: %v", err)
 		}
@@ -147,7 +171,7 @@ func TestProviderRequestConversions(t *testing.T) {
 	t.Run("Google GenAI", func(t *testing.T) {
 		t.Parallel()
 
-		contents, config, err := (&googleCaller{model: modelWithReasoningNative("HIGH")}).params(request)
+		contents, config, err := (&googleCaller{model: reasoningModel()}).params(request)
 		if err != nil {
 			t.Fatalf("convert request: %v", err)
 		}
@@ -166,12 +190,10 @@ func TestProviderRequestConversions(t *testing.T) {
 	})
 }
 
-func modelWithReasoningNative(native string) catalog.Model {
+func reasoningModel() catalog.Model {
 	return catalog.Model{
-		Code: "test-model",
-		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
-			native: shared.ReasoningHigh,
-		},
+		Code:             "test-model",
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningHigh},
 	}
 }
 
@@ -305,37 +327,31 @@ func TestApplyPatchToolRegistrations(t *testing.T) {
 
 	definitions := []modelToolDefinition{
 		testNamedTool("read_file"),
-		testNamedTool("write_file"),
-		testNamedTool("patch_file"),
-		testNamedTool("delete_file"),
 		testApplyPatchTool(),
 	}
 
-	native, err := openAIResponsesTools(definitions, true)
+	filesystem, err := openAIResponsesTools(definitions, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(native) != 2 || native[0].OfFunction == nil || native[0].OfFunction.Name != "read_file" ||
-		native[1].OfApplyPatch == nil {
-		t.Fatalf("native Responses tools = %#v, want read_file and native apply_patch", native)
+	if len(filesystem) != 1 || filesystem[0].OfFunction == nil || filesystem[0].OfFunction.Name != "read_file" {
+		t.Fatalf("non-free-form Responses tools = %#v, want read_file only", filesystem)
 	}
 
-	compatible, err := openAIResponsesTools(definitions, false)
+	freeForm, err := openAIResponsesTools(definitions, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(compatible) != 2 || compatible[0].OfFunction == nil || compatible[0].OfFunction.Name != "read_file" ||
-		compatible[1].OfCustom == nil || compatible[1].OfCustom.Name != "apply_patch" {
-		t.Fatalf("compatible Responses tools = %#v, want read_file and custom apply_patch", compatible)
+	if len(freeForm) != 2 || freeForm[0].OfFunction == nil || freeForm[0].OfFunction.Name != "read_file" ||
+		freeForm[1].OfCustom == nil || freeForm[1].OfCustom.Name != "apply_patch" {
+		t.Fatalf("free-form Responses tools = %#v, want read_file and custom apply_patch", freeForm)
 	}
 
 	chat, err := openAIChatTools(definitions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names := openAIChatToolNames(chat); !slices.Equal(names, []string{
-		"read_file", "write_file", "patch_file", "delete_file",
-	}) {
+	if names := openAIChatToolNames(chat); !slices.Equal(names, []string{"read_file"}) {
 		t.Errorf("OpenAI Chat tools = %q", names)
 	}
 
@@ -343,16 +359,16 @@ func TestApplyPatchToolRegistrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(anthropicDefinitions) != 4 {
-		t.Errorf("Anthropic tools = %d, want 4 original filesystem tools", len(anthropicDefinitions))
+	if len(anthropicDefinitions) != 1 {
+		t.Errorf("Anthropic tools = %d, want read_file only", len(anthropicDefinitions))
 	}
 
 	googleDefinitions, err := googleTools(definitions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(googleDefinitions) != 4 {
-		t.Errorf("Google tools = %#v, want 4 original filesystem tools", googleDefinitions)
+	if len(googleDefinitions) != 1 {
+		t.Errorf("Google tools = %#v, want read_file only", googleDefinitions)
 	}
 }
 
@@ -840,6 +856,15 @@ func TestApplyPatchMessageConversionsAcrossProviders(t *testing.T) {
 		t.Fatalf("native Responses history = %#v", nativeItems)
 	}
 
+	freeFormItems, err := openAIResponsesMessages([]conversation.Message{assistant, result}, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(freeFormItems) != 2 || freeFormItems[0].OfCustomToolCall == nil ||
+		freeFormItems[1].OfCustomToolCallOutput == nil {
+		t.Fatalf("free-form Responses history = %#v", freeFormItems)
+	}
+
 	compatibleItems, err := openAIResponsesMessages([]conversation.Message{assistant, result}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -1057,24 +1082,25 @@ func TestNewCallerConfiguresNativeOpenAIResponsesToolsByProviderIdentity(t *test
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		provider catalog.Provider
-		want     bool
+		name         string
+		provider     catalog.Provider
+		wantNative   bool
+		wantFreeForm bool
 	}{
 		{
 			name: "built-in OpenAI with SDK default URL",
 			provider: catalog.Provider{
-				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key", Official: true, FreeFormTool: true,
 			},
-			want: true,
+			wantNative: true, wantFreeForm: true,
 		},
 		{
 			name: "built-in OpenAI with official URL",
 			provider: catalog.Provider{
-				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key",
+				Code: "openai", Type: catalog.APIOpenAI, APIKey: "test-key", Official: true,
 				BaseURL: "https://api.openai.com/v1/",
 			},
-			want: true,
+			wantNative: true,
 		},
 		{
 			name: "OpenRouter Responses compatibility",
@@ -1110,19 +1136,32 @@ func TestNewCallerConfiguresNativeOpenAIResponsesToolsByProviderIdentity(t *test
 			if !ok {
 				t.Fatalf("NewCaller() = %T, want *openAIResponsesCaller", caller)
 			}
-			if responsesCaller.nativeOpenAI != tt.want {
-				t.Errorf("nativeOpenAI = %v, want %v", responsesCaller.nativeOpenAI, tt.want)
+			if responsesCaller.nativeOpenAI != tt.wantNative {
+				t.Errorf("nativeOpenAI = %v, want %v", responsesCaller.nativeOpenAI, tt.wantNative)
+			}
+			if responsesCaller.freeFormTool != tt.wantFreeForm {
+				t.Errorf("freeFormTool = %v, want %v", responsesCaller.freeFormTool, tt.wantFreeForm)
 			}
 		})
 	}
 }
 
+func TestNativeOpenAIResponsesProviderRequiresOfficialResponsesAPI(t *testing.T) {
+	if !nativeOpenAIResponsesProvider(catalog.Provider{Type: catalog.APIOpenAI, Official: true}) {
+		t.Fatal("official OpenAI Responses provider was not recognized")
+	}
+	if nativeOpenAIResponsesProvider(catalog.Provider{Type: catalog.APIOpenAICompletions, Official: true}) {
+		t.Fatal("official OpenAI Chat Completions provider was recognized as Responses")
+	}
+	if nativeOpenAIResponsesProvider(catalog.Provider{Type: catalog.APIOpenAI}) {
+		t.Fatal("compatible Responses provider was recognized as official OpenAI")
+	}
+}
+
 func testModel() catalog.Model {
 	return catalog.Model{
-		Code: "test-model",
-		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
-			"low": shared.ReasoningLow, "HIGH": shared.ReasoningHigh,
-		},
+		Code:             "test-model",
+		ReasoningEfforts: shared.StandardReasoningEfforts(),
 	}
 }
 

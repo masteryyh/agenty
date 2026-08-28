@@ -351,8 +351,8 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(requests))
 	}
-	if requests[0].MaxOutputTokens != agentloop.DefaultMaxOutputTokens {
-		t.Errorf("max output tokens = %d, want %d", requests[0].MaxOutputTokens, agentloop.DefaultMaxOutputTokens)
+	if requests[0].MaxOutputTokens != 100_000 {
+		t.Errorf("max output tokens = %d, want %d", requests[0].MaxOutputTokens, 100_000)
 	}
 	if len(requests[0].Messages) != 2 || len(requests[1].Messages) != 4 {
 		t.Fatalf("request message counts = %d, %d", len(requests[0].Messages), len(requests[1].Messages))
@@ -397,6 +397,72 @@ func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	requests := caller.Requests()
 	if len(requests) != 1 || requests[0].MaxOutputTokens != agentloop.DefaultMaxOutputTokens {
 		t.Fatalf("requests = %+v, want maxOutputTokens %d", requests, agentloop.DefaultMaxOutputTokens)
+	}
+}
+
+func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name            string
+		freeFormTool    bool
+		wantApplyPatch  bool
+		wantShellPrompt bool
+	}{
+		{name: "free-form provider", freeFormTool: true, wantApplyPatch: true},
+		{name: "shell fallback", wantShellPrompt: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newExecutionFixture(t, 8_192)
+			provider, err := fixture.catalog.Get(t.Context(), "openai")
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider.FreeFormTool = test.freeFormTool
+			if err := fixture.catalog.Save(t.Context(), provider); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.registry.Register(&executionTestTool{
+				definition: agentloop.ToolDefinition{
+					Type: agentloop.ToolTypeApplyPatch,
+					Name: "apply_patch",
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			caller := &scriptedCaller{responses: []*agentloop.Response{{
+				Content:    conversation.Text("done"),
+				StopReason: agentloop.StopReasonEndTurn,
+			}}}
+			engine := fixture.newEngine(t, func(
+				context.Context,
+				catalog.Provider,
+				catalog.Model,
+			) (agentloop.Caller, error) {
+				return caller, nil
+			})
+			session := fixture.createSession(t)
+			if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("edit")); err != nil {
+				t.Fatal(err)
+			}
+			waitForExecution(t, engine, session.ID)
+
+			requests := caller.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			gotApplyPatch := len(requests[0].Tools) == 1 && requests[0].Tools[0].Name == "apply_patch"
+			if gotApplyPatch != test.wantApplyPatch {
+				t.Errorf("apply_patch registered = %v, want %v", gotApplyPatch, test.wantApplyPatch)
+			}
+			gotShellPrompt := strings.Contains(requests[0].SystemPrompt, "shell tool with one complete apply_patch command")
+			if gotShellPrompt != test.wantShellPrompt {
+				t.Errorf("shell fallback prompt present = %v, want %v", gotShellPrompt, test.wantShellPrompt)
+			}
+		})
 	}
 }
 
@@ -616,9 +682,10 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	provider.AddModel(catalog.Model{
-		Code:          "small-model",
-		Name:          "Small Model",
-		ContextWindow: 4_000,
+		Code:            "small-model",
+		Name:            "Small Model",
+		ContextWindow:   4_000,
+		MaxOutputTokens: 1_024,
 	})
 	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
 		t.Fatal(err)
@@ -656,6 +723,9 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 	}
 	if len(caller.Requests()) != 1 {
 		t.Fatalf("model switch LLM requests = %d, want 1 compaction request", len(caller.Requests()))
+	}
+	if caller.Requests()[0].MaxOutputTokens != 8_192 {
+		t.Fatalf("model switch compaction max output = %d, want 8192", caller.Requests()[0].MaxOutputTokens)
 	}
 
 	events := fixture.sessions.events[session.ID]

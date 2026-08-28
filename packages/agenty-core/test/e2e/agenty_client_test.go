@@ -103,6 +103,15 @@ func (c *agentyClient) ListProviders(ctx context.Context) ([]Provider, error) {
 	)
 }
 
+func (c *agentyClient) ListProviderModels(ctx context.Context, providerCode string) ([]AvailableModel, error) {
+	return callResult[[]AvailableModel](
+		ctx,
+		c.rpc,
+		"provider.listModels",
+		map[string]any{"providerCode": providerCode},
+	)
+}
+
 func (c *agentyClient) UpdateProvider(ctx context.Context, input ProviderUpdateInput) (Provider, error) {
 	return callResult[Provider](
 		ctx,

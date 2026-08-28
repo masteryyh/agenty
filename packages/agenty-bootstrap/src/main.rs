@@ -34,20 +34,28 @@ fn bootstrap() -> Result<i32> {
     let home = dirs::home_dir().ok_or_else(|| {
         BootstrapError::Invalid("cannot locate the current user's home directory".to_string())
     })?;
-    let (cli, core) = artifact_paths(&home);
+    let artifacts = artifact_paths(&home);
 
-    if !cli.is_file() && !core.is_file() {
+    if !artifacts.cli.is_file() && !artifacts.core.is_file() && !artifacts.patch_applier.is_file() {
         progress.parent("local binary not found, extracting...");
-        install_artifact(&mut file, &footer.cli, &cli)?;
-        install_artifact(&mut file, &footer.core, &core)?;
+        install_artifact(&mut file, &footer.cli, &artifacts.cli)?;
+        install_artifact(&mut file, &footer.core, &artifacts.core)?;
+        install_artifact(&mut file, &footer.patch_applier, &artifacts.patch_applier)?;
     } else {
         progress.parent("checking local binary integrity...");
-        ensure_with_progress(&mut file, &footer.cli, &cli, "cli", &progress)?;
-        ensure_with_progress(&mut file, &footer.core, &core, "core", &progress)?;
+        ensure_with_progress(&mut file, &footer.cli, &artifacts.cli, "cli", &progress)?;
+        ensure_with_progress(&mut file, &footer.core, &artifacts.core, "core", &progress)?;
+        ensure_with_progress(
+            &mut file,
+            &footer.patch_applier,
+            &artifacts.patch_applier,
+            "apply_patch",
+            &progress,
+        )?;
     }
 
     progress.finish();
-    launch(&cli)
+    launch(&artifacts.cli)
 }
 
 fn agenty_version() -> &'static str {

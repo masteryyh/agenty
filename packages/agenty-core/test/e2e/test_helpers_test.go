@@ -66,11 +66,12 @@ func createExecutionResources(
 		return Session{}, fmt.Errorf("create agent: %w", err)
 	}
 	if _, err := client.CreateProvider(ctx, ProviderCreateInput{
-		Code:    providerCode,
-		Name:    "E2E Provider",
-		Type:    apiType,
-		BaseURL: fixture.BaseURL(apiType),
-		APIKey:  "test-key",
+		Code:         providerCode,
+		Name:         "E2E Provider",
+		Type:         apiType,
+		BaseURL:      fixture.BaseURL(apiType),
+		APIKey:       "test-key",
+		FreeFormTool: apiType == "openai",
 	}); err != nil {
 		return Session{}, fmt.Errorf("create provider: %w", err)
 	}

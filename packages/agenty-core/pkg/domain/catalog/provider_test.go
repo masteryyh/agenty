@@ -24,11 +24,9 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	}
 
 	p.AddModel(Model{
-		Code: "model-b",
-		Name: "B2",
-		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
-			"high": shared.ReasoningHigh,
-		},
+		Code:             "model-b",
+		Name:             "B2",
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningHigh},
 	})
 	if len(p.Models) != 2 {
 		t.Fatalf("models = %d, want 2 after upsert", len(p.Models))
@@ -52,5 +50,33 @@ func TestProvider_ModelLifecycle(t *testing.T) {
 	}
 	if _, ok := p.DefaultModel(); ok {
 		t.Error("DefaultModel found a model after the default was removed")
+	}
+}
+
+func TestProvider_AddModelSetsSingleDefault(t *testing.T) {
+	t.Parallel()
+
+	provider := &Provider{Models: []Model{
+		{Code: "model-a", Name: "A", IsDefault: true},
+		{Code: "model-b", Name: "B"},
+	}}
+
+	provider.AddModel(Model{Code: "model-b", Name: "B", IsDefault: true})
+
+	modelA, err := provider.Model("model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelB, err := provider.Model("model-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelA.IsDefault || !modelB.IsDefault {
+		t.Fatalf("default flags = model-a:%t model-b:%t, want false/true", modelA.IsDefault, modelB.IsDefault)
+	}
+
+	defaultModel, ok := provider.DefaultModel()
+	if !ok || defaultModel.Code != "model-b" {
+		t.Fatalf("default model = %+v, %t", defaultModel, ok)
 	}
 }

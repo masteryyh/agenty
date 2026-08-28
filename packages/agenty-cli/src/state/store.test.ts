@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AgentyClient } from "../api/client";
-import type { ChatSessionDto, SessionEvent } from "../api/types";
-import { useAppStore } from "./store";
+import type { ChatSessionDto, ModelDto, SessionEvent } from "../api/types";
+import { resolveReasoningEffortForModel, useAppStore } from "./store";
 
 const session: ChatSessionDto = {
     id: "session-1",
@@ -13,6 +13,92 @@ const session: ChatSessionDto = {
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
 };
+
+describe("reasoning effort fallback", () => {
+    test("switches unsupported effort to high with a user-facing notice", () => {
+        expect(resolveReasoningEffortForModel({
+            name: "Gemini Flash",
+            reasoningEfforts: ["low", "medium", "high"],
+        }, "max")).toEqual({
+            effort: "high",
+            notice: "Reasoning effort \"max\" is not supported by Gemini Flash; using \"high\" instead.",
+        });
+    });
+
+    test("uses the last configured effort when high is unavailable", () => {
+        expect(resolveReasoningEffortForModel({
+            name: "Limited Model",
+            reasoningEfforts: ["low"],
+        }, "max")).toEqual({
+            effort: "low",
+            notice: "Reasoning effort \"max\" is not supported by Limited Model; using \"low\" instead.",
+        });
+    });
+
+    test("persists the last supported effort after switching models", async () => {
+        const nextModel = {
+            code: "limited",
+            providerCode: "provider",
+            providerName: "Provider",
+            name: "Limited",
+            contextWindow: 32000,
+            maxOutputTokens: 8192,
+            multiModal: false,
+            light: false,
+            reasoning: true,
+            reasoningEfforts: ["low", "medium"],
+            isDefault: false,
+        } satisfies ModelDto;
+        let persistedEffort = "";
+        const current = { ...session, currentReasoningEffort: "max" as const };
+        const client = {
+            async setSessionModel() {
+                return current;
+            },
+            async setSessionReasoningEffort(_id: string, effort: string) {
+                persistedEffort = effort;
+                return { ...current, currentReasoningEffort: effort };
+            },
+        } as unknown as AgentyClient;
+        useAppStore.setState({ client, session: current, thinkingEnabled: true, thinkingLevel: "max" });
+
+        await useAppStore.getState().switchModel(nextModel);
+
+        expect(persistedEffort).toBe("medium");
+        expect(useAppStore.getState()).toMatchObject({
+            thinkingEnabled: true,
+            thinkingLevel: "medium",
+        });
+    });
+
+    test("rejects an explicitly selected effort outside the current model capabilities", () => {
+        useAppStore.setState({
+            model: {
+                code: "limited",
+                providerCode: "provider",
+                providerName: "Provider",
+                name: "Limited",
+                contextWindow: 32000,
+                maxOutputTokens: 8192,
+                multiModal: false,
+                light: false,
+                reasoning: true,
+                reasoningEfforts: ["low", "medium"],
+                isDefault: false,
+            },
+            thinkingEnabled: true,
+            thinkingLevel: "medium",
+        });
+
+        useAppStore.getState().setThinking(true, "max");
+
+        expect(useAppStore.getState()).toMatchObject({
+            thinkingEnabled: true,
+            thinkingLevel: "medium",
+            toast: { text: "Effort \"max\" is not supported by Limited.", error: true },
+        });
+    });
+});
 
 function makeEvent(sequence: number, event: Omit<SessionEvent, "sessionId" | "roundId" | "sequence">): SessionEvent {
     return {
@@ -253,7 +339,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return persisted;
             },
-            async resolveModel() {
+            async getModel() {
                 return {
                     code: "model",
                     providerCode: "provider",
@@ -339,7 +425,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return persisted;
             },
-            async resolveModel() {
+            async getModel() {
                 return {
                     code: "model",
                     providerCode: "provider",

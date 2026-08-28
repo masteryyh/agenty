@@ -41,7 +41,9 @@ func newProviderFixture(t *testing.T, responder providerResponder) *providerFixt
 	fixture := &providerFixture{requests: make(chan providerRequest, 64)}
 	fixture.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+		if request.Method == http.MethodGet {
+			body = map[string]any{}
+		} else if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Errorf("decode provider request: %v", err)
 			http.Error(writer, "invalid request", http.StatusBadRequest)
 			return

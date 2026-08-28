@@ -11,6 +11,7 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	"github.com/masteryyh/agenty-core/pkg/infra/catalogdata"
 )
 
 func newCatalogRepo(t *testing.T) *CatalogRepository {
@@ -38,28 +39,26 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	provider.APIKey = "sk-ant-test"
 
 	model1 := catalog.Model{
-		Code:            mustCatalogModelCode(`org/claude\\claude-opus[fast]`),
-		Name:            "Claude Opus 4.8",
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
-		ReasoningEffortMapping: map[string]shared.ReasoningEffort{
-			"low":    shared.ReasoningLow,
-			"medium": shared.ReasoningMedium,
-			"high":   shared.ReasoningHigh,
-		},
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		Code:             mustCatalogModelCode(`org/claude\\claude-opus[fast]`),
+		Name:             "Claude Opus 4.8",
+		ContextWindow:    200000,
+		MaxOutputTokens:  32000,
+		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningMedium, shared.ReasoningHigh},
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
 	}
 	model2 := catalog.Model{
-		Code:            mustCatalogModelCode("claude-haiku-4-5"),
-		Name:            "Claude Haiku 4.5",
-		ContextWindow:   200000,
-		MaxOutputTokens: 8000,
-		Light:           true,
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		Code:             mustCatalogModelCode("claude-haiku-4-5"),
+		Name:             "Claude Haiku 4.5",
+		ContextWindow:    200000,
+		MaxOutputTokens:  8000,
+		Light:            true,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
 	}
 	provider.Models = []catalog.Model{model1, model2}
+	provider.ModelsCached = false
 
 	if err := repo.Save(ctx, provider); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -71,6 +70,9 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	var persistedProvider catalog.Provider
 	if err := json.Unmarshal(providerData, &persistedProvider); err != nil {
 		t.Fatalf("decode provider file: %v", err)
+	}
+	if persistedProvider.ModelsCached {
+		t.Fatal("transient cache marker was persisted in provider config")
 	}
 	if len(persistedProvider.Models) != 2 {
 		t.Fatalf("persisted %d models, want 2", len(persistedProvider.Models))
@@ -113,19 +115,273 @@ func TestCatalogSaveAndGet(t *testing.T) {
 	if gotOpus != nil && !gotOpus.SupportsReasoning() {
 		t.Errorf("opus SupportsReasoning = %v, want true", gotOpus.SupportsReasoning())
 	}
-	if gotOpus != nil && gotOpus.MaxOutputTokens != catalog.DefaultMaxOutputTokens {
-		t.Errorf("opus max output tokens = %d, want %d", gotOpus.MaxOutputTokens, catalog.DefaultMaxOutputTokens)
+	if gotOpus != nil && gotOpus.MaxOutputTokens != model1.MaxOutputTokens {
+		t.Errorf("opus max output tokens = %d, want %d", gotOpus.MaxOutputTokens, model1.MaxOutputTokens)
 	}
 	if gotHaiku != nil && gotHaiku.SupportsReasoning() {
 		t.Errorf("haiku SupportsReasoning = %v, want false", gotHaiku.SupportsReasoning())
 	}
-	if gotOpus != nil {
-		if effort, ok := gotOpus.MapReasoningEffort("medium"); !ok || effort != shared.ReasoningMedium {
-			t.Errorf("mapped medium effort = %q, %v; want medium, true", effort, ok)
-		}
+	if gotOpus != nil && !gotOpus.SupportsReasoningEffort(shared.ReasoningMedium) {
+		t.Error("opus does not support medium reasoning effort")
 	}
 	if gotHaiku != nil && !gotHaiku.Light {
 		t.Errorf("haiku Light = %v, want true", gotHaiku.Light)
+	}
+}
+
+func TestCatalogReasoningModelWithEmptyEffortsUsesDefaults(t *testing.T) {
+	repo := newCatalogRepo(t)
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.Models = []catalog.Model{{
+		Code:      mustCatalogModelCode("reasoning-model"),
+		Name:      "Reasoning model",
+		Reasoning: true,
+	}}
+	if err := repo.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := repo.Get(t.Context(), provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Models[0].Reasoning || len(loaded.Models[0].ReasoningEfforts) != len(shared.StandardReasoningEfforts()) {
+		t.Fatalf("reasoning capabilities = %+v", loaded.Models[0])
+	}
+}
+
+func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
+	repo := newCatalogRepo(t)
+	builtins, err := catalogdata.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo = NewCatalogRepository(repo.providersDir, builtins...)
+	ctx := context.Background()
+
+	provider, err := repo.Get(ctx, mustCode("openai_legacy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provider.Builtin || provider.Name != "OpenAI (Legacy API)" {
+		t.Fatalf("builtin provider = %+v", provider)
+	}
+	provider.APIKey = "secret"
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatalf("Save builtin: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repo.providersDir, "openai_legacy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{\n  \"apiKey\": \"secret\"\n}" {
+		t.Fatalf("builtin credentials = %s", data)
+	}
+
+	loaded, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.APIKey != "secret" || loaded.Name != provider.Name || len(loaded.Models) != len(provider.Models) {
+		t.Fatalf("loaded builtin = %+v", loaded)
+	}
+	for _, model := range loaded.Models {
+		if model.ReasoningEfforts == nil {
+			t.Errorf("model %s reasoning efforts is nil", model.Code)
+		}
+	}
+	if err := repo.Delete(ctx, provider.Code); err != catalog.ErrBuiltinProviderReadOnly {
+		t.Fatalf("Delete builtin = %v, want read-only", err)
+	}
+}
+
+func TestCatalogModelDiscoveryCacheUsesExpirationAndStaysInMemory(t *testing.T) {
+	dir := t.TempDir()
+	builtins, err := catalogdata.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewCatalogRepository(filepath.Join(dir, "providers"), builtins...)
+	ctx := context.Background()
+	code := mustCode("openrouter")
+	models := []catalog.Model{{
+		Code:             mustCatalogModelCode("openai/gpt-test"),
+		Name:             "GPT Test",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  16_384,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}}
+	expiresAt := time.Now().UTC().Add(catalog.ModelDiscoveryCacheTTL)
+	if err := repo.ReplaceModels(ctx, code, models, expiresAt); err != nil {
+		t.Fatalf("ReplaceModels: %v", err)
+	}
+
+	loaded, err := repo.Get(ctx, code)
+	if err != nil {
+		t.Fatalf("Get cached provider: %v", err)
+	}
+	if len(loaded.Models) != 1 || loaded.Models[0].Code != models[0].Code {
+		t.Fatalf("cached models = %#v", loaded.Models)
+	}
+	if !loaded.ModelsCached {
+		t.Fatal("cached provider did not expose the transient cache marker")
+	}
+	if !loaded.Models[0].Cached {
+		t.Fatal("discovered model did not expose the transient cache marker")
+	}
+
+	cachePath := filepath.Join(repo.providersDir, ".models", "openrouter.json")
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("model discovery cache file exists: %v", err)
+	}
+
+	restarted := NewCatalogRepository(repo.providersDir, builtins...)
+	restartedProvider, err := restarted.Get(ctx, code)
+	if err != nil {
+		t.Fatalf("Get after restart: %v", err)
+	}
+	if len(restartedProvider.Models) != 0 {
+		t.Fatalf("restarted models = %#v, want no in-memory cache", restartedProvider.Models)
+	}
+	if restartedProvider.ModelsCached {
+		t.Fatal("restarted provider exposed a cache that should not survive restart")
+	}
+
+	if err := repo.ReplaceModels(ctx, code, models, time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatalf("ReplaceModels expired: %v", err)
+	}
+	expired, err := repo.Get(ctx, code)
+	if err != nil {
+		t.Fatalf("Get expired provider: %v", err)
+	}
+	if len(expired.Models) != 1 {
+		t.Fatalf("expired models = %#v, want stale cache", expired.Models)
+	}
+	needsDiscovery, err := repo.NeedsModelDiscovery(ctx, code)
+	if err != nil {
+		t.Fatalf("NeedsModelDiscovery: %v", err)
+	}
+	if !needsDiscovery {
+		t.Fatal("expired cache did not request discovery")
+	}
+}
+
+func TestCatalogSaveDoesNotPersistDiscoveredModels(t *testing.T) {
+	repo := newCatalogRepo(t)
+	ctx := context.Background()
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+
+	model := catalog.Model{
+		Code:             mustCatalogModelCode("gateway/model"),
+		Name:             "Gateway model",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}
+	if err := repo.ReplaceModels(ctx, provider.Code, []catalog.Model{model}, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.ModelsCached || len(cached.Models) != 1 {
+		t.Fatalf("cached provider = %+v", cached)
+	}
+	if !cached.Models[0].Cached {
+		t.Fatal("discovered model did not expose the transient cache marker")
+	}
+
+	if err := repo.Save(ctx, cached); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo.providersDir, "custom.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted catalog.Provider
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Models) != 0 {
+		t.Fatalf("persisted discovered models = %#v, want none", persisted.Models)
+	}
+	reloaded, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.ModelsCached || len(reloaded.Models) != 1 {
+		t.Fatalf("cache after Save = %+v", reloaded)
+	}
+}
+
+func TestCatalogModelDiscoveryCacheMarksOnlyDiscoveredModels(t *testing.T) {
+	repo := newCatalogRepo(t)
+	ctx := context.Background()
+	provider, err := catalog.NewProvider("custom", "Custom", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.Models = []catalog.Model{{
+		Code:             mustCatalogModelCode("configured"),
+		Name:             "Configured",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}}
+	if err := repo.Save(ctx, provider); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.ReplaceModels(ctx, provider.Code, []catalog.Model{{
+		Code:             mustCatalogModelCode("discovered"),
+		Name:             "Discovered",
+		ContextWindow:    128_000,
+		MaxOutputTokens:  8_192,
+		ReasoningEfforts: []shared.ReasoningEffort{},
+	}}, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := repo.Get(ctx, provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, err := loaded.Model(mustCatalogModelCode("configured"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovered, err := loaded.Model(mustCatalogModelCode("discovered"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.Cached || !discovered.Cached {
+		t.Fatalf("cached flags = configured:%t discovered:%t, want false/true", configured.Cached, discovered.Cached)
+	}
+
+	if err := repo.Save(ctx, loaded); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo.providersDir, "custom.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted catalog.Provider
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Models) != 1 || persisted.Models[0].Code != configured.Code || persisted.Models[0].Cached {
+		t.Fatalf("persisted models = %#v", persisted.Models)
 	}
 }
 

@@ -29,6 +29,7 @@ var publicRPCMethods = []string{
 	"provider.create",
 	"provider.get",
 	"provider.list",
+	"provider.listModels",
 	"provider.update",
 	"provider.delete",
 	"provider.addModel",
@@ -126,24 +127,38 @@ type Agent struct {
 }
 
 type Model struct {
-	Code                   string            `json:"code"`
-	Name                   string            `json:"name"`
-	ContextWindow          int               `json:"contextWindow"`
-	MaxOutputTokens        int64             `json:"maxOutputTokens"`
-	MultiModal             bool              `json:"multiModal"`
-	Light                  bool              `json:"light"`
-	ReasoningEffortMapping map[string]string `json:"reasoningEffortMapping"`
-	IsDefault              bool              `json:"isDefault"`
+	Code             string   `json:"code"`
+	Name             string   `json:"name"`
+	ContextWindow    int      `json:"contextWindow"`
+	MaxOutputTokens  int64    `json:"maxOutputTokens"`
+	MultiModal       bool     `json:"multiModal"`
+	Light            bool     `json:"light"`
+	ReasoningEfforts []string `json:"reasoningEfforts"`
+	IsDefault        bool     `json:"isDefault"`
+}
+
+type AvailableModel struct {
+	Code             string   `json:"code"`
+	Name             string   `json:"name"`
+	ContextWindow    int      `json:"contextWindow"`
+	MaxOutputTokens  int64    `json:"maxOutputTokens"`
+	MultiModal       bool     `json:"multiModal"`
+	ReasoningEfforts []string `json:"reasoningEfforts"`
 }
 
 type Provider struct {
-	Code     string         `json:"code"`
-	Name     string         `json:"name"`
-	Type     string         `json:"type"`
-	BaseURL  string         `json:"baseUrl"`
-	APIKey   string         `json:"apiKey"`
-	Models   []Model        `json:"models"`
-	Metadata map[string]any `json:"metadata"`
+	Code          string         `json:"code"`
+	Name          string         `json:"name"`
+	Type          string         `json:"type"`
+	BaseURL       string         `json:"baseUrl"`
+	APIKey        string         `json:"apiKey"`
+	Builtin       bool           `json:"builtin"`
+	Official      bool           `json:"official"`
+	FreeFormTool  bool           `json:"freeFormTool"`
+	ModelsURL     string         `json:"modelsUrl"`
+	TokenCountURL string         `json:"tokenCountUrl"`
+	Models        []Model        `json:"models"`
+	Metadata      map[string]any `json:"metadata"`
 }
 
 type Session struct {
@@ -248,33 +263,35 @@ type AgentUpdateInput struct {
 }
 
 type ProviderCreateInput struct {
-	Code     string         `json:"code"`
-	Name     string         `json:"name"`
-	Type     string         `json:"type"`
-	BaseURL  string         `json:"baseUrl,omitempty"`
-	APIKey   string         `json:"apiKey,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Code         string         `json:"code"`
+	Name         string         `json:"name"`
+	Type         string         `json:"type"`
+	BaseURL      string         `json:"baseUrl,omitempty"`
+	APIKey       string         `json:"apiKey,omitempty"`
+	FreeFormTool bool           `json:"freeFormTool,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 type ProviderUpdateInput struct {
-	Code     string         `json:"code"`
-	Name     *string        `json:"name,omitempty"`
-	Type     *string        `json:"type,omitempty"`
-	BaseURL  *string        `json:"baseUrl,omitempty"`
-	APIKey   *string        `json:"apiKey,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Code         string         `json:"code"`
+	Name         *string        `json:"name,omitempty"`
+	Type         *string        `json:"type,omitempty"`
+	BaseURL      *string        `json:"baseUrl,omitempty"`
+	APIKey       *string        `json:"apiKey,omitempty"`
+	FreeFormTool *bool          `json:"freeFormTool,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 type ModelInput struct {
-	ProviderCode           string            `json:"providerCode"`
-	ModelCode              string            `json:"modelCode"`
-	Name                   string            `json:"name"`
-	ContextWindow          int               `json:"contextWindow,omitempty"`
-	MaxOutputTokens        int64             `json:"maxOutputTokens"`
-	MultiModal             bool              `json:"multiModal,omitempty"`
-	Light                  bool              `json:"light,omitempty"`
-	ReasoningEffortMapping map[string]string `json:"reasoningEffortMapping,omitempty"`
-	IsDefault              bool              `json:"isDefault,omitempty"`
+	ProviderCode    string `json:"providerCode"`
+	ModelCode       string `json:"modelCode"`
+	Name            string `json:"name"`
+	ContextWindow   int    `json:"contextWindow,omitempty"`
+	MaxOutputTokens int64  `json:"maxOutputTokens"`
+	MultiModal      bool   `json:"multiModal,omitempty"`
+	Light           bool   `json:"light,omitempty"`
+	Reasoning       *bool  `json:"reasoning,omitempty"`
+	IsDefault       bool   `json:"isDefault,omitempty"`
 }
 
 type SessionCreateInput struct {

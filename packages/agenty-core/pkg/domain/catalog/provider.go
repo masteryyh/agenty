@@ -8,19 +8,26 @@ import (
 )
 
 var (
-	ErrModelNotFound = errors.New("catalog: model not found")
+	ErrModelNotFound           = errors.New("catalog: model not found")
+	ErrBuiltinProviderReadOnly = errors.New("catalog: built-in provider is read-only")
 )
 
 type Provider struct {
-	Code      shared.Code     `json:"code"`
-	Name      string          `json:"name"`
-	Type      APIType         `json:"type"`
-	BaseURL   string          `json:"baseUrl"`
-	APIKey    string          `json:"apiKey"`
-	Models    []Model         `json:"models"`
-	Metadata  shared.Metadata `json:"metadata,omitempty"`
-	CreatedAt time.Time       `json:"createdAt"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	Code          shared.Code     `json:"code"`
+	Name          string          `json:"name"`
+	Type          APIType         `json:"type"`
+	BaseURL       string          `json:"baseUrl"`
+	APIKey        string          `json:"apiKey"`
+	Builtin       bool            `json:"builtin"`
+	Official      bool            `json:"official"`
+	FreeFormTool  bool            `json:"freeFormTool"`
+	ModelsURL     string          `json:"modelsUrl,omitempty"`
+	TokenCountURL string          `json:"tokenCountUrl,omitempty"`
+	Models        []Model         `json:"models"`
+	ModelsCached  bool            `json:"modelsCached,omitempty"`
+	Metadata      shared.Metadata `json:"metadata,omitempty"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
 func NewProvider(code, name string, apiType APIType) (*Provider, error) {
@@ -53,7 +60,17 @@ func (p *Provider) Model(code shared.ModelCode) (*Model, error) {
 }
 
 func (p *Provider) AddModel(m Model) {
-	m.MaxOutputTokens = DefaultMaxOutputTokens
+	NormalizeReasoningCapabilities(&m)
+	if m.MaxOutputTokens <= 0 {
+		m.MaxOutputTokens = DefaultMaxOutputTokens
+	}
+	if m.IsDefault {
+		for index := range p.Models {
+			if p.Models[index].Code != m.Code {
+				p.Models[index].IsDefault = false
+			}
+		}
+	}
 	for i := range p.Models {
 		if p.Models[i].Code == m.Code {
 			p.Models[i] = m

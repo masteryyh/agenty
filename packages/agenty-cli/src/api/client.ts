@@ -1,6 +1,8 @@
 import type { StdioRPCClient } from "../core/rpc";
+import { formatModelRef, resolveModelInput as resolveModelInputFromList } from "./modelReference";
 import type {
     AgentDto,
+    AvailableModelDto,
     ChatMessageDto,
     ChatSessionDto,
     CompactionEvent,
@@ -13,6 +15,7 @@ import type {
     InitializeCompleteInput,
     ModelDto,
     ModelProviderDto,
+    ModelRef,
     PagedResponse,
     ReasoningEffort,
     RoundDto,
@@ -22,6 +25,7 @@ import type {
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
+import { STANDARD_REASONING_EFFORTS } from "./types";
 
 export interface PreparedSession {
     agent: AgentDto;
@@ -108,8 +112,10 @@ export class AgentyClient {
         await this.rpc.call("agent.delete", { code });
     }
 
-    async listProviders(): Promise<ModelProviderDto[]> {
-        const providers = await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list");
+    async listProviders(providerCode?: string): Promise<ModelProviderDto[]> {
+        const providers = providerCode
+            ? await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list", { providerCode })
+            : await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list");
         return (providers ?? [])
             .filter((provider): provider is ModelProviderDto => provider !== null)
             .map(normalizeProvider);
@@ -117,6 +123,18 @@ export class AgentyClient {
 
     async listProvidersPage(page = 1, pageSize = 100): Promise<PagedResponse<ModelProviderDto>> {
         return paginate(await this.listProviders(), page, pageSize);
+    }
+
+    async listProviderModels(providerCode: string): Promise<AvailableModelDto[]> {
+        const models = await this.rpc.call<Array<AvailableModelDto | null> | null>("provider.listModels", {
+            providerCode,
+        });
+        return (models ?? [])
+            .filter((model): model is AvailableModelDto => model !== null)
+            .map((model) => ({
+                ...model,
+                reasoningEfforts: Array.isArray(model.reasoningEfforts) ? model.reasoningEfforts : [],
+            }));
     }
 
     async createProvider(input: CreateModelProviderDto): Promise<ModelProviderDto> {
@@ -149,7 +167,10 @@ export class AgentyClient {
     }
 
     async getDefaultModel(): Promise<ModelDto> {
-        const models = await this.listModels();
+        const providers = await this.listProviders();
+        const models = providers
+            .filter((provider) => provider.apiKey.trim() !== "")
+            .flatMap((provider) => provider.models.map((model) => projectModel(provider, model)));
         const model = models.find((candidate) => candidate.isDefault) ?? models[0];
         if (!model) {
             throw new Error("no model available");
@@ -157,22 +178,21 @@ export class AgentyClient {
         return model;
     }
 
-    async resolveModel(reference?: string): Promise<ModelDto> {
+    async getModel(ref: ModelRef): Promise<ModelDto> {
+        const providers = await this.listProviders(ref.providerCode);
+        const provider = providers.find((candidate) => candidate.code === ref.providerCode);
+        const model = provider?.models.find((candidate) => candidate.code === ref.modelCode);
+        if (!provider || !model) {
+            throw new Error(`model not found: ${formatModelRef(ref)}`);
+        }
+        return projectModel(provider, model);
+    }
+
+    async resolveModelInput(reference?: string): Promise<ModelDto> {
         if (!reference) {
             return this.getDefaultModel();
         }
-        const models = await this.listModels();
-        const lower = reference.toLowerCase();
-        const matches = models.filter((model) =>
-            model.code === reference ||
-            model.name.toLowerCase() === lower ||
-            `${model.providerCode}/${model.code}`.toLowerCase() === lower ||
-            `${model.providerName}/${model.name}`.toLowerCase() === lower,
-        );
-        if (matches.length !== 1) {
-            throw new Error(matches.length === 0 ? `model not found: ${reference}` : `model reference is ambiguous: ${reference}`);
-        }
-        return matches[0];
+        return resolveModelInputFromList(await this.listModels(), reference);
     }
 
     async createModel(input: CreateModelDto): Promise<ModelDto> {
@@ -265,12 +285,12 @@ export class AgentyClient {
 
     async prepareSession(options: {
         agentRef?: string;
-        modelRef?: string;
+        modelInput?: string;
         newSession: boolean;
         reasoningEffort?: ReasoningEffort;
     }): Promise<PreparedSession> {
         const agent = await this.resolveAgent(options.agentRef);
-        const requestedModel = options.modelRef ? await this.resolveModel(options.modelRef) : undefined;
+        const requestedModel = options.modelInput ? await this.resolveModelInput(options.modelInput) : undefined;
         let session = options.newSession ? null : await this.getLastSessionByAgent(agent.code);
         if (!session) {
             const model = requestedModel ?? await this.resolveAgentModel(agent);
@@ -292,9 +312,7 @@ export class AgentyClient {
         }
 
         if (session.currentModel) {
-            const model = await this.resolveModel(
-                `${session.currentModel.providerCode}/${session.currentModel.modelCode}`,
-            );
+            const model = await this.getModel(session.currentModel);
             return { agent, model, session };
         }
 
@@ -305,7 +323,7 @@ export class AgentyClient {
 
     private async resolveAgentModel(agent: AgentDto): Promise<ModelDto> {
         if (agent.defaultModel) {
-            return this.resolveModel(`${agent.defaultModel.providerCode}/${agent.defaultModel.modelCode}`);
+            return this.getModel(agent.defaultModel);
         }
         return this.getDefaultModel();
     }
@@ -322,8 +340,28 @@ function projectModel(provider: ModelProviderDto, model: CoreModelDto): ModelDto
 function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
     return {
         ...provider,
+        builtin: provider.builtin === true,
+        official: provider.official === true,
+        freeFormTool: provider.freeFormTool === true,
+        modelsCached: provider.modelsCached === true,
         models: Array.isArray(provider.models)
-            ? provider.models.filter((model): model is CoreModelDto => model !== null)
+            ? provider.models
+                .filter((model): model is CoreModelDto => model !== null)
+                .map((model) => {
+                    const configuredEfforts = Array.isArray(model.reasoningEfforts)
+                        ? model.reasoningEfforts
+                        : [];
+                    const reasoning = model.reasoning === true || configuredEfforts.length > 0;
+                    return {
+                        ...model,
+                        reasoning,
+                        reasoningEfforts: reasoning
+                            ? configuredEfforts.length > 0
+                                ? configuredEfforts
+                                : [...STANDARD_REASONING_EFFORTS]
+                            : [],
+                    };
+                })
             : [],
     };
 }

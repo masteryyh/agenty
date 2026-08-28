@@ -1,0 +1,295 @@
+[
+    {
+        "name": "OpenAI",
+        "code": "openai",
+        "type": "openai",
+        "baseUrl": "https://api.openai.com/v1",
+        "official": true,
+        "freeFormTool": true,
+        "modelsUrl": "models",
+        "tokenCountUrl": "responses/input_tokens",
+        "models": [
+            {
+                "name": "GPT-5.6 Sol",
+                "code": "gpt-5.6-sol",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": true,
+                "reasoning": true
+            },
+            {
+                "name": "GPT-5.6 Terra",
+                "code": "gpt-5.6-terra",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "GPT-5.6 Luna",
+                "code": "gpt-5.6-luna",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": true,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "GPT-5.5",
+                "code": "gpt-5.5",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            }
+        ]
+    },
+    {
+        "name": "OpenAI (Legacy API)",
+        "code": "openai_legacy",
+        "type": "openai_completions",
+        "baseUrl": "https://api.openai.com/v1",
+        "official": true,
+        "modelsUrl": "models",
+        "tokenCountUrl": "",
+        "models": [
+            {
+                "name": "GPT-4o",
+                "code": "gpt-4o",
+                "contextWindow": 128000,
+                "maxOutputTokens": 16384,
+                "reasoningEfforts": [],
+                "multiModal": true,
+                "light": false,
+                "isDefault": true,
+                "reasoning": false
+            },
+            {
+                "name": "GPT-4.1",
+                "code": "gpt-4.1",
+                "contextWindow": 1047576,
+                "maxOutputTokens": 32768,
+                "reasoningEfforts": [],
+                "multiModal": true,
+                "light": false,
+                "reasoning": false
+            },
+            {
+                "name": "GPT-4o mini",
+                "code": "gpt-4o-mini",
+                "contextWindow": 128000,
+                "maxOutputTokens": 16384,
+                "reasoningEfforts": [],
+                "multiModal": true,
+                "light": true,
+                "reasoning": false
+            }
+        ]
+    },
+    {
+        "name": "OpenRouter",
+        "code": "openrouter",
+        "type": "openai",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "modelsUrl": "models",
+        "tokenCountUrl": "",
+        "models": []
+    },
+    {
+        "name": "Anthropic",
+        "code": "anthropic",
+        "type": "anthropic",
+        "baseUrl": "https://api.anthropic.com",
+        "official": true,
+        "modelsUrl": "v1/models",
+        "tokenCountUrl": "v1/messages/count_tokens",
+        "models": [
+            {
+                "name": "Claude Fable 5",
+                "code": "claude-fable-5",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "Claude Opus 5",
+                "code": "claude-opus-5",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": true,
+                "reasoning": true
+            },
+            {
+                "name": "Claude Opus 4.6",
+                "code": "claude-opus-4-6",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "Claude Sonnet 5",
+                "code": "claude-sonnet-5",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "Claude Sonnet 4.6",
+                "code": "claude-sonnet-4-6",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "Claude Haiku 4.5",
+                "code": "claude-haiku-4-5",
+                "contextWindow": 200000,
+                "maxOutputTokens": 64000,
+                "reasoningEfforts": [],
+                "multiModal": true,
+                "light": true,
+                "isDefault": false,
+                "reasoning": false
+            }
+        ]
+    },
+    {
+        "name": "Google",
+        "code": "google",
+        "type": "gemini",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "official": true,
+        "modelsUrl": "models",
+        "tokenCountUrl": "models/{model}:countTokens",
+        "models": [
+            {
+                "name": "Gemini 3.7 Flash",
+                "code": "gemini-3.7-flash",
+                "contextWindow": 1048576,
+                "maxOutputTokens": 65536,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high"
+                ],
+                "multiModal": true,
+                "light": true,
+                "isDefault": true,
+                "reasoning": true
+            },
+            {
+                "name": "Gemini 3.5 Flash Lite",
+                "code": "gemini-3.5-flash-lite",
+                "contextWindow": 1048576,
+                "maxOutputTokens": 65536,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high"
+                ],
+                "multiModal": true,
+                "light": true,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "Gemini 3.1 Pro (Preview)",
+                "code": "gemini-3.1-pro-preview",
+                "contextWindow": 1048576,
+                "maxOutputTokens": 65536,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            }
+        ]
+    }
+]

@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"net/http"
 	"testing"
 )
 
@@ -11,6 +12,9 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	t.Parallel()
 
 	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
+		if request.Method == http.MethodGet {
+			return providerReply{Body: `{"object":"list","data":[{"id":"fixture-model"}]}`}
+		}
 		if request.Call == 3 {
 			return providerReply{WaitForCancel: true}
 		}
@@ -122,7 +126,20 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	}
 	providers, err := first.ListProviders(ctx)
 	requireNoError(t, err)
-	if len(providers) != 1 || providers[0].Code != "local-openai" {
+	var legacyProvider *Provider
+	var localProvider *Provider
+	for index := range providers {
+		if providers[index].Code == "openai_legacy" {
+			legacyProvider = &providers[index]
+		}
+		if providers[index].Code == "local-openai" {
+			localProvider = &providers[index]
+		}
+	}
+	if legacyProvider == nil || !legacyProvider.Builtin || !legacyProvider.Official || legacyProvider.Name != "OpenAI (Legacy API)" || legacyProvider.Type != "openai_completions" {
+		t.Fatalf("legacy provider = %+v", legacyProvider)
+	}
+	if localProvider == nil {
 		t.Fatalf("providers = %+v", providers)
 	}
 	_, err = first.GetProvider(ctx, "local-openai")
@@ -135,13 +152,10 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		ContextWindow:   128_000,
 		MaxOutputTokens: 100_000,
 		MultiModal:      true,
-		ReasoningEffortMapping: map[string]string{
-			"high": "high",
-		},
-		IsDefault: true,
+		IsDefault:       true,
 	})
 	requireNoError(t, err)
-	if len(provider.Models) != 1 || provider.Models[0].MaxOutputTokens != 8_192 {
+	if len(provider.Models) != 1 || provider.Models[0].MaxOutputTokens != 100_000 {
 		t.Fatalf("provider models = %+v", provider.Models)
 	}
 	_, err = first.AddModel(ctx, ModelInput{
@@ -257,8 +271,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		fixture.requests,
 		2,
 	)
-	if firstProviderRequest.Body["max_completion_tokens"] != float64(8_192) {
-		t.Fatalf("max completion tokens = %v, want 8192", firstProviderRequest.Body["max_completion_tokens"])
+	if firstProviderRequest.Body["max_completion_tokens"] != float64(100_000) {
+		t.Fatalf("max completion tokens = %v, want 100000", firstProviderRequest.Body["max_completion_tokens"])
 	}
 	if providerMessageCount(secondProviderRequest) <= providerMessageCount(firstProviderRequest) {
 		t.Fatalf(
@@ -287,6 +301,11 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		fixture.requests,
 		3,
 	)
+	models, err := second.ListProviderModels(ctx, "local-openai")
+	requireNoError(t, err)
+	if len(models) != 1 || models[0].Code != "fixture-model" || models[0].ContextWindow != 256_000 || models[0].MaxOutputTokens != 65_536 || len(models[0].ReasoningEfforts) != 0 {
+		t.Fatalf("discovered models = %+v", models)
+	}
 	_, err = second.StartSession(
 		ctx,
 		cancelSession.ID,

@@ -2,6 +2,7 @@ packages:
   - "packages/agenty-core"
   - "packages/agenty-cli"
   - "packages/agenty-bootstrap"
+  - "packages/patch-applier"
 
 peerDependencyRules:
   allowedVersions:

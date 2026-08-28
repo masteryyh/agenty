@@ -20,7 +20,7 @@ func TestInitializeDataDirCreatesStructure(t *testing.T) {
 		t.Errorf("ResolvePaths: %v", err)
 	}
 
-	for _, dir := range []string{paths.SessionsDir, paths.AgentsDir, paths.ProvidersDir} {
+	for _, dir := range []string{paths.SessionsDir, paths.AgentsDir, paths.ProvidersDir, paths.LocksDir} {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			t.Errorf("expected directory %s to exist", dir)
 		}
@@ -101,6 +101,9 @@ func TestResolvePathsUsesEnvVar(t *testing.T) {
 	}
 	if paths.ConfigFile != filepath.Join(custom, "config.json") {
 		t.Errorf("ConfigFile = %s", paths.ConfigFile)
+	}
+	if paths.LocksDir != filepath.Join(custom, "locks") {
+		t.Errorf("LocksDir = %s", paths.LocksDir)
 	}
 }
 

@@ -84,6 +84,22 @@ describe("tool display", () => {
             summaryLines: ["update src/main.go"],
         });
 
+        const completedDisplay = buildToolDisplay(toolCall(
+            "apply_patch",
+            { patch: "*** Begin Patch\n*** Add File: notes.txt\n+hello\n*** End Patch" },
+            JSON.stringify({
+                success: true,
+                files: [{
+                    path: "notes.txt",
+                    diff: "--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+hello",
+                    addedLines: 1,
+                    removedLines: 0,
+                }],
+            }),
+        ));
+        expect(completedDisplay.summaryLines).toEqual(["notes.txt · +1 -0"]);
+        expect(completedDisplay.detailLines).toContain("+hello");
+
         const customDisplay = buildToolDisplay(toolCall("apply_patch", {
             patch: [
                 "*** Begin Patch",

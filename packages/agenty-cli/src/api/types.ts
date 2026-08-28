@@ -1,4 +1,11 @@
 export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+];
 export type APIType = "openai" | "openai_completions" | "anthropic" | "gemini";
 
 export interface ModelRef {
@@ -40,28 +47,41 @@ export interface ModelDto {
     providerName: string;
     name: string;
     contextWindow: number;
-    /** Legacy projection; core now always uses 8192 for every model. */
+    /** The exact model limit, or the custom-model fallback when omitted. */
     maxOutputTokens: number;
     multiModal: boolean;
     light: boolean;
-    reasoningEffortMapping?: Record<string, ReasoningEffort>;
+    reasoning?: boolean;
+    reasoningEfforts?: ReasoningEffort[];
     isDefault: boolean;
+    cached?: boolean;
     createdAt?: string;
     updatedAt?: string;
 }
 
 export interface CoreModelDto extends Omit<ModelDto, "providerCode" | "providerName"> {}
 
+export interface AvailableModelDto {
+    code: string;
+    name: string;
+    contextWindow: number;
+    maxOutputTokens: number;
+    multiModal: boolean;
+    reasoning?: boolean;
+    reasoningEfforts: ReasoningEffort[];
+}
+
 export interface CreateModelDto {
     providerCode: string;
     modelCode: string;
     name: string;
     contextWindow?: number;
-    /** @deprecated Core ignores per-model output limits and uses 8192. */
+    /** Defaults to the core fallback when omitted. */
     maxOutputTokens?: number;
     multiModal?: boolean;
     light?: boolean;
-    reasoningEffortMapping?: Record<string, ReasoningEffort>;
+    reasoning?: boolean;
+    reasoningEfforts?: ReasoningEffort[];
     isDefault?: boolean;
 }
 
@@ -73,7 +93,14 @@ export interface ModelProviderDto {
     type: APIType;
     baseUrl: string;
     apiKey: string;
+    freeFormTool?: boolean;
+    builtin?: boolean;
+    official?: boolean;
+    modelsUrl?: string;
+    tokenCountUrl?: string;
     models: CoreModelDto[];
+    /** True when core populated models from its discovery cache. */
+    modelsCached?: boolean;
     metadata?: Record<string, unknown>;
     createdAt: string;
     updatedAt: string;
@@ -85,6 +112,7 @@ export interface CreateModelProviderDto {
     type: APIType;
     baseUrl?: string;
     apiKey?: string;
+    freeFormTool?: boolean;
     metadata?: Record<string, unknown>;
 }
 

@@ -30,9 +30,6 @@ export interface ToolDisplay {
 
 const TOOL_LABELS: Record<string, string> = {
     read_file: "Read file",
-    write_file: "Write file",
-    patch_file: "Edit file",
-    delete_file: "Delete file",
     grep: "Search text",
     glob: "Find files",
     ls: "List directory",
@@ -121,11 +118,6 @@ function formatRange(input: JsonRecord | undefined, result: JsonRecord | undefin
         return `lines ${start}–${end}`;
     }
     return start !== undefined ? `from line ${start}` : `through line ${end}`;
-}
-
-function formatBytes(value: unknown): string {
-    const bytes = numberValue(value);
-    return bytes === undefined ? "" : `${bytes.toLocaleString()} bytes`;
 }
 
 function formatCount(value: unknown, singular: string, plural = `${singular}s`): string {
@@ -240,47 +232,6 @@ function readFileDisplay(input: JsonRecord | undefined, result: ToolResult | und
         status: toolStatus(result),
         summaryLines: [summary ? `${path} · ${summary}` : path],
         detailLines: details,
-    };
-}
-
-function writeFileDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
-    const output = resultRecord(result);
-    const path = formatPath(input?.path ?? output?.path);
-    const created = booleanValue(output?.created);
-    const bytes = formatBytes(output?.bytesWritten);
-    const action = created === undefined ? "file" : created ? "created" : "updated";
-    const summary = [path, action, bytes].filter(Boolean).join(" · ");
-    return {
-        label: TOOL_LABELS.write_file,
-        status: toolStatus(result),
-        summaryLines: [summary],
-        detailLines: [],
-    };
-}
-
-function patchFileDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
-    const output = resultRecord(result);
-    const path = formatPath(input?.path ?? output?.path);
-    const replacements = formatCount(output?.replacements, "replacement");
-    const bytes = formatBytes(output?.bytesWritten);
-    return {
-        label: TOOL_LABELS.patch_file,
-        status: toolStatus(result),
-        summaryLines: [[path, replacements, bytes].filter(Boolean).join(" · ")],
-        detailLines: [],
-    };
-}
-
-function deleteFileDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
-    const output = resultRecord(result);
-    const path = formatPath(input?.path ?? output?.path);
-    const deleted = booleanValue(output?.deleted);
-    const action = deleted === undefined ? "file" : deleted ? "deleted" : "not deleted";
-    return {
-        label: TOOL_LABELS.delete_file,
-        status: toolStatus(result),
-        summaryLines: [`${path} · ${action}`],
-        detailLines: [],
     };
 }
 
@@ -460,15 +411,25 @@ function applyPatchDisplay(input: JsonRecord | undefined, result: ToolResult | u
     if (summaryLines.length === 0) {
         summaryLines.push("patch");
     }
-    const visibleSummary = summaryLines.slice(0, MAX_SUMMARY_LINES);
-    if (summaryLines.length > visibleSummary.length) {
-        visibleSummary.push(`… ${summaryLines.length - visibleSummary.length} more operations`);
+    const output = resultRecord(result);
+    const files = Array.isArray(output?.files) ? output.files.filter(isRecord) : [];
+    const resultSummary = files.map((file) => {
+        const path = formatPath(file.path);
+        const added = numberValue(file.addedLines) ?? 0;
+        const removed = numberValue(file.removedLines) ?? 0;
+        return `${path} · +${added} -${removed}`;
+    });
+    const visibleSummary = (resultSummary.length > 0 ? resultSummary : summaryLines).slice(0, MAX_SUMMARY_LINES);
+    const totalSummaryLines = resultSummary.length > 0 ? resultSummary.length : summaryLines.length;
+    if (totalSummaryLines > visibleSummary.length) {
+        visibleSummary.push(`… ${totalSummaryLines - visibleSummary.length} more files`);
     }
+    const diffDetails = files.flatMap((file) => splitLines(stringValue(file.diff)));
     return {
         label: TOOL_LABELS.apply_patch,
         status: toolStatus(result),
         summaryLines: visibleSummary,
-        detailLines: formatResultPreview(result),
+        detailLines: diffDetails.length > 0 ? diffDetails : formatResultPreview(result),
     };
 }
 
@@ -521,12 +482,6 @@ export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDis
         switch (toolCall.name) {
             case "read_file":
                 return readFileDisplay(input, toolCall.result);
-            case "write_file":
-                return writeFileDisplay(input, toolCall.result);
-            case "patch_file":
-                return patchFileDisplay(input, toolCall.result);
-            case "delete_file":
-                return deleteFileDisplay(input, toolCall.result);
             case "grep":
                 return grepDisplay(input, toolCall.result);
             case "glob":

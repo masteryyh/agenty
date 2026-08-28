@@ -75,9 +75,7 @@ func cloneProvider(provider *catalog.Provider) *catalog.Provider {
 	copy := *provider
 	copy.Models = slices.Clone(provider.Models)
 	for index := range copy.Models {
-		copy.Models[index].ReasoningEffortMapping = maps.Clone(
-			copy.Models[index].ReasoningEffortMapping,
-		)
+		copy.Models[index].ReasoningEfforts = slices.Clone(copy.Models[index].ReasoningEfforts)
 	}
 	copy.Metadata = maps.Clone(provider.Metadata)
 	return &copy

@@ -108,7 +108,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: packages/agenty-bootstrap
+          workspaces: |
+            packages/agenty-bootstrap
+            packages/patch-applier
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

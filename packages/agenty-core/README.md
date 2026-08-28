@@ -14,7 +14,7 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Session transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` | Write model — append-only event log (source of truth) |
 | Session index | `~/.agenty/agenty.sqlite` → `sessions` | Read model — projection for fast listing/search |
 | Global config | `~/.agenty/config.json` | Application configuration |
-| Providers | `~/.agenty/providers/<provider-code>.json` | Catalog aggregate, including its models |
+| Providers | Embedded catalog; custom providers use `~/.agenty/providers/<provider-code>.json` | Built-in metadata/models are read-only; built-in files store only API keys |
 | Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
@@ -47,24 +47,19 @@ model, context window, reasoning effort, and working directory used by that roun
 ### Reasoning effort
 
 Agenty exposes exactly six provider-independent reasoning effort levels: `off`, `low`,
-`medium`, `high`, `xhigh`, and `max`. A model stores a `reasoningEffortMapping` object
-whose keys are provider-native effort names and whose values are Agenty effort levels:
+`medium`, `high`, `xhigh`, and `max`. Reasoning models store supported enabled levels
+in a `reasoningEfforts` array:
 
 ```json
 {
-  "reasoningEffortMapping": {
-    "none": "off",
-    "minimal": "low",
-    "low": "low",
-    "medium": "medium",
-    "high": "high"
-  }
+  "reasoningEfforts": ["low", "medium", "high", "xhigh", "max"]
 }
 ```
 
-The mapping allows multiple native efforts to normalize to the same Agenty effort.
-A model whose mapping has no enabled effort does not support reasoning. Only the six
-Agenty levels above are valid mapping values; native effort names are provider-specific.
+An explicit empty array identifies a non-reasoning model. Missing upstream capability
+data defaults to all five enabled Agenty levels. Provider adapters send the selected level
+unchanged; unsupported levels are reported through the normal round error flow.
+Provider-specific levels such as `minimal` are not exposed.
 
 ## Agent-loop runtime
 
@@ -76,9 +71,9 @@ active rounds.
 
 Each loop resolves the Agent system prompt, rebuilds the effective conversation context,
 converts it through the selected provider adapter, invokes the LLM, persists the
-assistant response, and repeats when tool calls are returned. Every model invocation uses
-the global `8192` output-token limit; the legacy per-model field is ignored and retained
-only for wire compatibility. Automatic compaction runs when the estimated context reaches
+assistant response, and repeats when tool calls are returned. Custom models use `8192` output
+tokens when omitted; built-in models use the exact limit from
+the embedded catalog. Automatic compaction runs when the estimated context reaches
 `contextWindow * 90%`. `/compact` triggers the same flow
 manually. Compaction stores only the generated summary and compaction audit data in a
 `session_compacted` event. During replay and request construction, the effective model
@@ -92,9 +87,11 @@ compacts with the current model, trims retained context to fit the target when n
 then persists the model change. The loop currently permits at most 20 LLM/tool
 iterations. The shared registry implements the `ToolRuntime` port, executes one tool
 batch concurrently, and returns results in call order. `pkg/agentloop/builtin/` provides
-the production filesystem tools `read_file`, `write_file`, `patch_file`, `delete_file`,
-`grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly. Relative paths resolve
-from the round's captured session working directory, while absolute paths remain valid.
+`read_file`, `apply_patch`, `grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly.
+`apply_patch` delegates V4A parsing and atomic filesystem mutation to the bundled Rust
+executable of the same name. Providers with free-form tool support receive `apply_patch`
+as a model tool. Other providers receive a system instruction to run the same executable
+through `shell`. Relative paths resolve from the round's captured session working directory.
 
 ## Infrastructure layer
 
@@ -105,12 +102,13 @@ filesystem + SQLite storage model.
 pkg/infra/
 ├── config/             Load config file + env overrides into a merged singleton; resolve data-dir paths
 ├── initialize/         OpenRepositories: one-call setup of all stores
+├── catalogdata/        Embedded built-in provider/model JSON
 ├── llm/                Provider SDK adapters implementing the agentloop caller contract
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── agent.go        AgentRepository (agent JSON files)
-│   ├── catalog.go      CatalogRepository (provider aggregate JSON, embedded models)
+│   ├── catalog.go      CatalogRepository (embedded built-ins plus custom provider JSON)
 │   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
 └── rpc/                stdio JSON-RPC 2.0 interface layer
     ├── message.go      Request/Response/Notification/Error/ID wire types
@@ -194,9 +192,20 @@ Methods follow a `resource.action` naming:
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
 | Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
-| Provider | `provider.create`, `provider.get`, `provider.list`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
+| Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`provider.list` accepts an optional `{providerCode}`. Without it, core discovers all
+configured providers whose catalog is empty in parallel; with it, only that provider is
+eligible for discovery. `provider.listModels` accepts `{providerCode}` and exposes the same
+core-owned discovery path for direct callers. Successful discovery is cached in the running
+core process for 8 hours. It is not written to disk and does not survive a core
+restart. Expired entries remain available as stale data while a subsequent list refreshes them.
+It maps common `id`/name/token-limit fields, follows provider pagination, defaults missing or
+non-positive context/output limits to `256000` and `65536`, and represents missing reasoning
+capability as an empty `reasoningEfforts` array. Transactional `apply_patch` locks live under
+`~/.agenty/locks/`; each lock records its helper PID and full target path.
 
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
 and `running` status immediately; the engine continues the full agent turn

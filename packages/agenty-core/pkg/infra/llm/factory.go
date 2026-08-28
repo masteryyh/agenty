@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -61,6 +60,7 @@ func NewCaller(
 			client:       &client,
 			model:        model,
 			nativeOpenAI: nativeOpenAIResponsesProvider(provider),
+			freeFormTool: provider.FreeFormTool,
 		}, nil
 	case catalog.APIOpenAICompletions:
 		client := newOpenAIClient(provider, config)
@@ -80,23 +80,7 @@ func NewCaller(
 }
 
 func nativeOpenAIResponsesProvider(provider catalog.Provider) bool {
-	if provider.Code.String() != "openai" {
-		return false
-	}
-	baseURL := strings.TrimSpace(provider.BaseURL)
-	if baseURL == "" {
-		return true
-	}
-
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-
-	return strings.EqualFold(parsed.Scheme, "https") &&
-		strings.EqualFold(parsed.Hostname(), "api.openai.com") &&
-		strings.TrimRight(parsed.EscapedPath(), "/") == "/v1" &&
-		parsed.RawQuery == "" && parsed.Fragment == ""
+	return provider.Official && provider.Type == catalog.APIOpenAI
 }
 
 func newOpenAIClient(provider catalog.Provider, config factoryConfig) openai.Client {

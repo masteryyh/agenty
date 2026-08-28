@@ -47,15 +47,23 @@ const compactionPrompt = `<session-compaction-request>
   </constraints>
 </session-compaction-request>`
 
-func CompactionThreshold(contextWindow int64) int64 {
+func CompactionThreshold(contextWindow, maxOutputTokens int64) int64 {
 	if contextWindow <= 0 {
 		return 0
 	}
-	return contextWindow - contextWindow/10
+	if maxOutputTokens < 0 {
+		maxOutputTokens = 0
+	}
+	outputReservedWindow := contextWindow - maxOutputTokens
+	safetyWindow := contextWindow - contextWindow/10
+	if outputReservedWindow < safetyWindow {
+		return max(0, outputReservedWindow)
+	}
+	return safetyWindow
 }
 
-func ShouldCompact(contextTokens, contextWindow int64) bool {
-	threshold := CompactionThreshold(contextWindow)
+func ShouldCompact(contextTokens, contextWindow, maxOutputTokens int64) bool {
+	threshold := CompactionThreshold(contextWindow, maxOutputTokens)
 	return threshold == 0 || contextTokens >= threshold
 }
 
@@ -88,7 +96,13 @@ func (engine *Engine) compactPrepared(
 	prepared *preparedExecution,
 	trigger conversation.CompactionTrigger,
 ) (*conversation.SessionCompacted, error) {
-	return engine.compactPreparedForWindow(ctx, prepared, trigger, modelContextWindow(prepared))
+	return engine.compactPreparedForWindow(
+		ctx,
+		prepared,
+		trigger,
+		modelContextWindow(prepared),
+		prepared.maxOutputTokens,
+	)
 }
 
 func (engine *Engine) compactPreparedForWindow(
@@ -96,6 +110,7 @@ func (engine *Engine) compactPreparedForWindow(
 	prepared *preparedExecution,
 	trigger conversation.CompactionTrigger,
 	contextWindow int64,
+	maxOutputTokens int64,
 ) (*conversation.SessionCompacted, error) {
 	baseMessages := sessionMessages(prepared.session)
 	if len(baseMessages) == 0 {
@@ -105,7 +120,7 @@ func (engine *Engine) compactPreparedForWindow(
 	baseRequest := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        baseMessages,
-		Tools:           engine.tools.Definitions(),
+		Tools:           engine.toolDefinitions(prepared.freeFormTool),
 		MaxOutputTokens: prepared.maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
@@ -143,7 +158,7 @@ func (engine *Engine) compactPreparedForWindow(
 		engine.emitCompactionFailure(ctx, prepared.session.ID, compactionID, trigger, err)
 		return nil, fmt.Errorf("record compaction: %w", err)
 	}
-	compactedRequest := engine.sessionRequestForWindow(prepared, contextWindow)
+	compactedRequest := engine.sessionRequestForWindow(prepared, contextWindow, maxOutputTokens)
 	event.ContextTokensAfter = estimateRequestTokens(compactedRequest)
 
 	if err := engine.saveProgress(ctx, prepared.session); err != nil {
@@ -296,7 +311,7 @@ func fitCompactedRequest(request Request, contextWindow int64) Request {
 		return request
 	}
 
-	limit := CompactionThreshold(contextWindow)
+	limit := CompactionThreshold(contextWindow, request.MaxOutputTokens)
 	for estimateRequestTokens(request) >= limit {
 		removeIndex := retainedMessageIndex(request.Messages, "retained_assistant")
 		if removeIndex < 0 {
