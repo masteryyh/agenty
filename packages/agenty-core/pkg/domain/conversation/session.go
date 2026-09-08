@@ -146,6 +146,35 @@ func (s *Session) AppendHiddenUserMessage(roundID uuid.UUID, content Content) (M
 	return s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
 }
 
+func (s *Session) AppendHiddenUserMessageWithMetadata(
+	roundID uuid.UUID,
+	content Content,
+	metadata shared.Metadata,
+) (Message, error) {
+	message, err := s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	if err != nil {
+		return Message{}, err
+	}
+	message.Metadata = metadata
+	lastEvent := s.pending[len(s.pending)-1]
+	appended, ok := lastEvent.(MessageAppended)
+	if !ok {
+		return Message{}, errors.New("hidden message append event is missing")
+	}
+	appended.Message.Metadata = metadata
+	s.pending[len(s.pending)-1] = appended
+	if round, _, ok := s.findRound(roundID); ok && len(round.Messages) > 0 {
+		round.Messages[len(round.Messages)-1].Metadata = metadata
+	}
+	for index := len(s.context) - 1; index >= 0; index-- {
+		if s.context[index].ID == message.ID {
+			s.context[index].Metadata = metadata
+			break
+		}
+	}
+	return message, nil
+}
+
 func (s *Session) AppendAssistantMessage(roundID uuid.UUID, content Content, model shared.ModelRef, usage *TokenUsage) (Message, error) {
 	return s.AppendMessage(roundID, RoleAssistant, content, &model, usage)
 }

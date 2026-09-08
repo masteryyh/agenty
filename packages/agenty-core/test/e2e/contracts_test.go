@@ -21,6 +21,7 @@ const (
 var publicRPCMethods = []string{
 	"initialize.already",
 	"initialize.complete",
+	"skill.list",
 	"provider.create",
 	"provider.get",
 	"provider.list",

@@ -19,6 +19,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
+	"github.com/masteryyh/agenty-core/pkg/infra/skill"
 	"github.com/masteryyh/agenty-core/pkg/utils/signal"
 )
 
@@ -53,6 +54,16 @@ func run() (exitCode int) {
 			exitCode = 1
 		}
 	}()
+
+	skillRegistry, err := skill.Scan(config.Get().Paths().SkillsDir)
+	if err != nil {
+		slog.Warn("failed to scan skills", "error", err)
+		skillRegistry = nil
+	} else {
+		for _, diagnostic := range skillRegistry.Diagnostics() {
+			slog.Warn("skill discovery diagnostic", "code", diagnostic.Code, "message", diagnostic.Message, "path", diagnostic.Path)
+		}
+	}
 
 	ctx, cancel := signal.SetupContext()
 	defer cancel()
@@ -95,6 +106,7 @@ func run() (exitCode int) {
 		Compactions: func(eventCtx context.Context, event agentloop.CompactionEvent) error {
 			return srv.Notify(eventCtx, "session.compaction", event)
 		},
+		Skills: skillRegistry,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to initialize execution engine", "error", err)
@@ -121,6 +133,7 @@ func run() (exitCode int) {
 		sessionService,
 		execution,
 	)
+	adapter.RegisterSkillHandlers(disp, skillRegistry)
 
 	asm := rpc.NewChunkAssembler(disp)
 	rpc.RegisterChunkHandlers(disp, asm)

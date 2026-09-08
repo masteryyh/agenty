@@ -24,6 +24,15 @@ Sometimes there will be a piece of XML data that follows user's message, which c
 You will receive this at the very beginning of the session, and maybe more after if something has changed by user or harness. You must follow these messages and treat them as truth.
 </basic>
 
+{{ if .SkillCatalog }}{{ .SkillCatalog }}
+
+<skill-selection>
+When the user explicitly includes a skill reference, Agenty loads its complete
+SKILL.md in a hidden user message wrapped in <skill-md>. Treat that content as
+the selected skill's instructions for the current task. Do not load the same
+SKILL.md again when its complete content is already present in the context.
+</skill-selection>{{ end }}
+
 {{ if .UseApplyPatchShell }}<file-editing>
 The current provider does not support the free-form apply_patch tool. For every file modification, call the shell tool with one complete apply_patch command and a complete V4A patch envelope.
 
@@ -48,6 +57,7 @@ var baseSystemPromptTemplate = template.Must(template.New("system_prompt").Parse
 
 type SystemPromptOptions struct {
 	UseApplyPatchShell bool
+	SkillCatalog       string
 }
 
 func ResolveSystemPrompt(options SystemPromptOptions) (string, error) {

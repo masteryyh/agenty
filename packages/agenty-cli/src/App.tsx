@@ -1,5 +1,5 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
@@ -12,8 +12,16 @@ import { ModelOverlay } from "./components/ModelOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
+import type { StructuredTextInputHandle } from "./components/StructuredTextInput";
 import { Box, Text } from "./components/ui";
 import { WizardOverlay } from "./components/WizardOverlay";
+import {
+    type ComposerDocument,
+    emptyDocument,
+    rangesForDocument,
+    renderDocument,
+    serializeDocument,
+} from "./composer/document";
 import { useApp, useChat, useInput, useWindowSize } from "./hooks";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { type OverlayKind, useAppStore } from "./state/store";
@@ -91,11 +99,19 @@ function ChatView() {
     const { rows, columns } = useWindowSize();
     const client = useAppStore((s) => s.client);
     const thinkingLevel = useAppStore((s) => s.thinkingLevel);
-    const [value, setValue] = useState("");
+    const [document, setDocument] = useState<ComposerDocument>(() => emptyDocument());
+    const [cursorOffset, setCursorOffset] = useState(0);
+    const inputRef = useRef<StructuredTextInputHandle | null>(null);
+    const skills = useAppStore((s) => s.skills);
 
     const { palette, height: paletteHeight, tab } = useCommandPalette(
-        value,
+        renderDocument(document),
+        cursorOffset,
         client,
+        skills,
+        rangesForDocument(document)
+            .filter((range) => range.node.type === "skill")
+            .map(({ start, end }) => ({ start, end })),
     );
 
     const streaming = chat.status === "streaming";
@@ -120,12 +136,24 @@ function ChatView() {
         }
     };
 
-    const handleSubmit = (text: string) => {
-        const trimmed = text.trim();
+    const chooseSkill = (skill: typeof skills[number], start: number, end: number) => {
+        inputRef.current?.insertSkill(start, end, skill);
+    };
+
+    const handleSubmit = (submitted: ComposerDocument) => {
+        if (palette.mode === "skills") {
+            const skill = palette.matches[palette.highlight];
+            if (skill) {
+                chooseSkill(skill, palette.matchStart, palette.matchEnd);
+            }
+            return;
+        }
+        const trimmed = serializeDocument(submitted).trim();
         if (!trimmed) {
             return;
         }
-        setValue("");
+        setDocument(emptyDocument());
+        setCursorOffset(0);
         if (trimmed.startsWith("/")) {
             const tokens = parseCommandTokens(trimmed);
             const cmd = (tokens[0] ?? "").toLowerCase();
@@ -210,9 +238,14 @@ function ChatView() {
     };
 
     const handleTab = (): boolean => {
-        const v = tab();
-        if (v !== null) {
-            setValue(v);
+        const action = tab();
+        if (action?.type === "skill") {
+            chooseSkill(action.skill, action.start, action.end);
+            return true;
+        }
+        if (action?.type === "text") {
+            setDocument({ nodes: [{ type: "text", text: action.value }] });
+            setCursorOffset(action.value.length);
             return true;
         }
         return false;
@@ -236,6 +269,7 @@ function ChatView() {
             <MessageList
                 history={chat.history}
                 current={chat.current}
+                skills={skills}
                 height={messageHeight}
                 header={<LogoHeader />}
                 interactive={!hasPanelOverlay && paletteHeight === 0}
@@ -243,13 +277,20 @@ function ChatView() {
             <CommandPalette
                 palette={palette}
                 marginTop={-paletteHeight}
-                onChoose={setValue}
+                onChoose={(value) => {
+                    setDocument({ nodes: [{ type: "text", text: value }] });
+                    setCursorOffset(value.length);
+                }}
+                onChooseSkill={chooseSkill}
             />
             <Box marginTop={INPUT_TOP_GAP}>
                 <InputBox
-                    value={value}
-                    onChange={setValue}
+                    ref={inputRef}
+                    document={document}
+                    skills={skills}
+                    onChange={setDocument}
                     onSubmit={handleSubmit}
+                    onCursorChange={setCursorOffset}
                     onTab={handleTab}
                     streaming={busy}
                     phrase={chat.phrase}

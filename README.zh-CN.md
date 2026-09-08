@@ -7,8 +7,8 @@ Agenty 是一个本地优先的 AI agent 应用。当前产品链路由 `agenty-
 CLI 仅通过子进程
 stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
 
-core 当前支持 provider/model 管理、持久化会话、模型流式输出、agent 工具循环、会话压缩
-以及内置文件工具。Skills、MCP、memory 和远程客户端模式要等 core 提供对等实现后再开放。
+core 当前支持 provider/model 管理、持久化会话、模型流式输出、agent 工具循环、会话压缩、
+内置文件工具和本地 Skills。MCP、memory 和远程客户端模式要等 core 提供对等实现后再开放。
 
 ## 快速开始
 
@@ -44,7 +44,9 @@ core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notific
 到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
 
 TUI 当前开放 `/provider`、`/model`、`/cwd`、`/effort`、`/status`、
-`/new`、`/resume`、`/help` 和 `/exit`。core 尚未实现的功能暂不展示。
+`/new`、`/resume`、`/help` 和 `/exit`。在输入框中输入 `$` 可以搜索并插入已安装的
+Skill 结构化引用。core 会依次扫描数据目录下的 `skills/`、`~/.agents/skills` 和
+`~/.claude/skills`；可以通过 `AGENTY_DATA_DIR` 更改第一个目录。
 
 ## 配置与存储
 
@@ -54,6 +56,7 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 数据 | 路径 |
 | --- | --- |
 | 配置 | `~/.agenty/config.json` |
+| Skills | `~/.agenty/skills/`，然后是 `~/.agents/skills/` 和 `~/.claude/skills/` |
 | 会话 transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | 会话索引 | `~/.agenty/agenty.sqlite` |
 | Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key |

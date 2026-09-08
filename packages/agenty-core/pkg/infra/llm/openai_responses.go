@@ -479,9 +479,10 @@ func openAIResponsesMessageWithNativeCallIDs(
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(
-				value.ToolUseID, output,
-			))
+
+			item := responses.ResponseInputItemParamOfFunctionCallOutput(output)
+			item.OfFunctionCallOutput.CallID = openai.String(value.ToolUseID)
+			items = append(items, item)
 		default:
 			return nil, unsupportedContent("unknown OpenAI Responses block %q", block.BlockType())
 		}

@@ -9,6 +9,8 @@ import type {
     ModelDto,
     ReasoningEffort,
     SessionEvent,
+    SkillDiagnosticDto,
+    SkillDto,
     ToolResult,
 } from "../api/types";
 import type { CliOptions } from "../config";
@@ -55,6 +57,8 @@ interface AppState {
     client: AgentyClient | null;
     model: ModelDto | null;
     session: ChatSessionDto | null;
+    skills: SkillDto[];
+    skillDiagnostics: SkillDiagnosticDto[];
     overlay: OverlayKind;
     toast: ToastMsg | null;
     thinkingEnabled: boolean;
@@ -517,8 +521,18 @@ export const useAppStore = create<AppState>((set, get) => {
             thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
             initError: null,
         });
+        try {
+            const discovered = await client.listSkills();
+            set({ skills: discovered.skills, skillDiagnostics: discovered.diagnostics });
+        } catch {
+            set({ skills: [], skillDiagnostics: [] });
+        }
         if (resolvedEffort.notice) {
             setToast(resolvedEffort.notice);
+        }
+        const firstWarning = get().skillDiagnostics.find((diagnostic) => diagnostic.severity === "warning");
+        if (firstWarning) {
+            setToast(`Skill warning: ${firstWarning.message}`, true);
         }
     };
 
@@ -529,6 +543,8 @@ export const useAppStore = create<AppState>((set, get) => {
         client: null,
         model: null,
         session: null,
+        skills: [],
+        skillDiagnostics: [],
         overlay: null,
         toast: null,
         thinkingEnabled: false,

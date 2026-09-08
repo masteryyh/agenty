@@ -20,8 +20,8 @@ DTOs are checked against Go types by `scripts/generate.mjs --check`.
 
 The CLI starts core as a child process and communicates only through NDJSON messages on
 stdin/stdout. There is no HTTP or remote-client compatibility layer.
-Skills, MCP, memory, compaction, and other capabilities that core has not implemented
-must remain hidden or empty in the CLI.
+Skills are implemented by core and may be exposed by the CLI. MCP, memory, compaction,
+and other capabilities that core has not implemented must remain hidden or empty in the CLI.
 
 ## Core structure and contracts
 

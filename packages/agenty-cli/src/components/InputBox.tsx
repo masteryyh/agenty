@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { forwardRef } from "react";
 
+import type { SkillDto } from "../api/types";
+import type { ComposerDocument } from "../composer/document";
 import { useInput } from "../hooks/useInput";
 import type { ToastMsg } from "../state/store";
-import { Box, Spinner, Text, TextInput } from "./ui";
+import { StructuredTextInput, type StructuredTextInputHandle } from "./StructuredTextInput";
+import { Box, Spinner, Text } from "./ui";
 
-const PLACEHOLDER = "type a message, or / for commands";
+const PLACEHOLDER = "type a message, / for commands, or $ for skills";
 
 function abbreviateCwd(wd: string, max = 40): string {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
@@ -32,9 +35,11 @@ function effortColor(level: string): string {
 }
 
 interface InputBoxProps {
-    value: string;
-    onChange: (v: string) => void;
-    onSubmit: (text: string) => void;
+    document: ComposerDocument;
+    skills: SkillDto[];
+    onChange: (document: ComposerDocument) => void;
+    onSubmit: (document: ComposerDocument) => void;
+    onCursorChange: (offset: number) => void;
     onTab: () => boolean;
     streaming: boolean;
     phrase: string | null;
@@ -49,10 +54,12 @@ interface InputBoxProps {
     active?: boolean;
 }
 
-export function InputBox({
-    value,
+export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
+    document,
+    skills,
     onChange,
     onSubmit,
+    onCursorChange,
     onTab,
     streaming,
     phrase,
@@ -65,8 +72,7 @@ export function InputBox({
     abort,
     toast,
     active = true,
-}: InputBoxProps) {
-    const [tabNonce, setTabNonce] = useState(0);
+}: InputBoxProps, ref) => {
 
     useInput(
         (_input, key, event) => {
@@ -78,9 +84,7 @@ export function InputBox({
             }
             if (key.tab) {
                 event.preventDefault();
-                if (onTab()) {
-                    setTabNonce((n) => n + 1);
-                }
+                onTab();
             }
         },
         { isActive: active },
@@ -120,11 +124,13 @@ export function InputBox({
                     <Text dimColor>{PLACEHOLDER}</Text>
                 ) : (
                     <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
-                        <TextInput
-                            key={tabNonce}
-                            value={value}
+                        <StructuredTextInput
+                            ref={ref}
+                            document={document}
+                            skills={skills}
                             onChange={onChange}
                             onSubmit={onSubmit}
+                            onCursorChange={onCursorChange}
                             placeholder={PLACEHOLDER}
                             focus={active}
                             keepFocus={active}
@@ -152,4 +158,6 @@ export function InputBox({
             </Box>
         </Box>
     );
-}
+});
+
+InputBox.displayName = "InputBox";

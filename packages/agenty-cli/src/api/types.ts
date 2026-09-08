@@ -78,6 +78,24 @@ export interface ModelProviderDto {
     updatedAt: string;
 }
 
+export interface SkillDto {
+    name: string;
+    directoryName: string;
+    description: string;
+    location: string;
+    source: string;
+    autoEnabled: boolean;
+    warning?: string;
+}
+
+export interface SkillDiagnosticDto {
+    severity: string;
+    code: string;
+    message: string;
+    path?: string;
+    name?: string;
+}
+
 export interface CreateModelProviderDto {
     code: string;
     name: string;

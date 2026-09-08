@@ -36,6 +36,15 @@ describe("AgentyClient session list", () => {
         await expect(client.listProviders()).resolves.toEqual([]);
     });
 
+    test("normalizes empty skill discovery results", async () => {
+        const rpc = {
+            call: async () => null,
+        } as unknown as StdioRPCClient;
+        const client = new AgentyClient(rpc);
+
+        await expect(client.listSkills()).resolves.toEqual({ skills: [], diagnostics: [] });
+    });
+
     test("normalizes null provider models before model projection", async () => {
         const provider = {
             code: "empty",

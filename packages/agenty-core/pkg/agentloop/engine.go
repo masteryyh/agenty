@@ -13,6 +13,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	domainskill "github.com/masteryyh/agenty-core/pkg/domain/skill"
 )
 
 const (
@@ -36,6 +37,11 @@ type CallerFactory func(
 	model catalog.Model,
 ) (Caller, error)
 
+type SkillRegistry interface {
+	PromptSection() string
+	ResolveReferences(text string) ([]domainskill.Resolved, error)
+}
+
 type Dependencies struct {
 	Sessions    ExecutionSessionRepository
 	Catalog     ExecutionCatalogRepository
@@ -43,6 +49,7 @@ type Dependencies struct {
 	NewCaller   CallerFactory
 	Events      SessionEventHandler
 	Compactions CompactionEventHandler
+	Skills      SkillRegistry
 }
 
 type StartResult struct {
@@ -80,6 +87,7 @@ type Engine struct {
 	newCaller   CallerFactory
 	events      SessionEventHandler
 	compactions CompactionEventHandler
+	skills      SkillRegistry
 	logger      *slog.Logger
 	mu          sync.Mutex
 	active      map[uuid.UUID]*activeExecution
@@ -116,6 +124,7 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 		newCaller:   dependencies.NewCaller,
 		events:      dependencies.Events,
 		compactions: dependencies.Compactions,
+		skills:      dependencies.Skills,
 		logger:      slog.Default(),
 		active:      make(map[uuid.UUID]*activeExecution),
 		stopped:     make(chan struct{}),
@@ -454,6 +463,24 @@ func (engine *Engine) prepare(
 		}
 	}
 
+	resolvedSkills, err := engine.resolveExplicitSkills(content)
+	if err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeValidation, "failed to load referenced skill", err)
+	}
+	if len(resolvedSkills) > 0 {
+		if _, err := session.AppendHiddenUserMessageWithMetadata(
+			roundID,
+			conversation.Text(formatSkillMarkdown(resolvedSkills)),
+			map[string]any{
+				"kind":  "skill-md",
+				"names": skillNames(resolvedSkills),
+				"paths": skillPaths(resolvedSkills),
+			},
+		); err != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to append referenced skill", err)
+		}
+	}
+
 	userMessage, err := session.AppendUserMessage(roundID, content)
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to append user message", err)
@@ -496,8 +523,13 @@ func (engine *Engine) loadResources(
 		return nil, err
 	}
 
+	skillPrompt := ""
+	if engine.skills != nil {
+		skillPrompt = engine.skills.PromptSection()
+	}
 	systemPrompt, err := ResolveSystemPrompt(SystemPromptOptions{
 		UseApplyPatchShell: !provider.FreeFormTool,
+		SkillCatalog:       skillPrompt,
 	})
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)

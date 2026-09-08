@@ -166,9 +166,16 @@ Methods 使用 `resource.action` 命名：
 | 分组 | Methods |
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
+| Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`skill.list` 返回已发现的 skill registry 和非致命诊断信息。core 先扫描
+`<AGENTY_DATA_DIR>/skills`（默认是 `~/.agenty/skills`），再扫描 `~/.agents/skills` 和
+`~/.claude/skills`；前面目录中相同的文件系统目录名会覆盖后面的结果。skill 的展示名称和
+描述来自 `SKILL.md` frontmatter 的 `name` 与 `description`。如果 frontmatter 的 name 与
+目录名不同，skill 仍可被显式引用，但不会进入自动 system prompt catalog，并会产生警告。
 
 `provider.list` 可选接收 `{providerCode}`。不传时，core 会并行获取所有已配置且 catalog
 为空的 provider；传入时只会获取指定 provider。`provider.listModels` 接收同样的

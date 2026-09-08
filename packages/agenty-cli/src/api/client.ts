@@ -20,6 +20,8 @@ import type {
     RoundDto,
     SessionEvent,
     SessionSummaryDto,
+    SkillDiagnosticDto,
+    SkillDto,
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
@@ -194,6 +196,17 @@ export class AgentyClient {
     async listSessionSummaries(): Promise<SessionSummaryDto[]> {
         const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>("session.list", {});
         return (summaries ?? []).filter((summary): summary is SessionSummaryDto => summary !== null);
+    }
+
+    async listSkills(): Promise<{ skills: SkillDto[]; diagnostics: SkillDiagnosticDto[] }> {
+        const result = await this.rpc.call<{
+            skills?: SkillDto[];
+            diagnostics?: SkillDiagnosticDto[];
+        } | null>("skill.list");
+        return {
+            skills: result?.skills ?? [],
+            diagnostics: result?.diagnostics ?? [],
+        };
     }
 
     async listSessions(): Promise<ChatSessionDto[]> {

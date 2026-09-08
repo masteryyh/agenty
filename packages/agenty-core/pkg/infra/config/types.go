@@ -52,4 +52,7 @@ type Paths struct {
 
 	// DatabaseFile is DataDir/agenty.sqlite.
 	DatabaseFile string
+
+	// SkillsDir is the highest-priority skill directory under DataDir.
+	SkillsDir string
 }

@@ -775,6 +775,9 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 	if compatibleResult[0].OfFunctionCallOutput.Output.OfString.Value != `{"type":"shell_call_output","call_id":"call_1","max_output_length":4096,"output":[{"stdout":"hi","stderr":"","outcome":{"type":"exit","exit_code":0}}]}` {
 		t.Errorf("compatible Responses shell result = %#v", compatibleResult[0].OfFunctionCallOutput.Output)
 	}
+	if compatibleResult[0].OfFunctionCallOutput.CallID.Value != "call_1" {
+		t.Errorf("compatible Responses shell call ID = %#v", compatibleResult[0].OfFunctionCallOutput.CallID)
+	}
 
 	chatCall, err := openAIChatMessages(conversation.Message{
 		Role: conversation.RoleAssistant, Content: conversation.Content{call},

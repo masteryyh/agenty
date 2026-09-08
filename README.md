@@ -9,8 +9,8 @@ The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 o
 the child process's stdin/stdout; it does not start an HTTP server.
 
 The current core supports provider/model management, persistent sessions, streaming model
-output, agentic tool loops, session compaction, and built-in filesystem tools. Skills, MCP,
-memory, and remote-client mode remain hidden until equivalent core implementations exist.
+output, agentic tool loops, session compaction, built-in filesystem tools, and local skills.
+MCP, memory, and remote-client mode remain hidden until equivalent core implementations exist.
 
 ## Quick start
 
@@ -50,7 +50,10 @@ response, so clients must subscribe before sending the request. Core exits when 
 reaches EOF.
 
 The TUI currently exposes `/provider`, `/model`, `/cwd`, `/effort`, `/status`,
-`/new`, `/resume`, `/help`, and `/exit`. Features not yet implemented by core are hidden.
+`/new`, `/resume`, `/help`, and `/exit`. Type `$` in the composer to search for an installed
+skill and insert it as a structured reference. Core scans the data directory's `skills/`
+folder first, followed by `~/.agents/skills` and `~/.claude/skills`; set `AGENTY_DATA_DIR` to
+change the first location.
 
 ## Configuration and storage
 
@@ -60,6 +63,7 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Data | Path |
 | --- | --- |
 | Configuration | `~/.agenty/config.json` |
+| Skills | `~/.agenty/skills/`, then `~/.agents/skills/` and `~/.claude/skills/` |
 | Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | Session index | `~/.agenty/agenty.sqlite` |
 | Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, while built-in provider files store only API keys |

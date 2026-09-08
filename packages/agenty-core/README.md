@@ -186,9 +186,17 @@ Methods follow a `resource.action` naming:
 | Group | Methods |
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
+| Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+`skill.list` returns the discovered skill registry and non-fatal diagnostics. Core scans
+`<AGENTY_DATA_DIR>/skills` first (`~/.agenty/skills` by default), then `~/.agents/skills` and
+`~/.claude/skills`; an earlier directory name shadows a later one. A skill is advertised from
+its `SKILL.md` frontmatter `name` and `description`. A frontmatter name that differs from the
+directory name remains available for explicit references but is not included in the automatic
+system-prompt catalog and produces a warning.
 
 `provider.list` accepts an optional `{providerCode}`. Without it, core discovers all
 configured providers whose catalog is empty in parallel; with it, only that provider is
