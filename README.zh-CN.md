@@ -92,3 +92,11 @@ release 版本来自根目录导出的 `AGENTY_VERSION`。把 `.env.example` 复
 本项目使用 Apache License 2.0，详见 [LICENSE](./LICENSE)。
 
 Copyright (c) 2026 masteryyh
+
+## 会话调试工具
+
+[Agenty Inspector](./packages/agenty-inspector/README.md) 是独立的只读网页调试工具。
+执行 `pnpm inspector:dev` 后访问 `http://127.0.0.1:5173`；也可执行
+`pnpm inspector:build` 与 `pnpm inspector:start`，使用默认端口 4318 的独立程序。
+它沿用 `AGENTY_DATA_DIR`（默认 `~/.agenty`），展示消息、原始事件、工具关联和诊断问题，
+无需启动 core。

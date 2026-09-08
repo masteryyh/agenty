@@ -1,5 +1,6 @@
 packages:
   - "packages/agenty-core"
+  - "packages/agenty-inspector"
   - "packages/agenty-cli"
   - "packages/agenty-bootstrap"
   - "packages/patch-applier"

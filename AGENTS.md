@@ -10,6 +10,14 @@ The active product path has four workspaces:
 - `packages/patch-applier`: Rust V4A parser and transactional filesystem patch helper.
 - `packages/agenty-bootstrap`: Rust self-extracting launcher.
 
+The optional `packages/agenty-inspector` workspace is a read-only local web debugger.
+It shares core's config path resolution and `pkg/infra/transcript` reader, decoder,
+and domain replay. Its own Go process serves HTTP and embedded React assets; it does
+not change core's stdio protocol or the bootstrap payload layout. Inspector must not
+initialize or write the inspected data directory. Run `pnpm inspector:dev`,
+`inspector:build`, `inspector:test`, or `inspector:typecheck`. Its generated frontend
+DTOs are checked against Go types by `scripts/generate.mjs --check`.
+
 The CLI starts core as a child process and communicates only through NDJSON messages on
 stdin/stdout. There is no HTTP or remote-client compatibility layer.
 Skills, MCP, memory, compaction, and other capabilities that core has not implemented

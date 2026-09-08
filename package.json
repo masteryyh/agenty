@@ -29,7 +29,12 @@
         "cli:clean": "pnpm --filter agenty-cli clean",
         "bootstrap:build": "turbo run build --filter=agenty-bootstrap",
         "bootstrap:test": "turbo run test --filter=agenty-bootstrap",
-        "bootstrap:clean": "pnpm --filter agenty-bootstrap clean"
+        "bootstrap:clean": "pnpm --filter agenty-bootstrap clean",
+        "inspector:dev": "pnpm --filter agenty-inspector dev",
+        "inspector:build": "turbo run build --filter=agenty-inspector",
+        "inspector:start": "pnpm --filter agenty-inspector start",
+        "inspector:test": "pnpm --filter agenty-inspector test",
+        "inspector:typecheck": "pnpm --filter agenty-inspector typecheck"
     },
     "packageManager": "pnpm@11.21.0",
     "devDependencies": {
@@ -38,7 +43,7 @@
         "eslint-plugin-import-newlines": "^2.0.0",
         "eslint-plugin-jsonc": "^3.4.1",
         "eslint-plugin-simple-import-sort": "^14.0.0",
-        "turbo": "^2.10.11",
+        "turbo": "^2.10.12",
         "typescript-eslint": "^8.67.0"
     }
 }
