@@ -1,0 +1,30 @@
+{
+    "name": "agenty-inspector",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "node scripts/dev.mjs",
+        "start": "node scripts/start.mjs",
+        "build": "node scripts/build.mjs",
+        "build:web": "vite build",
+        "generate": "node scripts/generate.mjs",
+        "typecheck": "tsc --noEmit",
+        "test": "go test ./... && node --test scripts/runtime.test.mjs && node scripts/generate.mjs --check",
+        "clean": "rm -rf bin web/dist",
+        "test:integration": "go test -race -tags=integration ./..."
+    },
+    "dependencies": {
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
+        "react-markdown": "^10.1.0",
+        "lucide-react": "^0.577.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.20.1",
+        "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.3",
+        "typescript": "^6.0.3",
+        "vite": "^8.0.10"
+    }
+}

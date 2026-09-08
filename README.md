@@ -95,6 +95,15 @@ The release version comes from the exported root `AGENTY_VERSION` value. Copy
 `.env.example` to the ignored `.env`, source it, and run `pnpm build` for a complete
 launcher build.
 
+## Session inspector
+
+[Agenty Inspector](./packages/agenty-inspector/README.md) is a separate read-only web
+debugger for local session transcripts. Run `pnpm inspector:dev` and open
+`http://127.0.0.1:5173`, or use `pnpm inspector:build` followed by
+`pnpm inspector:start` for the standalone executable on port 4318. It reads
+`AGENTY_DATA_DIR` (default `~/.agenty`) and exposes messages, raw events, tool
+relations and diagnostics without starting core.
+
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](./LICENSE).

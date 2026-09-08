@@ -2,12 +2,10 @@ package storage
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	"github.com/masteryyh/agenty-core/pkg/infra/transcript"
 )
 
 var (
@@ -305,37 +304,20 @@ func (r *ConversationRepository) loadTranscript(sessionID uuid.UUID, createdAt t
 	}
 	defer f.Close()
 
-	var events []shared.Event
-	reader := bufio.NewReader(f)
-	lineNo := 0
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(line) == 0 && readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return nil, readErr
+	events := []shared.Event{}
+	err = transcript.Read(context.Background(), f, func(record transcript.Record) error {
+		if len(record.Bytes) == 0 {
+			return nil
 		}
-		lineNo++
-		line = bytes.TrimSuffix(line, []byte{'\n'})
-		line = bytes.TrimSuffix(line, []byte{'\r'})
-		if len(line) == 0 {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			continue
-		}
-		e, err := conversation.DecodeEventLine(line)
+		event, err := conversation.DecodeEventLine(record.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("transcript: line %d: %w", lineNo, err)
+			return fmt.Errorf("transcript: line %d: %w", record.Line, err)
 		}
-		events = append(events, e)
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return nil, readErr
-		}
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return events, nil
 }
@@ -362,12 +344,5 @@ func (r *ConversationRepository) transcriptExists(sessionID uuid.UUID, createdAt
 }
 
 func (r *ConversationRepository) pathFor(sessionID uuid.UUID, createdAt time.Time) string {
-	y, m, d := createdAt.Date()
-	return filepath.Join(
-		r.sessionsDir,
-		fmt.Sprintf("%04d", y),
-		fmt.Sprintf("%02d", int(m)),
-		fmt.Sprintf("%02d", d),
-		sessionID.String()+".jsonl",
-	)
+	return transcript.Path(r.sessionsDir, sessionID, createdAt)
 }

@@ -1,6 +1,6 @@
 module github.com/masteryyh/agenty-core
 
-go 1.27
+go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.66.0

@@ -53,7 +53,7 @@ export const commands: Command[] = [
     },
     {
         name: "/exit",
-        description: "Quit agenty-cli",
+        description: "Quit agenty",
         usage: "/exit",
     },
     {

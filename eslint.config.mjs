@@ -11,6 +11,7 @@ export default defineConfig(
     {
         ignores: [
             "**/.turbo/**",
+            "packages/agenty-inspector/web/src/generated.ts",
             "**/bin/**",
             "**/coverage/**",
             "**/dist/**",
@@ -73,7 +74,7 @@ export default defineConfig(
         languageOptions: {
             parser: tseslint.parser,
             parserOptions: {
-                project: ["./packages/agenty-cli/tsconfig.eslint.json"],
+                project: ["./packages/agenty-cli/tsconfig.eslint.json", "./packages/agenty-inspector/tsconfig.json"],
                 tsconfigRootDir: import.meta.dirname,
             },
         },
