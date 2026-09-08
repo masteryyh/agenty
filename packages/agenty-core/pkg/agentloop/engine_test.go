@@ -12,7 +12,6 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
-	"github.com/masteryyh/agenty-core/pkg/domain/agent"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -105,7 +104,6 @@ func (tool *executionTestTool) Execute(
 }
 
 type executionFixture struct {
-	agents   *agentRepositoryFake
 	catalog  *providerRepositoryFake
 	sessions *sessionRepositoryFake
 	registry *agentloop.Registry
@@ -114,19 +112,9 @@ type executionFixture struct {
 func newExecutionFixture(t *testing.T, maxOutputTokens int64) *executionFixture {
 	t.Helper()
 
-	agents := newAgentRepositoryFake()
 	catalogRepository := newProviderRepositoryFake()
 	sessions := newSessionRepositoryFake()
 	registry := agentloop.NewRegistry()
-
-	agentDefinition, err := agent.New("coder", "Code Assistant")
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentDefinition.Soul = "Be precise."
-	if err := agents.Save(t.Context(), agentDefinition); err != nil {
-		t.Fatal(err)
-	}
 
 	provider, err := catalog.NewProvider("openai", "OpenAI", catalog.APIOpenAI)
 	if err != nil {
@@ -144,7 +132,6 @@ func newExecutionFixture(t *testing.T, maxOutputTokens int64) *executionFixture 
 	}
 
 	return &executionFixture{
-		agents:   agents,
 		catalog:  catalogRepository,
 		sessions: sessions,
 		registry: registry,
@@ -155,7 +142,6 @@ func (fixture *executionFixture) createSession(t *testing.T) *conversation.Sessi
 	t.Helper()
 
 	session := conversation.StartSession(
-		"coder",
 		shared.NewModelRef("openai", "gpt-5"),
 		128_000,
 		shared.ReasoningOff,
@@ -193,7 +179,6 @@ func (fixture *executionFixture) newEngineWithHandlers(
 
 	engine, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
 		Sessions:    fixture.sessions,
-		Agents:      fixture.agents,
 		Catalog:     fixture.catalog,
 		Tools:       fixture.registry,
 		NewCaller:   callerFactory,
@@ -367,8 +352,8 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	if len(requests[0].Tools) != 1 || requests[0].Tools[0].Name != "lookup" {
 		t.Errorf("request tools = %+v", requests[0].Tools)
 	}
-	if !strings.Contains(requests[0].SystemPrompt, "Be precise.") {
-		t.Errorf("system prompt does not contain soul: %q", requests[0].SystemPrompt)
+	if !strings.Contains(requests[0].SystemPrompt, "<basic>") {
+		t.Errorf("system prompt = %q", requests[0].SystemPrompt)
 	}
 	toolResults := toolResultBlocks(round.Messages[3].Content)
 	if len(toolResults) != 1 || toolResults[0].ToolUseID != "call-1" || toolResults[0].IsError {
@@ -531,7 +516,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("LLM requests = %d, want compaction plus normal", len(requests))
 	}
-	if !strings.Contains(requests[0].SystemPrompt, "Be precise.") {
+	if !strings.Contains(requests[0].SystemPrompt, "<basic>") {
 		t.Errorf("compaction system prompt = %q", requests[0].SystemPrompt)
 	}
 	compactionPromptBlock, ok := requests[0].Messages[2].Content[0].(conversation.TextBlock)

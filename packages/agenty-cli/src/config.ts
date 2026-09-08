@@ -1,7 +1,6 @@
 export type ThinkingFlag = "off" | "on" | string;
 
 export interface CliOptions {
-    agentRef?: string;
     modelInput?: string;
     thinking: ThinkingFlag;
     dataDir?: string;
@@ -32,7 +31,6 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
 export function loadOptions(): CliOptions {
     const flags = parseArgs(process.argv.slice(2));
     return {
-        agentRef: typeof flags.agent === "string" ? flags.agent : undefined,
         modelInput: typeof flags.model === "string" ? flags.model : undefined,
         thinking: typeof flags.thinking === "string" ? flags.thinking : "off",
         dataDir: typeof flags["data-dir"] === "string" ? flags["data-dir"] : undefined,

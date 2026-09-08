@@ -8,10 +8,9 @@ Agenty is a local-first AI agent application. The current product path consists 
 The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 over
 the child process's stdin/stdout; it does not start an HTTP server.
 
-The current core supports provider/model/agent management, persistent sessions,
-streaming model output, agentic tool loops, session compaction, and built-in filesystem
-tools. Skills, MCP, memory, and remote-client mode remain hidden until equivalent core
-implementations exist.
+The current core supports provider/model management, persistent sessions, streaming model
+output, agentic tool loops, session compaction, and built-in filesystem tools. Skills, MCP,
+memory, and remote-client mode remain hidden until equivalent core implementations exist.
 
 ## Quick start
 
@@ -27,8 +26,8 @@ agenty
 
 On first run, the launcher verifies and extracts the bundled CLI, core, and patch helper into
 `~/.agenty/bin/{cli,core,apply_patch}`. The CLI starts core as a child process and opens a setup
-wizard. The wizard creates one provider, one chat model, and one default agent through
-the existing `provider.*` and `agent.*` IPC methods, then calls `initialize.complete`.
+wizard. The wizard creates one provider and one chat model through the existing `provider.*`
+IPC methods, then calls `initialize.complete` to persist the global default session model.
 
 ## Runtime model
 
@@ -50,7 +49,7 @@ and the terminal round status. Notifications may arrive before the `session.star
 response, so clients must subscribe before sending the request. Core exits when stdin
 reaches EOF.
 
-The TUI currently exposes `/provider`, `/model`, `/agents`, `/cwd`, `/effort`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/cwd`, `/effort`, `/status`,
 `/new`, `/resume`, `/help`, and `/exit`. Features not yet implemented by core are hidden.
 
 ## Configuration and storage
@@ -65,7 +64,6 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Session index | `~/.agenty/agenty.sqlite` |
 | Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, while built-in provider files store only API keys |
 | Model discovery cache | Kept only in the running core process for 8 hours; it is refreshed on demand and does not survive a core restart |
-| Agents | `~/.agenty/agents/` |
 | Patch transaction locks | `~/.agenty/locks/` |
 | Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 

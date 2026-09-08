@@ -13,7 +13,7 @@ import (
 func Events() []shared.Event {
 	cwd := "/workspace/example"
 	model := shared.ModelRef{ProviderCode: "example", ModelCode: "reasoner"}
-	session := conversation.StartSession("developer", model, 128000, shared.ReasoningEffort("high"), &cwd)
+	session := conversation.StartSession(model, 128000, shared.ReasoningEffort("high"), &cwd)
 	session.SetTitle("Trace a provider configuration change")
 	round, err := session.StartRound()
 	must(err)

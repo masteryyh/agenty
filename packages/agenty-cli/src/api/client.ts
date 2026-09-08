@@ -1,18 +1,17 @@
 import type { StdioRPCClient } from "../core/rpc";
 import { formatModelRef, resolveModelInput as resolveModelInputFromList } from "./modelReference";
 import type {
-    AgentDto,
     AvailableModelDto,
     ChatMessageDto,
     ChatSessionDto,
     CompactionEvent,
     ContentBlock,
     CoreModelDto,
-    CreateAgentDto,
     CreateModelDto,
     CreateModelProviderDto,
     ExecutionStart,
     InitializeCompleteInput,
+    InitializeStatusDto,
     ModelDto,
     ModelProviderDto,
     ModelRef,
@@ -21,14 +20,12 @@ import type {
     RoundDto,
     SessionEvent,
     SessionSummaryDto,
-    UpdateAgentDto,
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
 import { STANDARD_REASONING_EFFORTS } from "./types";
 
 export interface PreparedSession {
-    agent: AgentDto;
     model: ModelDto;
     session: ChatSessionDto;
 }
@@ -56,60 +53,22 @@ export class AgentyClient {
         return this.rpc.onClose(listener);
     }
 
+    async initializationStatus(): Promise<InitializeStatusDto> {
+        const result = await this.rpc.call<InitializeStatusDto | null>("initialize.already");
+        return {
+            initialized: result?.initialized === true,
+            defaultModel: result?.defaultModel,
+            defaultReasoningEffort: result?.defaultReasoningEffort,
+        };
+    }
+
     async isInitialized(): Promise<boolean> {
-        const result = await this.rpc.call<{ initialized?: boolean } | null>("initialize.already");
-        return result?.initialized === true;
+        return (await this.initializationStatus()).initialized;
     }
 
     async completeInitialization(input: InitializeCompleteInput): Promise<{ initialized: boolean }> {
         const result = await this.rpc.call<{ initialized?: boolean } | null>("initialize.complete", input);
         return { initialized: result?.initialized === true };
-    }
-
-    async listAgents(): Promise<AgentDto[]> {
-        const agents = await this.rpc.call<Array<AgentDto | null> | null>("agent.list");
-        return (agents ?? []).filter((agent): agent is AgentDto => agent !== null);
-    }
-
-    async listAgentsPage(page = 1, pageSize = 100): Promise<PagedResponse<AgentDto>> {
-        return paginate(await this.listAgents(), page, pageSize);
-    }
-
-    async resolveAgent(reference?: string): Promise<AgentDto> {
-        const agents = await this.listAgents();
-        if (agents.length === 0) {
-            throw new Error("no agents available; run `agenty init` first");
-        }
-        if (!reference) {
-            return agents.find((agent) => agent.isDefault) ?? agents[0];
-        }
-        const lower = reference.toLowerCase();
-        const matched = agents.find((agent) => agent.code === reference) ??
-            agents.find((agent) => agent.name.toLowerCase() === lower);
-        if (!matched) {
-            throw new Error(`agent not found: ${reference}`);
-        }
-        return matched;
-    }
-
-    async createAgent(input: CreateAgentDto): Promise<AgentDto> {
-        const agent = await this.rpc.call<AgentDto | null>("agent.create", input);
-        if (!agent) {
-            throw new Error("core returned an empty agent");
-        }
-        return agent;
-    }
-
-    async updateAgent(code: string, input: UpdateAgentDto): Promise<AgentDto> {
-        const agent = await this.rpc.call<AgentDto | null>("agent.update", { code, ...input });
-        if (!agent) {
-            throw new Error(`core returned an empty agent for ${code}`);
-        }
-        return agent;
-    }
-
-    async deleteAgent(code: string): Promise<void> {
-        await this.rpc.call("agent.delete", { code });
     }
 
     async listProviders(providerCode?: string): Promise<ModelProviderDto[]> {
@@ -167,6 +126,10 @@ export class AgentyClient {
     }
 
     async getDefaultModel(): Promise<ModelDto> {
+        const status = await this.initializationStatus();
+        if (status.defaultModel) {
+            return this.getModel(status.defaultModel);
+        }
         const providers = await this.listProviders();
         const models = providers
             .filter((provider) => provider.apiKey.trim() !== "")
@@ -213,9 +176,8 @@ export class AgentyClient {
         await this.rpc.call("provider.removeModel", { providerCode, modelCode });
     }
 
-    async createSession(agentCode: string, model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
+    async createSession(model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
-            agentCode,
             providerCode: model.providerCode,
             modelCode: model.code,
             contextWindow: model.contextWindow,
@@ -229,22 +191,14 @@ export class AgentyClient {
         return requireSession(session, `session.get ${id}`);
     }
 
-    async listSessionSummaries(agentCode?: string): Promise<SessionSummaryDto[]> {
-        const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>(
-            "session.list",
-            agentCode ? { agentCode } : {},
-        );
+    async listSessionSummaries(): Promise<SessionSummaryDto[]> {
+        const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>("session.list", {});
         return (summaries ?? []).filter((summary): summary is SessionSummaryDto => summary !== null);
     }
 
-    async listSessions(agentCode?: string): Promise<ChatSessionDto[]> {
-        const summaries = await this.listSessionSummaries(agentCode);
+    async listSessions(): Promise<ChatSessionDto[]> {
+        const summaries = await this.listSessionSummaries();
         return Promise.all(summaries.map((session) => this.getSession(session.id)));
-    }
-
-    async getLastSessionByAgent(agentCode: string): Promise<ChatSessionDto | null> {
-        const sessions = await this.listSessionSummaries(agentCode);
-        return sessions.length > 0 ? this.getSession(sessions[0].id) : null;
     }
 
     async getLastSession(): Promise<ChatSessionDto | null> {
@@ -284,22 +238,20 @@ export class AgentyClient {
     }
 
     async prepareSession(options: {
-        agentRef?: string;
         modelInput?: string;
         newSession: boolean;
         reasoningEffort?: ReasoningEffort;
     }): Promise<PreparedSession> {
-        const agent = await this.resolveAgent(options.agentRef);
         const requestedModel = options.modelInput ? await this.resolveModelInput(options.modelInput) : undefined;
-        let session = options.newSession ? null : await this.getLastSessionByAgent(agent.code);
+        let session = options.newSession ? null : await this.getLastSession();
         if (!session) {
-            const model = requestedModel ?? await this.resolveAgentModel(agent);
+            const status = await this.initializationStatus();
+            const model = requestedModel ?? await this.getDefaultModel();
             session = await this.createSession(
-                agent.code,
                 model,
-                options.reasoningEffort ?? agent.defaultReasoningEffort ?? "off",
+                options.reasoningEffort ?? status.defaultReasoningEffort ?? "off",
             );
-            return { agent, model, session };
+            return { model, session };
         }
 
         if (requestedModel) {
@@ -308,24 +260,17 @@ export class AgentyClient {
             if (!matchesCurrent) {
                 session = await this.setSessionModel(session.id, requestedModel);
             }
-            return { agent, model: requestedModel, session };
+            return { model: requestedModel, session };
         }
 
         if (session.currentModel) {
             const model = await this.getModel(session.currentModel);
-            return { agent, model, session };
+            return { model, session };
         }
 
-        const model = await this.resolveAgentModel(agent);
+        const model = await this.getDefaultModel();
         session = await this.setSessionModel(session.id, model);
-        return { agent, model, session };
-    }
-
-    private async resolveAgentModel(agent: AgentDto): Promise<ModelDto> {
-        if (agent.defaultModel) {
-            return this.getModel(agent.defaultModel);
-        }
-        return this.getDefaultModel();
+        return { model, session };
     }
 }
 

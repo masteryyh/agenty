@@ -45,7 +45,6 @@ func NewSessionService(repo sessionRepository, options ...SessionServiceOption) 
 }
 
 type SessionCreateInput struct {
-	AgentCode       string                 `json:"agentCode"`
 	ProviderCode    string                 `json:"providerCode"`
 	ModelCode       string                 `json:"modelCode"`
 	ContextWindow   int64                  `json:"contextWindow,omitempty"`
@@ -54,10 +53,6 @@ type SessionCreateInput struct {
 }
 
 func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*conversation.Session, error) {
-	agentCode, err := shared.NewCode(in.AgentCode)
-	if err != nil {
-		return nil, Validation(err.Error())
-	}
 	providerCode, err := shared.NewCode(in.ProviderCode)
 	if err != nil {
 		return nil, Validation(err.Error())
@@ -76,7 +71,6 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 	}
 
 	session := conversation.StartSession(
-		agentCode,
 		shared.NewModelRef(providerCode, modelCode),
 		in.ContextWindow,
 		effort,
@@ -106,22 +100,12 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 }
 
 type SessionListQuery struct {
-	AgentCode string
-	Limit     int
-	Offset    int
+	Limit  int
+	Offset int
 }
 
 func (s *SessionService) List(ctx context.Context, q SessionListQuery) ([]conversation.SessionSummary, error) {
-	var agentCode *shared.Code
-	if q.AgentCode != "" {
-		sv, err := shared.NewCode(q.AgentCode)
-		if err != nil {
-			return nil, Validation(err.Error())
-		}
-		agentCode = &sv
-	}
-
-	sums, err := s.repo.List(ctx, conversation.ListQuery{AgentCode: agentCode, Limit: q.Limit, Offset: q.Offset})
+	sums, err := s.repo.List(ctx, conversation.ListQuery{Limit: q.Limit, Offset: q.Offset})
 	if err != nil {
 		return nil, Internal("failed to list sessions: " + err.Error())
 	}

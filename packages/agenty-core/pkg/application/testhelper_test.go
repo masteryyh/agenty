@@ -12,75 +12,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/application"
-	"github.com/masteryyh/agenty-core/pkg/domain/agent"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
-
-type agentRepositoryFake struct {
-	agents    map[shared.Code]*agent.Agent
-	getErr    error
-	listErr   error
-	saveErr   error
-	deleteErr error
-}
-
-func newAgentRepositoryFake() *agentRepositoryFake {
-	return &agentRepositoryFake{agents: make(map[shared.Code]*agent.Agent)}
-}
-
-func (r *agentRepositoryFake) Get(_ context.Context, code shared.Code) (*agent.Agent, error) {
-	if r.getErr != nil {
-		return nil, r.getErr
-	}
-	a, ok := r.agents[code]
-	if !ok {
-		return nil, storage.ErrAgentNotFound
-	}
-	return cloneAgent(a), nil
-}
-
-func (r *agentRepositoryFake) List(context.Context) ([]*agent.Agent, error) {
-	if r.listErr != nil {
-		return nil, r.listErr
-	}
-	result := make([]*agent.Agent, 0, len(r.agents))
-	for _, a := range r.agents {
-		result = append(result, cloneAgent(a))
-	}
-	return result, nil
-}
-
-func (r *agentRepositoryFake) Save(_ context.Context, a *agent.Agent) error {
-	if r.saveErr != nil {
-		return r.saveErr
-	}
-	r.agents[a.Code] = cloneAgent(a)
-	return nil
-}
-
-func (r *agentRepositoryFake) Delete(_ context.Context, code shared.Code) error {
-	if r.deleteErr != nil {
-		return r.deleteErr
-	}
-	if _, ok := r.agents[code]; !ok {
-		return storage.ErrAgentNotFound
-	}
-	delete(r.agents, code)
-	return nil
-}
-
-func cloneAgent(a *agent.Agent) *agent.Agent {
-	copy := *a
-	if a.DefaultModel != nil {
-		model := *a.DefaultModel
-		copy.DefaultModel = &model
-	}
-	copy.Metadata = cloneMetadata(a.Metadata)
-	return &copy
-}
 
 type providerRepositoryFake struct {
 	providers map[shared.Code]*catalog.Provider
@@ -224,9 +160,7 @@ func (r *sessionRepositoryFake) List(_ context.Context, query conversation.ListQ
 	result := make([]conversation.SessionSummary, 0, len(r.events))
 	for _, events := range r.events {
 		summary := conversation.ReplaySession(events).Summary()
-		if query.AgentCode == nil || summary.AgentCode == *query.AgentCode {
-			result = append(result, summary)
-		}
+		result = append(result, summary)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].UpdatedAt.After(result[j].UpdatedAt)
@@ -259,10 +193,9 @@ func (r *sessionRepositoryFake) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func newServices(t *testing.T) (*application.AgentService, *application.ProviderService, *application.SessionService) {
+func newServices(t *testing.T) (*application.ProviderService, *application.SessionService) {
 	t.Helper()
-	return application.NewAgentService(newAgentRepositoryFake()),
-		application.NewProviderService(newProviderRepositoryFake()),
+	return application.NewProviderService(newProviderRepositoryFake()),
 		application.NewSessionService(newSessionRepositoryFake())
 }
 

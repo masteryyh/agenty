@@ -61,7 +61,7 @@ func TestProjectUsesMetadataCwdWhenLegacyStartHasNoCwd(t *testing.T) {
 	t.Parallel()
 
 	model := shared.NewModelRef("provider", "model")
-	session := conversation.StartSession("coder", model, 128_000, shared.ReasoningHigh, nil)
+	session := conversation.StartSession(model, 128_000, shared.ReasoningHigh, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestProjectDoesNotResurrectExplicitlyClearedCwd(t *testing.T) {
 	t.Parallel()
 
 	model := shared.NewModelRef("provider", "model")
-	session := conversation.StartSession("coder", model, 128_000, shared.ReasoningHigh, nil)
+	session := conversation.StartSession(model, 128_000, shared.ReasoningHigh, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)

@@ -11,12 +11,12 @@ import (
 
 type initializationStateFake struct {
 	initialized bool
+	model       shared.ModelRef
+	eff         shared.ReasoningEffort
 	err         error
 }
 
-func (s *initializationStateFake) Initialized() bool {
-	return s.initialized
-}
+func (s *initializationStateFake) Initialized() bool { return s.initialized }
 
 func (s *initializationStateFake) SetInitialized(initialized bool) error {
 	if s.err != nil {
@@ -26,99 +26,79 @@ func (s *initializationStateFake) SetInitialized(initialized bool) error {
 	return nil
 }
 
+func (s *initializationStateFake) DefaultModel() (shared.ModelRef, shared.ReasoningEffort) {
+	return s.model, s.eff
+}
+
+func (s *initializationStateFake) SetDefaultModel(model shared.ModelRef, effort shared.ReasoningEffort) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.model, s.eff = model, effort
+	return nil
+}
+
 func TestInitializeServiceCompletesConfiguredResources(t *testing.T) {
-	agents, providers, _ := newServices(t)
+	providers, _ := newServices(t)
 	state := &initializationStateFake{}
-	svc := application.NewInitializeService(agents, providers, state)
+	svc := application.NewInitializeService(providers, state)
 	ctx := context.Background()
 
-	if got := svc.Already(ctx); got.Initialized {
-		t.Fatal("Already().Initialized = true, want false")
-	}
 	provider, err := providers.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI})
 	if err != nil {
-		t.Fatalf("SetProvider create: %v", err)
+		t.Fatalf("create provider: %v", err)
 	}
 	provider, err = providers.Update(ctx, "openai", application.ProviderUpdate{
 		Name: ptr("OpenAI Updated"), Type: ptr(catalog.APIOpenAI), APIKey: ptr("secret"),
 	})
 	if err != nil {
-		t.Fatalf("SetProvider update: %v", err)
+		t.Fatalf("update provider: %v", err)
 	}
 	if provider.Name != "OpenAI Updated" || provider.APIKey != "secret" {
 		t.Fatalf("provider = %+v", provider)
 	}
 
 	provider, err = providers.AddModel(ctx, "openai", "gpt-test", application.ModelInput{
-		Name:            "GPT Test",
-		ContextWindow:   128_000,
-		MaxOutputTokens: 16_384,
-		IsDefault:       true,
+		Name: "GPT Test", ContextWindow: 128_000, MaxOutputTokens: 16_384, IsDefault: true,
 	})
 	if err != nil {
-		t.Fatalf("SetModel: %v", err)
+		t.Fatalf("add model: %v", err)
 	}
 	if len(provider.Models) != 1 {
 		t.Fatalf("models = %d, want 1", len(provider.Models))
 	}
 
-	modelRef := &shared.ModelRef{ProviderCode: "openai", ModelCode: "gpt-test"}
-	agentResult, err := agents.Create(ctx, "default", application.AgentInput{
-		Name:                 "Default",
-		Soul:                 "Be helpful.",
-		DefaultModel:         modelRef,
-		DefaultContextWindow: 128_000,
-		IsDefault:            true,
-	})
-	if err != nil {
-		t.Fatalf("SetAgent create: %v", err)
-	}
-	if agentResult.DefaultModel == nil || *agentResult.DefaultModel != *modelRef {
-		t.Fatalf("agent default model = %+v", agentResult.DefaultModel)
-	}
-
 	completed, err := svc.Complete(ctx, application.InitializeCompleteInput{
-		AgentCode:    "default",
-		ProviderCode: "openai",
-		ModelCode:    "gpt-test",
+		ProviderCode: "openai", ModelCode: "gpt-test", ReasoningEffort: shared.ReasoningHigh,
 	})
 	if err != nil {
-		t.Fatalf("Complete: %v", err)
+		t.Fatalf("complete: %v", err)
 	}
 	if !completed.Initialized || !state.initialized {
 		t.Fatalf("completed = %+v, state = %+v", completed, state)
 	}
+	if completed.DefaultModel == nil || *completed.DefaultModel != shared.NewModelRef("openai", "gpt-test") {
+		t.Fatalf("default model = %+v", completed.DefaultModel)
+	}
+	if state.eff != shared.ReasoningHigh {
+		t.Fatalf("reasoning effort = %q", state.eff)
+	}
 }
 
-func TestInitializeServiceRejectsMismatchedAgentModel(t *testing.T) {
-	agents, providers, _ := newServices(t)
+func TestInitializeServiceRejectsMissingModel(t *testing.T) {
+	providers, _ := newServices(t)
 	state := &initializationStateFake{}
-	svc := application.NewInitializeService(agents, providers, state)
+	svc := application.NewInitializeService(providers, state)
 	ctx := context.Background()
 
-	_, err := providers.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI})
-	if err != nil {
+	if _, err := providers.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = providers.AddModel(ctx, "openai", "gpt-test", application.ModelInput{
-		Name:            "GPT Test",
-		MaxOutputTokens: 8_192,
+	_, err := svc.Complete(ctx, application.InitializeCompleteInput{
+		ProviderCode: "openai", ModelCode: "missing",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = agents.Create(ctx, "default", application.AgentInput{Name: "Default"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = svc.Complete(ctx, application.InitializeCompleteInput{
-		AgentCode:    "default",
-		ProviderCode: "openai",
-		ModelCode:    "gpt-test",
-	})
-	if code := appErrorCode(err); code != application.CodeValidation {
-		t.Fatalf("error code = %v, want validation: %v", code, err)
+	if code := appErrorCode(err); code != application.CodeNotFound {
+		t.Fatalf("error code = %v, want not found: %v", code, err)
 	}
 	if state.initialized {
 		t.Fatal("state initialized after failed completion")

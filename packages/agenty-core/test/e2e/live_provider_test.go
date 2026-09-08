@@ -81,16 +81,9 @@ func runLiveProviderConversation(t *testing.T, tt liveProviderCase) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	client := newAgentyClient(startCore(t))
-	agentCode := tt.prefix + "-agent"
 	providerCode := tt.prefix + "-provider"
 
-	_, err := client.CreateAgent(ctx, AgentCreateInput{
-		Code: agentCode,
-		Name: "Live Provider E2E Agent",
-		Soul: "Follow the user's requested output format exactly.",
-	})
-	requireNoError(t, err)
-	_, err = client.CreateProvider(ctx, ProviderCreateInput{
+	_, err := client.CreateProvider(ctx, ProviderCreateInput{
 		Code:    providerCode,
 		Name:    tt.name,
 		Type:    tt.apiType,
@@ -107,7 +100,6 @@ func runLiveProviderConversation(t *testing.T, tt liveProviderCase) {
 	})
 	requireNoError(t, err)
 	session, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     agentCode,
 		ProviderCode:  providerCode,
 		ModelCode:     modelCode,
 		ContextWindow: 128_000,

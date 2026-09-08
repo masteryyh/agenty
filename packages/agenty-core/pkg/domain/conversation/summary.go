@@ -11,7 +11,6 @@ import (
 type SessionSummary struct {
 	ID                  uuid.UUID              `json:"id"`
 	Title               string                 `json:"title"`
-	AgentCode           shared.Code            `json:"agentCode"`
 	LastProviderCode    shared.Code            `json:"lastProviderCode"`
 	LastModelCode       shared.ModelCode       `json:"lastModelCode"`
 	ContextWindow       int64                  `json:"contextWindow"`
@@ -23,7 +22,6 @@ type SessionSummary struct {
 func (s *Session) Summary() SessionSummary {
 	sum := SessionSummary{
 		ID:                  s.ID,
-		AgentCode:           s.AgentCode,
 		ContextWindow:       s.ContextWindow,
 		LastReasoningEffort: s.CurrentReasoningEffort,
 		CreatedAt:           s.CreatedAt,

@@ -3,9 +3,7 @@ import type { ParsedArgs } from "./utils";
 const HELP = `Usage: agenty-cli [core options] <command> <subcommand> [options]
 
 Commands:
-  init                         Initialize one provider, model, and default agent
-  agent list|get|add|update|remove
-                               Manage agents
+  init                         Initialize one provider, model, and default session model
   provider list|get|add|update|remove
                                Manage model providers
   model list|get|add|update|remove

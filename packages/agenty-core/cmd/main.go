@@ -80,7 +80,6 @@ func run() (exitCode int) {
 	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
-		Agents:   repos.Agent,
 		Catalog:  repos.Catalog,
 		Tools:    toolRegistry,
 		NewCaller: func(
@@ -114,11 +113,9 @@ func run() (exitCode int) {
 		repos.Conversation,
 		application.WithSessionExecutionState(execution),
 	)
-	agentService := application.NewAgentService(repos.Agent)
 	providerService := application.NewProviderService(repos.Catalog)
-	initializeService := application.NewInitializeService(agentService, providerService, config.Get())
+	initializeService := application.NewInitializeService(providerService, config.Get())
 	adapter.RegisterAll(disp,
-		agentService,
 		providerService,
 		initializeService,
 		sessionService,

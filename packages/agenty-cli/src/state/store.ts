@@ -2,7 +2,6 @@ import { create } from "zustand";
 
 import { AgentyClient } from "../api/client";
 import type {
-    AgentDto,
     ChatMessageDto,
     ChatSessionDto,
     CompactionEvent,
@@ -18,7 +17,7 @@ import { pickStreamingPhrase } from "../consts/streamingPhrases";
 import { startLocalCore } from "../localCore";
 
 export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
-export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "agents" | "status" | null;
+export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | null;
 export type SystemMessageVariant = "compacted";
 const TOAST_DURATION_MS = 3000;
 
@@ -54,7 +53,6 @@ interface AppState {
     initError: string | null;
     opts: CliOptions;
     client: AgentyClient | null;
-    agent: AgentDto | null;
     model: ModelDto | null;
     session: ChatSessionDto | null;
     overlay: OverlayKind;
@@ -78,7 +76,6 @@ interface AppState {
     newSession: () => Promise<void>;
     switchModel: (model: ModelDto) => Promise<void>;
     resumeSession: (session: ChatSessionDto) => Promise<void>;
-    switchAgent: (agent: AgentDto) => Promise<void>;
     setOverlay: (overlay: OverlayKind) => void;
     setToast: (text: string, error?: boolean) => void;
     notify: (text: string, error?: boolean) => void;
@@ -499,7 +496,6 @@ export const useAppStore = create<AppState>((set, get) => {
     const prepareAndReady = async (client: AgentyClient, options: CliOptions) => {
         const parsed = parseThinking(options.thinking);
         const prepared = await client.prepareSession({
-            agentRef: options.agentRef,
             modelInput: options.modelInput,
             newSession: options.newSession,
             reasoningEffort: reasoningEffort(parsed.thinking, parsed.thinkingLevel),
@@ -513,7 +509,6 @@ export const useAppStore = create<AppState>((set, get) => {
         set({
             phase: "ready",
             client,
-            agent: prepared.agent,
             model: prepared.model,
             session,
             history: buildHistory(session),
@@ -532,7 +527,6 @@ export const useAppStore = create<AppState>((set, get) => {
         initError: null,
         opts: loadOptions(),
         client: null,
-        agent: null,
         model: null,
         session: null,
         overlay: null,
@@ -701,14 +695,14 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         newSession: async () => {
-            const { client, agent, model, thinkingEnabled, thinkingLevel } = get();
-            if (!client || !agent || !model) {
+            const { client, model, thinkingEnabled, thinkingLevel } = get();
+            if (!client || !model) {
                 return;
             }
             try {
                 const requestedEffort = reasoningEffort(thinkingEnabled, thinkingLevel);
                 const resolvedEffort = resolveReasoningEffortForModel(model, requestedEffort);
-                const session = await client.createSession(agent.code, model, resolvedEffort.effort);
+                const session = await client.createSession(model, resolvedEffort.effort);
                 set({ session, history: [], current: null, tokenConsumed: 0, overlay: null });
                 setToast(resolvedEffort.notice ?? "New session created.");
             } catch (error) {
@@ -759,23 +753,6 @@ export const useAppStore = create<AppState>((set, get) => {
                 set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
             } catch (error) {
                 pushSystem(`resume failed: ${(error as Error).message}`, true);
-            }
-        },
-
-        switchAgent: async (agent) => {
-            const { client } = get();
-            if (!client) {
-                return;
-            }
-            try {
-                const model = agent.defaultModel
-                    ? await client.getModel(agent.defaultModel)
-                    : await client.getDefaultModel();
-                const session = await client.getLastSessionByAgent(agent.code) ?? await client.createSession(agent.code, model);
-                set({ agent, model, session, history: buildHistory(session), current: null, tokenConsumed: actualContextSize(session), overlay: null });
-                setToast(`Switched to agent: ${agent.name}`);
-            } catch (error) {
-                pushSystem(`switch agent failed: ${(error as Error).message}`, true);
             }
         },
 

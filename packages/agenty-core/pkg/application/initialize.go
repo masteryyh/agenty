@@ -10,48 +10,51 @@ import (
 type initializationState interface {
 	Initialized() bool
 	SetInitialized(initialized bool) error
+	DefaultModel() (shared.ModelRef, shared.ReasoningEffort)
+	SetDefaultModel(model shared.ModelRef, effort shared.ReasoningEffort) error
 }
 
 type InitializeService struct {
-	agents    *AgentService
 	providers *ProviderService
 	state     initializationState
 }
 
 func NewInitializeService(
-	agents *AgentService,
 	providers *ProviderService,
 	state initializationState,
 ) *InitializeService {
 	return &InitializeService{
-		agents:    agents,
 		providers: providers,
 		state:     state,
 	}
 }
 
 type InitializeAlreadyResult struct {
-	Initialized bool `json:"initialized"`
+	Initialized            bool                   `json:"initialized"`
+	DefaultModel           *shared.ModelRef       `json:"defaultModel,omitempty"`
+	DefaultReasoningEffort shared.ReasoningEffort `json:"defaultReasoningEffort,omitempty"`
 }
 
 func (s *InitializeService) Already(context.Context) InitializeAlreadyResult {
-	return InitializeAlreadyResult{Initialized: s.state.Initialized()}
+	model, effort := s.state.DefaultModel()
+	result := InitializeAlreadyResult{Initialized: s.state.Initialized()}
+	if !model.IsZero() {
+		result.DefaultModel = &model
+		result.DefaultReasoningEffort = effort
+	}
+	return result
 }
 
 type InitializeCompleteInput struct {
-	AgentCode    string `json:"agentCode"`
-	ProviderCode string `json:"providerCode"`
-	ModelCode    string `json:"modelCode"`
+	ProviderCode    string                 `json:"providerCode"`
+	ModelCode       string                 `json:"modelCode"`
+	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
 }
 
 func (s *InitializeService) Complete(
 	ctx context.Context,
 	in InitializeCompleteInput,
 ) (InitializeAlreadyResult, error) {
-	a, err := s.agents.Get(ctx, in.AgentCode)
-	if err != nil {
-		return InitializeAlreadyResult{}, err
-	}
 	p, err := s.providers.Get(ctx, in.ProviderCode)
 	if err != nil {
 		return InitializeAlreadyResult{}, err
@@ -66,12 +69,23 @@ func (s *InitializeService) Complete(
 			fmt.Sprintf("model %s not found in provider %s", in.ModelCode, in.ProviderCode),
 		)
 	}
-	wantModel := shared.ModelRef{ProviderCode: p.Code, ModelCode: m.Code}
-	if a.DefaultModel == nil || *a.DefaultModel != wantModel {
-		return InitializeAlreadyResult{}, Validation("agent default model does not match the initialized provider and model")
+	effort := in.ReasoningEffort
+	if effort == "" {
+		effort = shared.ReasoningOff
+	}
+	if !effort.Valid() {
+		return InitializeAlreadyResult{}, Validation("invalid default reasoning effort: " + string(effort))
+	}
+	defaultModel := shared.ModelRef{ProviderCode: p.Code, ModelCode: m.Code}
+	if err := s.state.SetDefaultModel(defaultModel, effort); err != nil {
+		return InitializeAlreadyResult{}, Internal("failed to persist default model: " + err.Error())
 	}
 	if err := s.state.SetInitialized(true); err != nil {
 		return InitializeAlreadyResult{}, Internal("failed to persist initialization state: " + err.Error())
 	}
-	return InitializeAlreadyResult{Initialized: true}, nil
+	return InitializeAlreadyResult{
+		Initialized:            true,
+		DefaultModel:           &defaultModel,
+		DefaultReasoningEffort: effort,
+	}, nil
 }

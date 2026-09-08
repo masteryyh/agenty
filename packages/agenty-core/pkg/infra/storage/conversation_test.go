@@ -70,7 +70,6 @@ func TestProjectionUpsertAndGet(t *testing.T) {
 	sum := conversation.SessionSummary{
 		ID:                  shared.NewID(),
 		Title:               "test session",
-		AgentCode:           mustCode("coder"),
 		LastProviderCode:    mustCode("anthropic"),
 		LastModelCode:       mustModelCode("claude-opus"),
 		ContextWindow:       1024,
@@ -95,9 +94,6 @@ func TestProjectionUpsertAndGet(t *testing.T) {
 	if got.Title != sum.Title {
 		t.Errorf("Title = %q, want %q", got.Title, sum.Title)
 	}
-	if got.AgentCode != sum.AgentCode {
-		t.Errorf("AgentCode = %q, want %q", got.AgentCode, sum.AgentCode)
-	}
 	if got.ContextWindow != sum.ContextWindow {
 		t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, sum.ContextWindow)
 	}
@@ -112,7 +108,6 @@ func TestProjectionUpsertUpdatesExisting(t *testing.T) {
 	sum := conversation.SessionSummary{
 		ID:        shared.NewID(),
 		Title:     "original",
-		AgentCode: mustCode("coder"),
 		CreatedAt: time.Now().UTC().Truncate(time.Second),
 		UpdatedAt: time.Now().UTC().Truncate(time.Second),
 	}
@@ -154,19 +149,12 @@ func TestProjectionGetReturnsNotFound(t *testing.T) {
 func TestProjectionList(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
-	agentA := mustCode("agent-a")
-	agentB := mustCode("agent-b")
 
 	baseTime := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
-		agent := agentA
-		if i%2 == 0 {
-			agent = agentB
-		}
 		sum := conversation.SessionSummary{
 			ID:        shared.NewID(),
 			Title:     "session",
-			AgentCode: agent,
 			CreatedAt: baseTime,
 			UpdatedAt: baseTime.Add(time.Duration(i) * time.Second),
 		}
@@ -181,19 +169,6 @@ func TestProjectionList(t *testing.T) {
 	}
 	if len(all) != 5 {
 		t.Errorf("List all returned %d, want 5", len(all))
-	}
-
-	filtered, err := repo.listSessions(ctx, conversation.ListQuery{AgentCode: &agentA})
-	if err != nil {
-		t.Fatalf("List filtered: %v", err)
-	}
-	if len(filtered) != 2 {
-		t.Errorf("List filtered returned %d, want 2", len(filtered))
-	}
-	for _, s := range filtered {
-		if s.AgentCode != agentA {
-			t.Errorf("expected only agent-a, got %s", s.AgentCode)
-		}
 	}
 
 	limited, err := repo.listSessions(ctx, conversation.ListQuery{Limit: 2})
@@ -236,7 +211,6 @@ func TestProjectionDelete(t *testing.T) {
 	ctx := context.Background()
 	sum := conversation.SessionSummary{
 		ID:        shared.NewID(),
-		AgentCode: mustCode("coder"),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -261,10 +235,8 @@ func TestTranscriptAppendAndLoad(t *testing.T) {
 
 	sessionID := shared.NewID()
 	createdAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
-	agentCode := mustCode("coder")
-
 	events := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: agentCode, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 
@@ -294,10 +266,8 @@ func TestTranscriptAppendIsAppendOnly(t *testing.T) {
 
 	sessionID := shared.NewID()
 	createdAt := time.Now().UTC()
-	agentCode := mustCode("coder")
-
 	first := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: agentCode, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 	second := []shared.Event{
 		conversation.RoundStarted{SessionID: sessionID, RoundID: shared.NewID(), Sequence: 1, Model: shared.NewModelRef("anthropic", "claude-opus"), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
@@ -328,7 +298,7 @@ func TestTranscriptLoadsLargeMessage(t *testing.T) {
 	createdAt := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	largeText := strings.Repeat("x", 128*1024)
 	events := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: mustCode("coder"), Model: defaultModel(), At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Model: defaultModel(), At: createdAt},
 		conversation.RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: defaultModel(), At: createdAt},
 		conversation.MessageAppended{SessionID: sessionID, Message: conversation.Message{ID: shared.NewID(), RoundID: roundID, Role: conversation.RoleUser, Content: conversation.Text(largeText), CreatedAt: createdAt}, At: createdAt},
 	}
@@ -359,7 +329,7 @@ func TestTranscriptReportsCorruptLine(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	valid, err := shared.EncodeEvent(1, conversation.SessionStarted{SessionID: sessionID, Agent: mustCode("coder"), Model: defaultModel(), At: createdAt})
+	valid, err := shared.EncodeEvent(1, conversation.SessionStarted{SessionID: sessionID, Model: defaultModel(), At: createdAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +358,7 @@ func TestTranscriptDelete(t *testing.T) {
 	sessionID := shared.NewID()
 	createdAt := time.Now().UTC()
 	events := []shared.Event{
-		conversation.SessionStarted{SessionID: sessionID, Agent: mustCode("coder"), Model: defaultModel(), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
+		conversation.SessionStarted{SessionID: sessionID, Model: defaultModel(), ContextWindow: 200_000, ReasoningEffort: shared.ReasoningOff, At: createdAt},
 	}
 
 	if err := repo.appendTranscript(sessionID, createdAt, 1, events); err != nil {
@@ -436,7 +406,7 @@ func TestConversationSaveAndLoad(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session, add a round and messages.
-	session := conversation.StartSession(mustCode("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
+	session := conversation.StartSession(defaultModel(), 200_000, shared.ReasoningOff, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)
@@ -481,7 +451,7 @@ func TestConversationSaveAndLoad(t *testing.T) {
 
 func TestConversationSaveWithCanceledContextHasNoSideEffects(t *testing.T) {
 	repo := newConversationRepo(t)
-	session := conversation.StartSession(mustCode("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
+	session := conversation.StartSession(defaultModel(), 200_000, shared.ReasoningOff, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -504,7 +474,7 @@ func TestConversationSaveAppendsEvents(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
 
-	session := conversation.StartSession(mustCode("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
+	session := conversation.StartSession(defaultModel(), 200_000, shared.ReasoningOff, nil)
 	if err := repo.Save(ctx, session); err != nil {
 		t.Fatal(err)
 	}
@@ -537,15 +507,8 @@ func TestConversationList(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
 
-	agentA := mustCode("agent-a")
-	agentB := mustCode("agent-b")
-
 	for i := 0; i < 3; i++ {
-		agent := agentA
-		if i == 2 {
-			agent = agentB
-		}
-		s := conversation.StartSession(agent, defaultModel(), 200_000, shared.ReasoningOff, nil)
+		s := conversation.StartSession(defaultModel(), 200_000, shared.ReasoningOff, nil)
 		if err := repo.Save(ctx, s); err != nil {
 			t.Fatal(err)
 		}
@@ -559,20 +522,13 @@ func TestConversationList(t *testing.T) {
 		t.Errorf("List all returned %d, want 3", len(all))
 	}
 
-	filtered, err := repo.List(ctx, conversation.ListQuery{AgentCode: &agentA})
-	if err != nil {
-		t.Fatalf("List filtered: %v", err)
-	}
-	if len(filtered) != 2 {
-		t.Errorf("List filtered returned %d, want 2", len(filtered))
-	}
 }
 
 func TestConversationDelete(t *testing.T) {
 	repo := newConversationRepo(t)
 	ctx := context.Background()
 
-	session := conversation.StartSession(mustCode("coder"), defaultModel(), 200_000, shared.ReasoningOff, nil)
+	session := conversation.StartSession(defaultModel(), 200_000, shared.ReasoningOff, nil)
 	if err := repo.Save(ctx, session); err != nil {
 		t.Fatal(err)
 	}

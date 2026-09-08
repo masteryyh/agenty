@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/masteryyh/agenty-core/pkg/domain/agent"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -58,7 +57,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	}
 
 	// Directory structure, config and SQLite database were created.
-	for _, dir := range []string{"sessions", "agents", "providers"} {
+	for _, dir := range []string{"sessions", "providers"} {
 		path := filepath.Join(tmpDir, dir)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("expected directory %s to exist", path)
@@ -73,7 +72,7 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 		t.Error("expected agenty.sqlite to exist")
 	}
 
-	// Create and persist the catalog and an agent with its default session model.
+	// Create and persist the catalog with a session model.
 	provider, err := catalog.NewProvider("integration-anthropic", "Anthropic", catalog.APIAnthropic)
 	if err != nil {
 		t.Fatal(err)
@@ -89,17 +88,6 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	}
 
 	modelRef := shared.NewModelRef(provider.Code, mustModelCode("claude-opus-4-8"))
-	a, err := agent.New("coder", "Code Assistant")
-	if err != nil {
-		t.Fatal(err)
-	}
-	a.DefaultModel = &modelRef
-	a.DefaultContextWindow = 200_000
-	a.DefaultReasoningEffort = shared.ReasoningHigh
-	if err := repos.Agent.Save(ctx, a); err != nil {
-		t.Fatalf("Save agent: %v", err)
-	}
-
 	loadedProvider, err := repos.Catalog.Get(ctx, provider.Code)
 	if err != nil {
 		t.Fatalf("Get provider: %v", err)
@@ -107,20 +95,8 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	if len(loadedProvider.Models) != 1 {
 		t.Errorf("loaded %d models, want 1", len(loadedProvider.Models))
 	}
-	loadedAgent, err := repos.Agent.Get(ctx, a.Code)
-	if err != nil {
-		t.Fatalf("Get agent: %v", err)
-	}
-	if loadedAgent.DefaultModel == nil || *loadedAgent.DefaultModel != modelRef {
-		t.Errorf("loaded default model = %v, want %v", loadedAgent.DefaultModel, modelRef)
-	}
-	if loadedAgent.DefaultContextWindow != 200_000 || loadedAgent.DefaultReasoningEffort != shared.ReasoningHigh {
-		t.Errorf("loaded default session config = %+v", loadedAgent)
-	}
-
-	// Conversation flow: the application layer resolves the agent's default
-	// configuration before constructing a session.
-	session := conversation.StartSession(loadedAgent.Code, *loadedAgent.DefaultModel, loadedAgent.DefaultContextWindow, loadedAgent.DefaultReasoningEffort, nil)
+	// Conversation flow uses the selected model directly.
+	session := conversation.StartSession(modelRef, 200_000, shared.ReasoningHigh, nil)
 	roundID, err := session.StartRound()
 	if err != nil {
 		t.Fatal(err)

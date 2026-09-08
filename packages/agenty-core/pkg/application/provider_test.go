@@ -14,7 +14,7 @@ import (
 )
 
 func TestProviderCreateAndGet(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := context.Background()
 
 	p, err := providerSvc.Create(ctx, "anthropic", application.ProviderInput{
@@ -56,7 +56,7 @@ func TestProviderCreateIgnoresFreeFormToolForNonOpenAI(t *testing.T) {
 		{code: "google", name: "Google", apiType: catalog.APIGemini},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, providerSvc, _ := newServices(t)
+			providerSvc, _ := newServices(t)
 			provider, err := providerSvc.Create(t.Context(), test.code, application.ProviderInput{
 				Name:         test.name,
 				Type:         test.apiType,
@@ -73,7 +73,7 @@ func TestProviderCreateIgnoresFreeFormToolForNonOpenAI(t *testing.T) {
 }
 
 func TestProviderCreateInvalidType(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	_, err := providerSvc.Create(context.Background(), "x", application.ProviderInput{
 		Name: "X",
 		Type: catalog.APIType("bogus"),
@@ -84,7 +84,7 @@ func TestProviderCreateInvalidType(t *testing.T) {
 }
 
 func TestProviderCreateDuplicate(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	if _, err := providerSvc.Create(t.Context(), "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestProviderCreateDuplicate(t *testing.T) {
 }
 
 func TestProviderList(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := context.Background()
 
 	for _, code := range []string{"anthropic", "openai"} {
@@ -233,7 +233,7 @@ func TestProviderListAutomaticallyDiscoversOnlyRequestedProvider(t *testing.T) {
 }
 
 func TestProviderUpdate(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := t.Context()
 	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{
 		Name: "OpenAI", Type: catalog.APIOpenAI, BaseURL: "https://old.example", APIKey: "old-key", FreeFormTool: true,
@@ -313,7 +313,7 @@ func TestBuiltinProviderAllowsOnlyAPIKeyUpdate(t *testing.T) {
 }
 
 func TestProviderAddModelAndRemoveModel(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := context.Background()
 
 	if _, err := providerSvc.Create(ctx, "anthropic", application.ProviderInput{Name: "Anthropic", Type: catalog.APIAnthropic}); err != nil {
@@ -423,7 +423,7 @@ func mustModelCodeForTest(value string) shared.ModelCode {
 }
 
 func TestProviderAddModelDefaultsReasoningAndAllowsExplicitDisable(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := t.Context()
 	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
 		t.Fatal(err)
@@ -479,7 +479,7 @@ func TestProviderAddModelDefaultsReasoningAndAllowsExplicitDisable(t *testing.T)
 func TestProviderAddModelUsesGlobalMaxOutputTokens(t *testing.T) {
 	t.Parallel()
 
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := t.Context()
 	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{Name: "OpenAI", Type: catalog.APIOpenAI}); err != nil {
 		t.Fatal(err)
@@ -500,7 +500,7 @@ func TestProviderAddModelUsesGlobalMaxOutputTokens(t *testing.T) {
 }
 
 func TestProviderDelete(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	ctx := context.Background()
 
 	if _, err := providerSvc.Create(ctx, "anthropic", application.ProviderInput{Name: "Anthropic", Type: catalog.APIAnthropic}); err != nil {
@@ -516,7 +516,7 @@ func TestProviderDelete(t *testing.T) {
 }
 
 func TestProviderNotFoundPaths(t *testing.T) {
-	_, providerSvc, _ := newServices(t)
+	providerSvc, _ := newServices(t)
 	tests := []struct {
 		name string
 		call func() error

@@ -27,8 +27,8 @@ must remain hidden or empty in the CLI.
 
 - `cmd/main.go`: opens repositories, registers built-in tools and RPC adapters, and
   serves stdio until EOF or process cancellation.
-- `pkg/domain`: provider-neutral agent, catalog, conversation, and shared domain types.
-- `pkg/application`: agent, provider, initialization, and session use-case services.
+- `pkg/domain`: provider-neutral execution, catalog, conversation, and shared domain types.
+- `pkg/application`: provider, initialization, and session use-case services.
 - `pkg/agentloop`: concurrent session engine, provider streaming contract, tool runtime,
   and built-in filesystem tools.
 - `pkg/infra/config`: merged config and data-path manager.
@@ -37,9 +37,9 @@ must remain hidden or empty in the CLI.
 - `pkg/infra/rpc`: NDJSON JSON-RPC server, notification writer, chunking, and adapters.
 
 The setup contract is `initialize.already`, then the regular `provider.create`,
-`provider.addModel`, and `agent.create` methods, followed by `initialize.complete`.
-Completion is valid only when the selected agent, provider, and non-embedding model exist
-and the agent's default model matches that exact provider/model reference.
+`provider.addModel` methods, followed by `initialize.complete`. Completion is valid only
+when the selected provider and non-embedding model exist; the selected model and reasoning
+effort become the global defaults for new sessions.
 
 After `session.start`, core continuously writes `session.event` notifications. Events are
 scoped by `sessionId` and `roundId`, carry a per-round monotonically increasing
@@ -57,7 +57,6 @@ Core data is local-first:
 - Built-in providers/models: embedded in the core binary; custom providers use
   `~/.agenty/providers/<provider-code>.json`, while built-in provider files contain
   only the API key.
-- Agents: `~/.agenty/agents/`
 - Logs: `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log`
 
 `AGENTY_DATA_DIR` overrides the data root. `AGENTY_LOG_LEVEL` and
@@ -73,7 +72,7 @@ Core data is local-first:
 - `src/state/store.ts`: initialization, session lifecycle, optimistic user messages, and
   continuous `session.event` consumption.
 - `src/components`: OpenTUI screens and overlays.
-- `src/cli`: direct agent/provider/model/init commands.
+- `src/cli`: direct provider/model/init commands.
 
 CLI state must preserve the core contract rather than recreate backend business rules.
 Event consumers must tolerate notifications arriving before the start response, filter

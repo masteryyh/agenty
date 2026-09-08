@@ -3,7 +3,6 @@ import { useState } from "react";
 
 import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
-import { AgentOverlay } from "./components/AgentOverlay";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { InputBox } from "./components/InputBox";
@@ -23,7 +22,6 @@ import { useTuiRuntime } from "./tui/runtime";
 const INPUT_HEIGHT = 4;
 const INPUT_TOP_GAP = 1;
 const PROVIDER_OVERLAY_HEIGHT = 18;
-const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
 const MODEL_OVERLAY_HEIGHT = 20;
 
@@ -31,8 +29,6 @@ function panelHeight(overlay: OverlayKind): number | null {
     switch (overlay) {
         case "provider":
             return PROVIDER_OVERLAY_HEIGHT;
-        case "agents":
-            return AGENTS_OVERLAY_HEIGHT;
         case "status":
             return STATUS_OVERLAY_HEIGHT;
         case "model-select":
@@ -124,18 +120,6 @@ function ChatView() {
         }
     };
 
-    const switchAgentByRef = async (ref: string) => {
-        if (!client) {
-            return;
-        }
-        try {
-            const a = await client.resolveAgent(ref);
-            await app.switchAgent(a);
-        } catch (e) {
-            app.notify(`agent not found: ${ref} (${(e as Error).message})`, true);
-        }
-    };
-
     const handleSubmit = (text: string) => {
         const trimmed = text.trim();
         if (!trimmed) {
@@ -166,13 +150,6 @@ function ChatView() {
                     return;
                 case "/provider":
                     app.setOverlay("provider");
-                    return;
-                case "/agents":
-                    if (arg) {
-                        void switchAgentByRef(arg);
-                    } else {
-                        app.setOverlay("agents");
-                    }
                     return;
                 case "/resume":
                     app.setOverlay("session-select");
@@ -302,14 +279,12 @@ function ChatView() {
 function OverlayPanel({
     kind,
 }: {
-    kind: "provider" | "agents" | "status" | "model-select";
+    kind: "provider" | "status" | "model-select";
 }) {
     return kind === "model-select" ? (
         <ModelOverlay />
     ) : kind === "provider" ? (
         <ProviderOverlay />
-    ) : kind === "agents" ? (
-        <AgentOverlay />
     ) : kind === "status" ? (
         <StatusOverlay />
     ) : <StatusOverlay />;

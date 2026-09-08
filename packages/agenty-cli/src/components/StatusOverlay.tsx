@@ -6,7 +6,6 @@ import { Panel } from "./Panel";
 
 export function StatusOverlay() {
     const dialogSize = useBottomDialogSize();
-    const agent = useAppStore((s) => s.agent);
     const model = useAppStore((s) => s.model);
     const session = useAppStore((s) => s.session);
     const thinkingEnabled = useAppStore((s) => s.thinkingEnabled);
@@ -26,7 +25,6 @@ export function StatusOverlay() {
         : "off";
     const rows = [
         { key: "Session", value: session?.id ?? "?" },
-        { key: "Agent", value: agent?.name ?? "?" },
         { key: "Model", value: `${model?.providerName ?? "?"} · ${model?.name ?? "?"}` },
         { key: "Thinking", value: thinking },
         { key: "Messages", value: String(history.length) },

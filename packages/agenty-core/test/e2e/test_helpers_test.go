@@ -54,17 +54,9 @@ func createExecutionResources(
 	apiType string,
 	prefix string,
 ) (Session, error) {
-	agentCode := prefix + "-agent"
 	providerCode := prefix + "-provider"
 	modelCode := prefix + "-model"
 
-	if _, err := client.CreateAgent(ctx, AgentCreateInput{
-		Code: agentCode,
-		Name: "E2E Agent",
-		Soul: "Answer the user clearly.",
-	}); err != nil {
-		return Session{}, fmt.Errorf("create agent: %w", err)
-	}
 	if _, err := client.CreateProvider(ctx, ProviderCreateInput{
 		Code:         providerCode,
 		Name:         "E2E Provider",
@@ -86,7 +78,6 @@ func createExecutionResources(
 	}
 
 	session, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     agentCode,
 		ProviderCode:  providerCode,
 		ModelCode:     modelCode,
 		ContextWindow: 128_000,

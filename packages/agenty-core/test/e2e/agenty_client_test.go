@@ -22,58 +22,12 @@ func (c *agentyClient) InitializeAlready(ctx context.Context) (InitializeResult,
 
 func (c *agentyClient) CompleteInitialization(
 	ctx context.Context,
-	agentCode, providerCode, modelCode string,
+	providerCode, modelCode string,
 ) (InitializeResult, error) {
 	return callResult[InitializeResult](ctx, c.rpc, "initialize.complete", map[string]any{
-		"agentCode":    agentCode,
 		"providerCode": providerCode,
 		"modelCode":    modelCode,
 	})
-}
-
-func (c *agentyClient) CreateAgent(ctx context.Context, input AgentCreateInput) (Agent, error) {
-	return callResult[Agent](
-		ctx,
-		c.rpc,
-		"agent.create",
-		input,
-	)
-}
-
-func (c *agentyClient) GetAgent(ctx context.Context, code string) (Agent, error) {
-	return callResult[Agent](
-		ctx,
-		c.rpc,
-		"agent.get",
-		map[string]any{"code": code},
-	)
-}
-
-func (c *agentyClient) ListAgents(ctx context.Context) ([]Agent, error) {
-	return callResult[[]Agent](
-		ctx,
-		c.rpc,
-		"agent.list",
-		struct{}{},
-	)
-}
-
-func (c *agentyClient) UpdateAgent(ctx context.Context, input AgentUpdateInput) (Agent, error) {
-	return callResult[Agent](
-		ctx,
-		c.rpc,
-		"agent.update",
-		input,
-	)
-}
-
-func (c *agentyClient) DeleteAgent(ctx context.Context, code string) (DeleteResult, error) {
-	return callResult[DeleteResult](
-		ctx,
-		c.rpc,
-		"agent.delete",
-		map[string]any{"code": code},
-	)
 }
 
 func (c *agentyClient) CreateProvider(ctx context.Context, input ProviderCreateInput) (Provider, error) {

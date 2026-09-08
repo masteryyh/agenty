@@ -15,7 +15,7 @@ func TestOpenDBInitializesSchema(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	wantColumns := map[string]bool{
-		"id": false, "title": false, "agent_code": false,
+		"id": false, "title": false,
 		"last_provider_code": false, "last_model_code": false,
 		"context_window": false, "last_reasoning_effort": false,
 		"created_at": false, "updated_at": false,

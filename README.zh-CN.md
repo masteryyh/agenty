@@ -7,9 +7,8 @@ Agenty 是一个本地优先的 AI agent 应用。当前产品链路由 `agenty-
 CLI 仅通过子进程
 stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
 
-core 当前支持 provider/model/agent 管理、持久化会话、模型流式输出、agent 工具循环
-以及内置文件工具。Skills、MCP、memory、会话压缩和远程客户端模式要等 core 提供对等
-实现后再开放。
+core 当前支持 provider/model 管理、持久化会话、模型流式输出、agent 工具循环、会话压缩
+以及内置文件工具。Skills、MCP、memory 和远程客户端模式要等 core 提供对等实现后再开放。
 
 ## 快速开始
 
@@ -24,8 +23,8 @@ agenty
 
 首次运行时，launcher 会校验并释放内置的 CLI 和 core 到
 `~/.agenty/bin/{cli,core,apply_patch}`。CLI 启动 core 子进程并打开初始化向导；向导通过
-已有的 `provider.*` 和 `agent.*` IPC methods 创建一个 provider、一个聊天 model 和一个默认 agent，
-最后调用 `initialize.complete` 标记初始化完成。
+已有的 `provider.*` IPC methods 创建一个 provider 和一个聊天 model，最后调用
+`initialize.complete` 保存全局默认会话模型。
 
 ## 运行模型
 
@@ -44,7 +43,7 @@ core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notific
 已持久化消息、模型流式增量、工具调用和 round 终态。通知可能早于 `session.start` response
 到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
 
-TUI 当前开放 `/provider`、`/model`、`/agents`、`/cwd`、`/effort`、`/status`、
+TUI 当前开放 `/provider`、`/model`、`/cwd`、`/effort`、`/status`、
 `/new`、`/resume`、`/help` 和 `/exit`。core 尚未实现的功能暂不展示。
 
 ## 配置与存储
@@ -59,7 +58,6 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 会话索引 | `~/.agenty/agenty.sqlite` |
 | Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key |
 | 模型发现缓存 | 仅保存在运行中的 core 进程内，有效期 8 小时；按需刷新，core 重启后不会保留 |
-| Agents | `~/.agenty/agents/` |
 | Patch 事务锁 | `~/.agenty/locks/` |
 | 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 

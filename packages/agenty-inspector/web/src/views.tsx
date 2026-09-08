@@ -46,9 +46,6 @@ export function MessagesView({ detail, onSource }: Pick<ViewProps, "detail" | "o
             </div>
             <div className="session-facts">
                 <span>
-                    AGENT <strong>{detail.agentCode || "—"}</strong>
-                </span>
-                <span>
                     REASONING <strong>{detail.reasoningEffort || "off"}</strong>
                 </span>
                 <span>
@@ -605,7 +602,6 @@ function eventFields(data: RecordDetail): EventField[] {
     switch (data.record.type) {
         case "session_started":
             add("Session ID", payload.sessionId);
-            add("Agent", payload.agent);
             addModel(payload.model);
             add("Context window", payload.contextWindow);
             add("Reasoning effort", payload.reasoningEffort);

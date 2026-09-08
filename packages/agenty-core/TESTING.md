@@ -8,7 +8,7 @@ Chinese version, see [TESTING-CN.md](./TESTING-CN.md).
 | Area | Environment | Covered behavior | Default suite |
 | --- | --- | --- | --- |
 | Domain | In-memory values | Aggregate invariants, Session transitions and replay, event and content serialization, Provider model lifecycle, code and reasoning effort mapping validation | Yes |
-| Application | In-memory repository fakes | Agent, Provider, and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
+| Application | In-memory repository fakes | Provider and Session use cases; execution-loop completion, tool continuation, per-model token limits, multi-session concurrency, cancellation, shutdown, validation, error mapping, and pending-event lifecycle | Yes |
 | Built-in tools | `t.TempDir()`, helper fixtures, and real filesystem operations | Registration, relative path resolution, ranged reads, structured `apply_patch` subprocess results, regular-expression search, recursive globbing, directory listing, output limits, and error paths | Yes |
 | RPC | Buffers, fake handlers, and synthetic time | JSON-RPC/NDJSON framing, notifications, batches, invalid requests, line limits, chunk assembly, and cleanup | Yes |
 | Config, logging, and storage | `t.TempDir()`, real files, and local SQLite | Config file + env override merging, singleton Manager, log level/format/path selection, JSON repositories, append-only transcripts, SQLite projections, and schema initialization | Yes |
@@ -29,8 +29,8 @@ batches, and chunks, and does not import core implementation packages.
 `blackbox_test.go` continuously enforces this dependency boundary.
 
 The suite intentionally skips pure DTOs, trivial struct construction, thin getters,
-and constructors that only assign fields. This includes `Agent.New`, `NewID`,
-`ModelRef.String`, and `TokenUsage.Add`. Command wiring and process-terminating signal
+and constructors that only assign fields. This includes `NewID`, `ModelRef.String`, and
+`TokenUsage.Add`. Command wiring and process-terminating signal
 paths are also outside the unit-test scope.
 
 ## §2. Test environment
@@ -142,7 +142,7 @@ payloads.
 
 The E2E system treats core as a black box composed of stdin, stdout, stderr, exit
 status, and public provider HTTP requests. A complete typed-client journey creates
-and updates Agents, Providers/Models, and Sessions, continues a multi-turn conversation
+and updates Providers/Models and Sessions, continues a multi-turn conversation
 across a process restart, and queries persisted behavior through IPC without asserting
 SQLite, JSONL, or repository layout. Provider fixtures cover OpenAI Responses, OpenAI
 Chat Completions, Anthropic Messages, and Google GenAI. The scenarios verify the
@@ -150,8 +150,8 @@ Chat Completions, Anthropic Messages, and Google GenAI. The scenarios verify the
 duplicate-start and running-delete rejection, stop-driven cancellation, and recovery
 after the process exits during execution.
 
-The journey exercises all 28 current public methods: 2 Initialize, 5 Agent, 7 Provider,
-10 Session, and 4 Chunk methods. Session events, batches, exact request IDs, malformed-JSON
+The journey exercises all 25 current public methods: 2 Initialize, 8 Provider/Model,
+11 Session, and 4 Chunk methods. Session events, batches, exact request IDs, malformed-JSON
 recovery, a final line without a newline, stdin EOF, and startup failure remain
 process-level protocol scenarios. Exhaustive parser and invalid-chunk permutations
 remain in the lower-level RPC suite.

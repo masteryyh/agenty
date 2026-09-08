@@ -5,7 +5,6 @@ package adapter_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
+	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
@@ -31,7 +31,6 @@ func newDispatcher(t *testing.T) *rpc.Dispatcher {
 func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatcher {
 	t.Helper()
 	dir := t.TempDir()
-	agentRepo := storage.NewAgentRepository(filepath.Join(dir, "agents"))
 	catalogRepo := storage.NewCatalogRepository(filepath.Join(dir, "providers"))
 	db, err := storage.OpenIsolatedDB(filepath.Join(dir, "test.db"))
 	if err != nil {
@@ -41,7 +40,6 @@ func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatc
 	convRepo := storage.NewConversationRepository(db, filepath.Join(dir, "sessions"))
 	execution, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
 		Sessions: convRepo,
-		Agents:   agentRepo,
 		Catalog:  catalogRepo,
 		Tools:    agentloop.NewRegistry(),
 		NewCaller: func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
@@ -62,15 +60,13 @@ func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatc
 		convRepo,
 		application.WithSessionExecutionState(execution),
 	)
-	agentService := application.NewAgentService(agentRepo)
 	providerService := application.NewProviderService(catalogRepo)
 	initialization := &initializationState{}
 	d := rpc.NewDispatcher()
 	adapter.RegisterAll(
 		d,
-		agentService,
 		providerService,
-		application.NewInitializeService(agentService, providerService, initialization),
+		application.NewInitializeService(providerService, initialization),
 		sessionService,
 		execution,
 	)
@@ -79,6 +75,8 @@ func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatc
 
 type initializationState struct {
 	initialized bool
+	model       shared.ModelRef
+	effort      shared.ReasoningEffort
 }
 
 func (s *initializationState) Initialized() bool {
@@ -87,6 +85,16 @@ func (s *initializationState) Initialized() bool {
 
 func (s *initializationState) SetInitialized(initialized bool) error {
 	s.initialized = initialized
+	return nil
+}
+
+func (s *initializationState) DefaultModel() (shared.ModelRef, shared.ReasoningEffort) {
+	return s.model, s.effort
+}
+
+func (s *initializationState) SetDefaultModel(model shared.ModelRef, effort shared.ReasoningEffort) error {
+	s.model = model
+	s.effort = effort
 	return nil
 }
 
@@ -160,30 +168,6 @@ func errCode(resp map[string]any) int {
 	return int(code)
 }
 
-func TestAdapterAgentCreateAndGet(t *testing.T) {
-	d := newDispatcher(t)
-
-	create := call(t, d, request(1, "agent.create", map[string]any{
-		"code": "coder", "name": "Code Assistant", "soul": "You code.",
-	}))
-	if errCode(create) != 0 {
-		t.Fatalf("create error: %+v", create["error"])
-	}
-	result := create["result"].(map[string]any)
-	if result["code"] != "coder" {
-		t.Errorf("code = %v, want coder", result["code"])
-	}
-
-	got := call(t, d, request(2, "agent.get", map[string]any{"code": "coder"}))
-	if errCode(got) != 0 {
-		t.Fatalf("get error: %+v", got["error"])
-	}
-	gotResult := got["result"].(map[string]any)
-	if gotResult["name"] != "Code Assistant" {
-		t.Errorf("name = %v", gotResult["name"])
-	}
-}
-
 func TestAdapterEmptyCollectionsUseArrays(t *testing.T) {
 	d := newDispatcher(t)
 
@@ -192,9 +176,8 @@ func TestAdapterEmptyCollectionsUseArrays(t *testing.T) {
 		method string
 		id     int
 	}{
-		{name: "agents", method: "agent.list", id: 1},
-		{name: "providers", method: "provider.list", id: 2},
-		{name: "sessions", method: "session.list", id: 3},
+		{name: "providers", method: "provider.list", id: 1},
+		{name: "sessions", method: "session.list", id: 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			response := call(t, d, request(tt.id, tt.method, map[string]any{}))
@@ -205,31 +188,6 @@ func TestAdapterEmptyCollectionsUseArrays(t *testing.T) {
 				t.Errorf("%s result = %T, want array", tt.method, response["result"])
 			}
 		})
-	}
-}
-
-func TestAdapterAgentNotFound(t *testing.T) {
-	d := newDispatcher(t)
-	resp := call(t, d, request(1, "agent.get", map[string]any{"code": "missing"}))
-	if code := errCode(resp); code != rpc.ErrCodeNotFound {
-		t.Errorf("code = %d, want %d (not found)", code, rpc.ErrCodeNotFound)
-	}
-}
-
-func TestAdapterAgentInvalidCode(t *testing.T) {
-	d := newDispatcher(t)
-	resp := call(t, d, request(1, "agent.create", map[string]any{"code": "Bad Code", "name": "x"}))
-	if code := errCode(resp); code != rpc.ErrCodeInvalidParams {
-		t.Errorf("code = %d, want %d (invalid params)", code, rpc.ErrCodeInvalidParams)
-	}
-}
-
-func TestAdapterAgentDuplicate(t *testing.T) {
-	d := newDispatcher(t)
-	call(t, d, request(1, "agent.create", map[string]any{"code": "coder", "name": "A"}))
-	resp := call(t, d, request(2, "agent.create", map[string]any{"code": "coder", "name": "B"}))
-	if code := errCode(resp); code != rpc.ErrCodeAlreadyExists {
-		t.Errorf("code = %d, want %d (already exists)", code, rpc.ErrCodeAlreadyExists)
 	}
 }
 
@@ -255,8 +213,8 @@ func TestAdapterProviderAddModel(t *testing.T) {
 		t.Errorf("models = %d, want 1", len(models))
 	}
 	model := models[0].(map[string]any)
-	if model["maxOutputTokens"] != float64(8192) {
-		t.Errorf("maxOutputTokens = %v, want 8192", model["maxOutputTokens"])
+	if model["maxOutputTokens"] != float64(32000) {
+		t.Errorf("maxOutputTokens = %v, want 32000", model["maxOutputTokens"])
 	}
 }
 
@@ -282,13 +240,8 @@ func TestAdapterInitializeJourney(t *testing.T) {
 			"providerCode": "openai", "modelCode": "gpt-test", "name": "GPT Test",
 			"contextWindow": 128000, "maxOutputTokens": 16384, "isDefault": true,
 		}},
-		{method: "agent.create", params: map[string]any{
-			"code": "default", "name": "Default", "soul": "Be helpful.", "isDefault": true,
-			"defaultContextWindow": 128000,
-			"defaultModel":         map[string]any{"providerCode": "openai", "modelCode": "gpt-test"},
-		}},
 		{method: "initialize.complete", params: map[string]any{
-			"agentCode": "default", "providerCode": "openai", "modelCode": "gpt-test",
+			"providerCode": "openai", "modelCode": "gpt-test",
 		}},
 	} {
 		resp := call(t, d, request(id+2, step.method, step.params))
@@ -307,7 +260,6 @@ func TestAdapterSessionCreateAndGet(t *testing.T) {
 	d := newDispatcher(t)
 
 	create := call(t, d, request(1, "session.create", map[string]any{
-		"agentCode":     "coder",
 		"providerCode":  "anthropic",
 		"modelCode":     "claude-opus-4-8",
 		"contextWindow": 200000,
@@ -338,7 +290,6 @@ func TestAdapterSessionList(t *testing.T) {
 	d := newDispatcher(t)
 	for range 3 {
 		call(t, d, request(1, "session.create", map[string]any{
-			"agentCode":    "coder",
 			"providerCode": "anthropic",
 			"modelCode":    "claude-opus-4-8",
 		}))
@@ -434,15 +385,7 @@ func TestAdapterSessionStopCancelsRound(t *testing.T) {
 func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 	t.Helper()
 
-	createAgent := call(t, d, request(1, "agent.create", map[string]any{
-		"code": "coder",
-		"name": "Coder",
-		"soul": "Complete the task.",
-	}))
-	if errCode(createAgent) != 0 {
-		t.Fatalf("create agent error: %+v", createAgent["error"])
-	}
-	createProvider := call(t, d, request(2, "provider.create", map[string]any{
+	createProvider := call(t, d, request(1, "provider.create", map[string]any{
 		"code":   "openai",
 		"name":   "OpenAI",
 		"type":   "openai_completions",
@@ -451,7 +394,7 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 	if errCode(createProvider) != 0 {
 		t.Fatalf("create provider error: %+v", createProvider["error"])
 	}
-	addModel := call(t, d, request(3, "provider.addModel", map[string]any{
+	addModel := call(t, d, request(2, "provider.addModel", map[string]any{
 		"providerCode":    "openai",
 		"modelCode":       "gpt-test",
 		"name":            "GPT Test",
@@ -461,8 +404,7 @@ func createExecutableSession(t *testing.T, d *rpc.Dispatcher) string {
 	if errCode(addModel) != 0 {
 		t.Fatalf("add model error: %+v", addModel["error"])
 	}
-	created := call(t, d, request(4, "session.create", map[string]any{
-		"agentCode":     "coder",
+	created := call(t, d, request(3, "session.create", map[string]any{
 		"providerCode":  "openai",
 		"modelCode":     "gpt-test",
 		"contextWindow": 128000,
@@ -508,71 +450,5 @@ func TestAdapterUnknownMethod(t *testing.T) {
 	resp := call(t, d, request(1, "bogus.method", map[string]any{}))
 	if code := errCode(resp); code != rpc.ErrCodeMethodNotFound {
 		t.Errorf("code = %d, want %d (method not found)", code, rpc.ErrCodeMethodNotFound)
-	}
-}
-
-// callChunked uploads params via the chunk.* protocol (2 shards) and returns
-// the commit response, which carries the real method's result.
-func callChunked(t *testing.T, d *rpc.Dispatcher, id int, method string, params any) map[string]any {
-	t.Helper()
-	raw, _ := json.Marshal(params)
-	mid := len(raw) / 2
-	if mid == 0 {
-		mid = len(raw)
-	}
-	shards := [][]byte{raw[:mid], raw[mid:]}
-
-	var input strings.Builder
-	bp, _ := json.Marshal(map[string]any{"requestId": "r", "method": method})
-	input.WriteString(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"chunk.begin","params":%s}`+"\n", id, bp))
-	for i, s := range shards {
-		pp, _ := json.Marshal(map[string]any{"requestId": "r", "index": i, "data": base64.StdEncoding.EncodeToString(s)})
-		input.WriteString(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"chunk.part","params":%s}`+"\n", id, pp))
-	}
-	cp, _ := json.Marshal(map[string]any{"requestId": "r"})
-	input.WriteString(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"chunk.commit","params":%s}`+"\n", id, cp))
-
-	out := &bytes.Buffer{}
-	srv := rpc.NewServer(d, strings.NewReader(input.String()), out)
-	srv.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := srv.Serve(context.Background()); err != nil {
-		t.Fatalf("Serve: %v", err)
-	}
-	lines := bytes.Split(out.Bytes(), []byte("\n"))
-	var last []byte
-	for i := len(lines) - 1; i >= 0; i-- {
-		if len(bytes.TrimSpace(lines[i])) > 0 {
-			last = lines[i]
-			break
-		}
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(last, &resp); err != nil {
-		t.Fatalf("decode commit response %q: %v", out.String(), err)
-	}
-	return resp
-}
-
-func TestAdapterChunkedAgentCreate(t *testing.T) {
-	d := newDispatcher(t)
-	asm := rpc.NewChunkAssembler(d)
-	rpc.RegisterChunkHandlers(d, asm)
-
-	resp := callChunked(t, d, 1, "agent.create", map[string]any{
-		"code": "chunked", "name": "Chunked Agent", "soul": "You shard.",
-	})
-	if errCode(resp) != 0 {
-		t.Fatalf("chunked create error: %+v", resp["error"])
-	}
-	result := resp["result"].(map[string]any)
-	if result["code"] != "chunked" {
-		t.Errorf("code = %v, want chunked", result["code"])
-	}
-
-	// The committed upload must be indistinguishable from a direct call: a
-	// subsequent agent.get reads back the same record.
-	got := call(t, d, request(2, "agent.get", map[string]any{"code": "chunked"}))
-	if errCode(got) != 0 {
-		t.Fatalf("get error: %+v", got["error"])
 	}
 }

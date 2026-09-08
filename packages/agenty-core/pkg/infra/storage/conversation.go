@@ -128,11 +128,10 @@ func (r *ConversationRepository) Delete(ctx context.Context, id uuid.UUID) error
 
 func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversation.SessionSummary) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO sessions (id, title, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
-			agent_code = excluded.agent_code,
 			last_provider_code = excluded.last_provider_code,
 			last_model_code = excluded.last_model_code,
 			context_window = excluded.context_window,
@@ -141,7 +140,6 @@ func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversa
 	`,
 		sum.ID.String(),
 		sum.Title,
-		sum.AgentCode.String(),
 		sum.LastProviderCode.String(),
 		sum.LastModelCode.String(),
 		sum.ContextWindow,
@@ -154,21 +152,18 @@ func (r *ConversationRepository) upsertSession(ctx context.Context, sum conversa
 
 func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (conversation.SessionSummary, error) {
 	var sum conversation.SessionSummary
-	var idStr, agentStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
+	var idStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
 
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at
+		SELECT id, title, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at
 		FROM sessions WHERE id = ?
-	`, id.String()).Scan(&idStr, &sum.Title, &agentStr, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr)
+	`, id.String()).Scan(&idStr, &sum.Title, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr)
 
 	if err != nil {
 		return conversation.SessionSummary{}, err
 	}
 
 	if sum.ID, err = uuid.Parse(idStr); err != nil {
-		return conversation.SessionSummary{}, err
-	}
-	if sum.AgentCode, err = shared.NewCode(agentStr); err != nil {
 		return conversation.SessionSummary{}, err
 	}
 	if providerStr != "" {
@@ -193,13 +188,8 @@ func (r *ConversationRepository) getSession(ctx context.Context, id uuid.UUID) (
 }
 
 func (r *ConversationRepository) listSessions(ctx context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error) {
-	q := "SELECT id, title, agent_code, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at FROM sessions"
+	q := "SELECT id, title, last_provider_code, last_model_code, context_window, last_reasoning_effort, created_at, updated_at FROM sessions"
 	args := []any{}
-
-	if query.AgentCode != nil {
-		q += " WHERE agent_code = ?"
-		args = append(args, query.AgentCode.String())
-	}
 
 	q += " ORDER BY updated_at DESC"
 
@@ -221,16 +211,13 @@ func (r *ConversationRepository) listSessions(ctx context.Context, query convers
 	results := make([]conversation.SessionSummary, 0)
 	for rows.Next() {
 		var sum conversation.SessionSummary
-		var idStr, agentStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
+		var idStr, providerStr, modelStr, effortStr, createdStr, updatedStr string
 
-		if err := rows.Scan(&idStr, &sum.Title, &agentStr, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr); err != nil {
+		if err := rows.Scan(&idStr, &sum.Title, &providerStr, &modelStr, &sum.ContextWindow, &effortStr, &createdStr, &updatedStr); err != nil {
 			return nil, err
 		}
 
 		if sum.ID, err = uuid.Parse(idStr); err != nil {
-			return nil, err
-		}
-		if sum.AgentCode, err = shared.NewCode(agentStr); err != nil {
 			return nil, err
 		}
 		if providerStr != "" {

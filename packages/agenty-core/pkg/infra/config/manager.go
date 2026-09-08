@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/spf13/viper"
 )
 
@@ -41,7 +42,57 @@ func (m *Manager) SetInitialized(initialized bool) error {
 	return nil
 }
 
+func (m *Manager) DefaultModel() (shared.ModelRef, shared.ReasoningEffort) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.cfg.DefaultProviderCode == "" || m.cfg.DefaultModelCode == "" {
+		return shared.ModelRef{}, shared.ReasoningOff
+	}
+	effort := shared.ReasoningEffort(m.cfg.DefaultReasoningEffort)
+	if effort == "" {
+		effort = shared.ReasoningOff
+	}
+	provider, err := shared.NewCode(m.cfg.DefaultProviderCode)
+	if err != nil {
+		return shared.ModelRef{}, effort
+	}
+	model, err := shared.NewModelCode(m.cfg.DefaultModelCode)
+	if err != nil {
+		return shared.ModelRef{}, effort
+	}
+	return shared.NewModelRef(provider, model), effort
+}
+
+func (m *Manager) SetDefaultModel(model shared.ModelRef, effort shared.ReasoningEffort) error {
+	if model.IsZero() {
+		return fmt.Errorf("config: default model is empty")
+	}
+	if !effort.Valid() {
+		return fmt.Errorf("config: invalid default reasoning effort %q", effort)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := persistConfigValues(m.paths.ConfigFile, map[string]any{
+		"defaultProviderCode":    model.ProviderCode.String(),
+		"defaultModelCode":       model.ModelCode.String(),
+		"defaultReasoningEffort": string(effort),
+	}); err != nil {
+		return fmt.Errorf("config: persist default model: %w", err)
+	}
+	m.cfg.DefaultProviderCode = model.ProviderCode.String()
+	m.cfg.DefaultModelCode = model.ModelCode.String()
+	m.cfg.DefaultReasoningEffort = string(effort)
+	return nil
+}
+
 func persistConfigValue(file, key string, value any) error {
+	return persistConfigValues(file, map[string]any{key: value})
+}
+
+func persistConfigValues(file string, values map[string]any) error {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file)), ".")
 	if ext == "yml" {
 		ext = "yaml"
@@ -63,7 +114,9 @@ func persistConfigValue(file, key string, value any) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	v.Set(key, value)
+	for key, value := range values {
+		v.Set(key, value)
+	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(file), ".config-*"+filepath.Ext(file))
 	if err != nil {

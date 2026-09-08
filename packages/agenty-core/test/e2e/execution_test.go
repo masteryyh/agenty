@@ -239,7 +239,6 @@ func TestSingleIPCClientRunsSessionsConcurrently(t *testing.T) {
 	)
 	requireNoError(t, err)
 	second, err := client.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     "parallel-agent",
 		ProviderCode:  "parallel-provider",
 		ModelCode:     "parallel-model",
 		ContextWindow: 128_000,

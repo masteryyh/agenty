@@ -39,7 +39,6 @@ func TestReplaySessionCachesMetadataAndVisibleCopyFiltersIt(t *testing.T) {
 	t.Parallel()
 
 	session := StartSession(
-		"coder",
 		shared.NewModelRef("provider", "model"),
 		128_000,
 		shared.ReasoningHigh,
@@ -85,7 +84,6 @@ func TestReplaySessionMergesIncrementalMetadata(t *testing.T) {
 	t.Parallel()
 
 	session := StartSession(
-		"coder",
 		shared.NewModelRef("provider", "model"),
 		128_000,
 		shared.ReasoningHigh,

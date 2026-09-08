@@ -28,7 +28,7 @@ func testAPI(t *testing.T) (http.Handler, *inspection.Store, inspection.SessionE
 	store.Scan(t.Context())
 	assets := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>Inspector</title>")}}
 	handler := New(Options{Store: store, Assets: assets, Address: "127.0.0.1:4318"})
-	return handler, store, store.List("", "", "", "", "", false)[0]
+	return handler, store, store.List("", "", "", "", false)[0]
 }
 
 func request(handler http.Handler, method, target, host, origin string) *httptest.ResponseRecorder {

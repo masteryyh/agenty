@@ -63,7 +63,7 @@ and released launcher remain unchanged. Go uses the same version as core's go.mo
   data and a `Raw` tab for formatted JSON. Tool relations link to their original
   event records; source messages are never moved or rewritten.
 
-Session search covers titles, IDs and relative file paths. Agent/model/date filters
+Session search covers titles, IDs and relative file paths. Model/date filters
 and **With issues** narrow the list. Dates use the server's local time and source
 file modification date. Session list ordering uses file modification time, then
 stable file ID. Multiple files claiming the same session ID remain separate entries.

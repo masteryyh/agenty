@@ -54,9 +54,8 @@ func sessionGet(svc *application.SessionService) rpc.Handler {
 }
 
 type sessionListParams struct {
-	AgentCode string `json:"agentCode,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
-	Offset    int    `json:"offset,omitempty"`
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
 }
 
 func sessionList(svc *application.SessionService) rpc.Handler {
@@ -66,9 +65,8 @@ func sessionList(svc *application.SessionService) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(svc.List(ctx, application.SessionListQuery{
-			AgentCode: p.AgentCode,
-			Limit:     p.Limit,
-			Offset:    p.Offset,
+			Limit:  p.Limit,
+			Offset: p.Offset,
 		}))
 	}
 }

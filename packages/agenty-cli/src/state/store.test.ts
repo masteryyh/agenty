@@ -6,7 +6,6 @@ import { resolveReasoningEffortForModel, useAppStore } from "./store";
 
 const session: ChatSessionDto = {
     id: "session-1",
-    agentCode: "default",
     currentModel: { providerCode: "provider", modelCode: "model" },
     contextWindow: 32_000,
     rounds: [],

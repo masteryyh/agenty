@@ -37,16 +37,6 @@ export const commands: Command[] = [
         usage: "/provider",
     },
     {
-        name: "/agents",
-        description: "Manage agents and switch current agent",
-        usage: "/agents [<name>]",
-        argHint: "name",
-        completeArgs: async (client) => {
-            const agents = await client.listAgents();
-            return agents.map((a) => a.name);
-        },
-    },
-    {
         name: "/resume",
         description: "Resume a previous session",
         usage: "/resume",

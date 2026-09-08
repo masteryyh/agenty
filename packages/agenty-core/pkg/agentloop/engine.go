@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/application/apperrors"
-	"github.com/masteryyh/agenty-core/pkg/domain/agent"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -27,10 +26,6 @@ type ExecutionSessionRepository interface {
 	Save(ctx context.Context, session *conversation.Session) error
 }
 
-type ExecutionAgentRepository interface {
-	Get(ctx context.Context, code shared.Code) (*agent.Agent, error)
-}
-
 type ExecutionCatalogRepository interface {
 	Get(ctx context.Context, code shared.Code) (*catalog.Provider, error)
 }
@@ -43,7 +38,6 @@ type CallerFactory func(
 
 type Dependencies struct {
 	Sessions    ExecutionSessionRepository
-	Agents      ExecutionAgentRepository
 	Catalog     ExecutionCatalogRepository
 	Tools       ToolRuntime
 	NewCaller   CallerFactory
@@ -81,7 +75,6 @@ type Engine struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	sessions    ExecutionSessionRepository
-	agents      ExecutionAgentRepository
 	catalog     ExecutionCatalogRepository
 	tools       ToolRuntime
 	newCaller   CallerFactory
@@ -103,9 +96,6 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 	if dependencies.Sessions == nil {
 		return nil, apperrors.Validation("execution session repository must not be nil")
 	}
-	if dependencies.Agents == nil {
-		return nil, apperrors.Validation("execution agent repository must not be nil")
-	}
 	if dependencies.Catalog == nil {
 		return nil, apperrors.Validation("execution catalog repository must not be nil")
 	}
@@ -121,7 +111,6 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 		ctx:         ctx,
 		cancel:      cancel,
 		sessions:    dependencies.Sessions,
-		agents:      dependencies.Agents,
 		catalog:     dependencies.Catalog,
 		tools:       dependencies.Tools,
 		newCaller:   dependencies.NewCaller,
@@ -498,13 +487,6 @@ func (engine *Engine) loadResources(
 	runCtx context.Context,
 	session *conversation.Session,
 ) (*executionResources, error) {
-	agentDefinition, err := engine.agents.Get(ctx, session.AgentCode)
-	if err != nil {
-		if errors.Is(err, agent.ErrNotFound) {
-			return nil, apperrors.NotFound("agent " + session.AgentCode.String() + " not found")
-		}
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load agent", err)
-	}
 	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
 		return nil, apperrors.Validation("session model is not configured")
 	}
@@ -514,7 +496,7 @@ func (engine *Engine) loadResources(
 		return nil, err
 	}
 
-	systemPrompt, err := agentDefinition.ResolveSystemPrompt(agent.SystemPromptOptions{
+	systemPrompt, err := ResolveSystemPrompt(SystemPromptOptions{
 		UseApplyPatchShell: !provider.FreeFormTool,
 	})
 	if err != nil {

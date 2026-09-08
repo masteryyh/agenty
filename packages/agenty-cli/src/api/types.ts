@@ -13,34 +13,6 @@ export interface ModelRef {
     modelCode: string;
 }
 
-export interface AgentDto {
-    code: string;
-    name: string;
-    description?: string;
-    soul: string;
-    defaultModel?: ModelRef;
-    defaultContextWindow: number;
-    defaultReasoningEffort?: ReasoningEffort;
-    isDefault: boolean;
-    metadata?: Record<string, unknown>;
-    createdAt: string;
-    updatedAt: string;
-}
-
-export interface CreateAgentDto {
-    code: string;
-    name: string;
-    description?: string;
-    soul?: string;
-    defaultModel?: ModelRef;
-    defaultContextWindow?: number;
-    defaultReasoningEffort?: ReasoningEffort;
-    isDefault?: boolean;
-    metadata?: Record<string, unknown>;
-}
-
-export type UpdateAgentDto = Partial<Omit<CreateAgentDto, "code">>;
-
 export interface ModelDto {
     code: string;
     providerCode: string;
@@ -195,7 +167,6 @@ export interface RoundDto {
 
 export interface ChatSessionDto {
     id: string;
-    agentCode: string;
     title?: string;
     cwd?: string;
     currentModel?: ModelRef;
@@ -209,7 +180,6 @@ export interface ChatSessionDto {
 export interface SessionSummaryDto {
     id: string;
     title: string;
-    agentCode: string;
     lastProviderCode: string;
     lastModelCode: string;
     contextWindow: number;
@@ -258,9 +228,15 @@ export interface ExecutionStart {
 }
 
 export interface InitializeCompleteInput {
-    agentCode: string;
     providerCode: string;
     modelCode: string;
+    reasoningEffort?: ReasoningEffort;
+}
+
+export interface InitializeStatusDto {
+    initialized: boolean;
+    defaultModel?: ModelRef;
+    defaultReasoningEffort?: ReasoningEffort;
 }
 
 export interface PagedResponse<T> {

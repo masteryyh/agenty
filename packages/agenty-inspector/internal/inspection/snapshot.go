@@ -109,7 +109,7 @@ func describe(event shared.Event) (string, string) {
 	case conversation.SessionTitleSet:
 		return "", e.Title
 	case conversation.SessionStarted:
-		return "", e.Agent.String() + " · " + e.Model.ModelCode.String()
+		return "", e.Model.ModelCode.String()
 	case conversation.SessionModelSet:
 		return "", e.Model.ProviderCode.String() + " / " + e.Model.ModelCode.String()
 	case conversation.SessionCwdSet:
@@ -161,7 +161,7 @@ func (s *Snapshot) issue(code, severity, message string, record Record) {
 func (s *Snapshot) project() {
 	session := s.session
 	s.Detail.SessionID, s.Detail.Title = session.ID.String(), session.Title
-	s.Detail.AgentCode, s.Detail.CurrentModel = session.AgentCode, session.CurrentModel
+	s.Detail.CurrentModel = session.CurrentModel
 	s.Detail.Cwd, s.Detail.ContextWindow = sessionCwd(session, s.events), session.ContextWindow
 	s.Detail.ReasoningEffort = session.CurrentReasoningEffort
 	s.Detail.RecordCount = len(s.Records)

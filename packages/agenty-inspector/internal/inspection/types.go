@@ -44,7 +44,6 @@ type SessionEntry struct {
 	SessionID  string    `json:"sessionId"`
 	Path       string    `json:"path"`
 	Title      string    `json:"title"`
-	Agent      string    `json:"agent"`
 	Model      string    `json:"model"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	Size       int64     `json:"size"`
@@ -87,7 +86,6 @@ type Detail struct {
 	Revision        string                 `json:"revision"`
 	SessionID       string                 `json:"sessionId"`
 	Title           *string                `json:"title"`
-	AgentCode       shared.Code            `json:"agentCode"`
 	CurrentModel    *shared.ModelRef       `json:"currentModel"`
 	Cwd             *string                `json:"cwd"`
 	ContextWindow   int64                  `json:"contextWindow"`

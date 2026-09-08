@@ -572,7 +572,7 @@ function WizardContent() {
                 {step === "done" ? (
                     <Text color="green" bold>Setup complete. Starting agenty-cli…</Text>
                 ) : (
-                    <Spinner label="Saving providers, model, and default agent…" />
+                    <Spinner label="Saving providers, model, and session defaults…" />
                 )}
                 {error ? <Text color="red">{error}</Text> : null}
             </Box>
@@ -609,7 +609,7 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
         <Box flexDirection="column" flexGrow={1} padding={1} gap={1}>
             <Text color="magenta" bold>AGENTY / FIRST RUN</Text>
             <Text color="cyan" bold>Welcome to agenty</Text>
-            <Text>Connect a model provider, configure its models, and choose the default agent model.</Text>
+            <Text>Connect a model provider, configure its models, and choose the default session model.</Text>
             <Box flexDirection="column" height={10} borderStyle="single" borderColor="cyan" padding={1} marginTop={1}>
                 <Box height={1}>
                     <Text color="cyan" bold>01  Provider access</Text>
@@ -624,7 +624,7 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
                     <Text dimColor wrap="truncate">Enter the model code and limits used by the core loop.</Text>
                 </Box>
                 <Box height={1}>
-                    <Text color="cyan" bold>03  Default agent</Text>
+                    <Text color="cyan" bold>03  Default session model</Text>
                 </Box>
                 <Box height={1}>
                     <Text dimColor wrap="truncate">Pick the model used when a new session starts.</Text>
@@ -1002,7 +1002,7 @@ function ModelStep({
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
             <Box flexDirection="column">
-                <Text color="magenta" bold>02 / Default agent model</Text>
+                <Text color="magenta" bold>02 / Default session model</Text>
                 <Text dimColor>Choose a model. Custom providers also allow model management here.</Text>
             </Box>
             {error ? <Text color="red">{error}</Text> : null}

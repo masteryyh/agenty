@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentDto, ModelProviderDto } from "../api/types";
+import type { ModelProviderDto } from "../api/types";
 import {
     createBuiltinDraft,
     createCustomDraft,
@@ -68,18 +68,6 @@ function createProviderResource(): ModelProviderDto {
     };
 }
 
-function createAgent(code: string, isDefault: boolean): AgentDto {
-    return {
-        code,
-        name: code,
-        soul: "",
-        defaultContextWindow: 128_000,
-        isDefault,
-        createdAt: "",
-        updatedAt: "",
-    };
-}
-
 function createProvider(draft: ProviderDraft, model: ModelDraft = createModel(draft)): ModelProviderDto {
     return {
         code: draft.code,
@@ -103,7 +91,6 @@ function createProvider(draft: ProviderDraft, model: ModelDraft = createModel(dr
 
 function fakeClient(
     providers: ModelProviderDto[] = [],
-    agents: AgentDto[] = [],
 ): WizardSetupClient & {
     calls: string[];
     createdModels: Array<{ modelCode: string; isDefault?: boolean }>;
@@ -124,10 +111,6 @@ function fakeClient(
             calls.push("provider.listModels");
             return [];
         },
-        listAgents: async () => {
-            calls.push("agent.list");
-            return agents;
-        },
         createProvider: async () => {
             calls.push("provider.create");
             return providers[0] ?? createProvider(createDraft());
@@ -144,14 +127,6 @@ function fakeClient(
         deleteModel: async (providerCode, modelCode) => {
             calls.push("provider.removeModel");
             deletedModels.push({ providerCode, modelCode });
-        },
-        createAgent: async () => {
-            calls.push("agent.create");
-            return createAgent("default", true);
-        },
-        updateAgent: async () => {
-            calls.push("agent.update");
-            return createAgent("default", true);
         },
         completeInitialization: async () => {
             calls.push("initialize.complete");
@@ -210,10 +185,8 @@ describe("first-run provider setup", () => {
 
         expect(client.calls).toEqual([
             "provider.list",
-            "agent.list",
             "provider.create",
             "provider.addModel",
-            "agent.create",
             "initialize.complete",
         ]);
     });
@@ -221,15 +194,13 @@ describe("first-run provider setup", () => {
     test("updates existing resources so a partial setup can resume", async () => {
         const draft = createDraft();
         const model = createModel(draft);
-        const client = fakeClient([createProvider(draft, model)], [createAgent("default", true)]);
+        const client = fakeClient([createProvider(draft, model)]);
 
         await persistWizardSetup(client, [draft], [model], selectedModelId(model));
 
         expect(client.calls).toEqual([
             "provider.list",
-            "agent.list",
             "provider.addModel",
-            "agent.update",
             "initialize.complete",
         ]);
     });
@@ -240,17 +211,15 @@ describe("first-run provider setup", () => {
         const second = { ...createModel(draft), id: `${draft.id}:second`, code: "second", name: "Second" };
         const existing = createProvider(draft, first);
         existing.models.push({ ...existing.models[0], code: "removed", name: "Removed" });
-        const client = fakeClient([existing], [createAgent("default", true)]);
+        const client = fakeClient([existing]);
 
         await persistWizardSetup(client, [draft], [first, second], selectedModelId(second));
 
         expect(client.calls).toEqual([
             "provider.list",
-            "agent.list",
             "provider.removeModel",
             "provider.addModel",
             "provider.addModel",
-            "agent.update",
             "initialize.complete",
         ]);
         expect(client.deletedModels).toEqual([{ providerCode: "custom", modelCode: "removed" }]);
@@ -283,8 +252,6 @@ describe("first-run provider setup", () => {
 
         expect(client.calls).toEqual([
             "provider.list",
-            "agent.list",
-            "agent.create",
             "initialize.complete",
         ]);
     });
@@ -297,7 +264,7 @@ describe("first-run provider setup", () => {
             modelsCached: true,
         };
         const models = modelDraftsForProvider(draft, provider);
-        const client = fakeClient([provider], [createAgent("default", true)]);
+        const client = fakeClient([provider]);
 
         expect(models[0].source).toBe("cached");
         await persistWizardSetup(client, [draft], models, selectedModelId(models[0]));
@@ -306,8 +273,6 @@ describe("first-run provider setup", () => {
         expect(client.deletedModels).toEqual([]);
         expect(client.calls).toEqual([
             "provider.list",
-            "agent.list",
-            "agent.update",
             "initialize.complete",
         ]);
     });
@@ -324,7 +289,7 @@ describe("first-run provider setup", () => {
         };
         const models = modelDraftsForProvider(draft, provider);
         const cached = models.find((model) => model.code === "cached");
-        const client = fakeClient([provider], [createAgent("default", true)]);
+        const client = fakeClient([provider]);
 
         expect(models.map((model) => ({ code: model.code, source: model.source }))).toEqual([
             { code: "configured", source: "configured" },
@@ -349,7 +314,6 @@ describe("first-run provider setup", () => {
         const second = { ...createModel(secondDraft), id: "custom:1:second", code: "second", isDefault: true };
         const client = fakeClient(
             [createProvider(firstDraft, first), createProvider(secondDraft, second)],
-            [createAgent("default", true)],
         );
 
         await persistWizardSetup(client, [firstDraft, secondDraft], [first, second], selectedModelId(first));

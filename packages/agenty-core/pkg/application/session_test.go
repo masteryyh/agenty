@@ -9,10 +9,9 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
-func newSession(t *testing.T, sessionSvc *application.SessionService, agentCode string) string {
+func newSession(t *testing.T, sessionSvc *application.SessionService) string {
 	t.Helper()
 	sess, err := sessionSvc.Create(context.Background(), application.SessionCreateInput{
-		AgentCode:     agentCode,
 		ProviderCode:  "anthropic",
 		ModelCode:     "claude-opus-4-8",
 		ContextWindow: 200_000,
@@ -24,11 +23,10 @@ func newSession(t *testing.T, sessionSvc *application.SessionService, agentCode 
 }
 
 func TestSessionCreateAndGet(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
 
 	sess, err := sessionSvc.Create(ctx, application.SessionCreateInput{
-		AgentCode:       "coder",
 		ProviderCode:    "anthropic",
 		ModelCode:       "claude-opus-4-8",
 		ContextWindow:   200_000,
@@ -64,7 +62,6 @@ func TestSessionGetFiltersHiddenMetadataMessages(t *testing.T) {
 	repo := newSessionRepositoryFake()
 	sessionSvc := application.NewSessionService(repo)
 	session := conversation.StartSession(
-		"coder",
 		shared.NewModelRef("anthropic", "claude-opus-4-8"),
 		200_000,
 		shared.ReasoningHigh,
@@ -104,15 +101,14 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 		name  string
 		input application.SessionCreateInput
 	}{
-		{name: "agent code", input: application.SessionCreateInput{AgentCode: "Bad Code", ProviderCode: "anthropic", ModelCode: "claude-opus"}},
-		{name: "provider code", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "Bad Code", ModelCode: "claude-opus"}},
-		{name: "model code", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "Bad Code"}},
-		{name: "reasoning effort", input: application.SessionCreateInput{AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "claude-opus", ReasoningEffort: "extreme"}},
+		{name: "provider code", input: application.SessionCreateInput{ProviderCode: "Bad Code", ModelCode: "claude-opus"}},
+		{name: "model code", input: application.SessionCreateInput{ProviderCode: "anthropic", ModelCode: "Bad Code"}},
+		{name: "reasoning effort", input: application.SessionCreateInput{ProviderCode: "anthropic", ModelCode: "claude-opus", ReasoningEffort: "extreme"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, _, sessionSvc := newServices(t)
+			_, sessionSvc := newServices(t)
 			_, err := sessionSvc.Create(t.Context(), tt.input)
 			if code := appErrorCode(err); code != application.CodeValidation {
 				t.Errorf("code = %v, want validation", code)
@@ -122,9 +118,9 @@ func TestSessionCreateRejectsInvalidInput(t *testing.T) {
 }
 
 func TestSessionCreateDefaultsReasoningOff(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	sess, err := sessionSvc.Create(t.Context(), application.SessionCreateInput{
-		AgentCode: "coder", ProviderCode: "anthropic", ModelCode: "claude-opus",
+		ProviderCode: "anthropic", ModelCode: "claude-opus",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,11 +131,11 @@ func TestSessionCreateDefaultsReasoningOff(t *testing.T) {
 }
 
 func TestSessionList(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
 
-	for _, agent := range []string{"coder", "coder", "writer"} {
-		newSession(t, sessionSvc, agent)
+	for range 3 {
+		newSession(t, sessionSvc)
 	}
 
 	all, err := sessionSvc.List(ctx, application.SessionListQuery{})
@@ -150,14 +146,6 @@ func TestSessionList(t *testing.T) {
 		t.Errorf("List all returned %d, want 3", len(all))
 	}
 
-	filtered, err := sessionSvc.List(ctx, application.SessionListQuery{AgentCode: "coder"})
-	if err != nil {
-		t.Fatalf("List filtered: %v", err)
-	}
-	if len(filtered) != 2 {
-		t.Errorf("List filtered returned %d, want 2", len(filtered))
-	}
-
 	paged, err := sessionSvc.List(ctx, application.SessionListQuery{Limit: 1, Offset: 1})
 	if err != nil {
 		t.Fatalf("List paged: %v", err)
@@ -166,15 +154,12 @@ func TestSessionList(t *testing.T) {
 		t.Errorf("List paged returned %d, want 1", len(paged))
 	}
 
-	if _, err := sessionSvc.List(ctx, application.SessionListQuery{AgentCode: "Bad Code"}); appErrorCode(err) != application.CodeValidation {
-		t.Errorf("invalid filter error = %v, want validation", err)
-	}
 }
 
 func TestSessionSetTitle(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
-	id := newSession(t, sessionSvc, "coder")
+	id := newSession(t, sessionSvc)
 
 	if _, err := sessionSvc.SetTitle(ctx, id, "greeting"); err != nil {
 		t.Fatalf("SetTitle: %v", err)
@@ -189,9 +174,9 @@ func TestSessionSetTitle(t *testing.T) {
 }
 
 func TestSessionSetModel(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
-	id := newSession(t, sessionSvc, "coder")
+	id := newSession(t, sessionSvc)
 
 	if _, err := sessionSvc.SetModel(ctx, id, "openai", "gpt-5.6", 128_000); err != nil {
 		t.Fatalf("SetModel: %v", err)
@@ -209,9 +194,9 @@ func TestSessionSetModel(t *testing.T) {
 }
 
 func TestSessionSetReasoningEffortAndCwd(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
-	id := newSession(t, sessionSvc, "coder")
+	id := newSession(t, sessionSvc)
 
 	if _, err := sessionSvc.SetReasoningEffort(ctx, id, shared.ReasoningMax); err != nil {
 		t.Fatalf("SetReasoningEffort: %v", err)
@@ -248,9 +233,9 @@ func TestSessionSetReasoningEffortAndCwd(t *testing.T) {
 }
 
 func TestSessionDelete(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	ctx := context.Background()
-	id := newSession(t, sessionSvc, "coder")
+	id := newSession(t, sessionSvc)
 
 	if err := sessionSvc.Delete(ctx, id); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -262,7 +247,7 @@ func TestSessionDelete(t *testing.T) {
 }
 
 func TestSessionGetNotFound(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	id := "01957f5e-7c2a-7c2a-9c2a-2c2a2c2a2c2a"
 	tests := []struct {
 		name string
@@ -283,7 +268,7 @@ func TestSessionGetNotFound(t *testing.T) {
 }
 
 func TestSessionRejectsInvalidID(t *testing.T) {
-	_, _, sessionSvc := newServices(t)
+	_, sessionSvc := newServices(t)
 	tests := []struct {
 		name string
 		call func() error

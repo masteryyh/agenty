@@ -23,7 +23,7 @@ func TestEventEnvelopeRoundTrip(t *testing.T) {
 		name  string
 		event shared.Event
 	}{
-		{name: "session started", event: SessionStarted{SessionID: sessionID, Agent: "coder", Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
+		{name: "session started", event: SessionStarted{SessionID: sessionID, Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
 		{name: "model set", event: SessionModelSet{SessionID: sessionID, Model: model, ContextWindow: 200_000, At: at}},
 		{name: "reasoning effort set", event: SessionReasoningEffortSet{SessionID: sessionID, ReasoningEffort: shared.ReasoningHigh, At: at}},
 		{name: "cwd cleared", event: SessionCwdSet{SessionID: sessionID, Cwd: nil, At: at}},

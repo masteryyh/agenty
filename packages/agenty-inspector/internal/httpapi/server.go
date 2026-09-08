@@ -92,7 +92,7 @@ func (s *server) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	items := s.store.List(q.Get("q"), q.Get("agent"), q.Get("model"), q.Get("since"), q.Get("until"), q.Get("issues") == "true")
+	items := s.store.List(q.Get("q"), q.Get("model"), q.Get("since"), q.Get("until"), q.Get("issues") == "true")
 	writeJSON(w, http.StatusOK, inspection.Paginate(items, offset, limit, strconv.FormatUint(s.store.System().Generation, 10)))
 }
 

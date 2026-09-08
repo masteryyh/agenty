@@ -15,7 +15,6 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Session index | `~/.agenty/agenty.sqlite` → `sessions` | Read model — projection for fast listing/search |
 | Global config | `~/.agenty/config.json` | Application configuration |
 | Providers | Embedded catalog; custom providers use `~/.agenty/providers/<provider-code>.json` | Built-in metadata/models are read-only; built-in files store only API keys |
-| Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
@@ -26,14 +25,13 @@ reasoning effort.
 ## Domain layer
 
 The domain layer is split by bounded context. Aggregates reference each other only by
-identity (UUIDv7 for the conversation family, path-safe codes for agents and providers,
-and opaque upstream codes for models).
+identity (UUIDv7 for the conversation family, path-safe codes for providers, and opaque
+upstream codes for models).
 
 ```
 pkg/domain/
 ├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session → Round → Message), content blocks, events
-├── agent/         Agent aggregate
 └── catalog/       Provider aggregate (Provider → Model)
 ```
 
@@ -69,7 +67,7 @@ model-calling contract, tool contract, JSON Schema, thread-safe tool registry, a
 session permits one active round, and `Engine` owns cancellation and shutdown for all
 active rounds.
 
-Each loop resolves the Agent system prompt, rebuilds the effective conversation context,
+Each loop resolves the built-in system prompt, rebuilds the effective conversation context,
 converts it through the selected provider adapter, invokes the LLM, persists the
 assistant response, and repeats when tool calls are returned. Custom models use `8192` output
 tokens when omitted; built-in models use the exact limit from
@@ -107,7 +105,6 @@ pkg/infra/
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
-│   ├── agent.go        AgentRepository (agent JSON files)
 │   ├── catalog.go      CatalogRepository (embedded built-ins plus custom provider JSON)
 │   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
 └── rpc/                stdio JSON-RPC 2.0 interface layer
@@ -129,11 +126,9 @@ Each service consumes the smallest repository interface required by its use case
 Production wires the filesystem/SQLite repositories, while unit tests use isolated
 in-memory fakes without opening files or a database.
 
-- `AgentService` — agent CRUD (`Create`/`Get`/`List`/`Update`/`Delete`).
 - `ProviderService` — provider CRUD plus model sub-resource operations
   (`AddModel`/`RemoveModel`).
-- `InitializeService` — first-run state and completion validation; provider/model/agent data
-  is written through their regular services.
+- `InitializeService` — first-run state, default model persistence, and completion validation.
 - `SessionService` — session CRUD and configuration mutations
   (`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`).
 
@@ -191,7 +186,6 @@ Methods follow a `resource.action` naming:
 | Group | Methods |
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
-| Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
@@ -259,8 +253,8 @@ map to `-32602`.
 Example:
 
 ```
-$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"code":"dev","name":"Dev"}}' | go run ./cmd
-{"jsonrpc":"2.0","id":1,"result":{"code":"dev","name":"Dev",...}}
+$ echo '{"jsonrpc":"2.0","id":1,"method":"provider.list","params":{}}' | go run ./cmd
+{"jsonrpc":"2.0","id":1,"result":[...]}
 ```
 
 Note: the `rpc` and `adapter` packages use `encoding/json` (RawMessage-native,
@@ -296,8 +290,8 @@ build tag. The same tag enables optional live LLM SDK tests. They read
 and report a skip, rather than a failure, when a key is absent.
 
 The `test/e2e` package builds `cmd` once, launches the real binary over stdio, and gives
-each parallel test process its own `AGENTY_DATA_DIR`. It covers public Agent,
-Provider/Model, Session, agent-loop start/stop and parallel execution, JSON-RPC,
+each parallel test process its own `AGENTY_DATA_DIR`. It covers public Provider/Model,
+Session, agent-loop start/stop and parallel execution, JSON-RPC,
 chunking, startup, restart persistence, and process isolation contracts without
 accessing the user's data directory.
 

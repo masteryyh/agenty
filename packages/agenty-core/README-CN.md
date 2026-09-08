@@ -15,7 +15,6 @@ Agenty 的核心运行时。它围绕本地优先的存储模型（文件系统 
 | Session index | `~/.agenty/agenty.sqlite` -> `sessions` | 读模型，用于快速列表和搜索的投影 |
 | 全局配置 | `~/.agenty/config.json` | 应用配置 |
 | Providers | 内置 catalog 固化在 core；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json` | 内置元数据/模型只读，内置 provider 文件仅保存 API key |
-| Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
 | Core 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | 结构化文本诊断信息（JSONL 模式下为 `core.jsonl`） |
 
 Session 的 messages 和 rounds 永远不会存入 SQLite；`sessions` 表是摘要投影，可以通过
@@ -25,13 +24,12 @@ reasoning effort。
 ## 领域层
 
 领域层按 bounded context 拆分。Aggregates 之间只通过 identity 相互引用（conversation
-系列使用 UUIDv7，agents 和 providers 使用路径安全的 code，models 使用可保留上游字符的 code）。
+系列使用 UUIDv7，providers 使用路径安全的 code，models 使用可保留上游字符的 code）。
 
 ```
 pkg/domain/
 ├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session -> Round -> Message), content blocks, events
-├── agent/         Agent aggregate
 └── catalog/       Provider aggregate (Provider -> Model)
 ```
 
@@ -65,7 +63,7 @@ contract、tool contract、JSON Schema、线程安全的 tool registry，以及�
 session 的 `Engine`。不同 session 可以并行执行，同一 session 只允许一个 active round；
 `Engine` 统一管理所有运行中 round 的取消和 shutdown。
 
-每次 loop 会解析 Agent system prompt，重建有效会话上下文，通过选定 provider adapter
+每次 loop 会解析内置 system prompt，重建有效会话上下文，通过选定 provider adapter
 转换上游数据结构，调用 LLM、持久化 assistant 响应，并在返回 tool calls 时继续循环。
 自定义 model 未填写时默认使用 `8192` 最大输出 token；内置 model 使用嵌入 catalog
 中的精确限制。估算上下文达到
@@ -98,7 +96,6 @@ pkg/infra/
 ├── logging/            slog 初始化、环境配置解析和按日生成日志路径
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
-│   ├── agent.go        AgentRepository（agent JSON 文件）
 │   ├── catalog.go      CatalogRepository（内置 provider 与自定义 provider JSON）
 │   └── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
 └── rpc/                stdio JSON-RPC 2.0 接口层
@@ -118,10 +115,9 @@ aggregate 一致（load -> mutate -> save -> clear pending events）。
 每个 service 只依赖其 use cases 所需的最小 repository interface。生产环境装配文件系统
 和 SQLite repositories；单元测试则使用隔离的内存 fakes，不会打开文件或数据库。
 
-- `AgentService`：agent CRUD（`Create`/`Get`/`List`/`Update`/`Delete`）。
 - `ProviderService`：provider CRUD 以及 model 子资源操作
   （`AddModel`/`RemoveModel`）。
-- `InitializeService`：首次运行状态和完成校验；provider/model/agent 数据通过各自的正式服务写入。
+- `InitializeService`：首次运行状态、默认模型持久化和完成校验。
 - `SessionService`：session CRUD 和配置修改
   （`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`）。
 
@@ -170,7 +166,6 @@ Methods 使用 `resource.action` 命名：
 | 分组 | Methods |
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
-| Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
@@ -228,8 +223,8 @@ chunk payload too large。Application validation errors 映射为 `-32602`。
 示例：
 
 ```
-$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"code":"dev","name":"Dev"}}' | go run ./cmd
-{"jsonrpc":"2.0","id":1,"result":{"code":"dev","name":"Dev",...}}
+$ echo '{"jsonrpc":"2.0","id":1,"method":"provider.list","params":{}}' | go run ./cmd
+{"jsonrpc":"2.0","id":1,"result":[...]}
 ```
 
 说明：`rpc` 和 `adapter` packages 使用 `encoding/json`（原生支持 RawMessage、无依赖），
@@ -263,7 +258,7 @@ RPC-to-disk 路径使用 `integration` build tag。同一 build tag 还会启用
 `GEMINI_API_KEY`，未配置对应 Key 时会提示并跳过，不计为失败。
 
 `test/e2e` package 只构建一次 `cmd`，通过 stdio 启动真实 binary，并为每个并行测试
-进程分配独立的 `AGENTY_DATA_DIR`。它覆盖公开的 Agent、Provider/Model、Session、
+进程分配独立的 `AGENTY_DATA_DIR`。它覆盖公开的 Provider/Model、Session、
 agent loop 启停与并行执行、JSON-RPC、chunking、startup、restart persistence 和
 process isolation contracts，不会访问用户的数据目录。
 
