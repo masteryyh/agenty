@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	json "github.com/bytedance/sonic"
 	"github.com/openai/openai-go/v3"
@@ -194,6 +195,7 @@ func openAIChatToolDefinition(tool modelToolDefinition) (openai.ChatCompletionTo
 func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMessageParamUnion, error) {
 	if message.Role == conversation.RoleUser {
 		parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(message.Content))
+		toolImages := make([]openai.ChatCompletionContentPartUnionParam, 0)
 		messages := make([]openai.ChatCompletionMessageParamUnion, 0, 2)
 		for _, block := range message.Content {
 			switch value := block.(type) {
@@ -212,17 +214,21 @@ func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMe
 					messages = append(messages, openai.UserMessage(parts))
 					parts = nil
 				}
-				output, err := textContent(value.Content)
+				output, images, err := openAIChatToolResult(value.Content)
 				if err != nil {
 					return nil, err
 				}
 				messages = append(messages, openai.ToolMessage(output, value.ToolUseID))
+				toolImages = append(toolImages, images...)
 			default:
 				return nil, unsupportedContent("OpenAI Chat user message cannot contain %q", block.BlockType())
 			}
 		}
 		if len(parts) > 0 {
 			messages = append(messages, openai.UserMessage(parts))
+		}
+		if len(toolImages) > 0 {
+			messages = append(messages, openai.UserMessage(toolImages))
 		}
 		return messages, nil
 	}
@@ -272,6 +278,38 @@ func openAIChatMessages(message conversation.Message) ([]openai.ChatCompletionMe
 	assistant := openai.AssistantMessage(text)
 	assistant.OfAssistant.ToolCalls = toolCalls
 	return []openai.ChatCompletionMessageParamUnion{assistant}, nil
+}
+
+func openAIChatToolResult(content conversation.Content) (string, []openai.ChatCompletionContentPartUnionParam, error) {
+	var text strings.Builder
+	images := make([]openai.ChatCompletionContentPartUnionParam, 0)
+	for _, block := range content {
+		switch value := block.(type) {
+		case conversation.TextBlock:
+			text.WriteString(value.Text)
+		case conversation.ShellCallOutputBlock:
+			encoded, err := marshalShellCallOutput(value)
+			if err != nil {
+				return "", nil, fmt.Errorf("encode shell output: %w", err)
+			}
+			text.WriteString(encoded)
+		case conversation.ImageBlock:
+			url, err := imageURL(value)
+			if err != nil {
+				return "", nil, err
+			}
+			images = append(images, openai.ImageContentPart(
+				openai.ChatCompletionContentPartImageImageURLParam{URL: url, Detail: "auto"},
+			))
+		default:
+			return "", nil, unsupportedContent("OpenAI Chat tool result cannot contain %q", block.BlockType())
+		}
+	}
+	output := text.String()
+	if output == "" && len(images) > 0 {
+		output = "Tool returned image content."
+	}
+	return output, images, nil
 }
 
 func openAIChatResponse(result *openai.ChatCompletion) (*modelResponse, error) {

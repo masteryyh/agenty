@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/oauth2"
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
@@ -112,6 +115,46 @@ func TestRegistryCRUDPersistsOneFilePerServer(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("config file still exists, stat err = %v", err)
+	}
+}
+
+func TestRegistryServerNamesAreCaseInsensitive(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "mcp")
+	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+
+	config := domainmcp.Config{Type: domainmcp.TransportHTTP, Enabled: false, URL: "https://example.com/mcp"}
+	server, err := registry.Create(t.Context(), "GitHub", config)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if server.Name != "GitHub" {
+		t.Fatalf("created server name = %q, want preserved casing", server.Name)
+	}
+	if _, ok := registry.Get(t.Context(), "github"); !ok {
+		t.Fatal("Get did not match server name case-insensitively")
+	}
+	if _, err := registry.Create(t.Context(), "github", config); err == nil {
+		t.Fatal("Create accepted a case-insensitive duplicate")
+	} else {
+		var registryErr *RegistryError
+		if !errors.As(err, &registryErr) || registryErr.Kind != RegistryErrorAlreadyExists {
+			t.Fatalf("duplicate error = %v, want already-exists registry error", err)
+		}
+	}
+	if err := registry.Remove(t.Context(), "github"); err != nil {
+		t.Fatalf("Remove with different casing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "GitHub.json")); !os.IsNotExist(err) {
+		t.Fatalf("preserved-casing config still exists, stat err = %v", err)
 	}
 }
 
@@ -267,6 +310,123 @@ func TestNewRemoteToolUsesNamespacedDefinition(t *testing.T) {
 	}
 	if got := tool.remoteName; got != "search" {
 		t.Fatalf("remoteName = %q", got)
+	}
+}
+
+func TestNewRemoteToolNormalizesAndTruncatesProviderName(t *testing.T) {
+	tool, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "search/v2 now",
+		Description: "Search",
+		InputSchema: map[string]any{"type": "object"},
+	}, "GitHub", time.Second)
+	if err != nil {
+		t.Fatalf("newRemoteTool: %v", err)
+	}
+	if got := tool.Definition().Name; got != "mcp__GitHub__search_v2_now" {
+		t.Fatalf("normalized tool name = %q", got)
+	}
+
+	long, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        strings.Repeat("x", 100),
+		InputSchema: map[string]any{"type": "object"},
+	}, "github", time.Second)
+	if err != nil {
+		t.Fatalf("newRemoteTool long name: %v", err)
+	}
+	if got := long.Definition().Name; len(got) != maxProviderToolNameLength {
+		t.Fatalf("truncated tool name length = %d, want %d", len(got), maxProviderToolNameLength)
+	}
+}
+
+func TestRegistryRefreshKeepsToolSnapshotActive(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "mcp")
+	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+
+	registry.mu.Lock()
+	registry.servers["remote"] = &serverEntry{
+		name: "remote", config: domainmcp.Config{Type: domainmcp.TransportHTTP, Enabled: true, URL: "https://example.com/mcp"},
+		tools: make(map[string]*remoteTool),
+	}
+	registry.mu.Unlock()
+
+	first, err := newRemoteTool(nil, &sdkmcp.Tool{Name: "search", InputSchema: map[string]any{"type": "object"}}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("first tool: %v", err)
+	}
+	if err := registry.install("remote", 0, nil, nil, []*remoteTool{first}, first.lifecycle); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	second, err := newRemoteToolWithLifecycle(nil, &sdkmcp.Tool{Name: "search", InputSchema: map[string]any{"type": "object"}}, "remote", time.Second, first.lifecycle)
+	if err != nil {
+		t.Fatalf("second tool: %v", err)
+	}
+	if err := registry.install("remote", 0, nil, nil, []*remoteTool{second}, first.lifecycle); err != nil {
+		t.Fatalf("refresh install: %v", err)
+	}
+	if !first.lifecycle.active.Load() {
+		t.Fatal("old tool snapshot became inactive after refresh")
+	}
+}
+
+func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
+	t.Parallel()
+
+	var refreshes atomic.Int32
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/token" {
+			http.NotFound(writer, request)
+			return
+		}
+		refreshes.Add(1)
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"access_token":"refreshed","token_type":"Bearer","expires_in":3600,"refresh_token":"refresh-2"}`)
+	}))
+	defer tokenServer.Close()
+
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+
+	oauthConfig := &oauth2.Config{
+		ClientID: "client",
+		Endpoint: oauth2.Endpoint{TokenURL: tokenServer.URL + "/token"},
+	}
+	initial := &oauth2.Token{
+		AccessToken:  "expired",
+		RefreshToken: "refresh-1",
+		Expiry:       time.Now().Add(-time.Minute),
+	}
+	refreshContext := context.WithValue(context.Background(), oauth2.HTTPClient, tokenServer.Client())
+	source := registry.savingTokenSource("remote", oauthConfig, initial, oauthConfig.TokenSource(refreshContext, initial))
+	token, err := source.Token()
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if token.AccessToken != "refreshed" || refreshes.Load() != 1 {
+		t.Fatalf("refreshed token = %#v, refreshes = %d", token, refreshes.Load())
+	}
+
+	stored, err := registry.loadOAuthSession("remote")
+	if err != nil {
+		t.Fatalf("loadOAuthSession: %v", err)
+	}
+	if stored.Config == nil || stored.Config.ClientID != "client" || stored.Token.AccessToken != "refreshed" || stored.Token.RefreshToken != "refresh-2" {
+		t.Fatalf("stored OAuth session = %#v", stored)
 	}
 }
 

@@ -267,29 +267,11 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 			if value.IsError {
 				key = "error"
 			}
-			response := map[string]any{}
-			if len(value.Content) == 1 {
-				if shellOutput, ok := value.Content[0].(conversation.ShellCallOutputBlock); ok {
-					object, err := shellCallOutputObject(shellOutput)
-					if err != nil {
-						return nil, err
-					}
-					response = object
-				} else {
-					text, err := textContent(value.Content)
-					if err != nil {
-						return nil, err
-					}
-					response[key] = text
-				}
-			} else {
-				text, err := textContent(value.Content)
-				if err != nil {
-					return nil, err
-				}
-				response[key] = text
+			response, responseParts, err := googleToolResult(value.Content, key)
+			if err != nil {
+				return nil, err
 			}
-			part := genai.NewPartFromFunctionResponse(name, response)
+			part := genai.NewPartFromFunctionResponseWithParts(name, response, responseParts)
 			part.FunctionResponse.ID = value.ToolUseID
 			parts = append(parts, part)
 		default:
@@ -298,6 +280,46 @@ func googleMessage(message conversation.Message, toolNames map[string]string) (*
 	}
 
 	return genai.NewContentFromParts(parts, role), nil
+}
+
+func googleToolResult(content conversation.Content, key string) (map[string]any, []*genai.FunctionResponsePart, error) {
+	if len(content) == 1 {
+		if shellOutput, ok := content[0].(conversation.ShellCallOutputBlock); ok {
+			object, err := shellCallOutputObject(shellOutput)
+			return object, nil, err
+		}
+	}
+
+	var text strings.Builder
+	var responseParts []*genai.FunctionResponsePart
+	for _, block := range content {
+		switch value := block.(type) {
+		case conversation.TextBlock:
+			text.WriteString(value.Text)
+		case conversation.ShellCallOutputBlock:
+			encoded, err := marshalShellCallOutput(value)
+			if err != nil {
+				return nil, nil, fmt.Errorf("encode shell output: %w", err)
+			}
+			text.WriteString(encoded)
+		case conversation.ImageBlock:
+			if _, err := imageURL(value); err != nil {
+				return nil, nil, err
+			}
+			if value.Data != "" {
+				data, err := base64.StdEncoding.DecodeString(value.Data)
+				if err != nil {
+					return nil, nil, invalidRequest("inline image data is not valid base64: %v", err)
+				}
+				responseParts = append(responseParts, genai.NewFunctionResponsePartFromBytes(data, value.MimeType))
+			} else {
+				responseParts = append(responseParts, genai.NewFunctionResponsePartFromURI(value.URI, value.MimeType))
+			}
+		default:
+			return nil, nil, unsupportedContent("Google tool result cannot contain %q", block.BlockType())
+		}
+	}
+	return map[string]any{key: text.String()}, responseParts, nil
 }
 
 func googleThinkingLevel(effort string) genai.ThinkingLevel {

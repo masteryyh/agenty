@@ -475,12 +475,17 @@ func openAIResponsesMessageWithNativeCallIDs(
 					continue
 				}
 			}
-			output, err := textContent(value.Content)
+			output, richOutput, hasImages, err := openAIResponsesToolResult(value.Content)
 			if err != nil {
 				return nil, err
 			}
 
-			item := responses.ResponseInputItemParamOfFunctionCallOutput(output)
+			var item responses.ResponseInputItemUnionParam
+			if hasImages {
+				item = responses.ResponseInputItemParamOfFunctionCallOutput(richOutput)
+			} else {
+				item = responses.ResponseInputItemParamOfFunctionCallOutput(output)
+			}
 			item.OfFunctionCallOutput.CallID = openai.String(value.ToolUseID)
 			items = append(items, item)
 		default:
@@ -490,6 +495,47 @@ func openAIResponsesMessageWithNativeCallIDs(
 	flush()
 
 	return items, nil
+}
+
+func openAIResponsesToolResult(content conversation.Content) (string, responses.ResponseFunctionCallOutputItemListParam, bool, error) {
+	hasImages := false
+	for _, block := range content {
+		if _, ok := block.(conversation.ImageBlock); ok {
+			hasImages = true
+			break
+		}
+	}
+	if !hasImages {
+		output, err := textContent(content)
+		return output, nil, false, err
+	}
+
+	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(content))
+	for _, block := range content {
+		switch value := block.(type) {
+		case conversation.TextBlock:
+			items = append(items, responses.ResponseFunctionCallOutputItemParamOfInputText(value.Text))
+		case conversation.ShellCallOutputBlock:
+			encoded, err := marshalShellCallOutput(value)
+			if err != nil {
+				return "", nil, false, fmt.Errorf("encode shell output: %w", err)
+			}
+			items = append(items, responses.ResponseFunctionCallOutputItemParamOfInputText(encoded))
+		case conversation.ImageBlock:
+			url, err := imageURL(value)
+			if err != nil {
+				return "", nil, false, err
+			}
+			image := responses.ResponseInputImageContentParam{
+				ImageURL: openai.String(url),
+				Detail:   responses.ResponseInputImageContentDetailAuto,
+			}
+			items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{OfInputImage: &image})
+		default:
+			return "", nil, false, unsupportedContent("OpenAI Responses tool result cannot contain %q", block.BlockType())
+		}
+	}
+	return "", items, true, nil
 }
 
 func shellCallOutput(content conversation.Content) (conversation.ShellCallOutputBlock, bool) {

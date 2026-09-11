@@ -65,12 +65,12 @@ func TestConfigArgumentsUseAStringArray(t *testing.T) {
 }
 
 func TestValidateName(t *testing.T) {
-	for _, name := range []string{"github", "browser-use", "my_server.v2"} {
+	for _, name := range []string{"github", "GitHub", "browser-use", "my_server_v2"} {
 		if err := ValidateName(name); err != nil {
 			t.Errorf("ValidateName(%q): %v", name, err)
 		}
 	}
-	for _, name := range []string{"", ".hidden", "../escape", "has space", "a/b"} {
+	for _, name := range []string{"", ".hidden", "my_server.v2", "中文", "../escape", "has space", "a/b"} {
 		if err := ValidateName(name); err == nil {
 			t.Errorf("ValidateName(%q) accepted an invalid name", name)
 		}

@@ -828,6 +828,51 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 	}
 }
 
+func TestToolResultImagesAcrossProviders(t *testing.T) {
+	t.Parallel()
+
+	result := conversation.Message{
+		Role: conversation.RoleUser,
+		Content: conversation.Content{conversation.ToolResultBlock{
+			ToolUseID: "call_image",
+			Content: conversation.Content{conversation.ImageBlock{
+				MimeType: "image/png",
+				Data:     "aW1hZ2U=",
+			}},
+		}},
+	}
+
+	responsesItems, err := openAIResponsesMessage(result, false)
+	if err != nil || len(responsesItems) != 1 || responsesItems[0].OfFunctionCallOutput == nil {
+		t.Fatalf("Responses image result = %#v, err = %v", responsesItems, err)
+	}
+	responsesOutput := responsesItems[0].OfFunctionCallOutput.Output.OfResponseFunctionCallOutputItemArray
+	if len(responsesOutput) != 1 || responsesOutput[0].OfInputImage == nil ||
+		responsesOutput[0].OfInputImage.ImageURL.Value != "data:image/png;base64,aW1hZ2U=" {
+		t.Fatalf("Responses image output = %#v", responsesOutput)
+	}
+
+	chatMessages, err := openAIChatMessages(result)
+	if err != nil || len(chatMessages) != 2 || chatMessages[0].OfTool == nil || chatMessages[1].OfUser == nil {
+		t.Fatalf("Chat image result = %#v, err = %v", chatMessages, err)
+	}
+	chatImages := chatMessages[1].OfUser.Content.OfArrayOfContentParts
+	if len(chatImages) != 1 || chatImages[0].OfImageURL == nil ||
+		chatImages[0].OfImageURL.ImageURL.URL != "data:image/png;base64,aW1hZ2U=" {
+		t.Fatalf("Chat image output = %#v", chatImages)
+	}
+
+	googleContent, err := googleMessage(result, map[string]string{"call_image": "image_tool"})
+	if err != nil || len(googleContent.Parts) != 1 || googleContent.Parts[0].FunctionResponse == nil {
+		t.Fatalf("Google image result = %#v, err = %v", googleContent, err)
+	}
+	googleParts := googleContent.Parts[0].FunctionResponse.Parts
+	if len(googleParts) != 1 || googleParts[0].InlineData == nil ||
+		string(googleParts[0].InlineData.Data) != "image" || googleParts[0].InlineData.MIMEType != "image/png" {
+		t.Fatalf("Google image output = %#v", googleParts)
+	}
+}
+
 func TestApplyPatchMessageConversionsAcrossProviders(t *testing.T) {
 	t.Parallel()
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"unicode"
 )
 
 // Transport identifies the wire transport used by an MCP server.
@@ -137,13 +136,12 @@ func ValidateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("mcp: server name is required")
 	}
+
 	for _, r := range name {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
 			continue
 		}
-		return fmt.Errorf("mcp: invalid server name %q", name)
-	}
-	if strings.Contains(name, "..") || strings.HasPrefix(name, ".") {
 		return fmt.Errorf("mcp: invalid server name %q", name)
 	}
 	return nil

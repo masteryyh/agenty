@@ -197,7 +197,8 @@ Methods follow a `resource.action` naming:
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
 MCP server configurations live in `<AGENTY_DATA_DIR>/mcp/<server-name>.json`; the file name is
-the server name. `stdio` entries use `command`, a JSON string array `args` (one process argument
+the server name. Server names contain only ASCII letters, digits, `_`, and `-`, and are
+case-insensitive (`GitHub` and `github` refer to the same server). `stdio` entries use `command`, a JSON string array `args` (one process argument
 per element), and optional `env`; `http` entries use
 Streamable HTTP `url`, optional `headers`, or `bearerTokenEnvVar`; `sse` entries retain compatibility with legacy
 servers and are reported as deprecated. No `cwd` field is persisted. Values in `env` and
@@ -208,7 +209,9 @@ The central registry starts enabled servers asynchronously with bounded parallel
 Streamable HTTP can use the official SDK OAuth authorization-code handler with dynamic or
 pre-registered clients (`oauth.clientId`, with optional `oauth.clientSecret` and `oauth.issuer`);
 `mcp.login` exposes a loopback callback URL to the CLI and stores tokens
-under `mcp-auth`. Tools are registered as `mcp__<server-name>__<tool-name>`. A session round
+under `mcp-auth`, including the OAuth client configuration needed to refresh them. Tools are
+registered as `mcp__<server-name>__<tool-name>`; characters outside the provider-safe
+ASCII set are replaced with `_` and the exposed name is limited to 64 characters. A session round
 captures the connected tool registry at round start, so a connection that completes later is
 visible from the next round. `mcp.logs` returns the latest bounded, in-memory diagnostics for a
 server, including connection errors and stdio child stderr; sensitive configured values are
