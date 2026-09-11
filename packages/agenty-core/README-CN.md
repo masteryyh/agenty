@@ -179,14 +179,13 @@ Methods 使用 `resource.action` 命名：
 MCP server 配置位于 `<AGENTY_DATA_DIR>/mcp/<server-name>.json`，文件名就是 server 名称。
 server 名称只允许 ASCII 字母、数字、`_` 和 `-`，且大小写不敏感（`GitHub` 与 `github`
 冲突）。
-`stdio` 使用 `command`、字符串数组形式的 `args`（每个进程参数一个元素）和可选的 `env`；`http` 使用 Streamable HTTP 的 `url` 和可选
-`headers` 或 `bearerTokenEnvVar`；`sse` 保留对 legacy server 的兼容，并标记为 deprecated。配置不保存 `cwd` 字段；
-`env` 和 `headers` 的值会在连接时展开 core 进程环境变量。
+`stdio` 使用 `command`、字符串数组形式的 `args`（每个进程参数一个元素）和可选的 `env`；`http` 和 `sse` 使用 Streamable HTTP 或 legacy SSE 的
+`url` 和可选 `headers`。配置不保存 `cwd` 字段；`env` 和 `headers` 的值会在连接时展开 core 进程环境变量。
 
 中心 registry 会以异步、有限并发方式连接启用的 server，并记录 `connecting`、`connected`、
 `auth-required` 和 `error` 状态，通过 `mcp.event` notification 推送变化。Streamable HTTP
-使用官方 SDK 的 OAuth authorization-code handler，支持动态或预注册 client；`mcp.login`
-（配置 `oauth.clientId`，可选 `oauth.clientSecret`/`oauth.issuer`）会把 loopback callback 授权 URL 交给 CLI，并将 token 及刷新所需的 OAuth client 配置保存到 `mcp-auth`。
+使用官方 SDK 的 OAuth authorization-code handler，自动进行动态 client 注册；`mcp.login`
+会把 loopback callback 授权 URL 交给 CLI，并将 token 及刷新所需的 OAuth client 配置保存到 `mcp-auth`。
 工具名称统一为 `mcp__<server-name>__<tool-name>`；不符合 provider 安全 ASCII 集合的符号会替换为 `_`，并截断到 64 个字符。每个 session round 开始时快照当时已连接的工具，因此较晚
 完成的连接从下一轮开始可见。core 退出时会关闭所有 MCP session 及 stdio 子进程。
 `mcp.logs` 返回 server 最近的有界内存诊断日志，包括连接错误和 stdio 子进程 stderr；配置中的敏感值会脱敏，日志不会持久化到磁盘。

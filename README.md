@@ -80,12 +80,11 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 `/mcp` manages stdio, Streamable HTTP, and legacy SSE servers. A server file contains `type`,
 `enabled`, and transport-specific `command`/`args`/`env` or `url`/`headers` fields; `args` is a
 JSON string array with one entry per process argument. It does not store a working directory.
-Environment and header values may reference environment variables;
-remote servers can also use `bearerTokenEnvVar` for a token kept in the process environment.
+Environment and header values may reference environment variables; headers can be edited from
+the collapsed `Advanced Options` section in the TUI.
 Streamable HTTP supports the Go SDK's OAuth authorization-code flow, including dynamic client
 registration and loopback browser login; `/mcp` opens the authorization URL and reports the
-connection state. Set `oauth.clientId` (and optional `oauth.clientSecret`/`oauth.issuer`) when a
-server uses a pre-registered client. SSE remains available for existing servers and is marked deprecated in the
+connection state. SSE remains available for existing servers and is marked deprecated in the
 TUI. Connections start in the background with bounded concurrency, and a round snapshots the
 currently connected tool set when it begins, so a server that connects later becomes available
 from the next round.

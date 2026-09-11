@@ -73,13 +73,11 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 `/mcp` 可管理 stdio、Streamable HTTP 和 legacy SSE server。server 文件包含 `type`、
 `enabled`，以及按 transport 选择的 `command`/`args`/`env` 或 `url`/`headers` 字段，
 其中 `args` 是每个进程参数一个元素的 JSON 字符串数组。不保存工作目录；环境变量和
-header 值可以引用环境变量，远程 server 也可以通过
-`bearerTokenEnvVar` 从进程环境读取 token。Streamable HTTP 使用 Go SDK
-提供的 OAuth authorization-code 流程，支持动态 client registration 和 loopback 浏览器
-登录；`/mcp` 会打开授权 URL 并显示连接状态。需要预注册 client 时可设置
-`oauth.clientId` 以及可选的 `oauth.clientSecret`/`oauth.issuer`。SSE 继续兼容已有 server，但会在 TUI 中标记
-为 deprecated。连接在后台以有限并发启动；每个 round 开始时会快照当时已连接的工具，
-较晚完成连接的 server 从下一轮开始可用。
+header 值可以引用环境变量；TUI 中的 headers 位于默认收起的 `Advanced Options` 下。
+Streamable HTTP 使用 Go SDK 提供的 OAuth authorization-code 流程，自动进行动态 client
+registration 和 loopback 浏览器登录；`/mcp` 会打开授权 URL 并显示连接状态。SSE 继续兼容已有
+server，但会在 TUI 中标记为 deprecated。连接在后台以有限并发启动；每个 round 开始时会快照
+当时已连接的工具，较晚完成连接的 server 从下一轮开始可用。
 
 ## 开发
 

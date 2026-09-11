@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -98,14 +97,6 @@ func mcpLogSecrets(config domainmcp.Config) []string {
 		if value != "" {
 			secrets = append(secrets, value)
 		}
-	}
-	if config.BearerTokenEnvVar != "" {
-		if value := os.Getenv(config.BearerTokenEnvVar); value != "" {
-			secrets = append(secrets, value)
-		}
-	}
-	if config.OAuth != nil && config.OAuth.ClientSecret != "" {
-		secrets = append(secrets, config.OAuth.ClientSecret)
 	}
 	return secrets
 }

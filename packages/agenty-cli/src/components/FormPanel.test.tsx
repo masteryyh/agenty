@@ -48,6 +48,25 @@ function AdvancedModelForm() {
     );
 }
 
+function AdvancedMcpForm() {
+    const [advanced, setAdvanced] = useState(false);
+    return (
+        <Dialog>
+            <FormPanel
+                title="Add MCP Server"
+                fields={buildFields(undefined, "http", true, advanced)}
+                onChange={(key, values) => {
+                    if (key === "advanced") {
+                        setAdvanced(formString(values, key) === "true");
+                    }
+                }}
+                onAction={() => undefined}
+                onClose={() => undefined}
+            />
+        </Dialog>
+    );
+}
+
 function StatefulActionsForm({ onAction }: { onAction: (action: string) => void }) {
     const [details, setDetails] = useState(false);
     return (
@@ -137,7 +156,7 @@ describe("overlay forms", () => {
             await act(async () => {
                 await setup.flush();
             });
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < 5; i++) {
                 await act(async () => {
                     await setup.mockInput.pressKeys(["ARROW_DOWN"], 15);
                     await setup.flush();
@@ -198,6 +217,43 @@ describe("overlay forms", () => {
             expect(setup.captureCharFrame()).not.toContain("Max output tokens:");
             expect(dialog.height).toBe(collapsedHeight);
             expect(setup.captureCharFrame()).toContain("❯ ▸ Advanced options");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
+    test("keeps MCP headers collapsed until Advanced Options is opened", async () => {
+        const setup = await testRender(<AdvancedMcpForm />, { width: 90, height: 24 });
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("▸ Advanced Options");
+            expect(setup.captureCharFrame()).not.toContain("Headers JSON:");
+
+            for (let i = 0; i < 4; i++) {
+                await act(async () => {
+                    await setup.mockInput.pressKeys(["ARROW_DOWN"], 15);
+                    await setup.flush();
+                });
+            }
+            await act(async () => {
+                await setup.mockInput.pressKeys(["ARROW_RIGHT"], 15);
+                await setup.flush();
+            });
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("Headers JSON:");
+
+            await act(async () => {
+                await setup.mockInput.pressKeys(["ARROW_LEFT"], 15);
+                await setup.flush();
+            });
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).not.toContain("Headers JSON:");
         } finally {
             act(() => setup.renderer.destroy());
         }

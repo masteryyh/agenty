@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -23,7 +24,7 @@ func TestConfigDefaultsEnabledWhenOmitted(t *testing.T) {
 }
 
 func TestConfigValidationRejectsMixedTransportFields(t *testing.T) {
-	config := Config{Type: TransportStdio, Enabled: true, Command: "server", Headers: map[string]string{"Authorization": "Bearer token"}}
+	config := Config{Type: TransportStdio, Enabled: true, Command: "server", URL: "https://example.com/mcp"}
 	if err := config.Validate(); err == nil {
 		t.Fatal("Validate accepted HTTP fields on a stdio server")
 	}
@@ -32,10 +33,34 @@ func TestConfigValidationRejectsMixedTransportFields(t *testing.T) {
 	if err := config.Validate(); err == nil {
 		t.Fatal("Validate accepted a non-absolute HTTP URL")
 	}
+}
 
-	config = Config{Type: TransportHTTP, Enabled: true, URL: "https://example.com/mcp", OAuth: &OAuthConfig{ClientSecret: "secret"}}
-	if err := config.Validate(); err == nil {
-		t.Fatal("Validate accepted OAuth credentials without a client id")
+func TestConfigIgnoresRemovedAuthenticationFields(t *testing.T) {
+	var config Config
+	if err := json.Unmarshal([]byte(`{
+		"type":"http",
+		"enabled":true,
+		"url":"https://example.com/mcp",
+		"headers":{"X-Region":"us-east-1"},
+		"bearerTokenEnvVar":"MCP_TOKEN",
+		"oauth":{"clientId":"client-id","clientSecret":"client-secret","issuer":"https://issuer.example.com"}
+	}`), &config); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if config.Headers["X-Region"] != "us-east-1" {
+		t.Fatalf("headers = %#v", config.Headers)
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, removedField := range []string{"bearerTokenEnvVar", "oauth", "clientId", "clientSecret", "issuer"} {
+		if bytes.Contains(data, []byte(removedField)) {
+			t.Fatalf("marshaled config contains removed field %q: %s", removedField, data)
+		}
 	}
 }
 

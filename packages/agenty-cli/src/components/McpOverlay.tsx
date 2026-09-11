@@ -64,6 +64,7 @@ export function buildFields(
     target: McpServerDto | undefined,
     transport: McpTransport,
     includeEnabled = target === undefined,
+    advancedOpen = false,
 ): FormField[] {
     const config = target?.config;
     return [
@@ -117,6 +118,21 @@ export function buildFields(
             value: config?.url ?? "",
             visible: transport !== "stdio",
         },
+        {
+            key: "advanced",
+            label: "Advanced Options",
+            kind: "disclosure",
+            value: String(advancedOpen),
+            visible: transport !== "stdio",
+        },
+        {
+            key: "headers",
+            label: "Headers JSON",
+            kind: "text",
+            value: config?.headers ? JSON.stringify(config.headers) : "",
+            visible: transport !== "stdio" && advancedOpen,
+            placeholder: "{\"Authorization\":\"Bearer ${TOKEN}\"}",
+        },
     ];
 }
 
@@ -133,12 +149,14 @@ export function buildConfig(values: FormValues, target?: McpServerDto): McpServe
         config.env = parseMap(formString(values, "env"), "env");
     } else {
         config.url = formString(values, "url").trim();
-        if (target && target.config.type !== "stdio") {
-            config.headers = target.config.headers;
-            config.bearerTokenEnvVar = target.config.bearerTokenEnvVar;
-            if (type === "http") {
-                config.oauth = target.config.oauth;
+        const headersValue = values.headers;
+        if (typeof headersValue === "string") {
+            const headers = parseMap(headersValue, "headers");
+            if (headers) {
+                config.headers = headers;
             }
+        } else if (target && target.config.type !== "stdio" && target.config.headers !== undefined) {
+            config.headers = target.config.headers;
         }
     }
     return config;
@@ -152,6 +170,7 @@ export function McpOverlay() {
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [mode, setMode] = useState<Mode>({ kind: "list" });
     const [transport, setTransport] = useState<McpTransport>("http");
+    const [advancedOpen, setAdvancedOpen] = useState(false);
     const [logs, setLogs] = useState<McpLogEntry[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState<string | null>(null);
@@ -231,10 +250,12 @@ export function McpOverlay() {
     const openRow = (row: McpListRow) => {
         if (row.kind === "add-server") {
             setTransport("http");
+            setAdvancedOpen(false);
             setMode({ kind: "add" });
             return;
         }
         setTransport(row.server.config.type);
+        setAdvancedOpen(false);
         setMode({ kind: "edit", target: row.server });
     };
 
@@ -255,7 +276,7 @@ export function McpOverlay() {
         return (
             <FormPanel
                 title={editing ? `Update MCP Server · ${target.name}` : "Add MCP Server"}
-                fields={buildFields(target, transport, !editing)}
+                fields={buildFields(target, transport, !editing, advancedOpen)}
                 actions={editing ? editActions(target) : undefined}
                 afterFields={editing && hasConnectionIssue(target) ? (
                     <McpLogs logs={logs} loading={logsLoading} error={logsError} />
@@ -263,7 +284,14 @@ export function McpOverlay() {
                 hint={transport === "sse" ? "SSE transport is deprecated; use Streamable HTTP when available." : undefined}
                 onChange={(key, values) => {
                     if (key === "type") {
-                        setTransport(formString(values, "type") as McpTransport);
+                        const nextTransport = formString(values, "type") as McpTransport;
+                        setTransport(nextTransport);
+                        if (nextTransport === "stdio") {
+                            setAdvancedOpen(false);
+                        }
+                    }
+                    if (key === "advanced") {
+                        setAdvancedOpen(formString(values, "advanced") === "true");
                     }
                 }}
                 onAction={(action, values) => {

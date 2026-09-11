@@ -5,14 +5,15 @@ import type { FormValues } from "./FormPanel";
 import { buildConfig, buildFields } from "./McpOverlay";
 
 describe("MCP form configuration", () => {
-    test("does not expose optional HTTP headers, bearer, or OAuth fields", () => {
+    test("shows headers under collapsed advanced options", () => {
         const fields = buildFields(undefined, "http");
         const labels = fields.filter((field) => field.visible !== false).map((field) => field.label);
 
-        expect(labels).toEqual(["Name", "Transport", "Enabled", "URL"]);
+        expect(labels).toEqual(["Name", "Transport", "Enabled", "URL", "Advanced Options"]);
+        expect(fields.find((field) => field.key === "headers")?.visible).toBe(false);
     });
 
-    test("preserves hidden HTTP configuration while editing a server", () => {
+    test("builds headers only when the advanced field is submitted", () => {
         const target: McpServerDto = {
             name: "remote",
             config: {
@@ -20,12 +21,6 @@ describe("MCP form configuration", () => {
                 enabled: true,
                 url: "https://example.com/mcp",
                 headers: { "X-Region": "us-east-1" },
-                bearerTokenEnvVar: "MCP_TOKEN",
-                oauth: {
-                    clientId: "client-id",
-                    clientSecret: "client-secret",
-                    issuer: "https://issuer.example.com",
-                },
             },
             status: "connected",
             toolCount: 1,
@@ -34,19 +29,20 @@ describe("MCP form configuration", () => {
             type: "http",
             enabled: "true",
             url: "https://example.com/updated",
+            headers: "{\"X-Region\":\"us-west-2\"}",
         };
 
-        expect(buildConfig(values, target)).toEqual({
+        expect(buildConfig({ type: "http", enabled: "true", url: "https://example.com/updated" }, target)).toEqual({
             type: "http",
             enabled: true,
             url: "https://example.com/updated",
             headers: { "X-Region": "us-east-1" },
-            bearerTokenEnvVar: "MCP_TOKEN",
-            oauth: {
-                clientId: "client-id",
-                clientSecret: "client-secret",
-                issuer: "https://issuer.example.com",
-            },
+        });
+        expect(buildConfig(values, target)).toEqual({
+            type: "http",
+            enabled: true,
+            url: "https://example.com/updated",
+            headers: { "X-Region": "us-west-2" },
         });
     });
 });

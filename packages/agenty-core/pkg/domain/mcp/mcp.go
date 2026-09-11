@@ -25,26 +25,16 @@ func (transport Transport) Valid() bool {
 	}
 }
 
-// OAuthConfig contains optional client registration settings. Access and
-// refresh tokens are kept outside the server configuration file.
-type OAuthConfig struct {
-	ClientID     string `json:"clientId,omitempty"`
-	ClientSecret string `json:"clientSecret,omitempty"`
-	Issuer       string `json:"issuer,omitempty"`
-}
-
 // Config is the concise, file-backed MCP server configuration. The file name
 // supplies the server name, so it is intentionally absent from this object.
 type Config struct {
-	Type              Transport         `json:"type"`
-	Enabled           bool              `json:"enabled"`
-	Command           string            `json:"command,omitempty"`
-	Args              []string          `json:"args,omitempty"`
-	Env               map[string]string `json:"env,omitempty"`
-	URL               string            `json:"url,omitempty"`
-	Headers           map[string]string `json:"headers,omitempty"`
-	BearerTokenEnvVar string            `json:"bearerTokenEnvVar,omitempty"`
-	OAuth             *OAuthConfig      `json:"oauth,omitempty"`
+	Type    Transport         `json:"type"`
+	Enabled bool              `json:"enabled"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func (config *Config) UnmarshalJSON(data []byte) error {
@@ -84,8 +74,8 @@ func (config Config) Validate() error {
 		if config.URL != "" {
 			return fmt.Errorf("mcp: url is only valid for HTTP transports")
 		}
-		if len(config.Headers) > 0 || config.BearerTokenEnvVar != "" || config.OAuth != nil {
-			return fmt.Errorf("mcp: headers, bearer token, and oauth are only valid for HTTP transports")
+		if len(config.Headers) > 0 {
+			return fmt.Errorf("mcp: headers are only valid for HTTP and SSE transports")
 		}
 	case TransportHTTP, TransportSSE:
 		if strings.TrimSpace(config.URL) == "" {
@@ -113,21 +103,6 @@ func (config Config) Validate() error {
 		if strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("mcp: invalid header value for %q", key)
 		}
-	}
-	if config.OAuth != nil {
-		if config.OAuth.ClientID == "" && (config.OAuth.ClientSecret != "" || config.OAuth.Issuer != "") {
-			return fmt.Errorf("mcp: oauth clientSecret and issuer require clientId")
-		}
-		for field, value := range map[string]string{
-			"clientId": config.OAuth.ClientID, "clientSecret": config.OAuth.ClientSecret, "issuer": config.OAuth.Issuer,
-		} {
-			if strings.ContainsAny(value, "\x00\r\n") {
-				return fmt.Errorf("mcp: invalid oauth %s", field)
-			}
-		}
-	}
-	if config.BearerTokenEnvVar != "" && (strings.TrimSpace(config.BearerTokenEnvVar) == "" || strings.ContainsAny(config.BearerTokenEnvVar, "=\x00\r\n")) {
-		return fmt.Errorf("mcp: invalid bearer token environment variable name %q", config.BearerTokenEnvVar)
 	}
 	return nil
 }

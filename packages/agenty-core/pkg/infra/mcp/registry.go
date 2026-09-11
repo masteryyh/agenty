@@ -161,12 +161,14 @@ func NewRegistry(parent context.Context, dir string, tools *agentloop.Registry, 
 	if dir == "" {
 		return nil, fmt.Errorf("mcp: configuration directory must not be empty")
 	}
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mcp: create configuration directory: %w", err)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mcp: secure configuration directory: %w", err)
 	}
+
 	authDir := filepath.Join(filepath.Dir(dir), "mcp-auth")
 	if err := os.MkdirAll(authDir, 0o700); err != nil {
 		return nil, fmt.Errorf("mcp: create auth directory: %w", err)
@@ -174,16 +176,14 @@ func NewRegistry(parent context.Context, dir string, tools *agentloop.Registry, 
 	if err := os.Chmod(authDir, 0o700); err != nil {
 		return nil, fmt.Errorf("mcp: secure auth directory: %w", err)
 	}
+
 	ctx, cancel := context.WithCancel(parent)
-	// Work scheduled by the registry follows the parent context, while an
-	// established MCP session gets an independent base context. This lets
-	// Shutdown perform the protocol close before a signal or parent cancellation
-	// tears down a stdio child process.
 	sessionBase, sessionBaseCancel := context.WithCancel(context.WithoutCancel(parent))
 	logger := options.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+
 	connectTimeout := options.ConnectTimeout
 	if connectTimeout <= 0 {
 		connectTimeout = defaultConnectTimeout
@@ -196,6 +196,7 @@ func NewRegistry(parent context.Context, dir string, tools *agentloop.Registry, 
 	if concurrency <= 0 {
 		concurrency = defaultConcurrency
 	}
+
 	registry := &Registry{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -274,6 +275,7 @@ func (registry *Registry) load() error {
 			registry.addLoadError(name, domainmcp.Config{}, "config", err)
 			continue
 		}
+
 		var config domainmcp.Config
 		if err := json.Unmarshal(data, &config); err != nil {
 			registry.addLoadError(name, config, "config", err)
@@ -374,12 +376,14 @@ func (registry *Registry) Create(ctx context.Context, name string, config domain
 	if err := config.Validate(); err != nil {
 		return domainmcp.Server{}, registryValidation(err)
 	}
+
 	config = cloneConfig(config)
 	registry.mu.Lock()
 	if registry.closing {
 		registry.mu.Unlock()
 		return domainmcp.Server{}, errRegistryClosed
 	}
+
 	key := serverKey(name)
 	if _, exists := registry.servers[key]; exists {
 		registry.mu.Unlock()
@@ -389,6 +393,7 @@ func (registry *Registry) Create(ctx context.Context, name string, config domain
 		registry.mu.Unlock()
 		return domainmcp.Server{}, err
 	}
+
 	entry := &serverEntry{
 		name: name, config: config, status: statusForConfig(config), lastChange: time.Now(),
 		deprecated: config.Type == domainmcp.TransportSSE, tools: make(map[string]*remoteTool),
@@ -410,12 +415,14 @@ func (registry *Registry) Update(ctx context.Context, name string, config domain
 	if err := config.Validate(); err != nil {
 		return domainmcp.Server{}, registryValidation(err)
 	}
+
 	config = cloneConfig(config)
 	registry.mu.Lock()
 	if registry.closing {
 		registry.mu.Unlock()
 		return domainmcp.Server{}, errRegistryClosed
 	}
+
 	key := serverKey(name)
 	entry, ok := registry.servers[key]
 	if !ok {
@@ -428,6 +435,7 @@ func (registry *Registry) Update(ctx context.Context, name string, config domain
 			return domainmcp.Server{}, fmt.Errorf("mcp: clear OAuth credentials: %w", err)
 		}
 	}
+
 	if err := registry.persistConfig(entry.name, config); err != nil {
 		registry.mu.Unlock()
 		return domainmcp.Server{}, err
@@ -1168,10 +1176,6 @@ func cloneConfig(config domainmcp.Config) domainmcp.Config {
 	clone.Args = append([]string(nil), config.Args...)
 	clone.Env = cloneStringMap(config.Env)
 	clone.Headers = cloneStringMap(config.Headers)
-	if config.OAuth != nil {
-		oauth := *config.OAuth
-		clone.OAuth = &oauth
-	}
 	return clone
 }
 

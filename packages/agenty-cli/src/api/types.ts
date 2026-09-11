@@ -106,12 +106,6 @@ export type McpServerStatus =
     | "error"
     | "closing";
 
-export interface McpOAuthConfig {
-    clientId?: string;
-    clientSecret?: string;
-    issuer?: string;
-}
-
 export interface McpServerConfig {
     type: McpTransport;
     enabled: boolean;
@@ -120,8 +114,6 @@ export interface McpServerConfig {
     env?: Record<string, string>;
     url?: string;
     headers?: Record<string, string>;
-    bearerTokenEnvVar?: string;
-    oauth?: McpOAuthConfig;
 }
 
 export interface McpServerDto {
