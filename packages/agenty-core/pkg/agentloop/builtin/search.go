@@ -47,7 +47,8 @@ type grepResult struct {
 
 func (tool *grepTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
-		Name: "grep",
+		Name:        "grep",
+		Destructive: false,
 		Description: "Recursively search text files with a Go regular expression. " +
 			"An optional glob filters relative file paths, and results include path, line, column, and text.",
 		InputSchema: objectSchema(
@@ -270,7 +271,8 @@ type globResult struct {
 
 func (tool *globTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
-		Name: "glob",
+		Name:        "glob",
+		Destructive: false,
 		Description: "Find files and symbolic links whose relative paths match a glob. " +
 			"Use ** as a complete path segment for recursive matching. Results are sorted.",
 		InputSchema: objectSchema(
@@ -489,6 +491,7 @@ type listResult struct {
 func (tool *listTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
 		Name:        "ls",
+		Destructive: false,
 		Description: "List the immediate children of a directory in name order, including entry type and size.",
 		InputSchema: objectSchema(
 			map[string]agentloop.JSONSchema{

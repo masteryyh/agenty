@@ -313,6 +313,72 @@ func TestNewRemoteToolUsesNamespacedDefinition(t *testing.T) {
 	if got := tool.remoteName; got != "search" {
 		t.Fatalf("remoteName = %q", got)
 	}
+	if !tool.Definition().Destructive {
+		t.Fatal("missing annotations should classify the tool as destructive")
+	}
+}
+
+func TestNewRemoteToolMapsReadOnlyAnnotation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		annotations     *sdkmcp.ToolAnnotations
+		wantDestructive bool
+	}{
+		{name: "missing annotations", wantDestructive: true},
+		{
+			name: "read only",
+			annotations: &sdkmcp.ToolAnnotations{
+				ReadOnlyHint: true,
+			},
+			wantDestructive: false,
+		},
+		{
+			name: "read only takes precedence",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: mcpBoolPointer(true),
+				ReadOnlyHint:    true,
+			},
+			wantDestructive: false,
+		},
+		{
+			name: "additive hint still permits writes",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: mcpBoolPointer(false),
+			},
+			wantDestructive: true,
+		},
+		{
+			name: "destructive hint",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: mcpBoolPointer(true),
+			},
+			wantDestructive: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			tool, err := newRemoteTool(nil, &sdkmcp.Tool{
+				Name:        "search",
+				Annotations: test.annotations,
+				InputSchema: map[string]any{"type": "object"},
+			}, "github", time.Second)
+			if err != nil {
+				t.Fatalf("newRemoteTool: %v", err)
+			}
+			if got := tool.Definition().Destructive; got != test.wantDestructive {
+				t.Fatalf("destructive = %t, want %t", got, test.wantDestructive)
+			}
+		})
+	}
+}
+
+func mcpBoolPointer(value bool) *bool {
+	return &value
 }
 
 func TestNewRemoteToolNormalizesAndTruncatesProviderName(t *testing.T) {

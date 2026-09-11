@@ -29,6 +29,14 @@ func TestRegisterAll(t *testing.T) {
 		"read_file",
 		"shell",
 	}
+	wantDestructive := map[string]bool{
+		"apply_patch": true,
+		"glob":        false,
+		"grep":        false,
+		"ls":          false,
+		"read_file":   false,
+		"shell":       true,
+	}
 	definitions := registry.Definitions()
 	if len(definitions) != len(wantNames) {
 		t.Fatalf("definitions = %d, want %d", len(definitions), len(wantNames))
@@ -37,6 +45,9 @@ func TestRegisterAll(t *testing.T) {
 		definition := definitions[index]
 		if definition.Name != wantName {
 			t.Errorf("definition %d name = %q, want %q", index, definition.Name, wantName)
+		}
+		if definition.Destructive != wantDestructive[definition.Name] {
+			t.Errorf("definition %q destructive = %t, want %t", definition.Name, definition.Destructive, wantDestructive[definition.Name])
 		}
 		if !snakeCase.MatchString(definition.Name) {
 			t.Errorf("definition %q name is not snake_case", definition.Name)

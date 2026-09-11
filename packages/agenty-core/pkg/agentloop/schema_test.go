@@ -13,6 +13,7 @@ func TestJSONSchemaToolDefinitionJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	const fixture = `{
+		"destructive":true,
 		"name":"lookup",
 		"description":"Look up a value",
 		"inputSchema":{
@@ -34,6 +35,9 @@ func TestJSONSchemaToolDefinitionJSONRoundTrip(t *testing.T) {
 	if tool.InputSchema.Type != JSONSchemaTypeObject {
 		t.Errorf("schema type = %q, want object", tool.InputSchema.Type)
 	}
+	if !tool.Destructive {
+		t.Error("destructive = false, want true")
+	}
 	if tool.InputSchema.Properties["q"].Type != JSONSchemaTypeString {
 		t.Errorf("q schema = %#v", tool.InputSchema.Properties["q"])
 	}
@@ -54,12 +58,32 @@ func TestJSONSchemaToolDefinitionJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		t.Fatalf("unmarshal ToolDefinition wire JSON: %v", err)
 	}
+	if wire["destructive"] != true {
+		t.Errorf("destructive = %#v, want true", wire["destructive"])
+	}
 	inputSchema, ok := wire["inputSchema"].(map[string]any)
 	if !ok {
 		t.Fatalf("inputSchema = %#v, want object", wire["inputSchema"])
 	}
 	if inputSchema["additionalProperties"] != false {
 		t.Errorf("additionalProperties = %#v, want false", inputSchema["additionalProperties"])
+	}
+}
+
+func TestToolDefinitionJSONIncludesFalseDestructiveValue(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := json.Marshal(ToolDefinition{Name: "lookup"})
+	if err != nil {
+		t.Fatalf("marshal ToolDefinition: %v", err)
+	}
+
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatalf("unmarshal ToolDefinition wire JSON: %v", err)
+	}
+	if value, ok := wire["destructive"]; !ok || value != false {
+		t.Errorf("destructive = %#v, want explicit false", wire["destructive"])
 	}
 }
 

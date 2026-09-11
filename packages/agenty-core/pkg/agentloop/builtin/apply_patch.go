@@ -37,6 +37,7 @@ type applyPatchResult struct {
 func (tool *applyPatchTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
 		Type:        agentloop.ToolTypeApplyPatch,
+		Destructive: true,
 		Name:        "apply_patch",
 		Description: "Apply a complete V4A patch atomically and return each file's final diff and line counts.",
 		InputSchema: objectSchema(

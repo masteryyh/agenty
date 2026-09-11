@@ -36,8 +36,9 @@ type shellTool struct{}
 
 func (tool *shellTool) Definition() agentloop.ToolDefinition {
 	return agentloop.ToolDefinition{
-		Type: agentloop.ToolTypeShell,
-		Name: "shell",
+		Type:        agentloop.ToolTypeShell,
+		Destructive: true,
+		Name:        "shell",
 		Description: "Execute up to 4 independent, complete shell commands in parallel. The commands array contains separate commands, not fragments of one command. Do not run commands in parallel when they perform the same kind of operation or modify the same file; combine dependent steps into one command. " +
 			"Uses zsh on macOS, bash on Linux, and sh as a fallback when the preferred shell is unavailable. " +
 			"On Windows, uses pwsh.exe or powershell.exe when available, then cmd.exe. Use stdin only with one command when the command reads patch data.",

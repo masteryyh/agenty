@@ -40,6 +40,7 @@ const (
 
 type ToolDefinition struct {
 	Type        ToolType   `json:"type,omitempty"`
+	Destructive bool       `json:"destructive"`
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
 	InputSchema JSONSchema `json:"inputSchema"`

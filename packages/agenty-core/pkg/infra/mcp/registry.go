@@ -1313,6 +1313,7 @@ func newRemoteToolWithLifecycle(session *mcp.ClientSession, definition *mcp.Tool
 		exposedName: exposedName,
 		definition: agentloop.ToolDefinition{
 			Type:        agentloop.ToolTypeFunction,
+			Destructive: definition.Annotations == nil || !definition.Annotations.ReadOnlyHint,
 			Name:        exposedName,
 			Description: definition.Description,
 			InputSchema: schema,
