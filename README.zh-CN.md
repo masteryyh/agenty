@@ -95,10 +95,21 @@ pnpm core:test:e2e
 pnpm cli:typecheck
 pnpm bootstrap:test
 pnpm build
+pnpm run update
+pnpm tidyup
+pnpm clean
+pnpm deepclean
 ```
 
-release 版本来自根目录导出的 `AGENTY_VERSION`。把 `.env.example` 复制为被忽略的 `.env`，
-加载环境变量后运行 `pnpm build`，即可构建完整 launcher。
+构建版本优先来自进程环境中的 `AGENTY_VERSION`，其次读取被忽略的根目录 `.env`，两者都
+没有时默认为 `dev`。如需固定本地版本，可把 `.env.example` 复制为 `.env`，直接运行
+`pnpm build` 即可构建完整 launcher。默认构建 patch-applier、core、CLI 和 bootstrap；
+Inspector 通过 `pnpm inspector:build` 单独构建。
+
+`pnpm run update` 会更新 pnpm、Go 和 Cargo 模块的依赖；`pnpm tidyup` 会在所有 Go 模块中依次
+运行 `go fmt`、`go vet` 和 `go mod tidy`。`pnpm clean` 清理根目录及所有模块的构建产物；
+`pnpm deepclean` 进一步清理本地缓存、依赖 store、`node_modules` 和其他生成的临时文件，
+保留环境文件与已跟踪的锁文件。
 
 ## 许可证
 

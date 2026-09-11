@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { resolveBuildVersion } from "../../../scripts/build-version.mjs";
 import { resolveArch, resolveBunTarget, resolveOpenTUILibc, resolveOS } from "./target";
 
 const PKG = resolve(import.meta.dir, "..");
@@ -11,7 +12,7 @@ const arch = resolveArch();
 const bunTarget = resolveBunTarget(os, arch);
 const opentuiLibc = resolveOpenTUILibc(os);
 
-const version = process.env.AGENTY_VERSION?.trim() || "dev";
+const version = resolveBuildVersion();
 mkdirSync(DIST, { recursive: true });
 const outfile = join(DIST, `agenty-cli-${os}-${arch}${os === "windows" ? ".exe" : ""}`);
 

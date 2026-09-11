@@ -27,6 +27,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/masteryyh/agenty-core/pkg/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/buildinfo"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
 )
@@ -708,7 +709,7 @@ func (registry *Registry) newClient(name string, generation uint64, transportTyp
 			registry.refreshAsync(name, generation)
 		}
 	}
-	return mcp.NewClient(&mcp.Implementation{Name: "agenty", Version: "0.1.0"}, options)
+	return mcp.NewClient(&mcp.Implementation{Name: "agenty", Version: buildinfo.Version}, options)
 }
 
 func (registry *Registry) connect(name string, generation uint64, interactive bool) {

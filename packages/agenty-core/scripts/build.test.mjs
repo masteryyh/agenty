@@ -11,7 +11,13 @@ test("uses host defaults for a macOS core build", () => {
     const plan = resolveCoreBuildPlan({}, "darwin", packageRoot);
 
     assert.deepEqual(plan.target, { artifactOS: "macos", extension: "", goOS: "darwin" });
+    assert.equal(plan.version, "dev");
     assert.equal(plan.corePath, join(packageRoot, "bin/agenty-core"));
+    assert.deepEqual(plan.goArgs.slice(0, 3), [
+        "build",
+        "-ldflags",
+        "-X github.com/masteryyh/agenty-core/pkg/buildinfo.Version=dev",
+    ]);
     assert.equal(plan.helperSource, join(repositoryRoot, "packages/patch-applier/target/release/apply_patch"));
     assert.equal(plan.helperDestination, join(packageRoot, "bin/apply_patch"));
 });
@@ -24,6 +30,7 @@ test("uses the GOOS target and Windows extensions", () => {
     }, "darwin", packageRoot);
 
     assert.deepEqual(plan.target, { artifactOS: "windows", extension: ".exe", goOS: "windows" });
+    assert.equal(plan.version, "dev");
     assert.equal(plan.corePath, join(packageRoot, "bin/windows_amd64/core.exe"));
     assert.equal(plan.helperSource, join(repositoryRoot, "packages/patch-applier/target/release/apply_patch.exe"));
     assert.equal(plan.helperDestination, join(packageRoot, "bin/windows_amd64/apply_patch.exe"));

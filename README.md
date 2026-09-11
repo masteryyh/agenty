@@ -106,11 +106,23 @@ pnpm core:test:e2e
 pnpm cli:typecheck
 pnpm bootstrap:test
 pnpm build
+pnpm run update
+pnpm tidyup
+pnpm clean
+pnpm deepclean
 ```
 
-The release version comes from the exported root `AGENTY_VERSION` value. Copy
-`.env.example` to the ignored `.env`, source it, and run `pnpm build` for a complete
-launcher build.
+The build version comes from `AGENTY_VERSION` in the process environment, then from
+the ignored root `.env`; it defaults to `dev`. Copy `.env.example` to `.env` if you
+want a persistent local version, then run `pnpm build` for a complete launcher build.
+The default build includes patch-applier, core, CLI and bootstrap. Build Inspector
+separately with `pnpm inspector:build`.
+
+`pnpm run update` updates dependencies for the pnpm, Go, and Cargo modules. `pnpm tidyup`
+runs `go fmt`, `go vet`, and `go mod tidy` in every Go module. `pnpm clean` removes
+all root and workspace build outputs; `pnpm deepclean` additionally removes local
+caches, dependency stores, `node_modules`, and generated temporary files. Environment
+files and tracked lockfiles are preserved.
 
 ## Session inspector
 

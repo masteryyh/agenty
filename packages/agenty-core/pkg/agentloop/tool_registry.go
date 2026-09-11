@@ -1,10 +1,10 @@
 package agentloop
 
 import (
-	"maps"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 

@@ -305,9 +305,12 @@ pnpm core:test:e2e          # real-binary stdio workflows in isolated processes
 pnpm core:test:e2e:race     # e2e harness and core binary with race detection
 pnpm core:test:race         # default suite with the race detector
 pnpm core:test:repeat       # shuffled repeated run for isolation checks
-pnpm core:tidyup            # go fmt, go vet, and go mod tidy
-pnpm core:clean             # remove Go build and test caches for the module
+pnpm core:tidyup            # go fmt, go vet, and go mod tidy for agenty-core only
+pnpm core:clean             # remove agenty-core build artifacts
 ```
+
+Use `pnpm tidyup` from the repository root to run the same Go maintenance commands in
+all Go modules.
 
 There is intentionally no local service command yet. End-to-end tests use the `e2e`
 build tag so they stay outside the default `core:test` suite.

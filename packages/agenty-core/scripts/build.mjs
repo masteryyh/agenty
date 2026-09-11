@@ -3,6 +3,8 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveBuildVersion } from "../../../scripts/build-version.mjs";
+
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 
 function targetForGoOS(rawOS) {
@@ -54,14 +56,23 @@ export function resolveCoreBuildPlan(
     const coreName = executableName(environment.BIN_NAME?.trim() || "agenty-core", target.extension);
     const helperName = `apply_patch${target.extension}`;
     const repositoryRoot = resolve(packageRoot, "../..");
+    const version = resolveBuildVersion(environment, repositoryRoot);
     return {
         corePath: join(outputDirectory, coreName),
-        goArgs: ["build", "-o", join(outputDirectory, coreName), "./cmd"],
+        goArgs: [
+            "build",
+            "-ldflags",
+            `-X github.com/masteryyh/agenty-core/pkg/buildinfo.Version=${version}`,
+            "-o",
+            join(outputDirectory, coreName),
+            "./cmd",
+        ],
         helperDestination: join(outputDirectory, helperName),
         helperSource: join(repositoryRoot, "packages/patch-applier/target/release", helperName),
         outputDirectory,
         packageRoot,
         target,
+        version,
     };
 }
 
@@ -81,7 +92,10 @@ function run() {
     mkdirSync(plan.outputDirectory, { recursive: true });
     const build = spawnSync("go", plan.goArgs, {
         cwd: plan.packageRoot,
-        env: process.env,
+        env: {
+            ...process.env,
+            AGENTY_VERSION: plan.version,
+        },
         stdio: "inherit",
     });
     const buildExitCode = exitCode("go build", build);
