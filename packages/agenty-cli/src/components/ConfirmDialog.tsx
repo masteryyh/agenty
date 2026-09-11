@@ -1,13 +1,12 @@
-import { RGBA } from "@opentui/core";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { useBottomDialogSize } from "./BottomDialog";
 import { ActionBar, Box, Text } from "./ui";
 
 const CONFIRM_DIALOG_Z_INDEX = 120;
-const TERMINAL_BACKGROUND = RGBA.defaultBackground();
 
 export interface ConfirmDialogProps {
     title: string;
@@ -71,16 +70,17 @@ export function ConfirmDialog({
             justifyContent="center"
         >
             <Box
+                id="confirm-dialog"
                 width={width}
                 height={height}
                 flexDirection="column"
                 borderStyle="single"
-                borderColor="red"
-                backgroundColor={TERMINAL_BACKGROUND}
+                borderColor={theme.danger}
+                backgroundColor={theme.surfaceRaised}
                 paddingX={1}
                 paddingY={1}
             >
-                <Text color="red" bold>{title}</Text>
+                <Text color={theme.danger} bold>{title}</Text>
                 <Box flexGrow={1} width="100%" overflow="hidden">
                     <Text wrap="wrap">{message}</Text>
                 </Box>

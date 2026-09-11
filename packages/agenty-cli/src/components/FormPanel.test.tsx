@@ -1,4 +1,4 @@
-import { type BaseRenderable, BoxRenderable, RGBA, ScrollBoxRenderable } from "@opentui/core";
+import { type BaseRenderable, BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { describe, expect, test } from "bun:test";
 import { type ReactNode, useState } from "react";
@@ -185,7 +185,7 @@ describe("overlay forms", () => {
                 await new Promise((resolve) => setTimeout(resolve, 20));
                 await setup.flush();
             });
-            const dialog = findBox(setup.renderer.root, (box) => box.borderColor.equals(RGBA.fromHex("#ff00ff")))!;
+            const dialog = findBox(setup.renderer.root, (box) => box.id === "panel-box")!;
             const collapsedHeight = dialog.height;
             const originalValueStart = setup.captureCharFrame().split("\n").find((line) => line.includes("128000"))!.indexOf("128000");
             for (let i = 0; i < 6; i++) {
@@ -299,7 +299,7 @@ describe("overlay forms", () => {
                 await setup.mockInput.pressKeys(["RETURN"], 15);
                 await setup.flush();
             });
-            const menu = findBox(setup.renderer.root, (box) => box.borderColor.equals(RGBA.fromHex("#405158")))!;
+            const menu = findBox(setup.renderer.root, (box) => box.id === "dropdown-menu")!;
             const viewport = findBox(setup.renderer.root, (box) => box instanceof ScrollBoxRenderable)!;
             expect(menu.x).toBe(valueStart);
             expect(menu.y).toBeGreaterThanOrEqual(viewport.y);
@@ -329,7 +329,7 @@ describe("overlay forms", () => {
                 await new Promise((resolve) => setTimeout(resolve, 20));
                 await setup.flush();
             });
-            const dialog = findBox(setup.renderer.root, (box) => box.borderColor.equals(RGBA.fromHex("#ff00ff")))!;
+            const dialog = findBox(setup.renderer.root, (box) => box.id === "panel-box")!;
             const initialHeight = dialog.height;
             for (let i = 0; i < 2; i++) {
                 await act(async () => {
@@ -448,7 +448,7 @@ describe("overlay forms", () => {
                 await new Promise((resolve) => setTimeout(resolve, 20));
                 await setup.flush();
             });
-            const dialog = findBox(setup.renderer.root, (box) => box.borderColor.equals(RGBA.fromHex("#ff00ff")))!;
+            const dialog = findBox(setup.renderer.root, (box) => box.id === "panel-box")!;
             expect(dialog.height).toBeLessThan(20);
             await act(async () => {
                 await setup.mockInput.pressKeys(["ESCAPE"], 50);

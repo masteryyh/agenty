@@ -18,6 +18,7 @@ import {
     validateModelDraft,
     validateProviderDraft,
 } from "../consts/providerPresets";
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { useWindowSize } from "../hooks/useWindowSize";
 import { useAppStore } from "../state/store";
@@ -578,11 +579,11 @@ function WizardContent() {
         return (
             <Box flexDirection="column" padding={1} gap={1}>
                 {step === "done" ? (
-                    <Text color="green" bold>Setup complete. Starting agenty-cli…</Text>
+                    <Text color={theme.success} bold>Setup complete. Starting agenty-cli…</Text>
                 ) : (
                     <Spinner label="Saving providers, model, and session defaults…" />
                 )}
-                {error ? <Text color="red">{error}</Text> : null}
+                {error ? <Text color={theme.danger}>{error}</Text> : null}
             </Box>
         );
     }
@@ -615,24 +616,24 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
 
     return (
         <Box flexDirection="column" flexGrow={1} padding={1} gap={1}>
-            <Text color="magenta" bold>AGENTY / FIRST RUN</Text>
-            <Text color="cyan" bold>Welcome to agenty</Text>
+            <Text color={theme.accent} bold>AGENTY / FIRST RUN</Text>
+            <Text color={theme.accent} bold>Welcome to agenty</Text>
             <Text>Connect a model provider, configure its models, and choose the default session model.</Text>
-            <Box flexDirection="column" height={10} borderStyle="single" borderColor="cyan" padding={1} marginTop={1}>
+            <Box flexDirection="column" height={10} borderStyle="single" borderColor={theme.border} padding={1} marginTop={1}>
                 <Box height={1}>
-                    <Text color="cyan" bold>01  Provider access</Text>
+                    <Text color={theme.accent} bold>01  Provider access</Text>
                 </Box>
                 <Box height={1}>
                     <Text dimColor wrap="truncate">Configure OpenAI, Anthropic, Google, or a compatible endpoint.</Text>
                 </Box>
                 <Box height={1}>
-                    <Text color="cyan" bold>02  Model details</Text>
+                    <Text color={theme.accent} bold>02  Model details</Text>
                 </Box>
                 <Box height={1}>
                     <Text dimColor wrap="truncate">Enter the model code and limits used by the core loop.</Text>
                 </Box>
                 <Box height={1}>
-                    <Text color="cyan" bold>03  Default session model</Text>
+                    <Text color={theme.accent} bold>03  Default session model</Text>
                 </Box>
                 <Box height={1}>
                     <Text dimColor wrap="truncate">Pick the model used when a new session starts.</Text>
@@ -686,11 +687,11 @@ function ProviderStep({
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
             <Box flexDirection="column">
-                <Text color="magenta" bold>01 / Provider connections</Text>
+                <Text color={theme.accent} bold>01 / Provider connections</Text>
                 <Text dimColor>Choose a row to configure it. You can add more than one provider.</Text>
             </Box>
             {loading ? <Spinner label="Loading existing providers…" /> : null}
-            {error ? <Text color="red">{error}</Text> : null}
+            {error ? <Text color={theme.danger}>{error}</Text> : null}
             {!loading ? (
                 <ProviderTable
                     rows={rows}
@@ -751,7 +752,7 @@ function ProviderTable({
             header: "Provider",
             value: (row) => row.label,
             render: (row, selected) => (
-                <Text color={selected ? "cyan" : "white"} bold={selected} wrap="truncate">
+                <Text color={selected ? theme.selection : theme.text} bold={selected} wrap="truncate">
                     {row.label}
                 </Text>
             ),
@@ -761,7 +762,7 @@ function ProviderTable({
             header: "Protocol",
             value: (row) => row.kind === "add" ? "" : row.description,
             render: (row, selected) => (
-                <Text color={selected ? "cyan" : "gray"} wrap="truncate">
+                <Text color={selected ? theme.selection : theme.textMuted} wrap="truncate">
                     {row.kind === "add" ? "" : row.description}
                 </Text>
             ),
@@ -771,7 +772,7 @@ function ProviderTable({
             header: "Status",
             value: providerStatus,
             render: (row) => (
-                <Text color={providerStatus(row) === "✓ ready" ? "green" : "gray"}>
+                <Text color={providerStatus(row) === "✓ ready" ? theme.success : theme.textMuted}>
                     {providerStatus(row)}
                 </Text>
             ),
@@ -927,7 +928,7 @@ function ModelStep({
             value: rowLabel,
             render: (row, active) => (
                 <Text
-                    color={rowState(row) ? "green" : active ? "cyan" : row.kind === "provider" ? "white" : "gray"}
+                    color={rowState(row) ? theme.success : active ? theme.selection : row.kind === "provider" ? theme.text : theme.textMuted}
                     bold={active || row.kind === "provider"}
                     wrap="truncate"
                 >
@@ -940,7 +941,7 @@ function ModelStep({
             header: "Context",
             value: rowContext,
             render: (row, active) => (
-                <Text color={active ? "cyan" : "gray"}>{rowContext(row)}</Text>
+                <Text color={active ? theme.selection : theme.textMuted}>{rowContext(row)}</Text>
             ),
         },
         {
@@ -948,7 +949,7 @@ function ModelStep({
             header: "State",
             value: rowState,
             render: (row) => (
-                <Text color={rowState(row) ? "green" : "gray"}>{rowState(row)}</Text>
+                <Text color={rowState(row) ? theme.success : theme.textMuted}>{rowState(row)}</Text>
             ),
         },
     ];
@@ -1010,10 +1011,10 @@ function ModelStep({
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
             <Box flexDirection="column">
-                <Text color="magenta" bold>02 / Default session model</Text>
+                <Text color={theme.accent} bold>02 / Default session model</Text>
                 <Text dimColor>Choose a model. Custom providers also allow model management here.</Text>
             </Box>
-            {error ? <Text color="red">{error}</Text> : null}
+            {error ? <Text color={theme.danger}>{error}</Text> : null}
             <Box height={1} overflow="hidden">
                 <Box width={2} height={1}><Text> </Text></Box>
                 <TableHeader columns={tableLayout} />

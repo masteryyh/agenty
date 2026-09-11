@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import { actionColor, theme } from "../../consts/theme";
 import { Box, type BoxProps } from "./Box";
 import { Text, TextBackgroundContext } from "./Text";
 
-export const HOVER_BACKGROUND = "#243238";
+export const HOVER_BACKGROUND = theme.surfaceHover;
 
 export interface PressableProps extends Omit<
     BoxProps,
@@ -80,13 +81,11 @@ export function ActionBar({
         <Box width="100%" height={1} gap={gap} overflow="hidden">
             {actions.map((action) => {
                 const active = activeKey === action.key;
-                const color = action.disabled
-                    ? "gray"
-                    : action.tone === "danger"
-                        ? "red"
-                        : active
-                            ? "cyan"
-                            : "gray";
+                const color = actionColor({
+                    disabled: action.disabled,
+                    tone: action.tone,
+                    active,
+                });
                 return (
                     <Pressable
                         key={action.key}

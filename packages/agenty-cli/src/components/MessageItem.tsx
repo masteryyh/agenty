@@ -1,9 +1,9 @@
-import type { ThemeMode } from "@opentui/core";
 import type React from "react";
 import { memo, useMemo } from "react";
 
 import type { SkillDto } from "../api/types";
 import { documentFromSerialized } from "../composer/document";
+import { outputColor, statusColor, theme } from "../consts/theme";
 import type { SystemMessageVariant, UIToolCall } from "../state/store";
 import {
     buildToolDisplay,
@@ -12,16 +12,6 @@ import {
     type ToolDisplay,
 } from "./toolDisplay";
 import { Box, Pressable, Text } from "./ui";
-
-const USER_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
-    dark: "#2a3f47",
-    light: "#dbe8ec",
-};
-
-const COMPACTED_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
-    dark: "#23332d",
-    light: "#dfece4",
-};
 
 function renderMessageContent(content: string, skills: SkillDto[]): React.ReactNode {
     const document = documentFromSerialized(content, skills);
@@ -33,7 +23,7 @@ function renderMessageContent(content: string, skills: SkillDto[]): React.ReactN
         : (
             <Text
                 key={`skill-${index}-${node.name}`}
-                color={node.warning ? "yellow" : "#00E5FF"}
+                color={node.warning ? theme.warning : theme.accent}
                 bold
             >
                 {`$${node.name}`}
@@ -49,24 +39,6 @@ function statusGlyph(status: "pending" | "success" | "error", blinkOn: boolean):
         return "✗";
     }
     return blinkOn ? "…" : "·";
-}
-
-function statusColor(status: "pending" | "success" | "error"): string {
-    if (status === "success") {
-        return "green";
-    }
-    if (status === "error") {
-        return "red";
-    }
-    return "magenta";
-}
-
-function outputColor(stream: ShellOutputStream): string | undefined {
-    return stream === "stderr"
-        ? "red"
-        : stream === "empty" || stream === "pending" || stream === "newline"
-            ? "gray"
-            : undefined;
 }
 
 function ConnectedOutput({
@@ -92,7 +64,7 @@ function ConnectedOutput({
                         flexShrink={0}
                     >
                         <Box width={2} flexShrink={0}>
-                            <Text width={2} color="gray" dimColor>
+                            <Text width={2} color={theme.textFaint}>
                                 {index === 0 ? "⎿ " : "  "}
                             </Text>
                         </Box>
@@ -106,7 +78,7 @@ function ConnectedOutput({
                             >
                                 {line.text}
                                 {trailingMarker && index === lines.length - 1 ? (
-                                    <Text color="gray" dimColor italic>
+                                    <Text color={theme.textFaint} italic>
                                         {trailingMarker}
                                     </Text>
                                 ) : null}
@@ -226,7 +198,11 @@ function ToolMessageItem({
     const done = !!item.toolCall.result;
     return (
         <Rail
-            color={display.status === "error" ? "red" : done || item.blinkOn ? "magenta" : "gray"}
+            color={display.status === "error"
+                ? theme.danger
+                : done || item.blinkOn
+                    ? theme.accent
+                    : theme.textMuted}
         >
             <ToolCallLine
                 tc={item.toolCall}
@@ -299,13 +275,11 @@ export const MessageItem = memo(({
     item,
     onToggleReasoning,
     onToggleTool,
-    themeMode = "dark",
     skills = [],
 }: {
     item: MessageRenderItem;
     onToggleReasoning?: (id: string) => void;
     onToggleTool?: (id: string) => void;
-    themeMode?: ThemeMode;
     skills?: SkillDto[];
 }) => {
     if (item.type === "reasoning") {
@@ -342,11 +316,11 @@ export const MessageItem = memo(({
             <Box
                 width="100%"
                 paddingX={1}
-                backgroundColor={USER_MESSAGE_BACKGROUNDS[themeMode]}
+                backgroundColor={theme.surfaceRaised}
             >
                 <Text width="100%" wrap="wrap">
-                    <Text dimColor>you</Text>
-                    <Text color="cyan"> › </Text>
+                    <Text color={theme.textFaint}>you</Text>
+                    <Text color={theme.accent}> › </Text>
                     {renderMessageContent(item.content, skills)}
                 </Text>
             </Box>
@@ -359,7 +333,7 @@ export const MessageItem = memo(({
                 <Box
                     width="100%"
                     paddingX={1}
-                    backgroundColor={COMPACTED_MESSAGE_BACKGROUNDS[themeMode]}
+                    backgroundColor={theme.surface}
                 >
                     <Text width="100%" italic dimColor wrap="wrap">
                         {renderMessageContent(item.content, skills)}
@@ -369,8 +343,12 @@ export const MessageItem = memo(({
         }
 
         return (
-            <Rail color={item.error ? "red" : "yellow"}>
-                <Text width="100%" color={item.error ? "red" : "yellow"} wrap="wrap">
+            <Rail color={item.error ? theme.danger : theme.warning}>
+                <Text
+                    width="100%"
+                    color={item.error ? theme.danger : theme.warning}
+                    wrap="wrap"
+                >
                     {item.error ? "✗" : "●"} {renderMessageContent(item.content, skills)}
                 </Text>
             </Rail>

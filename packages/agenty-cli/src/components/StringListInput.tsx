@@ -1,6 +1,7 @@
 import type { InputRenderable, KeyEvent } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
 
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { textWidth, truncateText } from "./Table";
 import { Box } from "./ui";
@@ -288,7 +289,7 @@ export function StringListInput({
             >
                 <text
                     content={tagLine}
-                    fg="gray"
+                    fg={theme.textMuted}
                     wrapMode="none"
                     truncate
                 />

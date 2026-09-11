@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { theme } from "../../consts/theme";
 import { Text } from "./Text";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -13,7 +14,7 @@ export function Spinner({ label }: { label: string }) {
         return () => clearInterval(timer);
     }, []);
     return (
-        <Text color="cyan">
+        <Text color={theme.accent}>
             {SPINNER_FRAMES[frame]} {label}
         </Text>
     );

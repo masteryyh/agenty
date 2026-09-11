@@ -10,6 +10,7 @@ import {
     reconcileTextEdit,
     renderDocument,
 } from "../composer/document";
+import { theme } from "../consts/theme";
 import { TextInput } from "./ui";
 
 export interface StructuredTextInputHandle {
@@ -34,8 +35,8 @@ export const StructuredTextInput = forwardRef<StructuredTextInputHandle, Structu
         const documentRef = useRef(document);
         documentRef.current = document;
         const [syntaxStyle] = useState(() => SyntaxStyle.fromStyles({
-            skill: { fg: "#00E5FF", bold: true },
-            "skill-warning": { fg: "#FFD166", bold: true },
+            skill: { fg: theme.accent, bold: true },
+            "skill-warning": { fg: theme.warning, bold: true },
         }));
         const skillTypeRef = useRef<number | null>(null);
 

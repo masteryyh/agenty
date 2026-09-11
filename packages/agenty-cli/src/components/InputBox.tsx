@@ -2,6 +2,7 @@ import { forwardRef } from "react";
 
 import type { SkillDto } from "../api/types";
 import type { ComposerDocument } from "../composer/document";
+import { effortColor, theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import type { ToastMsg } from "../state/store";
 import { StructuredTextInput, type StructuredTextInputHandle } from "./StructuredTextInput";
@@ -16,22 +17,6 @@ function abbreviateCwd(wd: string, max = 40): string {
         return display;
     }
     return `…${display.slice(display.length - max + 1)}`;
-}
-
-function effortColor(level: string): string {
-    switch (level) {
-        case "low":
-            return "gray";
-        case "medium":
-            return "yellow";
-        case "high":
-            return "cyan";
-        case "xhigh":
-        case "max":
-            return "magenta";
-        default:
-            return "green";
-    }
 }
 
 interface InputBoxProps {
@@ -105,18 +90,18 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     </>
                 ) : null}
                 <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
-                    <Text color="gray">{"─".repeat(300)}</Text>
+                    <Text color={theme.textFaint}>{"─".repeat(300)}</Text>
                 </Box>
                 {toast ? (
-                    <Text color={toast.error ? "red" : "green"}>{toast.text}</Text>
+                    <Text color={toast.error ? theme.danger : theme.success}>{toast.text}</Text>
                 ) : (
-                    <Text color="cyan">{` ▸ ${modelName}`}</Text>
+                    <Text color={theme.accent}>{` ▸ ${modelName}`}</Text>
                 )}
             </Box>
 
             <Box flexDirection="row" height={1} overflow="hidden">
                 <Box width={2} flexShrink={0} height={1}>
-                    <Text color="cyan" bold>
+                    <Text color={theme.accent} bold>
                         {"❯ "}
                     </Text>
                 </Box>
@@ -140,12 +125,12 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
             </Box>
 
             <Box height={1} overflow="hidden">
-                <Text color="gray">{"─".repeat(300)}</Text>
+                <Text color={theme.textFaint}>{"─".repeat(300)}</Text>
             </Box>
 
             <Box flexDirection="row" height={1} overflow="hidden">
                 <Box flexDirection="row" flexShrink={1} height={1} overflow="hidden">
-                    <Text color="gray" dimColor wrap="truncate-start">
+                    <Text color={theme.textFaint} wrap="truncate-start">
                         {abbreviateCwd(cwd)}
                     </Text>
                     {thinkingLevel ? <Text> </Text> : null}
@@ -154,7 +139,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     ) : null}
                 </Box>
                 <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden" />
-                <Text color="gray" dimColor>{`context: ${contextWindow}/${tokenConsumed}`}</Text>
+                <Text color={theme.textFaint}>{`context: ${contextWindow}/${tokenConsumed}`}</Text>
             </Box>
         </Box>
     );

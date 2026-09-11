@@ -101,17 +101,23 @@ pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun build
 CLI and packs payloads, Go builds core, and Cargo builds the patch helper and launcher. Do not add an npm
 `workspaces` field. The dependency graph builds the patch helper before core, then CLI and bootstrap.
 
-Root `.env` is the single `AGENTY_VERSION` source and stays ignored; only
-`.env.example` is committed. Release CI passes target-specific `GOOS`, `GOARCH`, `CC`,
-`CXX`, `PACKAGE_DIR`, `BIN_NAME`, `OS`, `ARCH`, and `OPENTUI_LIBC` inputs.
+Builds resolve `AGENTY_VERSION` from the process environment first, then the ignored
+root `.env`, and otherwise use `dev`; only `.env.example` is committed. Release CI
+passes target-specific `GOOS`, `GOARCH`, `CC`, `CXX`, `PACKAGE_DIR`, `BIN_NAME`, `OS`,
+`ARCH`, and `OPENTUI_LIBC` inputs.
 
 Important commands:
 
-- `pnpm build`, `pnpm test`, `pnpm clean`
+- `pnpm run update`, `pnpm build`, `pnpm test`, `pnpm clean`, `pnpm deepclean`, `pnpm tidyup`
 - `pnpm core:build`, `core:test`, `core:test:integration`, `core:test:e2e`,
   `core:test:e2e:race`, `core:test:race`, `core:test:repeat`, `core:tidyup`
 - `pnpm cli:build`, `cli:dev`, `cli:typecheck`
 - `pnpm bootstrap:build`, `bootstrap:test`
+
+`pnpm run update` updates pnpm, Go, and Cargo dependencies across the workspace. `pnpm clean`
+removes root and workspace build outputs; `pnpm deepclean` also removes local caches,
+dependency stores, `node_modules`, and other generated temporary files. `pnpm tidyup`
+runs `go fmt ./...`, `go vet ./...`, and `go mod tidy` in every Go module.
 
 For Go tests, reuse `GOCACHE=/private/tmp/agenty-go-cache` when sandbox restrictions make
 the default cache unavailable.

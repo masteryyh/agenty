@@ -268,9 +268,11 @@ pnpm core:test:e2e          # 在隔离进程中运行真实二进制 stdio work
 pnpm core:test:e2e:race     # 对 e2e harness 和 core binary 启用 race detection
 pnpm core:test:race         # 使用 race detector 运行默认 suite
 pnpm core:test:repeat       # shuffle 后重复运行，检查隔离性
-pnpm core:tidyup            # 运行 go fmt、go vet 和 go mod tidy
-pnpm core:clean             # 清理该模块的 Go build 和 test caches
+pnpm core:tidyup            # 仅对 agenty-core 运行 go fmt、go vet 和 go mod tidy
+pnpm core:clean             # 清理 agenty-core 构建产物
 ```
+
+在仓库根目录运行 `pnpm tidyup`，可对所有 Go 模块执行相同的整理命令。
 
 目前有意不提供本地 service 命令。End-to-end tests 使用 `e2e` build tag，因此不会进入
 默认 `core:test` suite。

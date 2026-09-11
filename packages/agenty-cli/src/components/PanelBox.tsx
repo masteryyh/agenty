@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import { Box } from "./ui";
 
 interface PanelBoxProps {
@@ -10,11 +11,12 @@ interface PanelBoxProps {
 export function PanelBox({ height, children }: PanelBoxProps) {
     return (
         <Box
+            id="panel-box"
             flexDirection="column"
             width="100%"
             height={height}
             borderStyle="single"
-            borderColor="magenta"
+            borderColor={theme.borderStrong}
             paddingX={1}
             paddingY={1}
         >

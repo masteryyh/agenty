@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import { Box, Text } from "./ui";
 
 export interface PanelProps {
@@ -27,11 +28,11 @@ export function Panel({
         <Box flexDirection="column" flexGrow={1} width="100%" gap={gap}>
             {title ? (
                 <Box flexDirection="column" width="100%" marginBottom={description ? 0 : 1}>
-                    <Text color="magenta" bold>{title}</Text>
+                    <Text color={theme.accent} bold>{title}</Text>
                     {description ? <Text dimColor>{description}</Text> : null}
                 </Box>
             ) : null}
-            {error ? <Text color="red">{error}</Text> : null}
+            {error ? <Text color={theme.danger}>{error}</Text> : null}
             <Box flexDirection="column" flexGrow={1} width="100%" overflow={contentOverflow}>
                 {children}
             </Box>

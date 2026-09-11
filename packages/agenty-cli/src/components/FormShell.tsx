@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import { useDialogContentHeight } from "./BottomDialog";
 import { Box, Text } from "./ui";
 
@@ -31,11 +32,11 @@ export function FormShell({
     return (
         <Box flexDirection="column" width="100%" flexGrow={1}>
             <Box flexDirection="column" width="100%" height={titleLines.length + (compact ? 0 : 1)} flexShrink={0}>
-                <Text color="magenta" bold>{titleLines.join("\n")}</Text>
+                <Text color={theme.accent} bold>{titleLines.join("\n")}</Text>
             </Box>
             {errorLines.length > 0 ? (
                 <Box width="100%" height={errorLines.length} flexShrink={0}>
-                    <Text color="red">{errorLines.join("\n")}</Text>
+                    <Text color={theme.danger}>{errorLines.join("\n")}</Text>
                 </Box>
             ) : null}
             <Box width="100%" height={bodyHeight} flexShrink={0} position="relative">

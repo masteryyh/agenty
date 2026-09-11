@@ -8,6 +8,8 @@ import {
 } from "@opentui/core";
 import { forwardRef, useCallback, useEffect, useRef } from "react";
 
+import { theme } from "../../consts/theme";
+
 export type TextInputProps = {
     value: string;
     onChange: (value: string) => void;
@@ -99,9 +101,9 @@ export const TextInput = forwardRef<InputRenderable, TextInputProps>(
                 value={value}
                 placeholder={placeholder}
                 focused={focus}
-                textColor="#ffffff"
-                focusedTextColor="#ffffff"
-                cursorColor="#00e5ff"
+                textColor={theme.text}
+                focusedTextColor={theme.text}
+                cursorColor={theme.accent}
                 syntaxStyle={syntaxStyle}
                 onInput={onChange}
                 onCursorChange={onCursorChange}

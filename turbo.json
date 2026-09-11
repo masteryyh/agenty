@@ -1,25 +1,74 @@
 {
     "$schema": "https://v2-10-12.turborepo.dev/schema.json",
+    "globalDependencies": [".env"],
     "tasks": {
         "build": {
             "dependsOn": ["^build"],
             "outputs": ["bin/**", "dist/**"],
-            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "GOCACHE", "PACKAGE_DIR", "BIN_NAME"]
+            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
+            "passThroughEnv": ["GOCACHE"]
         },
         "agenty-cli#build": {
             "dependsOn": ["^build"],
-            "cache": false,
+            "inputs": [
+                "package.json",
+                "scripts/**",
+                "!scripts/**/*.test.*",
+                "src/**",
+                "!src/**/*.test.*",
+                "tsconfig*.json",
+                "$TURBO_ROOT$/scripts/build-version.mjs",
+                "$TURBO_ROOT$/.env"
+            ],
+            "outputs": ["bin/**"],
             "env": ["AGENTY_VERSION", "OS", "ARCH", "OPENTUI_LIBC"]
         },
         "agenty-bootstrap#build": {
             "dependsOn": ["^build"],
-            "cache": false,
+            "inputs": [
+                "Cargo.toml",
+                "Cargo.lock",
+                "package.json",
+                "scripts/build.mjs",
+                "scripts/pack.ts",
+                "scripts/target.ts",
+                "scripts/footer.ts",
+                "src/**",
+                "$TURBO_ROOT$/scripts/build-version.mjs",
+                "$TURBO_ROOT$/.env"
+            ],
             "env": ["AGENTY_VERSION", "OS", "ARCH"],
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-            "outputs": ["dist/**"]
+            "outputs": ["bin/**"]
+        },
+        "agenty-core#build": {
+            "dependsOn": ["^build"],
+            "inputs": [
+                "go.mod",
+                "go.sum",
+                "package.json",
+                "cmd/**/*.go",
+                "!cmd/**/*_test.go",
+                "pkg/**/*.go",
+                "!pkg/**/*_test.go",
+                "scripts/build.mjs",
+                "$TURBO_ROOT$/scripts/build-version.mjs",
+                "$TURBO_ROOT$/.env"
+            ],
+            "outputs": ["bin/**"],
+            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
+            "passThroughEnv": ["GOCACHE"]
         },
         "patch-applier#build": {
-            "cache": false,
+            "inputs": [
+                "Cargo.toml",
+                "Cargo.lock",
+                "package.json",
+                "src/**",
+                "$TURBO_ROOT$/scripts/build-version.mjs",
+                "$TURBO_ROOT$/.env"
+            ],
+            "env": ["OS", "ARCH"],
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
             "outputs": ["target/release/apply_patch", "target/release/apply_patch.exe"]
         },
@@ -31,7 +80,7 @@
         },
         "test": {
             "dependsOn": ["^build"],
-            "env": ["GOCACHE"]
+            "passThroughEnv": ["GOCACHE"]
         },
         "lint": {},
         "clean": {
@@ -51,13 +100,13 @@
             ],
             "env": [
                 "AGENTY_VERSION",
-                "GOCACHE",
                 "CGO_ENABLED",
                 "GOOS",
                 "GOARCH",
                 "CC",
                 "CXX"
-            ]
+            ],
+            "passThroughEnv": ["GOCACHE"]
         },
         "agenty-inspector#test": {
             "dependsOn": [],
@@ -67,9 +116,7 @@
                 "$TURBO_ROOT$/packages/agenty-core/go.mod",
                 "$TURBO_ROOT$/packages/agenty-core/go.sum"
             ],
-            "env": [
-                "GOCACHE"
-            ]
+            "passThroughEnv": ["GOCACHE"]
         }
     }
 }

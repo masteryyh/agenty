@@ -1,6 +1,8 @@
 import { createTextAttributes, type MouseEvent } from "@opentui/core";
 import { createContext, type ReactNode, useContext, useRef } from "react";
 
+import { theme } from "../../consts/theme";
+
 const TextNestingContext = createContext(false);
 export const TextBackgroundContext = createContext<string | undefined>(undefined);
 
@@ -41,6 +43,9 @@ export function Text({
     const nested = useContext(TextNestingContext);
     const inheritedBackground = useContext(TextBackgroundContext);
     const resolvedBackground = backgroundColor ?? inheritedBackground;
+    // Uncolored text defaults to the warm foreground token instead of
+    // OpenTUI's cold pure-white default.
+    const resolvedColor = color ?? theme.text;
     const clickStart = useRef<{ x: number; y: number } | null>(null);
     const attributes = createTextAttributes({
         bold,
@@ -50,7 +55,11 @@ export function Text({
     });
     if (nested) {
         return (
-            <span fg={color} bg={resolvedBackground} attributes={attributes}>
+            <span
+                fg={resolvedColor}
+                bg={resolvedBackground}
+                attributes={attributes}
+            >
                 {children}
             </span>
         );
@@ -58,8 +67,10 @@ export function Text({
     return (
         <TextNestingContext.Provider value>
             <text
-                fg={color}
+                fg={resolvedColor}
                 bg={resolvedBackground}
+                selectionBg={theme.surfaceHover}
+                selectionFg={theme.text}
                 attributes={attributes}
                 selectable={selectable ?? true}
                 wrapMode={wrap === "wrap" || !wrap ? "word" : "none"}

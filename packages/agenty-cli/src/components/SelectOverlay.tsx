@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { theme } from "../consts/theme";
 import { List, useListNavigation } from "./List";
 import { Panel } from "./Panel";
 import { Box, Spinner, Text } from "./ui";
@@ -85,7 +86,7 @@ export function SelectOverlay<T>({
                         onActivate={(entry) => onSelect(entry.data)}
                         renderItem={(entry, { selected }) => (
                             <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
-                                <Text color={selected ? "cyan" : "white"} bold={selected} wrap="truncate">
+                                <Text color={selected ? theme.selection : theme.text} bold={selected} wrap="truncate">
                                     {entry.label}
                                 </Text>
                             </Box>

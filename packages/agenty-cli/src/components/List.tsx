@@ -1,6 +1,7 @@
 import type { KeyEvent } from "@opentui/core";
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import type { InputKey } from "../hooks/useInput";
 import { useInput } from "../hooks/useInput";
 import {
@@ -82,7 +83,7 @@ export function List<T>({
                         }}
                     >
                         <Box width={2} height={1}>
-                            <Text color={selected ? "cyan" : "gray"}>
+                            <Text color={selected ? theme.selection : theme.textMuted}>
                                 {selected ? "❯" : " "}
                             </Text>
                         </Box>
@@ -165,13 +166,13 @@ export function KeyValueList({
             key: "key",
             header: "Key",
             value: (row) => row.key,
-            render: (row) => <Text color="gray" wrap="truncate">{row.key}</Text>,
+            render: (row) => <Text color={theme.textMuted} wrap="truncate">{row.key}</Text>,
         },
         {
             key: "value",
             header: "Value",
             value: (row) => row.value,
-            render: (row) => <Text color="white" wrap="truncate">{row.value}</Text>,
+            render: (row) => <Text color={theme.text} wrap="truncate">{row.value}</Text>,
         },
     ];
     const tableLayout = createTableLayout(columns, rows, availableWidth, 1);

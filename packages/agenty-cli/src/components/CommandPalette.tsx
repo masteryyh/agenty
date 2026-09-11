@@ -1,15 +1,13 @@
-import { RGBA } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
 
 import type { SkillDto } from "../api/types";
 import { quoteArg } from "../commands/registry";
+import { theme } from "../consts/theme";
 import type { Palette } from "../hooks/useCommandPalette";
 import { useWindowSize } from "../hooks/useWindowSize";
 import { Box, Pressable, Text } from "./ui";
 
 const MAX_ITEMS = 8;
-const HIGHLIGHT = "#4FA8FF";
-const TERMINAL_BACKGROUND = RGBA.defaultBackground();
 
 interface CommandPaletteProps {
     palette: Palette;
@@ -75,7 +73,7 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                 flexDirection="column"
                 width="100%"
                 marginTop={marginTop}
-                backgroundColor={TERMINAL_BACKGROUND}
+                backgroundColor={theme.surfaceRaised}
             >
                 {items.map((skill, index) => {
                     const absoluteIndex = windowStart + index;
@@ -91,11 +89,11 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                             onPress={() => onChooseSkill(skill, palette.matchStart, palette.matchEnd)}
                         >
                             <Text width="100%">
-                                <Text color={selected ? HIGHLIGHT : undefined}>{cursor}</Text>
-                                <Text color={selected ? HIGHLIGHT : "#00E5FF"} bold>
+                                <Text color={selected ? theme.selection : undefined}>{cursor}</Text>
+                                <Text color={selected ? theme.selection : theme.accent} bold>
                                     {`$${skill.name}`}
                                 </Text>
-                                <Text color={skill.autoEnabled ? "gray" : "yellow"}>
+                                <Text color={skill.autoEnabled ? theme.textMuted : theme.warning}>
                                     {` — ${skill.description}${warning}`}
                                 </Text>
                                 <Text>{padSpaces(contentLen)}</Text>
@@ -117,7 +115,7 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                 flexDirection="column"
                 width="100%"
                 marginTop={marginTop}
-                backgroundColor={TERMINAL_BACKGROUND}
+                backgroundColor={theme.surfaceRaised}
             >
                 {items.map((c, i) => {
                     const absIdx = windowStart + i;
@@ -135,13 +133,13 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                                 onPress={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
                             >
                                 <Text width="100%">
-                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                    <Text color={selected ? theme.selection : undefined}>
                                         {cursor}
                                     </Text>
-                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                    <Text color={selected ? theme.selection : undefined}>
                                         {c.name}
                                     </Text>
-                                    <Text color="gray">
+                                    <Text color={theme.textMuted}>
                                         {" — "}
                                         {c.description}
                                     </Text>
@@ -162,21 +160,21 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                             onPress={() => onChoose(`${c.name}${c.argHint ? " " : ""}`)}
                         >
                             <Text width="100%">
-                                <Text color={selected ? HIGHLIGHT : undefined}>
+                                <Text color={selected ? theme.selection : undefined}>
                                     {cursor}
                                 </Text>
                                 <Text
-                                    color={HIGHLIGHT}
+                                    color={theme.selection}
                                     bold={isFull}
                                 >
                                     {matchedPart}
                                 </Text>
                                 {unmatchedPart ? (
-                                    <Text color={selected ? HIGHLIGHT : undefined}>
+                                    <Text color={selected ? theme.selection : undefined}>
                                         {unmatchedPart}
                                     </Text>
                                 ) : null}
-                                <Text color="gray">
+                                <Text color={theme.textMuted}>
                                     {" — "}
                                     {c.description}
                                 </Text>
@@ -204,11 +202,11 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
             flexDirection="column"
             width="100%"
             marginTop={marginTop}
-            backgroundColor={TERMINAL_BACKGROUND}
+            backgroundColor={theme.surfaceRaised}
         >
             <Text>
                 {" "}
-                <Text color={HIGHLIGHT} bold>
+                <Text color={theme.selection} bold>
                     {command.name}
                 </Text>
                 <Text dimColor>{headerRest}</Text>
@@ -239,7 +237,7 @@ export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: 
                         >
                             <Text
                                 width="100%"
-                                color={selected ? HIGHLIGHT : "white"}
+                                color={selected ? theme.selection : theme.text}
                                 dimColor={!selected}
                                 bold={selected}
                             >

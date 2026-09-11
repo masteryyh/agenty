@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { executableExtension, resolveArch, resolveOS } from "./platform.mjs";
+import { resolveTurboPlan } from "./turbo.mjs";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
@@ -25,8 +26,16 @@ export function resolveDevPlan(
         "packages/agenty-bootstrap/bin",
         `agenty-${os}-${arch}${executableExtension(os)}`,
     );
+    const turboPlan = resolveTurboPlan(
+        "build",
+        "agenty-bootstrap",
+        environment,
+        hostPlatform,
+        repositoryRoot,
+    );
     return {
-        buildArgs: ["exec", "turbo", "run", "build", "--filter=agenty-bootstrap"],
+        buildEnvironment: turboPlan.buildEnvironment,
+        buildArgs: turboPlan.args,
         launcher,
         launcherArgs: args,
     };
@@ -47,7 +56,7 @@ function run() {
     const plan = resolveDevPlan(process.argv.slice(2));
     const build = spawnSync(packageManagerCommand(), plan.buildArgs, {
         cwd: REPOSITORY_ROOT,
-        env: process.env,
+        env: plan.buildEnvironment,
         stdio: "inherit",
     });
     const buildExitCode = exitCode("bootstrap build", build);
@@ -60,7 +69,7 @@ function run() {
 
     const launcher = spawnSync(plan.launcher, plan.launcherArgs, {
         cwd: REPOSITORY_ROOT,
-        env: process.env,
+        env: plan.buildEnvironment,
         stdio: "inherit",
     });
     return exitCode("bootstrap launcher", launcher);

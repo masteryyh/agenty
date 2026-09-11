@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import { Box, Text } from "./ui";
 
 export interface TableColumn<T> {
@@ -205,7 +206,7 @@ export function TableRow<T>({
                         column.render(row, selected)
                     ) : (
                         <Text
-                            color={selected ? "cyan" : "white"}
+                            color={selected ? theme.selection : theme.text}
                             bold={selected}
                             wrap="truncate"
                         >

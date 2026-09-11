@@ -43,8 +43,9 @@ Agenty installation. `--port 0` selects an available port and prints its address
 The executable always binds to `127.0.0.1`.
 
 Inspector is built independently of the CLI/core/patch/bootstrap release payloads.
-The root `pnpm build` includes the workspace build, but the bootstrap payload format
-and released launcher remain unchanged. Go uses the same version as core's go.mod.
+The default root `pnpm build` excludes Inspector; use `pnpm inspector:build` for its
+standalone binary. The build uses the same `AGENTY_VERSION` resolution as the other
+modules.
 
 ## Explore a session
 

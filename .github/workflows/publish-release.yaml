@@ -119,12 +119,9 @@ jobs:
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
-          printf 'AGENTY_VERSION=%s\n' "${tag}" > .env
-          set -a
-          source .env
-          set +a
 
           pnpm run cli:typecheck
+          AGENTY_VERSION="${tag}" \
           CGO_ENABLED=1 \
           GOOS="${{ matrix.goos }}" \
           GOARCH="${{ matrix.arch }}" \
@@ -141,7 +138,7 @@ jobs:
         if: matrix.goos != 'windows'
         shell: bash
         run: |
-          artifact="packages/agenty-bootstrap/dist/agenty-${{ matrix.os }}-${{ matrix.arch }}"
+          artifact="packages/agenty-bootstrap/bin/agenty-${{ matrix.os }}-${{ matrix.arch }}"
           if [[ "${{ matrix.goos }}" == "darwin" ]]; then
             linked="$(otool -L "$artifact")"
           else
@@ -159,7 +156,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           mkdir -p dist
           tar -czf "dist/agenty_${tag}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" \
-            "packages/agenty-bootstrap/dist/agenty-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.bin_ext }}"
+            "packages/agenty-bootstrap/bin/agenty-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.bin_ext }}"
 
       - name: Upload release package
         uses: actions/upload-artifact@v7

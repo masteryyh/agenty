@@ -184,7 +184,7 @@ func (a *ChunkAssembler) Abort(requestID string) error {
 
 func (a *ChunkAssembler) StartCleanup(ctx context.Context) {
 	go func() {
-		interval := max(a.ttl / 2, time.Second)
+		interval := max(a.ttl/2, time.Second)
 		t := time.NewTicker(interval)
 		defer t.Stop()
 

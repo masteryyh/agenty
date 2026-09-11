@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CoreModelDto, ModelProviderDto, ModelRef } from "../api/types";
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
@@ -279,7 +280,7 @@ function ModelList({
             header: "Model",
             value: modelLabel,
             render: (model, selected) => (
-                <Text color={selected ? "cyan" : "white"} bold={selected} wrap="truncate">
+                <Text color={selected ? theme.selection : theme.text} bold={selected} wrap="truncate">
                     {modelLabel(model)}
                 </Text>
             ),
@@ -289,7 +290,7 @@ function ModelList({
             header: "Context",
             value: (model) => model.contextWindow.toLocaleString(),
             render: (model, selected) => (
-                <Text color={selected ? "cyan" : "gray"} dimColor={!selected}>
+                <Text color={selected ? theme.selection : theme.textMuted}>
                     {model.contextWindow.toLocaleString()}
                 </Text>
             ),
@@ -299,7 +300,7 @@ function ModelList({
             header: "State",
             value: modelState,
             render: (model) => (
-                <Text color={modelState(model) === "current" ? "green" : "gray"} dimColor>
+                <Text color={modelState(model) === "current" ? theme.success : theme.textMuted}>
                     {modelState(model)}
                 </Text>
             ),
@@ -343,11 +344,11 @@ function ModelList({
                 </Box>
                 <Text> </Text>
                 <Pressable height={1} onPress={() => moveProvider(-1)}>
-                    <Text color="cyan" bold> ‹ </Text>
+                    <Text color={theme.accent} bold> ‹ </Text>
                 </Pressable>
-                <Text color="cyan" bold> {provider?.name ?? "—"} </Text>
+                <Text color={theme.accent} bold> {provider?.name ?? "—"} </Text>
                 <Pressable height={1} onPress={() => moveProvider(1)}>
-                    <Text color="cyan" bold> › </Text>
+                    <Text color={theme.accent} bold> › </Text>
                 </Pressable>
             </Box>
             <Box width="100%" height={1} marginBottom={1} overflow="hidden">
