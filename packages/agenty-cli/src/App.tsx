@@ -26,6 +26,7 @@ import {
     renderDocument,
     serializeDocument,
 } from "./composer/document";
+import { theme } from "./consts/theme";
 import { useApp, useChat, useInput, useWindowSize } from "./hooks";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { type OverlayKind, useAppStore } from "./state/store";
@@ -86,10 +87,10 @@ export function App() {
     if (app.phase === "error") {
         return (
             <Box padding={1} flexDirection="column">
-                <Text color="red" bold>
+                <Text color={theme.danger} bold>
                     Failed to start agenty-cli:
                 </Text>
-                <Text color="red">{app.initError}</Text>
+                <Text color={theme.danger}>{app.initError}</Text>
                 <Text dimColor>Make sure the core binary is executable and its data directory is writable. Press Ctrl+C to exit.</Text>
             </Box>
         );
@@ -376,17 +377,17 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
     return (
         <Box flexDirection="column" paddingX={2} paddingY={1}>
             <Box marginBottom={1}>
-                <Text color="magenta" bold>
+                <Text color={theme.accent} bold>
                     Commands
                 </Text>
                 <Text dimColor> · Esc to close</Text>
             </Box>
             {commands.map((c) => (
                 <Box key={c.name} gap={1}>
-                    <Text color="cyan" bold>
+                    <Text color={theme.accent} bold>
                         {c.name}
                     </Text>
-                    <Text color="gray">— {c.description}</Text>
+                    <Text color={theme.textMuted}>— {c.description}</Text>
                 </Box>
             ))}
         </Box>

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { Box, Pressable, Text } from "./ui";
 
@@ -110,6 +111,7 @@ export function DropdownMenu({
 
     return (
         <Box
+            id="dropdown-menu"
             width={Math.max(width, 1)}
             height={panelHeight}
             flexDirection="column"
@@ -118,8 +120,8 @@ export function DropdownMenu({
             borderRight={bordered}
             borderBottom={bordered}
             borderLeft={bordered}
-            borderColor="#405158"
-            backgroundColor="#101417"
+            borderColor={theme.borderStrong}
+            backgroundColor={theme.surfaceRaised}
             overflow="hidden"
         >
             {visibleOptions.map((option, localIndex) => {
@@ -149,11 +151,11 @@ export function DropdownMenu({
                             }
                         }}
                     >
-                        <Text color={active ? "cyan" : "gray"}>
+                        <Text color={active ? theme.selection : theme.textMuted}>
                             {active ? "❯ " : "  "}
                         </Text>
                         <Text
-                            color={active || checked ? "cyan" : "white"}
+                            color={active || checked ? theme.selection : theme.text}
                             bold={active || checked}
                             wrap="truncate"
                         >

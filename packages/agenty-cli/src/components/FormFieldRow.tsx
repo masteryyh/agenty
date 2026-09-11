@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { theme } from "../consts/theme";
 import { FORM_MARKER_WIDTH, type FormLayout } from "./formLayout";
 import { Box, Pressable, Text } from "./ui";
 
@@ -35,10 +36,10 @@ export function FormFieldRow({
             onPress={onPress}
         >
             <Box width={FORM_MARKER_WIDTH} height={1} flexShrink={0}>
-                <Text color={selected ? "cyan" : "gray"}>{selected ? "❯" : " "}</Text>
+                <Text color={selected ? theme.selection : theme.textMuted}>{selected ? "❯" : " "}</Text>
             </Box>
             {disclosure ? (
-                <Text color={selected ? "cyan" : "gray"} bold={selected} wrap="truncate">
+                <Text color={selected ? theme.selection : theme.textMuted} bold={selected} wrap="truncate">
                     {disclosure}
                 </Text>
             ) : (
@@ -51,7 +52,7 @@ export function FormFieldRow({
                     <Box width={layout.labelWidth} height={labelLines.length} flexDirection="column" flexShrink={0}>
                         {labelLines.map((line, index) => (
                             <Box key={index} width="100%" height={1} justifyContent={stacked ? "flex-start" : "flex-end"}>
-                                <Text color={selected ? "cyan" : "gray"} bold={selected}>{line}</Text>
+                                <Text color={selected ? theme.selection : theme.textMuted} bold={selected}>{line}</Text>
                             </Box>
                         ))}
                     </Box>

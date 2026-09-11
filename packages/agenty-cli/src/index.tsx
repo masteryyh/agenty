@@ -4,6 +4,8 @@ import { createRoot } from "@opentui/react";
 
 import { App } from "./App";
 import { runCLICommand } from "./cli/run";
+import { Box } from "./components/ui";
+import { theme } from "./consts/theme";
 import { useAppStore } from "./state/store";
 import { TuiRuntimeProvider } from "./tui/runtime";
 
@@ -53,7 +55,12 @@ if (command.handled) {
 
     root.render(
         <TuiRuntimeProvider runtime={{ exit: (code) => void shutdown(code) }}>
-            <App />
+            {/* Absolute dark base: every token is an absolute hex value, so the
+                app paints its own background instead of inheriting the
+                terminal's (which may be light). */}
+            <Box width="100%" height="100%" flexDirection="column" backgroundColor={theme.base}>
+                <App />
+            </Box>
         </TuiRuntimeProvider>,
     );
 

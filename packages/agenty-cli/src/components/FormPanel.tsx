@@ -2,6 +2,7 @@ import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/co
 import type { ReactNode } from "react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { theme } from "../consts/theme";
 import type { InputKey } from "../hooks/useInput";
 import { useInput } from "../hooks/useInput";
 import { useWindowSize } from "../hooks/useWindowSize";
@@ -532,7 +533,7 @@ export function FormPanel({
                                     }}
                                 />
                             ) : (
-                                <Text color={selected ? "cyan" : "white"} wrap="truncate">
+                                <Text color={selected ? theme.selection : theme.text} wrap="truncate">
                                     {field.kind === "boolean"
                                         ? renderBoolean(selected, scalarValue)
                                         : field.kind === "multiselect"
@@ -632,7 +633,7 @@ function renderTextValue(
 function renderBoolean(selected: boolean, value: string): React.ReactNode {
     const enabled = value === "true";
     return (
-        <Text color={selected ? "cyan" : "white"} bold={selected}>
+        <Text color={selected ? theme.selection : theme.text} bold={selected}>
             {enabled ? "◉ true" : "○ false"}
         </Text>
     );

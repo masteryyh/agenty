@@ -1,19 +1,12 @@
-import {
-    CliRenderEvents,
-    type ScrollBoxRenderable,
-    type ThemeMode,
-} from "@opentui/core";
-import { useRenderer } from "@opentui/react";
+import type { ScrollBoxRenderable } from "@opentui/core";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SkillDto } from "../api/types";
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import type { UIMessage } from "../state/store";
 import { MessageItem, type MessageRenderItem } from "./MessageItem";
 import { Box, Pressable, Text } from "./ui";
-
-const HINT_BACKGROUND = "#24383f";
-const HINT_FOREGROUND = "#c7f5ff";
 
 function trimBoundaryBlankLines(content: string): string {
     const lines = content.split("\n");
@@ -48,7 +41,6 @@ export function MessageList({
     header,
     interactive = true,
 }: MessageListProps) {
-    const renderer = useRenderer();
     const listRef = useRef<ScrollBoxRenderable>(null);
     // follow = pinned to the bottom, auto-scrolling as new content streams in.
     // When the user scrolls up we detach; new messages then accrue into `unseen`.
@@ -64,29 +56,6 @@ export function MessageList({
     );
     const [now, setNow] = useState(() => Date.now());
     const [blinkOn, setBlinkOn] = useState(true);
-    const [themeMode, setThemeMode] = useState<ThemeMode>(
-        () => renderer.themeMode ?? "dark",
-    );
-
-    useEffect(() => {
-        let cancelled = false;
-        const handleThemeMode = (mode: ThemeMode) => {
-            if (!cancelled) {
-                setThemeMode(mode);
-            }
-        };
-
-        renderer.on(CliRenderEvents.THEME_MODE, handleThemeMode);
-        void renderer.waitForThemeMode().then((mode) => {
-            if (mode) {
-                handleThemeMode(mode);
-            }
-        });
-        return () => {
-            cancelled = true;
-            renderer.off(CliRenderEvents.THEME_MODE, handleThemeMode);
-        };
-    }, [renderer]);
 
     const messages: UIMessage[] = useMemo(() => {
         const list: UIMessage[] = [...history];
@@ -373,7 +342,13 @@ export function MessageList({
                     onMouseScroll={() => {
                         queueMicrotask(() => handleScrollPosition());
                     }}
-                    verticalScrollbarOptions={{ showArrows: false }}
+                    verticalScrollbarOptions={{
+                        showArrows: false,
+                        trackOptions: {
+                            backgroundColor: theme.surface,
+                            foregroundColor: theme.textFaint,
+                        },
+                    }}
                 >
                     {header ? (
                         <Box
@@ -400,7 +375,6 @@ export function MessageList({
                                 <MessageItem
                                     item={item}
                                     skills={skills}
-                                    themeMode={themeMode}
                                     onToggleReasoning={(id) => {
                                         setExpandedReasoningIds((ids) => {
                                             const next = new Set(ids);
@@ -431,8 +405,8 @@ export function MessageList({
             </Box>
             {showHint ? (
                 <Box height={1} marginTop={-2} justifyContent="center" overflow="hidden">
-                    <Pressable backgroundColor={HINT_BACKGROUND} onPress={jumpToBottom}>
-                        <Text color={HINT_FOREGROUND}>{` ${hintLabel} `}</Text>
+                    <Pressable backgroundColor={theme.surfaceRaised} onPress={jumpToBottom}>
+                        <Text color={theme.text}>{` ${hintLabel} `}</Text>
                     </Pressable>
                 </Box>
             ) : null}

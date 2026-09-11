@@ -1,5 +1,4 @@
 export { Box, type BoxProps } from "./Box";
-export { GradientText } from "./GradientText";
 export {
     ActionBar,
     type ActionBarItem,

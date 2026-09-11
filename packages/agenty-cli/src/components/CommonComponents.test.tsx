@@ -546,7 +546,7 @@ describe("common TUI components", () => {
 
             const dialog = findBox(
                 setup.renderer.root,
-                (box) => box.borderColor.equals(RGBA.fromHex("#ff0000")),
+                (box) => box.id === "confirm-dialog",
             );
             expect(dialog).not.toBeNull();
             const container = dialog?.parent;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { McpLogEntry, McpServerConfig, McpServerDto, McpTransport } from "../api/types";
+import { theme } from "../consts/theme";
 import { useAppStore } from "../state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
@@ -433,11 +434,11 @@ function McpServerList({
                 renderItem={(row, state) => (
                     <Box flexDirection="column" flexGrow={1} height={1} overflow="hidden">
                         {row.kind === "server" ? (
-                            <Text color={state.selected ? "cyan" : "white"} bold={state.selected} wrap="truncate">
+                            <Text color={state.selected ? theme.selection : theme.text} bold={state.selected} wrap="truncate">
                                 {row.server.name} · {row.server.config.type}{row.server.deprecated ? " (deprecated)" : ""} · {row.server.toolCount} tools · {statusLabel(row.server)}
                             </Text>
                         ) : (
-                            <Text color={state.selected ? "cyan" : "gray"} dimColor={!state.selected}>
+                            <Text color={state.selected ? theme.selection : theme.textMuted}>
                                 {row.label}
                             </Text>
                         )}
@@ -485,15 +486,15 @@ function McpLogs({
     const recent = logs.slice(-5);
     return (
         <Box flexDirection="column" width="100%" height={Math.max(recent.length + 1, 2)} overflow="hidden">
-            <Text color="magenta" bold>Connection logs</Text>
+            <Text color={theme.accent} bold>Connection logs</Text>
             {loading ? <Text dimColor>Loading logs…</Text> : null}
-            {error ? <Text color="red" wrap="truncate">Failed to load logs: {error}</Text> : null}
+            {error ? <Text color={theme.danger} wrap="truncate">Failed to load logs: {error}</Text> : null}
             {!loading && !error && recent.length === 0 ? <Text dimColor>No connection logs captured.</Text> : null}
             {!loading && !error ? recent.map((log, index) => {
                 const time = log.time.length >= 19 ? log.time.slice(11, 19) : log.time;
                 const stage = log.stage ? `/${log.stage}` : "";
                 return (
-                    <Text key={`${log.time}:${index}`} color={log.level === "error" ? "red" : "gray"} wrap="truncate">
+                    <Text key={`${log.time}:${index}`} color={log.level === "error" ? theme.danger : theme.textMuted} wrap="truncate">
                         {time} {log.level}/{log.source}{stage}: {log.message}
                     </Text>
                 );

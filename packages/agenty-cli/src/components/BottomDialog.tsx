@@ -1,4 +1,3 @@
-import { RGBA } from "@opentui/core";
 import { useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
     createContext,
@@ -11,11 +10,11 @@ import {
     useState,
 } from "react";
 
+import { theme } from "../consts/theme";
 import { PanelBox } from "./PanelBox";
 import { Box } from "./ui";
 
 const DIALOG_Z_INDEX = 100;
-const TERMINAL_BACKGROUND = RGBA.defaultBackground();
 
 interface BottomDialogSize {
     width: number;
@@ -95,7 +94,7 @@ export function BottomDialog({ width, height, children }: BottomDialogProps) {
             width={width}
             height={resolvedHeight}
             zIndex={DIALOG_Z_INDEX}
-            backgroundColor={TERMINAL_BACKGROUND}
+            backgroundColor={theme.surface}
         >
             <BottomDialogSizeContext.Provider value={contentSize}>
                 <PanelBox height={resolvedHeight}>{children}</PanelBox>

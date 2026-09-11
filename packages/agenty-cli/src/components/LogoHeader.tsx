@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 
 import { pickAsciiArt } from "../consts/asciiArts";
+import { theme } from "../consts/theme";
 import { AGENTY_VERSION } from "../version";
-import { Box, GradientText, Text } from "./ui";
+import { Box, Text } from "./ui";
 
 export const LOGO_HEADER_HEIGHT = 5;
 
@@ -13,7 +14,7 @@ export function LogoHeader() {
     return (
         <Box
             borderStyle="rounded"
-            borderColor="magenta"
+            borderColor={theme.border}
             paddingX={1}
             flexDirection="row"
             flexShrink={0}
@@ -23,7 +24,7 @@ export function LogoHeader() {
         >
             <Box flexDirection="column" flexShrink={1} overflow="hidden">
                 {artLines.map((line, i) => (
-                    <Text key={i} color="magenta" bold wrap="truncate">
+                    <Text key={i} color={theme.accent} bold wrap="truncate">
                         {line}
                     </Text>
                 ))}
@@ -34,10 +35,8 @@ export function LogoHeader() {
                 justifyContent="center"
                 gap={0}
             >
-                <GradientText colors={["#00E5FF", "#FF00E5"]}>
-                    agenty
-                </GradientText>
-                <Text color="gray" wrap="truncate">v{AGENTY_VERSION}</Text>
+                <Text color={theme.accentBright} bold>agenty</Text>
+                <Text color={theme.textMuted} wrap="truncate">v{AGENTY_VERSION}</Text>
             </Box>
         </Box>
     );

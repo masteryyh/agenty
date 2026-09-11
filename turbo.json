@@ -42,6 +42,7 @@
             "outputs": ["bin/**"]
         },
         "agenty-core#build": {
+            "dependsOn": ["^build"],
             "inputs": [
                 "go.mod",
                 "go.sum",

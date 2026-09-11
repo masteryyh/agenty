@@ -11,6 +11,7 @@ import type {
 } from "../api/types";
 import { STANDARD_REASONING_EFFORTS } from "../api/types";
 import { providerDefaultBaseURLs, providerTypes } from "../consts/providerTypes";
+import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
@@ -673,7 +674,7 @@ function ProviderList({
             value: providerRowLabel,
             render: (row, selected) => (
                 <Text
-                    color={selected ? "cyan" : row.kind === "provider" ? "white" : "gray"}
+                    color={selected ? theme.selection : row.kind === "provider" ? theme.text : theme.textMuted}
                     bold={selected || row.kind === "provider"}
                     wrap="truncate"
                 >
@@ -687,7 +688,7 @@ function ProviderList({
             value: providerRowState,
             render: (row) => (
                 <Text
-                    color={providerRowState(row) === "configured" ? "green" : "gray"}
+                    color={providerRowState(row) === "configured" ? theme.success : theme.textMuted}
                     dimColor={row.kind === "add-provider" || row.kind === "add-model"}
                 >
                     {providerRowState(row)}
