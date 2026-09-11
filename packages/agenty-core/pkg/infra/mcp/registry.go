@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,8 +138,9 @@ type serverEntry struct {
 }
 
 type tokenFile struct {
-	Config *oauth2.Config `json:"config,omitempty"`
-	Token  oauth2.Token   `json:"token"`
+	Config            *oauth2.Config `json:"config,omitempty"`
+	Token             oauth2.Token   `json:"token"`
+	TargetFingerprint string         `json:"targetFingerprint,omitempty"`
 }
 
 type toolSession struct {
@@ -241,14 +244,23 @@ func (registry *Registry) load() error {
 		return fmt.Errorf("mcp: read configuration directory: %w", err)
 	}
 	for _, item := range entries {
-		if item.IsDir() || strings.ToLower(filepath.Ext(item.Name())) != ".json" {
+		if item.IsDir() {
 			continue
 		}
+		extension := filepath.Ext(item.Name())
+		if extension != ".json" {
+			if strings.EqualFold(extension, ".json") {
+				registry.logger.Warn("ignoring MCP configuration with non-canonical filename", "file", item.Name(), "expectedSuffix", ".json")
+			}
+			continue
+		}
+
 		name := strings.TrimSuffix(item.Name(), filepath.Ext(item.Name()))
 		if err := domainmcp.ValidateName(name); err != nil {
 			registry.logger.Warn("ignoring MCP configuration with invalid name", "file", item.Name(), "error", err)
 			continue
 		}
+
 		key := serverKey(name)
 		if existing, exists := registry.servers[key]; exists {
 			return fmt.Errorf("mcp: server names %q and %q differ only by case", existing.name, name)
@@ -763,26 +775,29 @@ func (registry *Registry) transport(ctx context.Context, name string, config dom
 	headers := expandMap(config.Headers)
 	var oauthHandler auth.OAuthHandler
 	var err error
-	if config.BearerTokenEnvVar != "" {
-		if token := os.Getenv(config.BearerTokenEnvVar); token != "" {
-			headers["Authorization"] = "Bearer " + token
-		}
-	}
 	if config.Type == domainmcp.TransportHTTP {
-		if file, err := registry.loadOAuthSession(name); err == nil && file.Token.AccessToken != "" {
+		if file, err := registry.loadOAuthSession(name, config); err == nil && file.Token.AccessToken != "" {
 			if file.Config != nil {
 				oauthClient := &http.Client{Transport: http.DefaultTransport, Timeout: registry.connectWait}
 				tokenContext := context.WithValue(ctx, oauth2.HTTPClient, oauthClient)
 				source := file.Config.TokenSource(tokenContext, &file.Token)
-				source = registry.savingTokenSource(name, file.Config, &file.Token, source)
+				source = registry.savingTokenSource(name, generation, file.Config, &file.Token, source)
 				oauthHandler = &persistedOAuthHandler{source: source}
 				deleteAuthorizationHeader(headers)
 			} else {
-				headers["Authorization"] = bearerValue(&file.Token)
+				// Legacy token-only files have no trustworthy target binding and are
+				// intentionally ignored by loadOAuthSession.
 			}
 		}
 	}
-	httpClient := &http.Client{Transport: &headerRoundTripper{base: http.DefaultTransport, headers: headers}}
+	var httpClient *http.Client
+	if config.Type == domainmcp.TransportHTTP || config.Type == domainmcp.TransportSSE {
+		endpoint, err := url.Parse(config.URL)
+		if err != nil {
+			return nil, nil, cleanup, fmt.Errorf("mcp: parse endpoint URL: %w", err)
+		}
+		httpClient = newMCPHTTPClient(endpoint, headers)
+	}
 	switch config.Type {
 	case domainmcp.TransportStdio:
 		// The session context is retained for the lifetime of the MCP session.
@@ -799,7 +814,7 @@ func (registry *Registry) transport(ctx context.Context, name string, config dom
 			// OAuth discovery, registration, and token requests to avoid sending a
 			// resource-server secret to a different authorization host.
 			oauthClient := &http.Client{Transport: http.DefaultTransport, Timeout: registry.connectWait}
-			oauthHandler, handlerCleanup, err = registry.newOAuthHandler(name, config, oauthClient, generation)
+			oauthHandler, handlerCleanup, err = registry.newOAuthHandler(name, oauthClient, generation)
 			if err != nil {
 				return nil, nil, cleanup, err
 			}
@@ -813,6 +828,37 @@ func (registry *Registry) transport(ctx context.Context, name string, config dom
 	}
 }
 
+func sameHTTPOrigin(left, right *url.URL) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		httpOriginPort(left) == httpOriginPort(right)
+}
+
+func newMCPHTTPClient(endpoint *url.URL, headers map[string]string) *http.Client {
+	return &http.Client{
+		Transport: &headerRoundTripper{base: http.DefaultTransport, headers: headers},
+		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+			if sameHTTPOrigin(endpoint, request.URL) {
+				return nil
+			}
+			return fmt.Errorf("mcp: refusing cross-origin redirect from %s to %s", endpoint, request.URL)
+		},
+	}
+}
+
+func httpOriginPort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
 func (registry *Registry) install(name string, generation uint64, session *mcp.ClientSession, sessionCancel context.CancelFunc, tools []*remoteTool, lifecycles ...*toolSession) error {
 	var lifecycle *toolSession
 	if len(lifecycles) > 0 {
@@ -823,6 +869,9 @@ func (registry *Registry) install(name string, generation uint64, session *mcp.C
 	}
 	if lifecycle == nil {
 		lifecycle = &toolSession{}
+	}
+	if err := ensureUniqueRemoteToolNames(tools); err != nil {
+		return err
 	}
 	for _, tool := range tools {
 		if tool != nil {
@@ -1138,16 +1187,10 @@ func cloneStringMap(values map[string]string) map[string]string {
 }
 
 func sameOAuthTarget(left, right domainmcp.Config) bool {
-	if left.Type != right.Type || left.URL != right.URL || left.BearerTokenEnvVar != right.BearerTokenEnvVar {
+	if left.Type != right.Type || left.URL != right.URL {
 		return false
 	}
-	if !sameStringMap(left.Headers, right.Headers) {
-		return false
-	}
-	if left.OAuth == nil || right.OAuth == nil {
-		return left.OAuth == nil && right.OAuth == nil
-	}
-	return *left.OAuth == *right.OAuth
+	return sameStringMap(left.Headers, right.Headers)
 }
 
 func sameStringMap(left, right map[string]string) bool {
@@ -1188,10 +1231,32 @@ func listTools(ctx context.Context, session *mcp.ClientSession, serverName strin
 			result = append(result, tool)
 		}
 		if page.NextCursor == "" {
+			if err := ensureUniqueRemoteToolNames(result); err != nil {
+				return nil, err
+			}
 			return result, nil
 		}
 		params = &mcp.ListToolsParams{Cursor: page.NextCursor}
 	}
+}
+
+func ensureUniqueRemoteToolNames(tools []*remoteTool) error {
+	seenNames := make(map[string]string, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if previous, exists := seenNames[tool.exposedName]; exists {
+			return fmt.Errorf(
+				"mcp: remote tools %q and %q normalize to the same exposed name %q",
+				previous,
+				tool.remoteName,
+				tool.exposedName,
+			)
+		}
+		seenNames[tool.exposedName] = tool.remoteName
+	}
+	return nil
 }
 
 type remoteTool struct {
@@ -1328,7 +1393,7 @@ func convertContent(values []mcp.Content, structured any) (conversation.Content,
 	return content, nil
 }
 
-func (registry *Registry) newOAuthHandler(name string, config domainmcp.Config, httpClient *http.Client, generation uint64) (auth.OAuthHandler, func(), error) {
+func (registry *Registry) newOAuthHandler(name string, httpClient *http.Client, generation uint64) (auth.OAuthHandler, func(), error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("mcp: listen for OAuth callback: %w", err)
@@ -1383,20 +1448,10 @@ func (registry *Registry) newOAuthHandler(name string, config domainmcp.Config, 
 		},
 	}
 	options.NewTokenSource = func(ctx context.Context, oauthConfig *oauth2.Config, token *oauth2.Token) (oauth2.TokenSource, error) {
-		if err := registry.persistOAuthSession(name, oauthConfig, token); err != nil {
+		if err := registry.persistOAuthSession(name, generation, oauthConfig, token); err != nil {
 			return nil, err
 		}
-		return registry.savingTokenSource(name, oauthConfig, token, oauthConfig.TokenSource(ctx, token)), nil
-	}
-	if config.OAuth != nil && config.OAuth.ClientID != "" {
-		options.DynamicClientRegistrationConfig = nil
-		options.PreregisteredClient = &oauthex.ClientCredentials{
-			ClientID: os.ExpandEnv(config.OAuth.ClientID),
-			Issuer:   os.ExpandEnv(config.OAuth.Issuer),
-		}
-		if config.OAuth.ClientSecret != "" {
-			options.PreregisteredClient.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: os.ExpandEnv(config.OAuth.ClientSecret)}
-		}
+		return registry.savingTokenSource(name, generation, oauthConfig, token, oauthConfig.TokenSource(ctx, token)), nil
 	}
 	handler, err := auth.NewAuthorizationCodeHandler(options)
 	if err != nil {
@@ -1482,11 +1537,24 @@ func (registry *Registry) setAuthURL(name string, generation uint64, url string)
 	registry.emitLocked(domainmcp.Event{Type: "auth_url", Name: name, Status: entry.status, AuthURL: url})
 }
 
-func (registry *Registry) persistOAuthSession(name string, config *oauth2.Config, token *oauth2.Token) error {
+func (registry *Registry) persistOAuthSession(name string, generation uint64, config *oauth2.Config, token *oauth2.Token) error {
 	if config == nil || token == nil || token.AccessToken == "" {
 		return nil
 	}
-	data, err := json.MarshalIndent(tokenFile{Config: config, Token: *token}, "", "  ")
+	registry.mu.RLock()
+	entry, ok := registry.servers[serverKey(name)]
+	if !ok || entry.generation != generation || registry.closing {
+		registry.mu.RUnlock()
+		return fmt.Errorf("mcp: OAuth credentials for %q changed while refreshing", name)
+	}
+	targetConfig := cloneConfig(entry.config)
+	registry.mu.RUnlock()
+
+	data, err := json.MarshalIndent(tokenFile{
+		Config:            config,
+		Token:             *token,
+		TargetFingerprint: oauthTargetFingerprint(name, targetConfig),
+	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode OAuth credentials: %w", err)
 	}
@@ -1512,13 +1580,19 @@ func (registry *Registry) persistOAuthSession(name string, config *oauth2.Config
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close OAuth credentials: %w", err)
 	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	entry, ok = registry.servers[serverKey(name)]
+	if !ok || entry.generation != generation || registry.closing {
+		return fmt.Errorf("mcp: OAuth credentials for %q changed while refreshing", name)
+	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("replace OAuth credentials: %w", err)
 	}
 	return nil
 }
 
-func (registry *Registry) loadOAuthSession(name string) (tokenFile, error) {
+func (registry *Registry) loadOAuthSession(name string, config domainmcp.Config) (tokenFile, error) {
 	path := registry.tokenPath(name)
 	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
 		registry.logger.Warn("failed to secure MCP OAuth credentials", "server", name, "error", err)
@@ -1531,29 +1605,44 @@ func (registry *Registry) loadOAuthSession(name string) (tokenFile, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return tokenFile{}, err
 	}
+	if file.TargetFingerprint == "" {
+		return tokenFile{}, fmt.Errorf("mcp: OAuth credentials for %q have no target binding", name)
+	}
+	if file.TargetFingerprint != oauthTargetFingerprint(name, config) {
+		return tokenFile{}, fmt.Errorf("mcp: OAuth credentials for %q target does not match its configuration", name)
+	}
 	return file, nil
 }
 
-func (registry *Registry) loadOAuthToken(name string) (*oauth2.Token, error) {
-	file, err := registry.loadOAuthSession(name)
-	if err != nil {
-		return nil, err
-	}
-	return &file.Token, nil
+func oauthTargetFingerprint(name string, config domainmcp.Config) string {
+	target, _ := json.Marshal(struct {
+		ServerKey string              `json:"serverKey"`
+		Type      domainmcp.Transport `json:"type"`
+		URL       string              `json:"url"`
+		Headers   map[string]string   `json:"headers,omitempty"`
+	}{
+		ServerKey: serverKey(name),
+		Type:      config.Type,
+		URL:       config.URL,
+		Headers:   config.Headers,
+	})
+	digest := sha256.Sum256(target)
+	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 type savingTokenSource struct {
-	registry *Registry
-	name     string
-	config   *oauth2.Config
-	source   oauth2.TokenSource
-	last     oauth2.Token
-	hasLast  bool
-	mu       sync.Mutex
+	registry   *Registry
+	name       string
+	generation uint64
+	config     *oauth2.Config
+	source     oauth2.TokenSource
+	last       oauth2.Token
+	hasLast    bool
+	mu         sync.Mutex
 }
 
-func (registry *Registry) savingTokenSource(name string, config *oauth2.Config, initial *oauth2.Token, source oauth2.TokenSource) oauth2.TokenSource {
-	result := &savingTokenSource{registry: registry, name: name, config: config, source: source}
+func (registry *Registry) savingTokenSource(name string, generation uint64, config *oauth2.Config, initial *oauth2.Token, source oauth2.TokenSource) oauth2.TokenSource {
+	result := &savingTokenSource{registry: registry, name: name, generation: generation, config: config, source: source}
 	if initial != nil {
 		result.last = *initial
 		result.hasLast = true
@@ -1574,7 +1663,7 @@ func (source *savingTokenSource) Token() (*oauth2.Token, error) {
 	if source.hasLast && equalOAuthToken(source.last, *token) {
 		return token, nil
 	}
-	if err := source.registry.persistOAuthSession(source.name, source.config, token); err != nil {
+	if err := source.registry.persistOAuthSession(source.name, source.generation, source.config, token); err != nil {
 		return nil, err
 	}
 	source.last = *token
@@ -1706,13 +1795,6 @@ func envList(values map[string]string) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func bearerValue(token *oauth2.Token) string {
-	if token.TokenType == "" {
-		return "Bearer " + token.AccessToken
-	}
-	return token.TokenType + " " + token.AccessToken
 }
 
 type headerRoundTripper struct {

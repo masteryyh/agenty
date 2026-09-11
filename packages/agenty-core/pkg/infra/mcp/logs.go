@@ -22,7 +22,7 @@ func (registry *Registry) appendServerLog(
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
-	entry, ok := registry.servers[name]
+	entry, ok := registry.servers[serverKey(name)]
 	if !ok || entry.generation != generation || registry.closing {
 		return
 	}

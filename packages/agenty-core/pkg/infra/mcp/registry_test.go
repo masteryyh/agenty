@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -338,6 +340,170 @@ func TestNewRemoteToolNormalizesAndTruncatesProviderName(t *testing.T) {
 	}
 }
 
+func TestRemoteToolNameCollisionsAreRejectedBeforeInstall(t *testing.T) {
+	first, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "foo.bar",
+		InputSchema: map[string]any{"type": "object"},
+	}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("first tool: %v", err)
+	}
+	second, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "foo_bar",
+		InputSchema: map[string]any{"type": "object"},
+	}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("second tool: %v", err)
+	}
+	if err := ensureUniqueRemoteToolNames([]*remoteTool{first, second}); err == nil {
+		t.Fatal("ensureUniqueRemoteToolNames accepted a normalized collision")
+	}
+}
+
+func TestInstallRejectsRemoteToolNameCollisionsBeforeMutation(t *testing.T) {
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+
+	registry.mu.Lock()
+	registry.servers["remote"] = &serverEntry{
+		name: "remote",
+		config: domainmcp.Config{
+			Type:    domainmcp.TransportHTTP,
+			Enabled: true,
+			URL:     "https://example.com/mcp",
+		},
+		tools: make(map[string]*remoteTool),
+	}
+	registry.mu.Unlock()
+
+	existing, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "existing",
+		InputSchema: map[string]any{"type": "object"},
+	}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("existing tool: %v", err)
+	}
+	if err := registry.install("remote", 0, nil, nil, []*remoteTool{existing}, existing.lifecycle); err != nil {
+		t.Fatalf("install existing tool: %v", err)
+	}
+
+	first, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "foo.bar",
+		InputSchema: map[string]any{"type": "object"},
+	}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("first tool: %v", err)
+	}
+	second, err := newRemoteTool(nil, &sdkmcp.Tool{
+		Name:        "foo_bar",
+		InputSchema: map[string]any{"type": "object"},
+	}, "remote", time.Second)
+	if err != nil {
+		t.Fatalf("second tool: %v", err)
+	}
+	if err := registry.install("remote", 0, nil, nil, []*remoteTool{first, second}, first.lifecycle); err == nil {
+		t.Fatal("install accepted a normalized collision")
+	}
+	if _, ok := registry.tools.Get(existing.exposedName); !ok {
+		t.Fatal("collision removed the previously installed tool")
+	}
+	if server, ok := registry.Get(t.Context(), "remote"); !ok || server.ToolCount != 1 {
+		t.Fatalf("server after collision = %#v, ok=%v", server, ok)
+	}
+}
+
+func TestRegistryIgnoresNonCanonicalConfigSuffix(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "mcp")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(domainmcp.Config{
+		Type:    domainmcp.TransportHTTP,
+		Enabled: false,
+		URL:     "https://example.com/mcp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "remote.JSON"), config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+	if servers := registry.List(t.Context()); len(servers) != 0 {
+		t.Fatalf("servers = %#v, want no servers", servers)
+	}
+}
+
+func TestMCPHTTPClientRejectsCrossOriginRedirect(t *testing.T) {
+	var targetRequests atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		targetRequests.Add(1)
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, target.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+	endpoint, err := url.Parse(origin.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newMCPHTTPClient(endpoint, map[string]string{
+		"Authorization": "Bearer secret",
+		"X-Token":       "secret",
+	})
+	if _, err := client.Get(origin.URL); err == nil {
+		t.Fatal("cross-origin redirect was accepted")
+	}
+	if targetRequests.Load() != 0 {
+		t.Fatalf("cross-origin redirect reached target %d times", targetRequests.Load())
+	}
+}
+
+func TestMCPHTTPClientAllowsSameOriginRedirectWithHeaders(t *testing.T) {
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/start" {
+			http.Redirect(writer, request, "/done", http.StatusFound)
+			return
+		}
+		received <- request.Header.Get("X-Token")
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newMCPHTTPClient(endpoint, map[string]string{"X-Token": "secret"})
+	response, err := client.Get(server.URL + "/start")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	response.Body.Close()
+	if got := <-received; got != "secret" {
+		t.Fatalf("same-origin header = %q, want secret", got)
+	}
+}
+
 func TestRegistryRefreshKeepsToolSnapshotActive(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "mcp")
@@ -401,6 +567,14 @@ func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
 			t.Errorf("Shutdown: %v", err)
 		}
 	}()
+	serverConfig := domainmcp.Config{
+		Type:    domainmcp.TransportHTTP,
+		Enabled: false,
+		URL:     "https://example.com/mcp",
+	}
+	if _, err := registry.Create(t.Context(), "remote", serverConfig); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	oauthConfig := &oauth2.Config{
 		ClientID: "client",
@@ -412,7 +586,7 @@ func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
 		Expiry:       time.Now().Add(-time.Minute),
 	}
 	refreshContext := context.WithValue(context.Background(), oauth2.HTTPClient, tokenServer.Client())
-	source := registry.savingTokenSource("remote", oauthConfig, initial, oauthConfig.TokenSource(refreshContext, initial))
+	source := registry.savingTokenSource("remote", 0, oauthConfig, initial, oauthConfig.TokenSource(refreshContext, initial))
 	token, err := source.Token()
 	if err != nil {
 		t.Fatalf("Token: %v", err)
@@ -421,13 +595,141 @@ func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
 		t.Fatalf("refreshed token = %#v, refreshes = %d", token, refreshes.Load())
 	}
 
-	stored, err := registry.loadOAuthSession("remote")
+	stored, err := registry.loadOAuthSession("remote", serverConfig)
 	if err != nil {
 		t.Fatalf("loadOAuthSession: %v", err)
 	}
 	if stored.Config == nil || stored.Config.ClientID != "client" || stored.Token.AccessToken != "refreshed" || stored.Token.RefreshToken != "refresh-2" {
 		t.Fatalf("stored OAuth session = %#v", stored)
 	}
+	if stored.TargetFingerprint == "" {
+		t.Fatal("stored OAuth session has no target fingerprint")
+	}
+}
+
+func TestOAuthSessionTargetBinding(t *testing.T) {
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	defer func() {
+		if err := registry.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+	}()
+	config := domainmcp.Config{
+		Type:    domainmcp.TransportHTTP,
+		Enabled: false,
+		URL:     "https://example.com/mcp",
+		Headers: map[string]string{"X-Region": "us-east-1"},
+	}
+	if _, err := registry.Create(t.Context(), "remote", config); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	oauthConfig := &oauth2.Config{ClientID: "client"}
+	if err := registry.persistOAuthSession("remote", 0, oauthConfig, &oauth2.Token{AccessToken: "access"}); err != nil {
+		t.Fatalf("persistOAuthSession: %v", err)
+	}
+	if _, err := registry.loadOAuthSession("remote", config); err != nil {
+		t.Fatalf("loadOAuthSession with matching target: %v", err)
+	}
+	changed := config
+	changed.URL = "https://replacement.example.com/mcp"
+	if _, err := registry.loadOAuthSession("remote", changed); err == nil {
+		t.Fatal("loadOAuthSession accepted a credential for a different target")
+	}
+}
+
+func TestStaleOAuthRefreshCannotRestoreCredentials(t *testing.T) {
+	mutations := []struct {
+		name   string
+		mutate func(*Registry) error
+	}{
+		{
+			name: "logout",
+			mutate: func(registry *Registry) error {
+				_, err := registry.Logout(context.Background(), "remote")
+				return err
+			},
+		},
+		{
+			name: "remove",
+			mutate: func(registry *Registry) error {
+				return registry.Remove(context.Background(), "remote")
+			},
+		},
+		{
+			name: "update-target",
+			mutate: func(registry *Registry) error {
+				_, err := registry.Update(context.Background(), "remote", domainmcp.Config{
+					Type:    domainmcp.TransportHTTP,
+					Enabled: false,
+					URL:     "https://replacement.example.com/mcp",
+				})
+				return err
+			},
+		},
+	}
+
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+			if err != nil {
+				t.Fatalf("NewRegistry: %v", err)
+			}
+			defer func() {
+				if err := registry.Shutdown(context.Background()); err != nil {
+					t.Errorf("Shutdown: %v", err)
+				}
+			}()
+			if _, err := registry.Create(t.Context(), "remote", domainmcp.Config{
+				Type:    domainmcp.TransportHTTP,
+				Enabled: false,
+				URL:     "https://example.com/mcp",
+			}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			started := make(chan struct{})
+			release := make(chan struct{})
+			source := registry.savingTokenSource(
+				"remote",
+				0,
+				&oauth2.Config{ClientID: "client"},
+				&oauth2.Token{AccessToken: "old"},
+				&blockingTokenSource{started: started, release: release, token: &oauth2.Token{AccessToken: "refreshed"}},
+			)
+			result := make(chan error, 1)
+			go func() {
+				_, err := source.Token()
+				result <- err
+			}()
+			<-started
+			if err := mutation.mutate(registry); err != nil {
+				t.Fatalf("%s: %v", mutation.name, err)
+			}
+			close(release)
+			if err := <-result; err == nil {
+				t.Fatal("stale refresh unexpectedly succeeded")
+			}
+			if _, err := os.Stat(registry.tokenPath("remote")); !os.IsNotExist(err) {
+				t.Fatalf("stale refresh restored credentials, stat err = %v", err)
+			}
+		})
+	}
+}
+
+type blockingTokenSource struct {
+	started chan struct{}
+	release <-chan struct{}
+	token   *oauth2.Token
+	once    sync.Once
+}
+
+func (source *blockingTokenSource) Token() (*oauth2.Token, error) {
+	source.once.Do(func() { close(source.started) })
+	<-source.release
+	return source.token, nil
 }
 
 func writeMCPConfig(t *testing.T, dir, name string, config domainmcp.Config) {
