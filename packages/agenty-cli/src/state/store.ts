@@ -234,6 +234,14 @@ function reasoningEffort(enabled: boolean, level: string): ReasoningEffort {
     return "high";
 }
 
+function requestedReasoningEffort(flag: CliOptions["thinking"]): ReasoningEffort | undefined {
+    if (flag === undefined) {
+        return undefined;
+    }
+    const parsed = parseThinking(flag);
+    return reasoningEffort(parsed.thinking, parsed.thinkingLevel);
+}
+
 function modelReasoningEfforts(model: Pick<ModelDto, "reasoning" | "reasoningEfforts">): ReasoningEffort[] {
     if (model.reasoning === false) {
         return [];
@@ -498,14 +506,17 @@ export const useAppStore = create<AppState>((set, get) => {
     };
 
     const prepareAndReady = async (client: AgentyClient, options: CliOptions) => {
-        const parsed = parseThinking(options.thinking);
+        const requestedEffort = requestedReasoningEffort(options.thinking);
         const prepared = await client.prepareSession({
             modelInput: options.modelInput,
             newSession: options.newSession,
-            reasoningEffort: reasoningEffort(parsed.thinking, parsed.thinkingLevel),
+            reasoningEffort: requestedEffort,
         });
-        const requestedEffort = reasoningEffort(parsed.thinking, parsed.thinkingLevel);
-        const resolvedEffort = resolveReasoningEffortForModel(prepared.model, requestedEffort);
+        const persistedEffort = prepared.session.currentReasoningEffort ?? "off";
+        const resolvedEffort = resolveReasoningEffortForModel(
+            prepared.model,
+            requestedEffort ?? persistedEffort,
+        );
         let session = prepared.session;
         if (session.currentReasoningEffort !== resolvedEffort.effort) {
             session = await client.setSessionReasoningEffort(session.id, resolvedEffort.effort);

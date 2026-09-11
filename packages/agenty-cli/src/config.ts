@@ -2,7 +2,7 @@ export type ThinkingFlag = "off" | "on" | string;
 
 export interface CliOptions {
     modelInput?: string;
-    thinking: ThinkingFlag;
+    thinking?: ThinkingFlag;
     dataDir?: string;
     newSession: boolean;
 }
@@ -32,7 +32,7 @@ export function loadOptions(): CliOptions {
     const flags = parseArgs(process.argv.slice(2));
     return {
         modelInput: typeof flags.model === "string" ? flags.model : undefined,
-        thinking: typeof flags.thinking === "string" ? flags.thinking : "off",
+        thinking: typeof flags.thinking === "string" ? flags.thinking : undefined,
         dataDir: typeof flags["data-dir"] === "string" ? flags["data-dir"] : undefined,
         newSession: flags["new-session"] === true,
     };

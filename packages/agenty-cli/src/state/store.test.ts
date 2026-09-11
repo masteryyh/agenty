@@ -97,6 +97,52 @@ describe("reasoning effort fallback", () => {
             toast: { text: "Effort \"max\" is not supported by Limited.", error: true },
         });
     });
+
+    test("preserves a resumed session effort when startup thinking is omitted", async () => {
+        const resumed = { ...session, currentReasoningEffort: "high" as const };
+        const model = {
+            code: "model",
+            providerCode: "provider",
+            providerName: "Provider",
+            name: "Model",
+            contextWindow: 32000,
+            maxOutputTokens: 8192,
+            multiModal: false,
+            light: false,
+            reasoning: true,
+            reasoningEfforts: ["low", "medium", "high"],
+            isDefault: false,
+        } satisfies ModelDto;
+        let updates = 0;
+        const client = {
+            async prepareSession() {
+                return { model, session: resumed };
+            },
+            async setSessionReasoningEffort() {
+                updates += 1;
+                return resumed;
+            },
+            async listSkills() {
+                return { skills: [], diagnostics: [] };
+            },
+        } as unknown as AgentyClient;
+        useAppStore.setState({
+            client,
+            opts: { newSession: false },
+            phase: "wizard",
+            session: resumed,
+            model,
+        });
+
+        await useAppStore.getState().finishWizard();
+
+        expect(updates).toBe(0);
+        expect(useAppStore.getState()).toMatchObject({
+            phase: "ready",
+            thinkingEnabled: true,
+            thinkingLevel: "high",
+        });
+    });
 });
 
 function makeEvent(sequence: number, event: Omit<SessionEvent, "sessionId" | "roundId" | "sequence">): SessionEvent {
