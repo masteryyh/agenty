@@ -33,7 +33,7 @@ func TestStoreReadsWithoutSQLiteAndKeepsFrozenSnapshots(t *testing.T) {
 	path, original := writeFixture(t, dir)
 	store := NewStore(dir)
 	store.Scan(t.Context())
-	entries := store.List("", "", "", "", "", false)
+	entries := store.List("", "", "", "", false)
 	if len(entries) != 1 || entries[0].Title == "" {
 		t.Fatalf("missing session: %+v", entries)
 	}
@@ -97,7 +97,7 @@ func TestStoreMissingDirectoryAndEscapingSymlink(t *testing.T) {
 	}
 	store = NewStore(dir)
 	store.Scan(t.Context())
-	for _, entry := range store.List("", "", "", "", "", false) {
+	for _, entry := range store.List("", "", "", "", false) {
 		if snapshot, err := store.Snapshot(t.Context(), entry.ID, ""); err == nil {
 			t.Fatalf("read escaped transcript: %+v", snapshot.Detail)
 		}
@@ -110,7 +110,7 @@ func TestStoreConcurrentReadsAreReadOnly(t *testing.T) {
 	path, raw := writeFixture(t, dir)
 	store := NewStore(dir)
 	store.Scan(t.Context())
-	entry := store.List("", "", "", "", "", false)[0]
+	entry := store.List("", "", "", "", false)[0]
 	var group sync.WaitGroup
 	for range 5 {
 		group.Go(func() {

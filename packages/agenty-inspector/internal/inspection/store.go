@@ -28,7 +28,6 @@ var (
 )
 
 type System struct {
-	Agents             []string `json:"agents"`
 	Models             []string `json:"models"`
 	DataDir            string   `json:"dataDir"`
 	SessionsDir        string   `json:"sessionsDir"`
@@ -74,7 +73,6 @@ func NewStore(dataDir string) *Store {
 			SessionsDir:        filepath.Join(dataDir, "sessions"),
 			ReadOnly:           true,
 			Scanning:           true,
-			Agents:             []string{},
 			Models:             []string{},
 			MaxTranscriptBytes: MaxTranscriptBytes,
 			Version:            BuildVersion,
@@ -151,7 +149,6 @@ func (s *Store) Scan(ctx context.Context) {
 					if snapshot.Detail.Title != nil {
 						item.Title = *snapshot.Detail.Title
 					}
-					item.Agent = snapshot.Detail.AgentCode.String()
 					if model := snapshot.Detail.CurrentModel; model != nil {
 						item.Model = model.ProviderCode.String() + " / " + model.ModelCode.String()
 					}
@@ -183,23 +180,16 @@ func (s *Store) Scan(ctx context.Context) {
 			break
 		}
 	}
-	agents, models := map[string]bool{}, map[string]bool{}
+	models := map[string]bool{}
 	for _, item := range catalog {
-		if item.entry.Agent != "" {
-			agents[item.entry.Agent] = true
-		}
 		if item.entry.Model != "" {
 			models[item.entry.Model] = true
 		}
 	}
-	s.system.Agents, s.system.Models = []string{}, []string{}
-	for value := range agents {
-		s.system.Agents = append(s.system.Agents, value)
-	}
+	s.system.Models = []string{}
 	for value := range models {
 		s.system.Models = append(s.system.Models, value)
 	}
-	sort.Strings(s.system.Agents)
 	sort.Strings(s.system.Models)
 	s.catalog = catalog
 	s.system.Scanning, s.system.Error, s.system.SessionCount = false, errorMessage, len(catalog)
@@ -252,7 +242,7 @@ func readFile(ctx context.Context, root *os.Root, path string) ([]byte, error) {
 	return raw, nil
 }
 
-func (s *Store) List(query, agent, model, since, until string, issues bool) []SessionEntry {
+func (s *Store) List(query, model, since, until string, issues bool) []SessionEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	items := []SessionEntry{}
@@ -261,9 +251,6 @@ func (s *Store) List(query, agent, model, since, until string, issues bool) []Se
 		e := item.entry
 		date := e.UpdatedAt.Local().Format("2006-01-02")
 		if query != "" && !strings.Contains(strings.ToLower(e.Title+" "+e.SessionID+" "+e.Path), query) {
-			continue
-		}
-		if agent != "" && e.Agent != agent {
 			continue
 		}
 		if model != "" && e.Model != model {

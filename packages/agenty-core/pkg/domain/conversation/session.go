@@ -20,7 +20,6 @@ var (
 
 type Session struct {
 	ID                     uuid.UUID              `json:"id"`
-	AgentCode              shared.Code            `json:"agentCode"`
 	Title                  *string                `json:"title,omitempty"`
 	Cwd                    *string                `json:"cwd,omitempty"`
 	CurrentModel           *shared.ModelRef       `json:"currentModel,omitempty"`
@@ -44,11 +43,10 @@ type CompactionInput struct {
 	At                  time.Time
 }
 
-func StartSession(agentCode shared.Code, model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
+func StartSession(model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
 	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
 		SessionID:       shared.NewID(),
-		Agent:           agentCode,
 		Model:           model,
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
@@ -146,6 +144,35 @@ func (s *Session) AppendUserMessage(roundID uuid.UUID, content Content) (Message
 
 func (s *Session) AppendHiddenUserMessage(roundID uuid.UUID, content Content) (Message, error) {
 	return s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+}
+
+func (s *Session) AppendHiddenUserMessageWithMetadata(
+	roundID uuid.UUID,
+	content Content,
+	metadata shared.Metadata,
+) (Message, error) {
+	message, err := s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	if err != nil {
+		return Message{}, err
+	}
+	message.Metadata = metadata
+	lastEvent := s.pending[len(s.pending)-1]
+	appended, ok := lastEvent.(MessageAppended)
+	if !ok {
+		return Message{}, errors.New("hidden message append event is missing")
+	}
+	appended.Message.Metadata = metadata
+	s.pending[len(s.pending)-1] = appended
+	if round, _, ok := s.findRound(roundID); ok && len(round.Messages) > 0 {
+		round.Messages[len(round.Messages)-1].Metadata = metadata
+	}
+	for index := len(s.context) - 1; index >= 0; index-- {
+		if s.context[index].ID == message.ID {
+			s.context[index].Metadata = metadata
+			break
+		}
+	}
+	return message, nil
 }
 
 func (s *Session) AppendAssistantMessage(roundID uuid.UUID, content Content, model shared.ModelRef, usage *TokenUsage) (Message, error) {
@@ -267,7 +294,6 @@ func (s *Session) apply(e shared.Event) {
 	switch ev := e.(type) {
 	case SessionStarted:
 		s.ID = ev.SessionID
-		s.AgentCode = ev.Agent
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
 		s.CurrentReasoningEffort = ev.ReasoningEffort

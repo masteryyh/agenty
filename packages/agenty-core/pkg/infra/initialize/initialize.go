@@ -19,7 +19,6 @@ func DataDir() (*config.Paths, error) {
 
 type Repositories struct {
 	Conversation *storage.ConversationRepository
-	Agent        *storage.AgentRepository
 	Catalog      *storage.CatalogRepository
 	db           *sql.DB
 }
@@ -47,7 +46,6 @@ func OpenRepositories(ctx context.Context) (*Repositories, error) {
 	}
 	return &Repositories{
 		Conversation: storage.NewConversationRepository(db, paths.SessionsDir),
-		Agent:        storage.NewAgentRepository(paths.AgentsDir),
 		Catalog:      storage.NewCatalogRepository(paths.ProvidersDir, builtinProviders...),
 		db:           db,
 	}, nil

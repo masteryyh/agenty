@@ -20,6 +20,7 @@ export interface ListProps<T> {
     items: T[];
     cursor: number;
     visibleCount: number;
+    gap?: number;
     getKey: (item: T, index: number) => string;
     renderItem: (item: T, state: ListRenderState) => ReactNode;
     onCursor: (index: number) => void;
@@ -47,6 +48,7 @@ export function List<T>({
     items,
     cursor,
     visibleCount,
+    gap = 0,
     getKey,
     renderItem,
     onCursor,
@@ -64,7 +66,7 @@ export function List<T>({
 
     const { start, end } = listWindow(items.length, cursor, visibleCount);
     return (
-        <Box flexDirection="column" flexGrow={1} width="100%" overflow="hidden">
+        <Box flexDirection="column" flexGrow={1} width="100%" gap={gap} overflow="hidden">
             {items.slice(start, end).map((item, localIndex) => {
                 const index = start + localIndex;
                 const selected = active && index === cursor;

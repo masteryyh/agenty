@@ -30,6 +30,45 @@ function expectMeasuredChildren(scrollbox: ScrollBoxRenderable): void {
 }
 
 describe("MessageList layout", () => {
+    test("renders known skill references instead of their canonical syntax", async () => {
+        const skill = {
+            name: "awesome-masteryyh",
+            directoryName: "awesome-masteryyh",
+            description: "instructions",
+            location: "/Users/example/.agents/skills/awesome-masteryyh/SKILL.md",
+            source: "agents",
+            autoEnabled: true,
+        };
+        const setup = await testRender(
+            <MessageList
+                history={[{
+                    id: "user-skill",
+                    role: "user",
+                    content: `Use [$awesome-masteryyh](${skill.location}) now`,
+                }]}
+                current={null}
+                skills={[skill]}
+                height={10}
+            />,
+            { width: 80, height: 12 },
+        );
+
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+
+            const frame = setup.captureCharFrame();
+            expect(frame).toContain("$awesome-masteryyh");
+            expect(frame).not.toContain("[$awesome-masteryyh]");
+            expect(frame).not.toContain(skill.location);
+        } finally {
+            act(() => {
+                setup.renderer.destroy();
+            });
+        }
+    });
+
     test("removes boundary blank lines without collapsing paragraph spacing", async () => {
         const setup = await testRender(
             <MessageList

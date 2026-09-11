@@ -1,10 +1,8 @@
 import type {
-    AgentDto,
     CreateModelDto,
     CreateModelProviderDto,
     ModelProviderDto,
     ReasoningEffort,
-    UpdateAgentDto,
     UpdateModelProviderDto,
 } from "../api/types";
 import {
@@ -14,32 +12,17 @@ import {
     validateProviderDraft,
 } from "../consts/providerPresets";
 
-const DEFAULT_AGENT_CODE = "default";
-const DEFAULT_AGENT_NAME = "Default";
-const DEFAULT_AGENT_SOUL = "Be helpful, concise, and accurate.";
-
 export interface WizardSetupClient {
     listProviders(): Promise<ModelProviderDto[]>;
     listProviderModels(providerCode: string): Promise<unknown>;
-    listAgents(): Promise<AgentDto[]>;
     createProvider(input: CreateModelProviderDto): Promise<ModelProviderDto>;
     updateProvider(code: string, input: UpdateModelProviderDto): Promise<ModelProviderDto>;
     createModel(input: CreateModelDto): Promise<unknown>;
     deleteModel(providerCode: string, modelCode: string): Promise<void>;
-    createAgent(input: {
-        code: string;
-        name: string;
-        soul?: string;
-        defaultModel?: { providerCode: string; modelCode: string };
-        defaultContextWindow?: number;
-        defaultReasoningEffort?: ReasoningEffort;
-        isDefault?: boolean;
-    }): Promise<AgentDto>;
-    updateAgent(code: string, input: UpdateAgentDto): Promise<AgentDto>;
     completeInitialization(input: {
-        agentCode: string;
         providerCode: string;
         modelCode: string;
+        reasoningEffort?: ReasoningEffort;
     }): Promise<{ initialized: boolean }>;
 }
 
@@ -114,7 +97,6 @@ export async function persistWizardSetup(
     }
 
     const existingProviders = (await client.listProviders()) ?? [];
-    const existingAgents = (await client.listAgents()) ?? [];
     const modelsByProvider = new Map<string, ModelDraft[]>();
     for (const model of models) {
         const providerModels = modelsByProvider.get(model.providerId) ?? [];
@@ -212,27 +194,9 @@ export async function persistWizardSetup(
         providerCode: selectedProvider.code.trim(),
         modelCode: selectedModel.code.trim(),
     };
-    const existingAgent = existingAgents.find((agent) => agent.code === DEFAULT_AGENT_CODE) ??
-        existingAgents.find((agent) => agent.isDefault);
-    let agentCode = DEFAULT_AGENT_CODE;
-    const agentInput = {
-        name: DEFAULT_AGENT_NAME,
-        soul: DEFAULT_AGENT_SOUL,
-        defaultModel,
-        defaultContextWindow: selectedModel.contextWindow,
-        defaultReasoningEffort: "off" as const,
-        isDefault: true,
-    };
-    if (existingAgent) {
-        agentCode = existingAgent.code;
-        await client.updateAgent(agentCode, agentInput);
-    } else {
-        await client.createAgent({ code: DEFAULT_AGENT_CODE, ...agentInput });
-    }
-
     await client.completeInitialization({
-        agentCode,
         providerCode: defaultModel.providerCode,
         modelCode: defaultModel.modelCode,
+        reasoningEffort: "off",
     });
 }

@@ -16,6 +16,7 @@ export interface DropdownMenuProps {
     value: string | string[];
     width: number;
     maxVisible?: number;
+    bordered?: boolean;
     onSubmit: (value: string | string[]) => void;
     onClose: () => void;
 }
@@ -30,6 +31,7 @@ export function DropdownMenu({
     value,
     width,
     maxVisible = 6,
+    bordered = true,
     onSubmit,
     onClose,
 }: DropdownMenuProps) {
@@ -104,7 +106,7 @@ export function DropdownMenu({
         ),
     );
     const visibleOptions = options.slice(start, start + visibleCount);
-    const panelHeight = visibleCount + 2;
+    const panelHeight = visibleCount + (bordered ? 2 : 0);
 
     return (
         <Box
@@ -112,6 +114,10 @@ export function DropdownMenu({
             height={panelHeight}
             flexDirection="column"
             borderStyle="single"
+            borderTop={bordered}
+            borderRight={bordered}
+            borderBottom={bordered}
+            borderLeft={bordered}
             borderColor="#405158"
             backgroundColor="#101417"
             overflow="hidden"

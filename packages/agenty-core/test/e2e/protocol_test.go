@@ -17,32 +17,23 @@ func TestStdioJSONRPCSupportsClientTrafficPatterns(t *testing.T) {
 
 	writeRequestFrame(t, ctx, process, rpcRequest{
 		JSONRPC: "2.0",
-		Method:  "agent.create",
-		Params: AgentCreateInput{
-			Code: "notification-agent",
-			Name: "通知创建的 Agent 🐈",
-			Soul: "line one\nline two",
-		},
+		Method:  "provider.list",
+		Params:  struct{}{},
 	})
 	writeRequestFrame(t, ctx, process, rpcRequest{
 		JSONRPC: "2.0",
 		ID:      "barrier",
-		Method:  "agent.get",
-		Params:  map[string]any{"code": "notification-agent"},
+		Method:  "provider.list",
+		Params:  struct{}{},
 	})
 	barrier := readSingleResponse(t, ctx, process)
 	if string(barrier.ID) != `"barrier"` || barrier.Error != nil {
 		t.Fatalf("notification barrier response = %+v", barrier)
 	}
-	var created Agent
-	requireNoError(t, json.Unmarshal(barrier.Result, &created))
-	if created.Name != "通知创建的 Agent 🐈" || created.Soul != "line one\nline two" {
-		t.Fatalf("notification-created agent = %+v", created)
-	}
 
 	batch := []any{
-		rpcRequest{JSONRPC: "2.0", ID: 101, Method: "agent.list", Params: struct{}{}},
-		rpcRequest{JSONRPC: "2.0", Method: "agent.list", Params: struct{}{}},
+		rpcRequest{JSONRPC: "2.0", ID: 101, Method: "provider.list", Params: struct{}{}},
+		rpcRequest{JSONRPC: "2.0", Method: "provider.list", Params: struct{}{}},
 		rpcRequest{JSONRPC: "2.0", ID: 102, Method: "missing.method", Params: struct{}{}},
 		1,
 	}
@@ -74,7 +65,7 @@ func TestStdioJSONRPCSupportsClientTrafficPatterns(t *testing.T) {
 	writeRequestFrame(t, ctx, process, rpcRequest{
 		JSONRPC: "2.0",
 		ID:      "after-error",
-		Method:  "agent.list",
+		Method:  "provider.list",
 	})
 	recovered := readSingleResponse(t, ctx, process)
 	if recovered.Error != nil || string(recovered.ID) != `"after-error"` {
@@ -100,7 +91,7 @@ func TestJSONRPCRequestIDsRoundTripExactly(t *testing.T) {
 			defer cancel()
 			process := startCore(t)
 
-			frame := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"method":"agent.list"}`, tt.id)
+			frame := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"method":"provider.list"}`, tt.id)
 			requireNoError(t, process.WriteFrame(ctx, []byte(frame)))
 			response := readSingleResponse(t, ctx, process)
 			if response.Error != nil || string(response.ID) != tt.id {
@@ -123,7 +114,6 @@ func TestRemovedInitializeSetMethodsAreNotRegistered(t *testing.T) {
 	for id, method := range []string{
 		"initialize.set.provider",
 		"initialize.set.model",
-		"initialize.set.agent",
 		"initialize.set.completed",
 	} {
 		writeRequestFrame(t, ctx, process, rpcRequest{
@@ -145,7 +135,7 @@ func TestStdioProcessesFinalFrameWithoutNewlineAndExitsOnEOF(t *testing.T) {
 	defer cancel()
 	process := startCore(t)
 
-	payload := []byte(`{"jsonrpc":"2.0","id":"final-line","method":"agent.list"}`)
+	payload := []byte(`{"jsonrpc":"2.0","id":"final-line","method":"provider.list"}`)
 	requireNoError(t, process.WriteFinalFrame(ctx, payload))
 	response := readSingleResponse(t, ctx, process)
 	if response.Error != nil || string(response.ID) != `"final-line"` {

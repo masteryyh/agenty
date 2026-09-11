@@ -13,12 +13,15 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/agentloop/builtin"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
+	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
 	"github.com/masteryyh/agenty-core/pkg/infra/llm"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
+	mcpregistry "github.com/masteryyh/agenty-core/pkg/infra/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
+	"github.com/masteryyh/agenty-core/pkg/infra/skill"
 	"github.com/masteryyh/agenty-core/pkg/utils/signal"
 )
 
@@ -54,6 +57,16 @@ func run() (exitCode int) {
 		}
 	}()
 
+	skillRegistry, err := skill.Scan(config.Get().Paths().SkillsDir)
+	if err != nil {
+		slog.Warn("failed to scan skills", "error", err)
+		skillRegistry = nil
+	} else {
+		for _, diagnostic := range skillRegistry.Diagnostics() {
+			slog.Warn("skill discovery diagnostic", "code", diagnostic.Code, "message", diagnostic.Message, "path", diagnostic.Path)
+		}
+	}
+
 	ctx, cancel := signal.SetupContext()
 	defer cancel()
 
@@ -78,9 +91,28 @@ func run() (exitCode int) {
 
 	disp := rpc.NewDispatcher()
 	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
+	mcpRegistry, err := mcpregistry.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcpregistry.Options{
+		Events: func(eventCtx context.Context, event domainmcp.Event) {
+			if err := srv.Notify(eventCtx, "mcp.event", event); err != nil {
+				slog.DebugContext(eventCtx, "failed to publish MCP event", "error", err)
+			}
+		},
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to initialize MCP registry", "error", err)
+		return 1
+	}
+	mcpRegistry.Start()
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+		if err := mcpRegistry.Shutdown(shutdownCtx); err != nil {
+			slog.ErrorContext(shutdownCtx, "failed to stop MCP registry", "error", err)
+			exitCode = 1
+		}
+	}()
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
-		Agents:   repos.Agent,
 		Catalog:  repos.Catalog,
 		Tools:    toolRegistry,
 		NewCaller: func(
@@ -96,6 +128,7 @@ func run() (exitCode int) {
 		Compactions: func(eventCtx context.Context, event agentloop.CompactionEvent) error {
 			return srv.Notify(eventCtx, "session.compaction", event)
 		},
+		Skills: skillRegistry,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to initialize execution engine", "error", err)
@@ -114,16 +147,16 @@ func run() (exitCode int) {
 		repos.Conversation,
 		application.WithSessionExecutionState(execution),
 	)
-	agentService := application.NewAgentService(repos.Agent)
 	providerService := application.NewProviderService(repos.Catalog)
-	initializeService := application.NewInitializeService(agentService, providerService, config.Get())
+	initializeService := application.NewInitializeService(providerService, config.Get())
 	adapter.RegisterAll(disp,
-		agentService,
 		providerService,
 		initializeService,
 		sessionService,
 		execution,
 	)
+	adapter.RegisterMCPHandlers(disp, mcpRegistry)
+	adapter.RegisterSkillHandlers(disp, skillRegistry)
 
 	asm := rpc.NewChunkAssembler(disp)
 	rpc.RegisterChunkHandlers(disp, asm)

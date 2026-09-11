@@ -1,4 +1,11 @@
-import { type InputRenderable, type KeyEvent, RenderableEvents } from "@opentui/core";
+import {
+    type ContentChangeEvent,
+    type CursorChangeEvent,
+    type InputRenderable,
+    type KeyEvent,
+    RenderableEvents,
+    type SyntaxStyle,
+} from "@opentui/core";
 import { forwardRef, useCallback, useEffect, useRef } from "react";
 
 export type TextInputProps = {
@@ -10,6 +17,9 @@ export type TextInputProps = {
     keepFocus?: boolean;
     onMouseDown?: () => void;
     onKeyDown?: (event: KeyEvent) => void;
+    onCursorChange?: (event: CursorChangeEvent) => void;
+    onContentChange?: (event: ContentChangeEvent) => void;
+    syntaxStyle?: SyntaxStyle;
 };
 
 export const TextInput = forwardRef<InputRenderable, TextInputProps>(
@@ -23,6 +33,9 @@ export const TextInput = forwardRef<InputRenderable, TextInputProps>(
             keepFocus = false,
             onMouseDown,
             onKeyDown,
+            onCursorChange,
+            onContentChange,
+            syntaxStyle,
         },
         ref,
     ) => {
@@ -89,7 +102,10 @@ export const TextInput = forwardRef<InputRenderable, TextInputProps>(
                 textColor="#ffffff"
                 focusedTextColor="#ffffff"
                 cursorColor="#00e5ff"
+                syntaxStyle={syntaxStyle}
                 onInput={onChange}
+                onCursorChange={onCursorChange}
+                onContentChange={onContentChange}
                 onMouseDown={() => {
                     inputRef.current?.focus();
                     onMouseDown?.();

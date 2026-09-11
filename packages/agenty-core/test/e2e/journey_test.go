@@ -49,62 +49,13 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		IsDefault:       true,
 	})
 	requireNoError(t, err)
-	_, err = first.CreateAgent(ctx, AgentCreateInput{
-		Code:                 "setup-agent",
-		Name:                 "Setup Agent",
-		DefaultModel:         &ModelRef{ProviderCode: "setup-provider", ModelCode: "setup-model"},
-		DefaultContextWindow: 64_000,
-		IsDefault:            true,
-	})
-	requireNoError(t, err)
-	already, err = first.CompleteInitialization(ctx, "setup-agent", "setup-provider", "setup-model")
+	already, err = first.CompleteInitialization(ctx, "setup-provider", "setup-model")
 	requireNoError(t, err)
 	if !already.Initialized {
 		t.Fatal("completed initialization reported false")
 	}
 	_, err = first.DeleteProvider(ctx, "setup-provider")
 	requireNoError(t, err)
-	_, err = first.DeleteAgent(ctx, "setup-agent")
-	requireNoError(t, err)
-
-	createdAgent, err := first.CreateAgent(ctx, AgentCreateInput{
-		Code:                   "daily-assistant",
-		Name:                   "Daily Assistant",
-		Description:            "Helps with daily work",
-		Soul:                   "Be concise and verify facts.",
-		DefaultModel:           &ModelRef{ProviderCode: "local-openai", ModelCode: "primary-model"},
-		DefaultContextWindow:   128_000,
-		DefaultReasoningEffort: "high",
-		IsDefault:              true,
-		Metadata:               map[string]any{"team": "platform"},
-	})
-	requireNoError(t, err)
-	if createdAgent.Code != "daily-assistant" || createdAgent.CreatedAt.IsZero() {
-		t.Fatalf("created agent = %+v", createdAgent)
-	}
-	_, err = first.CreateAgent(ctx, AgentCreateInput{Code: "daily-assistant", Name: "duplicate"})
-	requireRPCCode(t, err, errAlreadyExists)
-
-	updatedAgent, err := first.UpdateAgent(ctx, AgentUpdateInput{
-		Code:        "daily-assistant",
-		Name:        stringPointer("Senior Daily Assistant"),
-		Description: stringPointer(""),
-		Metadata:    map[string]any{"team": "runtime"},
-	})
-	requireNoError(t, err)
-	if updatedAgent.Name != "Senior Daily Assistant" || updatedAgent.Description != "" {
-		t.Fatalf("updated agent = %+v", updatedAgent)
-	}
-	gotAgent, err := first.GetAgent(ctx, "daily-assistant")
-	requireNoError(t, err)
-	if gotAgent.Metadata["team"] != "runtime" {
-		t.Fatalf("agent metadata = %+v", gotAgent.Metadata)
-	}
-	agents, err := first.ListAgents(ctx)
-	requireNoError(t, err)
-	if len(agents) != 1 {
-		t.Fatalf("agents = %+v", agents)
-	}
 
 	provider, err := first.CreateProvider(ctx, ProviderCreateInput{
 		Code:     "local-openai",
@@ -168,14 +119,12 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 
 	primary, err := first.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     "daily-assistant",
 		ProviderCode:  "local-openai",
 		ModelCode:     "primary-model",
 		ContextWindow: 128_000,
 	})
 	requireNoError(t, err)
 	secondary, err := first.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     "daily-assistant",
 		ProviderCode:  "local-openai",
 		ModelCode:     "primary-model",
 		ContextWindow: 64_000,
@@ -202,12 +151,11 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 
 	summaries, err := first.ListSessions(ctx, SessionListInput{
-		AgentCode: "daily-assistant",
-		Limit:     1,
-		Offset:    1,
+		Limit:  1,
+		Offset: 1,
 	})
 	requireNoError(t, err)
-	if len(summaries) != 1 || summaries[0].AgentCode != "daily-assistant" {
+	if len(summaries) != 1 {
 		t.Fatalf("session summaries = %+v", summaries)
 	}
 
@@ -283,7 +231,6 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	}
 
 	cancelSession, err := second.CreateSession(ctx, SessionCreateInput{
-		AgentCode:     "daily-assistant",
 		ProviderCode:  "local-openai",
 		ModelCode:     "primary-model",
 		ContextWindow: 128_000,
@@ -303,7 +250,14 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	)
 	models, err := second.ListProviderModels(ctx, "local-openai")
 	requireNoError(t, err)
-	if len(models) != 1 || models[0].Code != "fixture-model" || models[0].ContextWindow != 256_000 || models[0].MaxOutputTokens != 65_536 || len(models[0].ReasoningEfforts) != 0 {
+	var fixtureModel *AvailableModel
+	for index := range models {
+		if models[index].Code == "fixture-model" {
+			fixtureModel = &models[index]
+			break
+		}
+	}
+	if fixtureModel == nil || fixtureModel.ContextWindow != 256_000 || fixtureModel.MaxOutputTokens != 65_536 || len(fixtureModel.ReasoningEfforts) != 0 {
 		t.Fatalf("discovered models = %+v", models)
 	}
 	_, err = second.StartSession(
@@ -329,17 +283,7 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	_, err = second.CompactSession(ctx, primary.ID)
 	requireNoError(t, err)
 
-	var chunkedAgent Agent
-	err = second.rpc.CallChunked(ctx, "agent.create", AgentCreateInput{
-		Code: "chunked-agent",
-		Name: "Chunked Agent",
-		Soul: "This payload is split by the client and reassembled by core.",
-	}, 17, &chunkedAgent)
-	requireNoError(t, err)
-	if chunkedAgent.Code != "chunked-agent" {
-		t.Fatalf("chunked agent = %+v", chunkedAgent)
-	}
-	requireNoError(t, second.rpc.AbortChunk(ctx, "aborted-upload", "agent.create"))
+	requireNoError(t, second.rpc.AbortChunk(ctx, "aborted-upload", "provider.list"))
 	err = second.rpc.Call(
 		ctx,
 		"chunk.commit",
@@ -356,14 +300,8 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 	_, err = second.RemoveModel(ctx, "local-openai", "temporary-model")
 	requireNoError(t, err)
-	_, err = second.DeleteAgent(ctx, "chunked-agent")
-	requireNoError(t, err)
 	_, err = second.DeleteProvider(ctx, "local-openai")
 	requireNoError(t, err)
-	_, err = second.DeleteAgent(ctx, "daily-assistant")
-	requireNoError(t, err)
-	_, err = second.GetAgent(ctx, "daily-assistant")
-	requireRPCCode(t, err, errNotFound)
 
 	called := mergeMethodCounts(first.rpc, second.rpc)
 	for _, method := range publicRPCMethods {

@@ -1,6 +1,7 @@
 import { RGBA } from "@opentui/core";
 import { useEffect, useRef, useState } from "react";
 
+import type { SkillDto } from "../api/types";
 import { quoteArg } from "../commands/registry";
 import type { Palette } from "../hooks/useCommandPalette";
 import { useWindowSize } from "../hooks/useWindowSize";
@@ -14,9 +15,10 @@ interface CommandPaletteProps {
     palette: Palette;
     marginTop: number;
     onChoose: (value: string) => void;
+    onChooseSkill: (skill: SkillDto, start: number, end: number) => void;
 }
 
-export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteProps) {
+export function CommandPalette({ palette, marginTop, onChoose, onChooseSkill }: CommandPaletteProps) {
     const { columns } = useWindowSize();
 
     const width = Math.max(columns, 1);
@@ -64,6 +66,46 @@ export function CommandPalette({ palette, marginTop, onChoose }: CommandPaletteP
 
     if (palette.mode === "none") {
         return null;
+    }
+
+    if (palette.mode === "skills") {
+        const items = palette.matches.slice(windowStart, windowStart + MAX_ITEMS);
+        return (
+            <Box
+                flexDirection="column"
+                width="100%"
+                marginTop={marginTop}
+                backgroundColor={TERMINAL_BACKGROUND}
+            >
+                {items.map((skill, index) => {
+                    const absoluteIndex = windowStart + index;
+                    const selected = absoluteIndex === palette.highlight;
+                    const cursor = selected ? "❯ " : "  ";
+                    const warning = skill.autoEnabled ? "" : " ⚠";
+                    const contentLen = cursor.length + 1 + skill.name.length + 3 + skill.description.length + warning.length;
+                    return (
+                        <Pressable
+                            key={`${skill.name}:${skill.location}`}
+                            width="100%"
+                            height={1}
+                            onPress={() => onChooseSkill(skill, palette.matchStart, palette.matchEnd)}
+                        >
+                            <Text width="100%">
+                                <Text color={selected ? HIGHLIGHT : undefined}>{cursor}</Text>
+                                <Text color={selected ? HIGHLIGHT : "#00E5FF"} bold>
+                                    {`$${skill.name}`}
+                                </Text>
+                                <Text color={skill.autoEnabled ? "gray" : "yellow"}>
+                                    {` — ${skill.description}${warning}`}
+                                </Text>
+                                <Text>{padSpaces(contentLen)}</Text>
+                            </Text>
+                        </Pressable>
+                    );
+                })}
+                <Text dimColor>{"  Tab to select · Enter to insert"}{padSpaces(2 + "Tab to select · Enter to insert".length)}</Text>
+            </Box>
+        );
     }
 
     if (palette.mode === "commands") {

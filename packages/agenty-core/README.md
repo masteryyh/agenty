@@ -15,7 +15,8 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Session index | `~/.agenty/agenty.sqlite` → `sessions` | Read model — projection for fast listing/search |
 | Global config | `~/.agenty/config.json` | Application configuration |
 | Providers | Embedded catalog; custom providers use `~/.agenty/providers/<provider-code>.json` | Built-in metadata/models are read-only; built-in files store only API keys |
-| Agents | `~/.agenty/agents/<code>.json` | Agent aggregate |
+| MCP servers | `~/.agenty/mcp/<server-name>.json` | One concise configuration file per server, mode `0600` |
+| MCP OAuth credentials | `~/.agenty/mcp-auth/<server-name>.json` | OAuth tokens, mode `0600`, kept outside server config |
 | Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
@@ -26,15 +27,15 @@ reasoning effort.
 ## Domain layer
 
 The domain layer is split by bounded context. Aggregates reference each other only by
-identity (UUIDv7 for the conversation family, path-safe codes for agents and providers,
-and opaque upstream codes for models).
+identity (UUIDv7 for the conversation family, path-safe codes for providers, and opaque
+upstream codes for models).
 
 ```
 pkg/domain/
 ├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session → Round → Message), content blocks, events
-├── agent/         Agent aggregate
-└── catalog/       Provider aggregate (Provider → Model)
+├── catalog/       Provider aggregate (Provider → Model)
+└── mcp/           MCP server configuration, status, and tool projection
 ```
 
 The conversation transcript is event-sourced: each JSONL line is a domain event
@@ -69,7 +70,7 @@ model-calling contract, tool contract, JSON Schema, thread-safe tool registry, a
 session permits one active round, and `Engine` owns cancellation and shutdown for all
 active rounds.
 
-Each loop resolves the Agent system prompt, rebuilds the effective conversation context,
+Each loop resolves the built-in system prompt, rebuilds the effective conversation context,
 converts it through the selected provider adapter, invokes the LLM, persists the
 assistant response, and repeats when tool calls are returned. Custom models use `8192` output
 tokens when omitted; built-in models use the exact limit from
@@ -107,9 +108,9 @@ pkg/infra/
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
-│   ├── agent.go        AgentRepository (agent JSON files)
 │   ├── catalog.go      CatalogRepository (embedded built-ins plus custom provider JSON)
 │   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
+├── mcp/                MCP client registry and stdio/Streamable HTTP/SSE transports
 └── rpc/                stdio JSON-RPC 2.0 interface layer
     ├── message.go      Request/Response/Notification/Error/ID wire types
     ├── codes.go        standard + server-defined error codes
@@ -129,11 +130,9 @@ Each service consumes the smallest repository interface required by its use case
 Production wires the filesystem/SQLite repositories, while unit tests use isolated
 in-memory fakes without opening files or a database.
 
-- `AgentService` — agent CRUD (`Create`/`Get`/`List`/`Update`/`Delete`).
 - `ProviderService` — provider CRUD plus model sub-resource operations
   (`AddModel`/`RemoveModel`).
-- `InitializeService` — first-run state and completion validation; provider/model/agent data
-  is written through their regular services.
+- `InitializeService` — first-run state, default model persistence, and completion validation.
 - `SessionService` — session CRUD and configuration mutations
   (`SetTitle`/`SetModel`/`SetReasoningEffort`/`SetCwd`).
 
@@ -191,10 +190,37 @@ Methods follow a `resource.action` naming:
 | Group | Methods |
 | --- | --- |
 | Initialize | `initialize.already`, `initialize.complete` |
-| Agent | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.delete` |
+| Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
+| MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+MCP server configurations live in `<AGENTY_DATA_DIR>/mcp/<server-name>.json`; the file name is
+the server name. Server names contain only ASCII letters, digits, `_`, and `-`, and are
+case-insensitive (`GitHub` and `github` refer to the same server). `stdio` entries use `command`, a JSON string array `args` (one process argument
+per element), and optional `env`; `http` and `sse` entries use Streamable HTTP or legacy SSE
+`url` and optional `headers`. No `cwd` field is persisted. Values in `env` and `headers`
+expand the core process environment at connection time.
+
+The central registry starts enabled servers asynchronously with bounded parallelism. It records
+`connecting`, `connected`, `auth-required`, and `error` states and emits `mcp.event` notifications.
+Streamable HTTP uses the official SDK OAuth authorization-code handler with dynamic client
+registration; `mcp.login` exposes a loopback callback URL to the CLI and stores tokens
+under `mcp-auth`, including the OAuth client configuration needed to refresh them. Tools are
+registered as `mcp__<server-name>__<tool-name>`; characters outside the provider-safe
+ASCII set are replaced with `_` and the exposed name is limited to 64 characters. A session round
+captures the connected tool registry at round start, so a connection that completes later is
+visible from the next round. `mcp.logs` returns the latest bounded, in-memory diagnostics for a
+server, including connection errors and stdio child stderr; sensitive configured values are
+redacted. Core closes all active MCP sessions and stdio child processes during shutdown.
+
+`skill.list` returns the discovered skill registry and non-fatal diagnostics. Core scans
+`<AGENTY_DATA_DIR>/skills` first (`~/.agenty/skills` by default), then `~/.agents/skills` and
+`~/.claude/skills`; an earlier directory name shadows a later one. A skill is advertised from
+its `SKILL.md` frontmatter `name` and `description`. A frontmatter name that differs from the
+directory name remains available for explicit references but is not included in the automatic
+system-prompt catalog and produces a warning.
 
 `provider.list` accepts an optional `{providerCode}`. Without it, core discovers all
 configured providers whose catalog is empty in parallel; with it, only that provider is
@@ -259,8 +285,8 @@ map to `-32602`.
 Example:
 
 ```
-$ echo '{"jsonrpc":"2.0","id":1,"method":"agent.create","params":{"code":"dev","name":"Dev"}}' | go run ./cmd
-{"jsonrpc":"2.0","id":1,"result":{"code":"dev","name":"Dev",...}}
+$ echo '{"jsonrpc":"2.0","id":1,"method":"provider.list","params":{}}' | go run ./cmd
+{"jsonrpc":"2.0","id":1,"result":[...]}
 ```
 
 Note: the `rpc` and `adapter` packages use `encoding/json` (RawMessage-native,
@@ -296,8 +322,8 @@ build tag. The same tag enables optional live LLM SDK tests. They read
 and report a skip, rather than a failure, when a key is absent.
 
 The `test/e2e` package builds `cmd` once, launches the real binary over stdio, and gives
-each parallel test process its own `AGENTY_DATA_DIR`. It covers public Agent,
-Provider/Model, Session, agent-loop start/stop and parallel execution, JSON-RPC,
+each parallel test process its own `AGENTY_DATA_DIR`. It covers public Provider/Model,
+Session, agent-loop start/stop and parallel execution, JSON-RPC,
 chunking, startup, restart persistence, and process isolation contracts without
 accessing the user's data directory.
 

@@ -55,7 +55,6 @@ export function App() {
     const [connected, setConnected] = useState(false);
     const [newRecords, setNewRecords] = useState(false);
     const [query, setQuery] = useState("");
-    const [agent, setAgent] = useState("");
     const [model, setModel] = useState("");
     const [issuesOnly, setIssuesOnly] = useState(false);
     const [since, setSince] = useState("");
@@ -75,7 +74,6 @@ export function App() {
         endpoint("/sessions", {
             q: search,
             issues: issuesOnly ? "true" : undefined,
-            agent,
             model,
             since,
             until,
@@ -159,7 +157,6 @@ export function App() {
         setRefresh((value) => value + 1);
         setNewRecords(false);
     }
-    const agents = system.data?.agents ?? [];
     const models = system.data?.models ?? [];
     const icons = [MessageSquare, Activity, CircleHelp];
     return (
@@ -244,23 +241,6 @@ export function App() {
                             />
                         </label>
                         <div className="filter-pair">
-                            <select
-                                aria-label="Agent filter"
-                                value={agent}
-                                onChange={(e) => {
-                                    setAgent(e.target.value);
-                                    setOffset(0);
-                                }}
-                            >
-                                <option value="">All agents</option>
-                                {[
-                                    ...new Set(
-                                        [...agents, agent].filter(Boolean),
-                                    ),
-                                ].map((value) => (
-                                    <option key={value}>{value}</option>
-                                ))}
-                            </select>
                             <select
                                 aria-label="Model filter"
                                 value={model}
@@ -354,8 +334,7 @@ export function App() {
                                             )}
                                         </div>
                                         <p>
-                                            {entry.agent ||
-                                                entry.sessionId.slice(0, 8)}
+                                            {entry.model || entry.sessionId.slice(0, 8)}
                                             <span>{bytes(entry.size)}</span>
                                         </p>
                                         <small>
@@ -388,7 +367,7 @@ export function App() {
                 </aside>
                 <main className="main-panel">
                     {!navigation.session && (
-                        <Empty title="A closer look at your agent">
+                        <Empty title="A closer look at your session">
                             <p>
                                 Select a session to explore its rounds,
                                 messages, tool calls and structural issues.

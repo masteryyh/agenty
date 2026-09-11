@@ -120,7 +120,7 @@ func (engine *Engine) compactPreparedForWindow(
 	baseRequest := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        baseMessages,
-		Tools:           engine.toolDefinitions(prepared.freeFormTool),
+		Tools:           engine.toolDefinitions(prepared.toolRuntime, prepared.freeFormTool),
 		MaxOutputTokens: prepared.maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
@@ -196,60 +196,57 @@ func (engine *Engine) invokeCompaction(
 		CreatedAt:  time.Now().UTC(),
 	})
 
-	var totalUsage conversation.TokenUsage
-	for iteration := 1; iteration <= maxAgentLoopIterations; iteration++ {
-		request := baseRequest
-		request.Messages = messages
-		response, err := prepared.caller.Invoke(ctx, request)
-		if err != nil {
-			return nil, fmt.Errorf("invoke compaction iteration %d: %w", iteration, err)
-		}
-		if response == nil {
-			return nil, fmt.Errorf("compaction iteration %d returned an empty response", iteration)
-		}
-
-		totalUsage = totalUsage.Add(response.Usage)
-		calls := toolCalls(response.Content)
-		if len(calls) == 0 {
-			if response.StopReason == StopReasonError {
-				return nil, fmt.Errorf("compaction model stopped with an error")
-			}
-			response.Usage = totalUsage
-			return response, nil
-		}
-
-		messages = append(messages, conversation.Message{
-			ID:        shared.NewID(),
-			RoundID:   compactionID,
-			Role:      conversation.RoleAssistant,
-			Content:   response.Content,
-			Usage:     &response.Usage,
-			CreatedAt: time.Now().UTC(),
-		})
-
-		results := engine.tools.ExecuteBatch(ctx, CallContext{
-			SessionID: prepared.session.ID,
-			RoundID:   compactionID,
-			Cwd:       sessionCwd(prepared.session),
-		}, calls)
-		markNativeShellResults(response.Content, results)
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		content := make(conversation.Content, 0, len(results))
-		for _, result := range results {
-			content = append(content, result)
-		}
-		messages = append(messages, conversation.Message{
-			ID:        shared.NewID(),
-			RoundID:   compactionID,
-			Role:      conversation.RoleUser,
-			Content:   content,
-			CreatedAt: time.Now().UTC(),
-		})
+	toolRuntime := prepared.toolRuntime
+	if toolRuntime == nil {
+		toolRuntime = engine.tools
 	}
-
-	return nil, fmt.Errorf("compaction conversation exceeded %d iterations", maxAgentLoopIterations)
+	result, err := runAgentLoop(ctx, agentLoopConfig{
+		name: "compaction conversation",
+		request: func(context.Context, int) (Request, conversation.TokenUsage, error) {
+			request := baseRequest
+			request.Messages = messages
+			return request, conversation.TokenUsage{}, nil
+		},
+		invoke: func(ctx context.Context, _ int, request Request) (*Response, error) {
+			return prepared.caller.Invoke(ctx, request)
+		},
+		toolRuntime: toolRuntime,
+		callContext: func() CallContext {
+			return CallContext{
+				SessionID: prepared.session.ID,
+				RoundID:   compactionID,
+				Cwd:       sessionCwd(prepared.session),
+			}
+		},
+		appendAssistant: func(_ context.Context, _ int, response *Response, hasToolCalls bool) error {
+			if !hasToolCalls {
+				return nil
+			}
+			messages = append(messages, conversation.Message{
+				ID:        shared.NewID(),
+				RoundID:   compactionID,
+				Role:      conversation.RoleAssistant,
+				Content:   response.Content,
+				Usage:     &response.Usage,
+				CreatedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+		appendToolResults: func(_ context.Context, _ int, content conversation.Content) error {
+			messages = append(messages, conversation.Message{
+				ID:        shared.NewID(),
+				RoundID:   compactionID,
+				Role:      conversation.RoleUser,
+				Content:   content,
+				CreatedAt: time.Now().UTC(),
+			})
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.response, nil
 }
 
 func preparedReasoningEffort(prepared *preparedExecution) shared.ReasoningEffort {

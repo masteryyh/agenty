@@ -87,9 +87,10 @@ func InitializeDataDir() error {
 	for _, dir := range []string{
 		paths.DataDir,
 		paths.SessionsDir,
-		paths.AgentsDir,
 		paths.ProvidersDir,
 		paths.LocksDir,
+		paths.SkillsDir,
+		paths.MCPDir,
 	} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
@@ -125,6 +126,9 @@ func writeDefaultConfig(file string) error {
 	v := viper.New()
 	v.Set("version", 1)
 	v.Set("initialized", false)
+	v.Set("defaultProviderCode", "")
+	v.Set("defaultModelCode", "")
+	v.Set("defaultReasoningEffort", "off")
 	v.Set("logging.level", "info")
 	v.Set("logging.format", "text")
 
@@ -162,9 +166,10 @@ func ResolvePaths() (*Paths, error) {
 		DataDir:      dataDir,
 		ConfigFile:   filepath.Join(dataDir, defaultConfigFile),
 		SessionsDir:  filepath.Join(dataDir, "sessions"),
-		AgentsDir:    filepath.Join(dataDir, "agents"),
 		ProvidersDir: filepath.Join(dataDir, "providers"),
 		LocksDir:     filepath.Join(dataDir, "locks"),
 		DatabaseFile: filepath.Join(dataDir, "agenty.sqlite"),
+		SkillsDir:    filepath.Join(dataDir, "skills"),
+		MCPDir:       filepath.Join(dataDir, "mcp"),
 	}, nil
 }

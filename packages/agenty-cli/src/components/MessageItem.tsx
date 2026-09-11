@@ -2,6 +2,8 @@ import type { ThemeMode } from "@opentui/core";
 import type React from "react";
 import { memo, useMemo } from "react";
 
+import type { SkillDto } from "../api/types";
+import { documentFromSerialized } from "../composer/document";
 import type { SystemMessageVariant, UIToolCall } from "../state/store";
 import {
     buildToolDisplay,
@@ -20,6 +22,24 @@ const COMPACTED_MESSAGE_BACKGROUNDS: Record<ThemeMode, string> = {
     dark: "#23332d",
     light: "#dfece4",
 };
+
+function renderMessageContent(content: string, skills: SkillDto[]): React.ReactNode {
+    const document = documentFromSerialized(content, skills);
+    if (!document.nodes.some((node) => node.type === "skill")) {
+        return content;
+    }
+    return document.nodes.map((node, index) => node.type === "text"
+        ? node.text
+        : (
+            <Text
+                key={`skill-${index}-${node.name}`}
+                color={node.warning ? "yellow" : "#00E5FF"}
+                bold
+            >
+                {`$${node.name}`}
+            </Text>
+        ));
+}
 
 function statusGlyph(status: "pending" | "success" | "error", blinkOn: boolean): string {
     if (status === "success") {
@@ -280,11 +300,13 @@ export const MessageItem = memo(({
     onToggleReasoning,
     onToggleTool,
     themeMode = "dark",
+    skills = [],
 }: {
     item: MessageRenderItem;
     onToggleReasoning?: (id: string) => void;
     onToggleTool?: (id: string) => void;
     themeMode?: ThemeMode;
+    skills?: SkillDto[];
 }) => {
     if (item.type === "reasoning") {
         return (
@@ -303,7 +325,7 @@ export const MessageItem = memo(({
                 {item.expanded ? (
                     <Box marginTop={1}>
                         <Text width="100%" dimColor italic wrap="wrap">
-                            {item.content}
+                            {renderMessageContent(item.content, skills)}
                         </Text>
                     </Box>
                 ) : null}
@@ -325,7 +347,7 @@ export const MessageItem = memo(({
                 <Text width="100%" wrap="wrap">
                     <Text dimColor>you</Text>
                     <Text color="cyan"> › </Text>
-                    {item.content}
+                    {renderMessageContent(item.content, skills)}
                 </Text>
             </Box>
         );
@@ -340,7 +362,7 @@ export const MessageItem = memo(({
                     backgroundColor={COMPACTED_MESSAGE_BACKGROUNDS[themeMode]}
                 >
                     <Text width="100%" italic dimColor wrap="wrap">
-                        {item.content}
+                        {renderMessageContent(item.content, skills)}
                     </Text>
                 </Box>
             );
@@ -349,7 +371,7 @@ export const MessageItem = memo(({
         return (
             <Rail color={item.error ? "red" : "yellow"}>
                 <Text width="100%" color={item.error ? "red" : "yellow"} wrap="wrap">
-                    {item.error ? "✗" : "●"} {item.content}
+                    {item.error ? "✗" : "●"} {renderMessageContent(item.content, skills)}
                 </Text>
             </Rail>
         );
@@ -358,7 +380,7 @@ export const MessageItem = memo(({
     return (
         <Box width="100%" flexShrink={0} paddingX={1}>
             <Text width="100%" wrap="wrap">
-                {item.content}
+                {renderMessageContent(item.content, skills)}
             </Text>
         </Box>
     );

@@ -10,41 +10,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/application"
-	"github.com/masteryyh/agenty-core/pkg/domain/agent"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
-
-type agentRepositoryFake struct {
-	agents map[shared.Code]*agent.Agent
-}
-
-func newAgentRepositoryFake() *agentRepositoryFake {
-	return &agentRepositoryFake{agents: make(map[shared.Code]*agent.Agent)}
-}
-
-func (repository *agentRepositoryFake) Get(
-	_ context.Context,
-	code shared.Code,
-) (*agent.Agent, error) {
-	definition, ok := repository.agents[code]
-	if !ok {
-		return nil, storage.ErrAgentNotFound
-	}
-
-	copy := *definition
-	copy.Metadata = maps.Clone(definition.Metadata)
-	return &copy, nil
-}
-
-func (repository *agentRepositoryFake) Save(_ context.Context, definition *agent.Agent) error {
-	copy := *definition
-	copy.Metadata = maps.Clone(definition.Metadata)
-	repository.agents[definition.Code] = &copy
-	return nil
-}
 
 type providerRepositoryFake struct {
 	providers map[shared.Code]*catalog.Provider

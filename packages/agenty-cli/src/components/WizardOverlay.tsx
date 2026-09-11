@@ -24,8 +24,13 @@ import { useAppStore } from "../state/store";
 import { useTuiRuntime } from "../tui/runtime";
 import { BottomDialog, useBottomDialogSize } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
-import type { FormField, FormOption } from "./FormPanel";
-import { FormPanel } from "./FormPanel";
+import {
+    type FormField,
+    type FormOption,
+    FormPanel,
+    formString,
+    type FormValues
+} from "./FormPanel";
 import { List } from "./List";
 import {
     createTableLayout,
@@ -295,22 +300,23 @@ function WizardContent() {
         setStep("provider-form");
     };
 
-    const saveDraft = (values: Record<string, string>) => {
+    const saveDraft = (values: FormValues) => {
         if (!editing) {
             return;
         }
-        if (!isAPIType(values.type)) {
+        const type = formString(values, "type");
+        if (!isAPIType(type)) {
             setError("Choose a supported API protocol.");
             return;
         }
         const next: ProviderDraft = {
             ...editing,
-            name: values.name.trim(),
-            code: values.code.trim(),
-            type: values.type,
-            baseUrl: values.baseUrl.trim(),
-            apiKey: values.apiKey.trim(),
-            freeFormTool: values.type === "openai" && values.freeFormTool === "true",
+            name: formString(values, "name").trim(),
+            code: formString(values, "code").trim(),
+            type,
+            baseUrl: formString(values, "baseUrl").trim(),
+            apiKey: formString(values, "apiKey").trim(),
+            freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
         };
         const duplicate = drafts.some(
             (draft) => draft.id !== next.id && draft.code.trim() !== "" && draft.code === next.code,
@@ -389,21 +395,23 @@ function WizardContent() {
         setStep("model-form");
     };
 
-    const saveModel = (values: Record<string, string>) => {
+    const saveModel = (values: FormValues) => {
         if (!editingModel) {
             return;
         }
         const next: ModelDraft = {
             ...editingModel,
             source: editingModel.source === "cached" ? "configured" : editingModel.source,
-            code: values.code.trim(),
-            name: values.name.trim(),
-            contextWindow: Number(values.contextWindow),
-            maxOutputTokens: Number(values.maxOutputTokens || editingModel.maxOutputTokens || 8192),
-            multiModal: values.multiModal === "true",
-            light: values.light === "true",
-            reasoning: values.reasoning === "true",
-            reasoningEfforts: values.reasoning === "true" ? parseReasoningEfforts(values.reasoningEfforts) : [],
+            code: formString(values, "code").trim(),
+            name: formString(values, "name").trim(),
+            contextWindow: Number(formString(values, "contextWindow")),
+            maxOutputTokens: Number(formString(values, "maxOutputTokens") || editingModel.maxOutputTokens || 8192),
+            multiModal: formString(values, "multiModal") === "true",
+            light: formString(values, "light") === "true",
+            reasoning: formString(values, "reasoning") === "true",
+            reasoningEfforts: formString(values, "reasoning") === "true"
+                ? parseReasoningEfforts(formString(values, "reasoningEfforts"))
+                : [],
         };
         const validationError = validateModelDraft(next);
         if (validationError) {
@@ -471,8 +479,8 @@ function WizardContent() {
     if (step === "provider-form" && editing) {
         return (
             <Box flexDirection="column" flexGrow={1}>
-                {error ? <Text color="red">{error}</Text> : null}
                 <FormPanel
+                    error={error}
                     key={editing.id}
                     title={editing.source === "builtin" ? `Configure ${editing.name}` : "Add compatible provider"}
                     fields={providerFields(editing)}
@@ -504,7 +512,7 @@ function WizardContent() {
                     fields={modelFields(editingModel, advancedModelOptions)}
                     onChange={(key, values) => {
                         if (key === "advanced") {
-                            setAdvancedModelOptions(values.advanced === "true");
+                            setAdvancedModelOptions(formString(values, "advanced") === "true");
                         }
                     }}
                     active={!deletingModel}
@@ -572,7 +580,7 @@ function WizardContent() {
                 {step === "done" ? (
                     <Text color="green" bold>Setup complete. Starting agenty-cli…</Text>
                 ) : (
-                    <Spinner label="Saving providers, model, and default agent…" />
+                    <Spinner label="Saving providers, model, and session defaults…" />
                 )}
                 {error ? <Text color="red">{error}</Text> : null}
             </Box>
@@ -609,7 +617,7 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
         <Box flexDirection="column" flexGrow={1} padding={1} gap={1}>
             <Text color="magenta" bold>AGENTY / FIRST RUN</Text>
             <Text color="cyan" bold>Welcome to agenty</Text>
-            <Text>Connect a model provider, configure its models, and choose the default agent model.</Text>
+            <Text>Connect a model provider, configure its models, and choose the default session model.</Text>
             <Box flexDirection="column" height={10} borderStyle="single" borderColor="cyan" padding={1} marginTop={1}>
                 <Box height={1}>
                     <Text color="cyan" bold>01  Provider access</Text>
@@ -624,7 +632,7 @@ function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => v
                     <Text dimColor wrap="truncate">Enter the model code and limits used by the core loop.</Text>
                 </Box>
                 <Box height={1}>
-                    <Text color="cyan" bold>03  Default agent</Text>
+                    <Text color="cyan" bold>03  Default session model</Text>
                 </Box>
                 <Box height={1}>
                     <Text dimColor wrap="truncate">Pick the model used when a new session starts.</Text>
@@ -1002,7 +1010,7 @@ function ModelStep({
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
             <Box flexDirection="column">
-                <Text color="magenta" bold>02 / Default agent model</Text>
+                <Text color="magenta" bold>02 / Default session model</Text>
                 <Text dimColor>Choose a model. Custom providers also allow model management here.</Text>
             </Box>
             {error ? <Text color="red">{error}</Text> : null}

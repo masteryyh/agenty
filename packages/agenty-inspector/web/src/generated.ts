@@ -39,7 +39,6 @@ export interface Detail {
     revision: string;
     sessionId: string;
     title: string | null;
-    agentCode: string;
     currentModel: ModelRef | null;
     cwd: string | null;
     contextWindow: number;
@@ -149,7 +148,6 @@ export interface SessionEntry {
     sessionId: string;
     path: string;
     title: string;
-    agent: string;
     model: string;
     updatedAt: string;
     size: number;
@@ -193,7 +191,6 @@ export interface SourceRef {
 }
 
 export interface System {
-    agents: (string)[];
     models: (string)[];
     dataDir: string;
     sessionsDir: string;

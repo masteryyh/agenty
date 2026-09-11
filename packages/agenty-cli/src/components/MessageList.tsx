@@ -6,6 +6,7 @@ import {
 import { useRenderer } from "@opentui/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import type { SkillDto } from "../api/types";
 import { useInput } from "../hooks/useInput";
 import type { UIMessage } from "../state/store";
 import { MessageItem, type MessageRenderItem } from "./MessageItem";
@@ -30,6 +31,7 @@ function trimBoundaryBlankLines(content: string): string {
 interface MessageListProps {
     history: UIMessage[];
     current: UIMessage | null;
+    skills?: SkillDto[];
     height: number;
     // Rendered as the first, scroll-away item at the top of the list (the logo).
     header?: ReactNode;
@@ -41,6 +43,7 @@ interface MessageListProps {
 export function MessageList({
     history,
     current,
+    skills = [],
     height,
     header,
     interactive = true,
@@ -396,6 +399,7 @@ export function MessageList({
                             >
                                 <MessageItem
                                     item={item}
+                                    skills={skills}
                                     themeMode={themeMode}
                                     onToggleReasoning={(id) => {
                                         setExpandedReasoningIds((ids) => {

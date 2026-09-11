@@ -1,20 +1,31 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
-import { AgentOverlay } from "./components/AgentOverlay";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
+import {
+    MCP_OVERLAY_HEIGHT,
+    McpOverlay,
+} from "./components/McpOverlay";
 import { MessageList } from "./components/MessageList";
 import { ModelOverlay } from "./components/ModelOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
 import { SelectOverlay } from "./components/SelectOverlay";
 import { StatusOverlay } from "./components/StatusOverlay";
+import type { StructuredTextInputHandle } from "./components/StructuredTextInput";
 import { Box, Text } from "./components/ui";
 import { WizardOverlay } from "./components/WizardOverlay";
+import {
+    type ComposerDocument,
+    emptyDocument,
+    rangesForDocument,
+    renderDocument,
+    serializeDocument,
+} from "./composer/document";
 import { useApp, useChat, useInput, useWindowSize } from "./hooks";
 import { useCommandPalette } from "./hooks/useCommandPalette";
 import { type OverlayKind, useAppStore } from "./state/store";
@@ -23,7 +34,6 @@ import { useTuiRuntime } from "./tui/runtime";
 const INPUT_HEIGHT = 4;
 const INPUT_TOP_GAP = 1;
 const PROVIDER_OVERLAY_HEIGHT = 18;
-const AGENTS_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
 const MODEL_OVERLAY_HEIGHT = 20;
 
@@ -31,12 +41,12 @@ function panelHeight(overlay: OverlayKind): number | null {
     switch (overlay) {
         case "provider":
             return PROVIDER_OVERLAY_HEIGHT;
-        case "agents":
-            return AGENTS_OVERLAY_HEIGHT;
         case "status":
             return STATUS_OVERLAY_HEIGHT;
         case "model-select":
             return MODEL_OVERLAY_HEIGHT;
+        case "mcp":
+            return MCP_OVERLAY_HEIGHT;
         default:
             return null;
     }
@@ -95,11 +105,19 @@ function ChatView() {
     const { rows, columns } = useWindowSize();
     const client = useAppStore((s) => s.client);
     const thinkingLevel = useAppStore((s) => s.thinkingLevel);
-    const [value, setValue] = useState("");
+    const [document, setDocument] = useState<ComposerDocument>(() => emptyDocument());
+    const [cursorOffset, setCursorOffset] = useState(0);
+    const inputRef = useRef<StructuredTextInputHandle | null>(null);
+    const skills = useAppStore((s) => s.skills);
 
     const { palette, height: paletteHeight, tab } = useCommandPalette(
-        value,
+        renderDocument(document),
+        cursorOffset,
         client,
+        skills,
+        rangesForDocument(document)
+            .filter((range) => range.node.type === "skill")
+            .map(({ start, end }) => ({ start, end })),
     );
 
     const streaming = chat.status === "streaming";
@@ -124,24 +142,24 @@ function ChatView() {
         }
     };
 
-    const switchAgentByRef = async (ref: string) => {
-        if (!client) {
-            return;
-        }
-        try {
-            const a = await client.resolveAgent(ref);
-            await app.switchAgent(a);
-        } catch (e) {
-            app.notify(`agent not found: ${ref} (${(e as Error).message})`, true);
-        }
+    const chooseSkill = (skill: typeof skills[number], start: number, end: number) => {
+        inputRef.current?.insertSkill(start, end, skill);
     };
 
-    const handleSubmit = (text: string) => {
-        const trimmed = text.trim();
+    const handleSubmit = (submitted: ComposerDocument) => {
+        if (palette.mode === "skills") {
+            const skill = palette.matches[palette.highlight];
+            if (skill) {
+                chooseSkill(skill, palette.matchStart, palette.matchEnd);
+            }
+            return;
+        }
+        const trimmed = serializeDocument(submitted).trim();
         if (!trimmed) {
             return;
         }
-        setValue("");
+        setDocument(emptyDocument());
+        setCursorOffset(0);
         if (trimmed.startsWith("/")) {
             const tokens = parseCommandTokens(trimmed);
             const cmd = (tokens[0] ?? "").toLowerCase();
@@ -167,12 +185,8 @@ function ChatView() {
                 case "/provider":
                     app.setOverlay("provider");
                     return;
-                case "/agents":
-                    if (arg) {
-                        void switchAgentByRef(arg);
-                    } else {
-                        app.setOverlay("agents");
-                    }
+                case "/mcp":
+                    app.setOverlay("mcp");
                     return;
                 case "/resume":
                     app.setOverlay("session-select");
@@ -233,9 +247,14 @@ function ChatView() {
     };
 
     const handleTab = (): boolean => {
-        const v = tab();
-        if (v !== null) {
-            setValue(v);
+        const action = tab();
+        if (action?.type === "skill") {
+            chooseSkill(action.skill, action.start, action.end);
+            return true;
+        }
+        if (action?.type === "text") {
+            setDocument({ nodes: [{ type: "text", text: action.value }] });
+            setCursorOffset(action.value.length);
             return true;
         }
         return false;
@@ -259,6 +278,7 @@ function ChatView() {
             <MessageList
                 history={chat.history}
                 current={chat.current}
+                skills={skills}
                 height={messageHeight}
                 header={<LogoHeader />}
                 interactive={!hasPanelOverlay && paletteHeight === 0}
@@ -266,13 +286,20 @@ function ChatView() {
             <CommandPalette
                 palette={palette}
                 marginTop={-paletteHeight}
-                onChoose={setValue}
+                onChoose={(value) => {
+                    setDocument({ nodes: [{ type: "text", text: value }] });
+                    setCursorOffset(value.length);
+                }}
+                onChooseSkill={chooseSkill}
             />
             <Box marginTop={INPUT_TOP_GAP}>
                 <InputBox
-                    value={value}
-                    onChange={setValue}
+                    ref={inputRef}
+                    document={document}
+                    skills={skills}
+                    onChange={setDocument}
                     onSubmit={handleSubmit}
+                    onCursorChange={setCursorOffset}
                     onTab={handleTab}
                     streaming={busy}
                     phrase={chat.phrase}
@@ -302,17 +329,17 @@ function ChatView() {
 function OverlayPanel({
     kind,
 }: {
-    kind: "provider" | "agents" | "status" | "model-select";
+    kind: "provider" | "status" | "model-select" | "mcp";
 }) {
     return kind === "model-select" ? (
         <ModelOverlay />
     ) : kind === "provider" ? (
         <ProviderOverlay />
-    ) : kind === "agents" ? (
-        <AgentOverlay />
     ) : kind === "status" ? (
         <StatusOverlay />
-    ) : <StatusOverlay />;
+    ) : (
+        <McpOverlay />
+    );
 }
 
 function SessionSelectOverlay({

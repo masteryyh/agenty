@@ -1,6 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 
-import type { AgentDto, ChatSessionDto, ModelDto } from "../api/types";
+import type { ChatSessionDto, ModelDto } from "../api/types";
 import type { CliOptions } from "../config";
 import {
     type OverlayKind,
@@ -12,7 +12,6 @@ export interface AppSlice {
     phase: "loading" | "error" | "wizard" | "ready";
     initError: string | null;
     opts: CliOptions;
-    agent: AgentDto | null;
     model: ModelDto | null;
     session: ChatSessionDto | null;
     overlay: OverlayKind;
@@ -24,7 +23,6 @@ export interface AppSlice {
     newSession: () => Promise<void>;
     switchModel: (model: ModelDto) => Promise<void>;
     resumeSession: (session: ChatSessionDto) => Promise<void>;
-    switchAgent: (agent: AgentDto) => Promise<void>;
     setOverlay: (overlay: OverlayKind) => void;
     setToast: (text: string, error?: boolean) => void;
     notify: (text: string, error?: boolean) => void;
@@ -38,7 +36,6 @@ export function useApp(): AppSlice {
             phase: s.phase,
             initError: s.initError,
             opts: s.opts,
-            agent: s.agent,
             model: s.model,
             session: s.session,
             overlay: s.overlay,
@@ -50,7 +47,6 @@ export function useApp(): AppSlice {
             newSession: s.newSession,
             switchModel: s.switchModel,
             resumeSession: s.resumeSession,
-            switchAgent: s.switchAgent,
             setOverlay: s.setOverlay,
             setToast: s.setToast,
             notify: s.notify,

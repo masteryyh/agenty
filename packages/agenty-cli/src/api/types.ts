@@ -13,34 +13,6 @@ export interface ModelRef {
     modelCode: string;
 }
 
-export interface AgentDto {
-    code: string;
-    name: string;
-    description?: string;
-    soul: string;
-    defaultModel?: ModelRef;
-    defaultContextWindow: number;
-    defaultReasoningEffort?: ReasoningEffort;
-    isDefault: boolean;
-    metadata?: Record<string, unknown>;
-    createdAt: string;
-    updatedAt: string;
-}
-
-export interface CreateAgentDto {
-    code: string;
-    name: string;
-    description?: string;
-    soul?: string;
-    defaultModel?: ModelRef;
-    defaultContextWindow?: number;
-    defaultReasoningEffort?: ReasoningEffort;
-    isDefault?: boolean;
-    metadata?: Record<string, unknown>;
-}
-
-export type UpdateAgentDto = Partial<Omit<CreateAgentDto, "code">>;
-
 export interface ModelDto {
     code: string;
     providerCode: string;
@@ -104,6 +76,74 @@ export interface ModelProviderDto {
     metadata?: Record<string, unknown>;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface SkillDto {
+    name: string;
+    directoryName: string;
+    description: string;
+    location: string;
+    source: string;
+    autoEnabled: boolean;
+    warning?: string;
+}
+
+export interface SkillDiagnosticDto {
+    severity: string;
+    code: string;
+    message: string;
+    path?: string;
+    name?: string;
+}
+
+export type McpTransport = "stdio" | "http" | "sse";
+export type McpServerStatus =
+    | "disabled"
+    | "connecting"
+    | "connected"
+    | "auth-required"
+    | "authenticating"
+    | "error"
+    | "closing";
+
+export interface McpServerConfig {
+    type: McpTransport;
+    enabled: boolean;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+}
+
+export interface McpServerDto {
+    name: string;
+    config: McpServerConfig;
+    status: McpServerStatus;
+    error?: string;
+    errorStage?: string;
+    toolCount: number;
+    lastChanged?: string;
+    deprecated?: boolean;
+    authUrl?: string;
+}
+
+export interface McpLogEntry {
+    time: string;
+    level: string;
+    source: string;
+    stage?: string;
+    message: string;
+}
+
+export interface McpEvent {
+    type: string;
+    name: string;
+    status?: McpServerStatus;
+    error?: string;
+    errorStage?: string;
+    toolCount?: number;
+    authUrl?: string;
 }
 
 export interface CreateModelProviderDto {
@@ -195,7 +235,6 @@ export interface RoundDto {
 
 export interface ChatSessionDto {
     id: string;
-    agentCode: string;
     title?: string;
     cwd?: string;
     currentModel?: ModelRef;
@@ -209,7 +248,6 @@ export interface ChatSessionDto {
 export interface SessionSummaryDto {
     id: string;
     title: string;
-    agentCode: string;
     lastProviderCode: string;
     lastModelCode: string;
     contextWindow: number;
@@ -258,9 +296,15 @@ export interface ExecutionStart {
 }
 
 export interface InitializeCompleteInput {
-    agentCode: string;
     providerCode: string;
     modelCode: string;
+    reasoningEffort?: ReasoningEffort;
+}
+
+export interface InitializeStatusDto {
+    initialized: boolean;
+    defaultModel?: ModelRef;
+    defaultReasoningEffort?: ReasoningEffort;
 }
 
 export interface PagedResponse<T> {

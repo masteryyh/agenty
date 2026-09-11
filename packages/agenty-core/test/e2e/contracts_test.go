@@ -21,11 +21,7 @@ const (
 var publicRPCMethods = []string{
 	"initialize.already",
 	"initialize.complete",
-	"agent.create",
-	"agent.get",
-	"agent.list",
-	"agent.update",
-	"agent.delete",
+	"skill.list",
 	"provider.create",
 	"provider.get",
 	"provider.list",
@@ -87,7 +83,9 @@ type ModelRef struct {
 }
 
 type InitializeResult struct {
-	Initialized bool `json:"initialized"`
+	Initialized            bool      `json:"initialized"`
+	DefaultModel           *ModelRef `json:"defaultModel,omitempty"`
+	DefaultReasoningEffort string    `json:"defaultReasoningEffort,omitempty"`
 }
 
 type SessionEvent struct {
@@ -110,20 +108,6 @@ type StreamEvent struct {
 	ToolUseID string          `json:"toolUseId"`
 	ToolName  string          `json:"toolName"`
 	ToolInput json.RawMessage `json:"toolInput"`
-}
-
-type Agent struct {
-	Code                   string         `json:"code"`
-	Name                   string         `json:"name"`
-	Description            string         `json:"description"`
-	Soul                   string         `json:"soul"`
-	DefaultModel           *ModelRef      `json:"defaultModel"`
-	DefaultContextWindow   int64          `json:"defaultContextWindow"`
-	DefaultReasoningEffort string         `json:"defaultReasoningEffort"`
-	IsDefault              bool           `json:"isDefault"`
-	Metadata               map[string]any `json:"metadata"`
-	CreatedAt              time.Time      `json:"createdAt"`
-	UpdatedAt              time.Time      `json:"updatedAt"`
 }
 
 type Model struct {
@@ -163,7 +147,6 @@ type Provider struct {
 
 type Session struct {
 	ID                     string    `json:"id"`
-	AgentCode              string    `json:"agentCode"`
 	Title                  *string   `json:"title"`
 	Cwd                    *string   `json:"cwd"`
 	CurrentModel           *ModelRef `json:"currentModel"`
@@ -177,7 +160,6 @@ type Session struct {
 type SessionSummary struct {
 	ID                  string `json:"id"`
 	Title               string `json:"title"`
-	AgentCode           string `json:"agentCode"`
 	LastProviderCode    string `json:"lastProviderCode"`
 	LastModelCode       string `json:"lastModelCode"`
 	ContextWindow       int64  `json:"contextWindow"`
@@ -242,26 +224,6 @@ type DeleteResult struct {
 	Deleted bool   `json:"deleted"`
 }
 
-type AgentCreateInput struct {
-	Code                   string         `json:"code"`
-	Name                   string         `json:"name"`
-	Description            string         `json:"description,omitempty"`
-	Soul                   string         `json:"soul,omitempty"`
-	DefaultModel           *ModelRef      `json:"defaultModel,omitempty"`
-	DefaultContextWindow   int64          `json:"defaultContextWindow,omitempty"`
-	DefaultReasoningEffort string         `json:"defaultReasoningEffort,omitempty"`
-	IsDefault              bool           `json:"isDefault,omitempty"`
-	Metadata               map[string]any `json:"metadata,omitempty"`
-}
-
-type AgentUpdateInput struct {
-	Code        string         `json:"code"`
-	Name        *string        `json:"name,omitempty"`
-	Description *string        `json:"description,omitempty"`
-	Soul        *string        `json:"soul,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-}
-
 type ProviderCreateInput struct {
 	Code         string         `json:"code"`
 	Name         string         `json:"name"`
@@ -295,7 +257,6 @@ type ModelInput struct {
 }
 
 type SessionCreateInput struct {
-	AgentCode       string  `json:"agentCode"`
 	ProviderCode    string  `json:"providerCode"`
 	ModelCode       string  `json:"modelCode"`
 	ContextWindow   int64   `json:"contextWindow,omitempty"`
@@ -304,9 +265,8 @@ type SessionCreateInput struct {
 }
 
 type SessionListInput struct {
-	AgentCode string `json:"agentCode,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
-	Offset    int    `json:"offset,omitempty"`
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
 }
 
 type ContentInput struct {

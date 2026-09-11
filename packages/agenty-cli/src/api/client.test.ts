@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { StdioRPCClient } from "../core/rpc";
 import { AgentyClient } from "./client";
-import type { AgentDto, ChatMessageDto, ChatSessionDto, ModelDto, ModelProviderDto } from "./types";
+import type { ChatMessageDto, ChatSessionDto, ModelDto, ModelProviderDto } from "./types";
 
 describe("AgentyClient session list", () => {
     test("treats a null initialize status as not initialized", async () => {
@@ -13,7 +13,6 @@ describe("AgentyClient session list", () => {
 
         await expect(client.isInitialized()).resolves.toBe(false);
         await expect(client.completeInitialization({
-            agentCode: "default",
             providerCode: "openai",
             modelCode: "gpt-test",
         })).resolves.toEqual({ initialized: false });
@@ -28,14 +27,22 @@ describe("AgentyClient session list", () => {
         await expect(client.listSessionSummaries()).resolves.toEqual([]);
     });
 
-    test("normalizes null agent and provider lists", async () => {
+    test("normalizes null provider lists", async () => {
         const rpc = {
             call: async () => null,
         } as unknown as StdioRPCClient;
         const client = new AgentyClient(rpc);
 
-        await expect(client.listAgents()).resolves.toEqual([]);
         await expect(client.listProviders()).resolves.toEqual([]);
+    });
+
+    test("normalizes empty skill discovery results", async () => {
+        const rpc = {
+            call: async () => null,
+        } as unknown as StdioRPCClient;
+        const client = new AgentyClient(rpc);
+
+        await expect(client.listSkills()).resolves.toEqual({ skills: [], diagnostics: [] });
     });
 
     test("normalizes null provider models before model projection", async () => {
@@ -93,7 +100,6 @@ describe("AgentyClient session list", () => {
     test("normalizes null session collections for old core responses", async () => {
         const session = {
             id: "session",
-            agentCode: "default",
             contextWindow: 128000,
             rounds: null,
             createdAt: "2026-01-01T00:00:00Z",
@@ -108,7 +114,6 @@ describe("AgentyClient session list", () => {
     });
 
     test("updates a resumed session when an explicit model is requested", async () => {
-        const agent = { code: "default", name: "Default" } as AgentDto;
         const currentModel = { providerCode: "openai", modelCode: "gpt-old" };
         const requestedModel = {
             code: "gpt-new",
@@ -117,22 +122,19 @@ describe("AgentyClient session list", () => {
         } as ModelDto;
         const existing = {
             id: "session",
-            agentCode: "default",
             currentModel,
             rounds: [],
         } as unknown as ChatSessionDto;
         let updatedWith: ModelDto | undefined;
         const client = new AgentyClient({} as StdioRPCClient);
-        client.resolveAgent = async () => agent;
         client.resolveModelInput = async () => requestedModel;
-        client.getLastSessionByAgent = async () => existing;
+        client.getLastSession = async () => existing;
         client.setSessionModel = async (_id, model) => {
             updatedWith = model;
             return { ...existing, currentModel: { providerCode: model.providerCode, modelCode: model.code } };
         };
 
         const prepared = await client.prepareSession({
-            agentRef: "default",
             modelInput: "openai/gpt-new",
             newSession: false,
         });
@@ -143,7 +145,6 @@ describe("AgentyClient session list", () => {
     });
 
     test("resolves a persisted current model through its structured reference", async () => {
-        const agent = { code: "default", name: "Default" } as AgentDto;
         const currentModel = { providerCode: "deepseek", modelCode: "deepseek-v4-pro" };
         const resolvedModel = {
             code: "deepseek-v4-pro",
@@ -153,20 +154,18 @@ describe("AgentyClient session list", () => {
         } as ModelDto;
         const session = {
             id: "session",
-            agentCode: "default",
             currentModel,
             rounds: [],
         } as unknown as ChatSessionDto;
         let requestedRef: unknown;
         const client = new AgentyClient({} as StdioRPCClient);
-        client.resolveAgent = async () => agent;
-        client.getLastSessionByAgent = async () => session;
+        client.getLastSession = async () => session;
         client.getModel = async (ref) => {
             requestedRef = ref;
             return resolvedModel;
         };
 
-        const prepared = await client.prepareSession({ agentRef: "default", newSession: false });
+        const prepared = await client.prepareSession({ newSession: false });
 
         expect(requestedRef).toEqual(currentModel);
         expect(prepared.model).toBe(resolvedModel);

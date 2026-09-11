@@ -20,22 +20,23 @@ const (
 )
 
 func (s *Session) applyCompaction(event SessionCompacted) {
-	users, assistants := retainedCompactionMessages(s.context)
-	context := make([]Message, 0, len(users)+len(assistants)+2)
+	users, skills, assistants := retainedCompactionMessages(s.context)
+	context := make([]Message, 0, len(users)+len(skills)+len(assistants)+2)
 	context = append(context, users...)
 	context = append(context, compactionSummaryMessage(event))
 	if metadata := s.compactionMetadataMessage(event.At, event.CompactionID); metadata != nil {
 		context = append(context, *metadata)
 	}
+	context = append(context, skills...)
 	context = append(context, assistants...)
 	s.context = context
 }
 
-func retainedCompactionMessages(messages []Message) ([]Message, []Message) {
+func retainedCompactionMessages(messages []Message) ([]Message, []Message, []Message) {
 	users := make([]Message, 0, maxCompactionUserMessages)
 	assistants := make([]Message, 0, maxCompactionAssistantMessages)
-	for index := len(messages) - 1; index >= 0; index-- {
-		message := messages[index]
+	skills := make([]Message, 0)
+	for _, message := range slices.Backward(messages) {
 		if message.IsHidden() {
 			continue
 		}
@@ -59,7 +60,23 @@ func retainedCompactionMessages(messages []Message) ([]Message, []Message) {
 	}
 	slices.Reverse(users)
 	slices.Reverse(assistants)
-	return users, assistants
+	retainedRounds := make(map[uuid.UUID]struct{}, len(users))
+	for _, user := range users {
+		retainedRounds[user.RoundID] = struct{}{}
+	}
+	for _, message := range messages {
+		if message.IsHidden() && isSkillMessage(message) {
+			if _, ok := retainedRounds[message.RoundID]; ok {
+				skills = append(skills, cloneMessage(message))
+			}
+		}
+	}
+	return users, skills, assistants
+}
+
+func isSkillMessage(message Message) bool {
+	kind, _ := message.Metadata["kind"].(string)
+	return kind == "skill-md"
 }
 
 func retainedUserMessage(message Message) (Message, bool) {

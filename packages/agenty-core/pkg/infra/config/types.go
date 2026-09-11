@@ -9,6 +9,13 @@ type Config struct {
 	// Initialized reports whether the first-run setup has been completed.
 	Initialized bool `mapstructure:"initialized"`
 
+	// DefaultProviderCode and DefaultModelCode identify the model used for new sessions.
+	DefaultProviderCode string `mapstructure:"defaultProviderCode"`
+	DefaultModelCode    string `mapstructure:"defaultModelCode"`
+
+	// DefaultReasoningEffort is the reasoning level used for new sessions.
+	DefaultReasoningEffort string `mapstructure:"defaultReasoningEffort"`
+
 	// Logging configures the slog file logger. Empty fields fall back to the
 	// logger defaults (info level, text format).
 	Logging LoggingConfig `mapstructure:"logging"`
@@ -37,9 +44,6 @@ type Paths struct {
 	// SessionsDir is DataDir/sessions, where JSONL transcripts live.
 	SessionsDir string
 
-	// AgentsDir is DataDir/agents, where agent JSON files live.
-	AgentsDir string
-
 	// ProvidersDir is DataDir/providers, where provider directories live.
 	ProvidersDir string
 
@@ -48,4 +52,10 @@ type Paths struct {
 
 	// DatabaseFile is DataDir/agenty.sqlite.
 	DatabaseFile string
+
+	// SkillsDir is the highest-priority skill directory under DataDir.
+	SkillsDir string
+
+	// MCPDir stores one JSON configuration file per MCP server.
+	MCPDir string
 }
