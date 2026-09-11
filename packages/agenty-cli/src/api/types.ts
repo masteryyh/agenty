@@ -96,6 +96,64 @@ export interface SkillDiagnosticDto {
     name?: string;
 }
 
+export type McpTransport = "stdio" | "http" | "sse";
+export type McpServerStatus =
+    | "disabled"
+    | "connecting"
+    | "connected"
+    | "auth-required"
+    | "authenticating"
+    | "error"
+    | "closing";
+
+export interface McpOAuthConfig {
+    clientId?: string;
+    clientSecret?: string;
+    issuer?: string;
+}
+
+export interface McpServerConfig {
+    type: McpTransport;
+    enabled: boolean;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+    bearerTokenEnvVar?: string;
+    oauth?: McpOAuthConfig;
+}
+
+export interface McpServerDto {
+    name: string;
+    config: McpServerConfig;
+    status: McpServerStatus;
+    error?: string;
+    errorStage?: string;
+    toolCount: number;
+    lastChanged?: string;
+    deprecated?: boolean;
+    authUrl?: string;
+}
+
+export interface McpLogEntry {
+    time: string;
+    level: string;
+    source: string;
+    stage?: string;
+    message: string;
+}
+
+export interface McpEvent {
+    type: string;
+    name: string;
+    status?: McpServerStatus;
+    error?: string;
+    errorStage?: string;
+    toolCount?: number;
+    authUrl?: string;
+}
+
 export interface CreateModelProviderDto {
     code: string;
     name: string;

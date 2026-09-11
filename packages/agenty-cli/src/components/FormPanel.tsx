@@ -1,4 +1,5 @@
 import type { InputRenderable, KeyEvent } from "@opentui/core";
+import type { ReactNode } from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { InputKey } from "../hooks/useInput";
@@ -6,6 +7,7 @@ import { useInput } from "../hooks/useInput";
 import { useBottomDialogSize } from "./BottomDialog";
 import { dropdownFieldMode, DropdownMenu, dropdownValueForField } from "./DropdownMenu";
 import { Panel } from "./Panel";
+import { StringListInput } from "./StringListInput";
 import { textWidth, truncateText } from "./Table";
 import { ActionBar, Box, Pressable, Text, TextInput } from "./ui";
 
@@ -22,7 +24,7 @@ export interface FormOption {
     value: string;
 }
 
-export interface FormField {
+interface ScalarFormField {
     key: string;
     label: string;
     kind: "text" | "select" | "boolean" | "multiselect" | "disclosure";
@@ -35,6 +37,20 @@ export interface FormField {
     visible?: boolean;
 }
 
+export interface StringListFormField {
+    key: string;
+    label: string;
+    kind: "string-list";
+    value: string[];
+    readOnly?: boolean;
+    focusable?: boolean;
+    visible?: boolean;
+}
+
+export type FormField = ScalarFormField | StringListFormField;
+export type FormValue = string | string[];
+export type FormValues = Record<string, FormValue>;
+
 export interface FormAction {
     key: string;
     label: string;
@@ -44,18 +60,19 @@ export interface FormPanelProps {
     title: string;
     fields: FormField[];
     actions?: FormAction[];
+    afterFields?: ReactNode;
     active?: boolean;
     error?: string | null;
     hint?: string;
     shortcutHint?: string;
-    onChange?: (key: string, allValues: Record<string, string>) => void;
+    onChange?: (key: string, allValues: FormValues) => void;
     onShortcut?: (
         input: string,
         key: InputKey,
         event: KeyEvent,
-        values: Record<string, string>,
+        values: FormValues,
     ) => boolean;
-    onAction: (key: string, values: Record<string, string>) => void;
+    onAction: (key: string, values: FormValues) => void;
     onClose: () => void;
 }
 
@@ -130,6 +147,16 @@ function serializeMulti(values: Set<string>): string {
     return JSON.stringify(Array.from(values));
 }
 
+export function formString(values: FormValues, key: string): string {
+    const value = values[key];
+    return typeof value === "string" ? value : "";
+}
+
+export function formStringList(values: FormValues, key: string): string[] {
+    const value = values[key];
+    return Array.isArray(value) ? value : [];
+}
+
 function splitWord(word: string, width: number): string[] {
     const chunks: string[] = [];
     let chunk = "";
@@ -188,6 +215,7 @@ export function FormPanel({
     title,
     fields,
     actions,
+    afterFields,
     active = true,
     error,
     hint: hintOverride,
@@ -215,7 +243,7 @@ export function FormPanel({
         ...visibleFields.flatMap((field, index) => field.focusable === false ? [] : [index]),
         ...actionDefs.map((_action, index) => actionStart + index),
     ], [actionDefs, actionStart, visibleFields]);
-    const [values, setValues] = useState<Record<string, string>>(() =>
+    const [values, setValues] = useState<FormValues>(() =>
         Object.fromEntries(fields.map((field) => [field.key, field.value])),
     );
     const [cursor, setCursor] = useState(navigationIndexes[0] ?? 0);
@@ -249,7 +277,7 @@ export function FormPanel({
             : wrapFormLabel(`${field.label}:`, labelWidth);
         return {
             labelLines,
-            height: field.kind === "disclosure" ? 1 : labelLines.length,
+            height: field.kind === "disclosure" ? 1 : Math.max(labelLines.length, 1),
         };
     });
     const menuRowBudget = hasMeasuredDialog
@@ -266,7 +294,7 @@ export function FormPanel({
     const actionDefsRef = useRef(actionDefs);
     actionDefsRef.current = actionDefs;
 
-    const updateValue = useCallback((key: string, value: string) => {
+    const updateValue = useCallback((key: string, value: FormValue) => {
         const next = { ...valuesRef.current, [key]: value };
         valuesRef.current = next;
         setValues(next);
@@ -296,14 +324,15 @@ export function FormPanel({
         if (!field || field.readOnly) {
             return;
         }
+        if (field.kind !== "select" && field.kind !== "multiselect") {
+            return;
+        }
         const options = field.options ?? [];
         if (options.length === 0) {
             return;
         }
 
-        if (field.kind === "select" || field.kind === "multiselect") {
-            setChoice({ kind: "open", visibleIndex });
-        }
+        setChoice({ kind: "open", visibleIndex });
     }, []);
 
     const runAction = useCallback((actionIndex: number) => {
@@ -327,11 +356,19 @@ export function FormPanel({
         const current = cursorRef.current;
         const field = visibleFieldsRef.current[current];
         const editingText = field?.kind === "text" && !field.readOnly;
-        if (!editingText && onShortcut?.(input, key, event, valuesRef.current)) {
+        const editingList = field?.kind === "string-list" && !field.readOnly;
+        if (!editingText && !editingList && onShortcut?.(input, key, event, valuesRef.current)) {
             return;
         }
         if (key.escape) {
             onClose();
+            return;
+        }
+        if (editingList) {
+            if (key.tab) {
+                event.preventDefault();
+                moveCursor(1);
+            }
             return;
         }
         if (key.upArrow) {
@@ -359,7 +396,7 @@ export function FormPanel({
             return;
         }
         if (field.kind === "disclosure") {
-            const expanded = (valuesRef.current[field.key] ?? field.value) === "true";
+            const expanded = formString(valuesRef.current, field.key) === "true";
             if (key.leftArrow && expanded) {
                 updateValue(field.key, "false");
             } else if (key.rightArrow && !expanded) {
@@ -371,7 +408,7 @@ export function FormPanel({
             return;
         } else if (field.kind === "boolean") {
             if (key.leftArrow || key.rightArrow || key.return || input === " ") {
-                const value = valuesRef.current[field.key] ?? field.value;
+                const value = formString(valuesRef.current, field.key);
                 updateValue(field.key, value === "true" ? "false" : "true");
             }
         } else if ((field.kind === "select" || field.kind === "multiselect") && key.return) {
@@ -380,29 +417,36 @@ export function FormPanel({
     }, { isActive: active });
 
     const hasDisclosure = visibleFields.some((field) => field.kind === "disclosure");
-    const hint = hintOverride ?? (dialogSize.width < 60
+    const hasStringList = visibleFields.some((field) => field.kind === "string-list");
+    const navigationHint = hintOverride ?? (dialogSize.width < 60
         ? hasDisclosure
             ? "↑↓ move · ←→ expand/collapse · Enter choose · Esc back"
             : "↑↓ move · Enter choose · Esc back"
         : hasDisclosure
             ? "↑↓ navigate · ←→ expand/collapse · type to edit · Enter open/choose · Space toggle · Esc back"
             : "↑↓ navigate · type to edit · Enter open/choose · Space toggle · Esc back");
+    const hint = hasStringList
+        ? `${hintOverride ? `${hintOverride} · ` : ""}${dialogSize.width < 60 ? "↑↓ move" : "↑↓ navigate"} · type + Enter adds tag · Backspace removes tag · Esc back`
+        : navigationHint;
     const choiceField = choice.kind === "idle"
         ? undefined
         : visibleFields[choice.visibleIndex];
-    const choiceFieldTop = choiceField && choice.kind !== "idle"
+    const choiceScalarField = choiceField?.kind === "select" || choiceField?.kind === "multiselect"
+        ? choiceField
+        : undefined;
+    const choiceFieldTop = choiceScalarField && choice.kind !== "idle"
         ? fieldLayouts
             .slice(0, choice.visibleIndex)
             .reduce((total, layout) => total + layout.height, 0)
         : 0;
     const choiceIndex = choice.kind === "open" ? choice.visibleIndex : 0;
-    const dropdownPlacement = choiceField && choice.kind !== "idle"
+    const dropdownPlacement = choiceScalarField && choice.kind !== "idle"
         ? hasMeasuredDialog
             ? chooseDropdownPlacement(
                 choiceFieldTop,
                 fieldLayouts[choice.visibleIndex]?.height ?? 1,
                 Math.max(dialogSize.height - 4, 1),
-                choiceField.options?.length ?? 0,
+                choiceScalarField.options?.length ?? 0,
                 menuRowBudget,
             )
             : {
@@ -443,7 +487,9 @@ export function FormPanel({
                 {visibleFields.map((field, visibleIndex) => {
                     const selected = cursor === visibleIndex;
                     const value = values[field.key] ?? field.value;
-                    const options = field.options ?? [];
+                    const scalarValue = typeof value === "string" ? value : "";
+                    const listValue = Array.isArray(value) ? value : [];
+                    const options = field.kind === "string-list" ? [] : field.options ?? [];
                     const editingText = active && selected && field.kind === "text" && !field.readOnly;
                     const layout = fieldLayouts[visibleIndex];
                     const rowHeight = layout?.height ?? 1;
@@ -464,9 +510,9 @@ export function FormPanel({
                                 setCursor(visibleIndex);
                                 setChoice({ kind: "idle" });
                                 if (field.kind === "disclosure") {
-                                    updateValue(field.key, value === "true" ? "false" : "true");
+                                    updateValue(field.key, scalarValue === "true" ? "false" : "true");
                                 } else if (field.kind === "boolean" && !field.readOnly) {
-                                    updateValue(field.key, value === "true" ? "false" : "true");
+                                    updateValue(field.key, scalarValue === "true" ? "false" : "true");
                                 }
                             }}
                         >
@@ -491,10 +537,61 @@ export function FormPanel({
                                         overflow="hidden"
                                     >
                                         <Text color={selected ? "cyan" : "gray"} bold={selected}>
-                                            {`${value === "true" ? "▾" : "▸"} ${field.label}`}
+                                            {`${scalarValue === "true" ? "▾" : "▸"} ${field.label}`}
                                         </Text>
                                     </Box>
                                     <Box width={valueWidth} height={1} flexShrink={0} />
+                                </Box>
+                            ) : field.kind === "string-list" ? (
+                                <Box
+                                    flexGrow={1}
+                                    flexBasis={0}
+                                    height={rowHeight}
+                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
+                                    alignItems="flex-start"
+                                    overflow="hidden"
+                                >
+                                    <Box
+                                        width={labelWidth}
+                                        height={rowHeight}
+                                        flexDirection="column"
+                                        overflow="hidden"
+                                    >
+                                        {labelLines.map((line, lineIndex) => (
+                                            <Box
+                                                key={`${field.key}:label:${lineIndex}`}
+                                                width={labelWidth}
+                                                height={1}
+                                                justifyContent="flex-end"
+                                                overflow="hidden"
+                                            >
+                                                <Text color={selected ? "cyan" : "gray"} bold={selected}>
+                                                    {line}
+                                                </Text>
+                                            </Box>
+                                        ))}
+                                    </Box>
+                                    <Box
+                                        width={valueWidth}
+                                        height={rowHeight}
+                                        flexGrow={valueWidth === undefined ? 1 : 0}
+                                        flexShrink={valueWidth === undefined ? 1 : 0}
+                                        justifyContent="flex-start"
+                                        overflow="hidden"
+                                    >
+                                        <StringListInput
+                                            value={listValue}
+                                            width={valueWidth ?? 48}
+                                            active={active && selected && !field.readOnly}
+                                            onChange={(next) => updateValue(field.key, next)}
+                                            onActivate={() => {
+                                                setCursor(visibleIndex);
+                                                setChoice({ kind: "idle" });
+                                            }}
+                                            onMoveOutside={(direction) => moveCursor(direction, visibleIndex)}
+                                            onClose={onClose}
+                                        />
+                                    </Box>
                                 </Box>
                             ) : (
                                 <Box
@@ -536,7 +633,7 @@ export function FormPanel({
                                         {editingText ? (
                                             <TextInput
                                                 ref={textInputRef}
-                                                value={value}
+                                                value={scalarValue}
                                                 onChange={(next) => updateValue(field.key, next)}
                                                 onSubmit={() => moveCursor(1, visibleIndex)}
                                                 placeholder={field.placeholder ?? ""}
@@ -560,10 +657,10 @@ export function FormPanel({
                                         ) : (
                                             <Text color={selected ? "cyan" : "white"}>
                                                 {field.kind === "boolean"
-                                                    ? renderBoolean(selected, value)
+                                                    ? renderBoolean(selected, scalarValue)
                                                     : field.kind === "multiselect"
-                                                        ? renderMultiValue(value)
-                                                        : renderTextValue(field, value, options, valueWidth ?? 48)}
+                                                        ? renderMultiValue(scalarValue)
+                                                        : renderTextValue(field, scalarValue, options, valueWidth ?? 48)}
                                             </Text>
                                         )}
                                     </Box>
@@ -572,7 +669,12 @@ export function FormPanel({
                         </Pressable>
                     );
                 })}
-                {choiceField && dropdownPlacement ? (
+                {afterFields ? (
+                    <Box width="100%" marginTop={1}>
+                        {afterFields}
+                    </Box>
+                ) : null}
+                {choiceScalarField && dropdownPlacement ? (
                     <Box
                         position="absolute"
                         top={dropdownPlacement.side === "above"
@@ -594,17 +696,17 @@ export function FormPanel({
                         >
                             <Box width={labelWidth} height={dropdownPlacement.height} />
                             <DropdownMenu
-                                options={choiceField.options ?? []}
-                                mode={dropdownFieldMode(choiceField.kind === "select" ? "select" : "multiselect")}
+                                options={choiceScalarField.options ?? []}
+                                mode={dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect")}
                                 value={dropdownValueForField(
-                                    dropdownFieldMode(choiceField.kind === "select" ? "select" : "multiselect"),
-                                    values[choiceField.key] ?? choiceField.value,
+                                    dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect"),
+                                    formString(values, choiceScalarField.key) || choiceScalarField.value,
                                 )}
                                 width={valueWidth ?? 48}
                                 maxVisible={dropdownPlacement.visibleRows}
                                 onSubmit={(next) => {
                                     const submitted = Array.isArray(next) ? serializeMulti(new Set(next)) : next;
-                                    updateValue(choiceField.key, submitted);
+                                    updateValue(choiceScalarField.key, submitted);
                                     setChoice({ kind: "idle" });
                                 }}
                                 onClose={() => setChoice({ kind: "idle" })}
@@ -618,7 +720,7 @@ export function FormPanel({
 }
 
 function renderTextValue(
-    field: FormField,
+    field: ScalarFormField,
     value: string,
     options: FormOption[],
     width: number,

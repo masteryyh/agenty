@@ -12,6 +12,10 @@ import type {
     ExecutionStart,
     InitializeCompleteInput,
     InitializeStatusDto,
+    McpEvent,
+    McpLogEntry,
+    McpServerConfig,
+    McpServerDto,
     ModelDto,
     ModelProviderDto,
     ModelRef,
@@ -45,6 +49,14 @@ export class AgentyClient {
 
     onCompactionEvent(listener: (event: CompactionEvent) => void): () => void {
         return this.rpc.onNotification<CompactionEvent | null | undefined>("session.compaction", (event) => {
+            if (event) {
+                listener(event);
+            }
+        });
+    }
+
+    onMcpEvent(listener: (event: McpEvent) => void): () => void {
+        return this.rpc.onNotification<McpEvent | null | undefined>("mcp.event", (event) => {
             if (event) {
                 listener(event);
             }
@@ -207,6 +219,68 @@ export class AgentyClient {
             skills: result?.skills ?? [],
             diagnostics: result?.diagnostics ?? [],
         };
+    }
+
+    async listMcpServers(): Promise<McpServerDto[]> {
+        const servers = await this.rpc.call<Array<McpServerDto | null> | null>("mcp.list");
+        return (servers ?? []).filter((server): server is McpServerDto => server !== null);
+    }
+
+    async listMcpServerLogs(name: string): Promise<McpLogEntry[]> {
+        const logs = await this.rpc.call<Array<McpLogEntry | null> | null>("mcp.logs", { name });
+        return (logs ?? []).filter((log): log is McpLogEntry => log !== null);
+    }
+
+    async createMcpServer(name: string, config: McpServerConfig): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.create", { name, config });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async updateMcpServer(name: string, config: McpServerConfig): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.update", { name, config });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async setMcpEnabled(name: string, enabled: boolean): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.enable", { name, enabled });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async reconnectMcpServer(name: string): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.reconnect", { name });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async loginMcpServer(name: string): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.login", { name });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async logoutMcpServer(name: string): Promise<McpServerDto> {
+        const server = await this.rpc.call<McpServerDto | null>("mcp.logout", { name });
+        if (!server) {
+            throw new Error(`core returned an empty MCP server for ${name}`);
+        }
+        return server;
+    }
+
+    async removeMcpServer(name: string): Promise<void> {
+        await this.rpc.call("mcp.remove", { name });
     }
 
     async listSessions(): Promise<ChatSessionDto[]> {

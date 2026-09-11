@@ -9,8 +9,9 @@ The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 o
 the child process's stdin/stdout; it does not start an HTTP server.
 
 The current core supports provider/model management, persistent sessions, streaming model
-output, agentic tool loops, session compaction, built-in filesystem tools, and local skills.
-MCP, memory, and remote-client mode remain hidden until equivalent core implementations exist.
+output, agentic tool loops, session compaction, built-in filesystem tools, local skills, and
+MCP client connections. Memory and remote-client mode remain hidden until equivalent core
+implementations exist.
 
 ## Quick start
 
@@ -49,7 +50,7 @@ and the terminal round status. Notifications may arrive before the `session.star
 response, so clients must subscribe before sending the request. Core exits when stdin
 reaches EOF.
 
-The TUI currently exposes `/provider`, `/model`, `/cwd`, `/effort`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/mcp`, `/cwd`, `/effort`, `/status`,
 `/new`, `/resume`, `/help`, and `/exit`. Type `$` in the composer to search for an installed
 skill and insert it as a structured reference. Core scans the data directory's `skills/`
 folder first, followed by `~/.agents/skills` and `~/.claude/skills`; set `AGENTY_DATA_DIR` to
@@ -67,12 +68,27 @@ Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the C
 | Session transcripts | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | Session index | `~/.agenty/agenty.sqlite` |
 | Providers and models | Built-in catalog is embedded in the core binary; custom providers use `~/.agenty/providers/<provider-code>.json`, while built-in provider files store only API keys |
+| MCP server configuration | `~/.agenty/mcp/<server-name>.json` (one concise JSON file per server, mode `0600`) |
+| MCP OAuth credentials | `~/.agenty/mcp-auth/<server-name>.json` (mode `0600`, separate from configuration) |
 | Model discovery cache | Kept only in the running core process for 8 hours; it is refreshed on demand and does not survive a core restart |
 | Patch transaction locks | `~/.agenty/locks/` |
 | Logs | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
 `AGENTY_LOG_LEVEL` accepts `debug`, `info`, `warn`, or `error`.
 `AGENTY_LOG_FORMAT` accepts `text` or `jsonl`.
+
+`/mcp` manages stdio, Streamable HTTP, and legacy SSE servers. A server file contains `type`,
+`enabled`, and transport-specific `command`/`args`/`env` or `url`/`headers` fields; `args` is a
+JSON string array with one entry per process argument. It does not store a working directory.
+Environment and header values may reference environment variables;
+remote servers can also use `bearerTokenEnvVar` for a token kept in the process environment.
+Streamable HTTP supports the Go SDK's OAuth authorization-code flow, including dynamic client
+registration and loopback browser login; `/mcp` opens the authorization URL and reports the
+connection state. Set `oauth.clientId` (and optional `oauth.clientSecret`/`oauth.issuer`) when a
+server uses a pre-registered client. SSE remains available for existing servers and is marked deprecated in the
+TUI. Connections start in the background with bounded concurrency, and a round snapshots the
+currently connected tool set when it begins, so a server that connects later becomes available
+from the next round.
 
 ## Development
 

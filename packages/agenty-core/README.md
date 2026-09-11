@@ -15,6 +15,8 @@ The filesystem is the source of truth; SQLite is a query-side projection.
 | Session index | `~/.agenty/agenty.sqlite` → `sessions` | Read model — projection for fast listing/search |
 | Global config | `~/.agenty/config.json` | Application configuration |
 | Providers | Embedded catalog; custom providers use `~/.agenty/providers/<provider-code>.json` | Built-in metadata/models are read-only; built-in files store only API keys |
+| MCP servers | `~/.agenty/mcp/<server-name>.json` | One concise configuration file per server, mode `0600` |
+| MCP OAuth credentials | `~/.agenty/mcp-auth/<server-name>.json` | OAuth tokens, mode `0600`, kept outside server config |
 | Core log | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | Structured text diagnostics (`core.jsonl` in JSONL mode) |
 
 A session's messages and rounds are never stored in SQLite; the `sessions` table is a
@@ -32,7 +34,8 @@ upstream codes for models).
 pkg/domain/
 ├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session → Round → Message), content blocks, events
-└── catalog/       Provider aggregate (Provider → Model)
+├── catalog/       Provider aggregate (Provider → Model)
+└── mcp/           MCP server configuration, status, and tool projection
 ```
 
 The conversation transcript is event-sourced: each JSONL line is a domain event
@@ -107,6 +110,7 @@ pkg/infra/
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── catalog.go      CatalogRepository (embedded built-ins plus custom provider JSON)
 │   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
+├── mcp/                MCP client registry and stdio/Streamable HTTP/SSE transports
 └── rpc/                stdio JSON-RPC 2.0 interface layer
     ├── message.go      Request/Response/Notification/Error/ID wire types
     ├── codes.go        standard + server-defined error codes
@@ -189,7 +193,26 @@ Methods follow a `resource.action` naming:
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
+| MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+MCP server configurations live in `<AGENTY_DATA_DIR>/mcp/<server-name>.json`; the file name is
+the server name. `stdio` entries use `command`, a JSON string array `args` (one process argument
+per element), and optional `env`; `http` entries use
+Streamable HTTP `url`, optional `headers`, or `bearerTokenEnvVar`; `sse` entries retain compatibility with legacy
+servers and are reported as deprecated. No `cwd` field is persisted. Values in `env` and
+`headers` expand the core process environment at connection time.
+
+The central registry starts enabled servers asynchronously with bounded parallelism. It records
+`connecting`, `connected`, `auth-required`, and `error` states and emits `mcp.event` notifications.
+Streamable HTTP can use the official SDK OAuth authorization-code handler with dynamic or
+pre-registered clients (`oauth.clientId`, with optional `oauth.clientSecret` and `oauth.issuer`);
+`mcp.login` exposes a loopback callback URL to the CLI and stores tokens
+under `mcp-auth`. Tools are registered as `mcp__<server-name>__<tool-name>`. A session round
+captures the connected tool registry at round start, so a connection that completes later is
+visible from the next round. `mcp.logs` returns the latest bounded, in-memory diagnostics for a
+server, including connection errors and stdio child stderr; sensitive configured values are
+redacted. Core closes all active MCP sessions and stdio child processes during shutdown.
 
 `skill.list` returns the discovered skill registry and non-fatal diagnostics. Core scans
 `<AGENTY_DATA_DIR>/skills` first (`~/.agenty/skills` by default), then `~/.agents/skills` and

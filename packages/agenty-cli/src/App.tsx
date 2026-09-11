@@ -1,5 +1,5 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
@@ -7,6 +7,10 @@ import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
+import {
+    MCP_OVERLAY_HEIGHT,
+    McpOverlay,
+} from "./components/McpOverlay";
 import { MessageList } from "./components/MessageList";
 import { ModelOverlay } from "./components/ModelOverlay";
 import { ProviderOverlay } from "./components/ProviderOverlay";
@@ -41,6 +45,8 @@ function panelHeight(overlay: OverlayKind): number | null {
             return STATUS_OVERLAY_HEIGHT;
         case "model-select":
             return MODEL_OVERLAY_HEIGHT;
+        case "mcp":
+            return MCP_OVERLAY_HEIGHT;
         default:
             return null;
     }
@@ -101,6 +107,7 @@ function ChatView() {
     const thinkingLevel = useAppStore((s) => s.thinkingLevel);
     const [document, setDocument] = useState<ComposerDocument>(() => emptyDocument());
     const [cursorOffset, setCursorOffset] = useState(0);
+    const [mcpOverlayHeight, setMcpOverlayHeight] = useState(MCP_OVERLAY_HEIGHT);
     const inputRef = useRef<StructuredTextInputHandle | null>(null);
     const skills = useAppStore((s) => s.skills);
 
@@ -118,7 +125,13 @@ function ChatView() {
     const busy = streaming || chat.status === "compacting";
     const reasoningActive = streaming && !!chat.current?.reasoning && !chat.current.content;
 
-    const panelH = panelHeight(app.overlay);
+    useEffect(() => {
+        if (app.overlay !== "mcp") {
+            setMcpOverlayHeight(MCP_OVERLAY_HEIGHT);
+        }
+    }, [app.overlay]);
+
+    const panelH = app.overlay === "mcp" ? mcpOverlayHeight : panelHeight(app.overlay);
     const hasPanelOverlay = panelH !== null;
     // Bottom dialogs float over the chat and input instead of changing the main
     // flex flow. This keeps scroll position and message layout stable.
@@ -178,6 +191,9 @@ function ChatView() {
                     return;
                 case "/provider":
                     app.setOverlay("provider");
+                    return;
+                case "/mcp":
+                    app.setOverlay("mcp");
                     return;
                 case "/resume":
                     app.setOverlay("session-select");
@@ -310,7 +326,10 @@ function ChatView() {
                     width={Math.max(columns - 2, 1)}
                     height={Math.max(Math.min(panelH!, Math.max(rows - 2, 1)), 1)}
                 >
-                    <OverlayPanel kind={app.overlay!} />
+                    <OverlayPanel
+                        kind={app.overlay!}
+                        onMcpHeightChange={setMcpOverlayHeight}
+                    />
                 </BottomDialog>
             ) : null}
         </Box>
@@ -319,8 +338,10 @@ function ChatView() {
 
 function OverlayPanel({
     kind,
+    onMcpHeightChange,
 }: {
-    kind: "provider" | "status" | "model-select";
+    kind: "provider" | "status" | "model-select" | "mcp";
+    onMcpHeightChange?: (height: number) => void;
 }) {
     return kind === "model-select" ? (
         <ModelOverlay />
@@ -328,7 +349,9 @@ function OverlayPanel({
         <ProviderOverlay />
     ) : kind === "status" ? (
         <StatusOverlay />
-    ) : <StatusOverlay />;
+    ) : (
+        <McpOverlay onPreferredHeightChange={onMcpHeightChange} />
+    );
 }
 
 function SessionSelectOverlay({

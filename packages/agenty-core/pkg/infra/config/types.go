@@ -55,4 +55,7 @@ type Paths struct {
 
 	// SkillsDir is the highest-priority skill directory under DataDir.
 	SkillsDir string
+
+	// MCPDir stores one JSON configuration file per MCP server.
+	MCPDir string
 }

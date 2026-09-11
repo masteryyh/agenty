@@ -8,7 +8,8 @@ CLI 仅通过子进程
 stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
 
 core 当前支持 provider/model 管理、持久化会话、模型流式输出、agent 工具循环、会话压缩、
-内置文件工具和本地 Skills。MCP、memory 和远程客户端模式要等 core 提供对等实现后再开放。
+内置文件工具、本地 Skills 和 MCP client 连接。memory 和远程客户端模式要等 core 提供对等
+实现后再开放。
 
 ## 快速开始
 
@@ -43,7 +44,7 @@ core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notific
 已持久化消息、模型流式增量、工具调用和 round 终态。通知可能早于 `session.start` response
 到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
 
-TUI 当前开放 `/provider`、`/model`、`/cwd`、`/effort`、`/status`、
+TUI 当前开放 `/provider`、`/model`、`/mcp`、`/cwd`、`/effort`、`/status`、
 `/new`、`/resume`、`/help` 和 `/exit`。在输入框中输入 `$` 可以搜索并插入已安装的
 Skill 结构化引用。core 会依次扫描数据目录下的 `skills/`、`~/.agents/skills` 和
 `~/.claude/skills`；可以通过 `AGENTY_DATA_DIR` 更改第一个目录。
@@ -60,12 +61,25 @@ core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>
 | 会话 transcript | `~/.agenty/sessions/<yyyy>/<mm>/<dd>/<session-id>.jsonl` |
 | 会话索引 | `~/.agenty/agenty.sqlite` |
 | Providers 和 models | 内置 catalog 固化在 core 二进制中；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json`，内置 provider 文件仅保存 API key |
+| MCP server 配置 | `~/.agenty/mcp/<server-name>.json`（每个 server 一个简洁 JSON 文件，权限 `0600`） |
+| MCP OAuth 凭据 | `~/.agenty/mcp-auth/<server-name>.json`（权限 `0600`，与配置分开保存） |
 | 模型发现缓存 | 仅保存在运行中的 core 进程内，有效期 8 小时；按需刷新，core 重启后不会保留 |
 | Patch 事务锁 | `~/.agenty/locks/` |
 | 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` |
 
 `AGENTY_LOG_LEVEL` 接受 `debug`、`info`、`warn` 或 `error`；
 `AGENTY_LOG_FORMAT` 接受 `text` 或 `jsonl`。
+
+`/mcp` 可管理 stdio、Streamable HTTP 和 legacy SSE server。server 文件包含 `type`、
+`enabled`，以及按 transport 选择的 `command`/`args`/`env` 或 `url`/`headers` 字段，
+其中 `args` 是每个进程参数一个元素的 JSON 字符串数组。不保存工作目录；环境变量和
+header 值可以引用环境变量，远程 server 也可以通过
+`bearerTokenEnvVar` 从进程环境读取 token。Streamable HTTP 使用 Go SDK
+提供的 OAuth authorization-code 流程，支持动态 client registration 和 loopback 浏览器
+登录；`/mcp` 会打开授权 URL 并显示连接状态。需要预注册 client 时可设置
+`oauth.clientId` 以及可选的 `oauth.clientSecret`/`oauth.issuer`。SSE 继续兼容已有 server，但会在 TUI 中标记
+为 deprecated。连接在后台以有限并发启动；每个 round 开始时会快照当时已连接的工具，
+较晚完成连接的 server 从下一轮开始可用。
 
 ## 开发
 

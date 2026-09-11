@@ -37,6 +37,11 @@ export const commands: Command[] = [
         usage: "/provider",
     },
     {
+        name: "/mcp",
+        description: "Manage MCP servers and connections",
+        usage: "/mcp",
+    },
+    {
         name: "/resume",
         description: "Resume a previous session",
         usage: "/resume",

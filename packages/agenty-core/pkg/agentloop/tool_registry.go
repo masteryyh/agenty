@@ -1,7 +1,9 @@
 package agentloop
 
 import (
+	"maps"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -74,6 +76,18 @@ func (r *Registry) Definitions() []ToolDefinition {
 	return definitions
 }
 
+// SnapshotToolRuntime returns an immutable view of the tools currently
+// registered. The underlying Tool values are shared, while the name-to-tool
+// map is copied so later registrations cannot change an in-flight round.
+func (r *Registry) SnapshotToolRuntime() ToolRuntime {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	snapshot := &Registry{tools: make(map[string]Tool, len(r.tools))}
+	maps.Copy(snapshot.tools, r.tools)
+	return snapshot
+}
+
 func (r *Registry) ExecuteBatch(
 	ctx context.Context,
 	callContext CallContext,
@@ -117,7 +131,12 @@ func (r *Registry) execute(
 
 	content, err := tool.Execute(ctx, callContext, call.Input)
 	if err != nil {
-		result.Content = conversation.Text(fmt.Sprintf("tool %q failed: %v", call.Name, err))
+		var structured *ToolExecutionError
+		if errors.As(err, &structured) && structured != nil && len(structured.Content) > 0 {
+			result.Content = structured.Content
+		} else {
+			result.Content = conversation.Text(fmt.Sprintf("tool %q failed: %v", call.Name, err))
+		}
 		result.IsError = true
 		return result
 	}

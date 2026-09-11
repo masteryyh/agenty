@@ -90,6 +90,7 @@ func InitializeDataDir() error {
 		paths.ProvidersDir,
 		paths.LocksDir,
 		paths.SkillsDir,
+		paths.MCPDir,
 	} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
@@ -169,5 +170,6 @@ func ResolvePaths() (*Paths, error) {
 		LocksDir:     filepath.Join(dataDir, "locks"),
 		DatabaseFile: filepath.Join(dataDir, "agenty.sqlite"),
 		SkillsDir:    filepath.Join(dataDir, "skills"),
+		MCPDir:       filepath.Join(dataDir, "mcp"),
 	}, nil
 }

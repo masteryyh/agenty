@@ -5,7 +5,7 @@ import { act, useState } from "react";
 
 import { BottomDialog } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
-import type { FormField } from "./FormPanel";
+import type { FormField, FormValues } from "./FormPanel";
 import {
     chooseDropdownPlacement,
     FormPanel,
@@ -71,12 +71,67 @@ describe("common TUI components", () => {
             height: 7,
         });
         expect(chooseDropdownPlacement(1, 1, 5, 5, 5).side).toBe("below");
+        expect(chooseDropdownPlacement(1, 1, 10, 3, 4)).toEqual({
+            side: "below",
+            visibleRows: 3,
+            height: 5,
+        });
     });
 
     test("grows dropdown rows from a four-row minimum to an eight-row maximum", () => {
         expect(preferredDropdownRows(5)).toBe(4);
         expect(preferredDropdownRows(16)).toBe(6);
         expect(preferredDropdownRows(40)).toBe(8);
+    });
+
+    test("shows every transport choice in an MCP-sized dialog", async () => {
+        const setup = await testRender(
+            <BottomDialog width={72} height={20}>
+                <FormPanel
+                    title="MCP Server"
+                    fields={[
+                        { key: "name", label: "Name", kind: "text", value: "local" },
+                        {
+                            key: "type",
+                            label: "Transport",
+                            kind: "select",
+                            value: "http",
+                            options: [
+                                { label: "Streamable HTTP", value: "http" },
+                                { label: "SSE (deprecated)", value: "sse" },
+                                { label: "Stdio", value: "stdio" },
+                            ],
+                        },
+                    ]}
+                    onAction={() => undefined}
+                    onClose={() => undefined}
+                />
+            </BottomDialog>,
+            { width: 74, height: 22 },
+        );
+
+        try {
+            await act(async () => {
+                await setup.flush();
+                setup.mockInput.pressArrow("down");
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressEnter();
+                await setup.flush();
+            });
+
+            const frame = await setup.waitForFrame((current) =>
+                current.includes("Streamable HTTP") &&
+                current.includes("SSE (deprecated)") &&
+                current.includes("Stdio"),
+            );
+            expect(frame).toContain("Streamable HTTP");
+            expect(frame).toContain("SSE (deprecated)");
+            expect(frame).toContain("Stdio");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
     });
 
     test("wraps labels at the shared maximum width", () => {
@@ -166,7 +221,7 @@ describe("common TUI components", () => {
                 ],
             },
         ];
-        let saved: Record<string, string> | undefined;
+        let saved: FormValues | undefined;
         const setup = await testRender(
             <FormPanel
                 title="Form"
@@ -227,7 +282,7 @@ describe("common TUI components", () => {
     });
 
     test("opens a multi-select dropdown and commits temporary choices", async () => {
-        let saved: Record<string, string> | undefined;
+        let saved: FormValues | undefined;
         const setup = await testRender(
             <FormPanel
                 title="Model"
@@ -282,6 +337,54 @@ describe("common TUI components", () => {
 
             expect(saved).toBeUndefined();
             expect(setup.captureCharFrame()).toContain("2 selected");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
+    test("keeps string-list form values as arrays while navigating out", async () => {
+        let saved: FormValues | undefined;
+        const setup = await testRender(
+            <FormPanel
+                title="MCP"
+                fields={[
+                    {
+                        key: "args",
+                        label: "Arguments",
+                        kind: "string-list",
+                        value: ["node"],
+                    },
+                ]}
+                actions={[{ key: "save", label: "Save" }]}
+                onAction={(_action, values) => {
+                    saved = values;
+                }}
+                onClose={() => undefined}
+            />,
+            { width: 60, height: 12 },
+        );
+
+        try {
+            await act(async () => {
+                await setup.flush();
+                await setup.mockInput.typeText("--stdio");
+                setup.mockInput.pressEnter();
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressArrow("down");
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressArrow("down");
+                await setup.flush();
+            });
+            await act(async () => {
+                setup.mockInput.pressEnter();
+                await setup.flush();
+            });
+
+            expect(saved).toEqual({ args: ["node", "--stdio"] });
         } finally {
             act(() => setup.renderer.destroy());
         }

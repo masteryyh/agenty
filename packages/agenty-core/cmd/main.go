@@ -13,10 +13,12 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/agentloop/builtin"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
+	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
 	"github.com/masteryyh/agenty-core/pkg/infra/llm"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
+	mcpregistry "github.com/masteryyh/agenty-core/pkg/infra/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
 	"github.com/masteryyh/agenty-core/pkg/infra/skill"
@@ -89,6 +91,26 @@ func run() (exitCode int) {
 
 	disp := rpc.NewDispatcher()
 	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
+	mcpRegistry, err := mcpregistry.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcpregistry.Options{
+		Events: func(eventCtx context.Context, event domainmcp.Event) {
+			if err := srv.Notify(eventCtx, "mcp.event", event); err != nil {
+				slog.DebugContext(eventCtx, "failed to publish MCP event", "error", err)
+			}
+		},
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to initialize MCP registry", "error", err)
+		return 1
+	}
+	mcpRegistry.Start()
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+		if err := mcpRegistry.Shutdown(shutdownCtx); err != nil {
+			slog.ErrorContext(shutdownCtx, "failed to stop MCP registry", "error", err)
+			exitCode = 1
+		}
+	}()
 	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
 		Sessions: repos.Conversation,
 		Catalog:  repos.Catalog,
@@ -133,6 +155,7 @@ func run() (exitCode int) {
 		sessionService,
 		execution,
 	)
+	adapter.RegisterMCPHandlers(disp, mcpRegistry)
 	adapter.RegisterSkillHandlers(disp, skillRegistry)
 
 	asm := rpc.NewChunkAssembler(disp)

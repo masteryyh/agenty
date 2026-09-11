@@ -213,6 +213,7 @@ func (engine *Engine) Compact(
 		return nil, err
 	}
 	defer engine.release(id, execution)
+	toolRuntime := engine.snapshotTools()
 
 	session, err := engine.sessions.Load(ctx, id)
 	if err != nil {
@@ -232,6 +233,7 @@ func (engine *Engine) Compact(
 		systemPrompt:    resources.systemPrompt,
 		freeFormTool:    resources.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(resources.model),
+		toolRuntime:     toolRuntime,
 	}
 	event, err := engine.compactPrepared(runCtx, prepared, conversation.CompactionTriggerManual)
 	if err != nil {
@@ -271,6 +273,7 @@ func (engine *Engine) SetModel(
 		return nil, err
 	}
 	defer engine.release(id, execution)
+	toolRuntime := engine.snapshotTools()
 
 	session, err := engine.sessions.Load(ctx, id)
 	if err != nil {
@@ -314,6 +317,7 @@ func (engine *Engine) SetModel(
 		systemPrompt:    source.systemPrompt,
 		freeFormTool:    source.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(source.model),
+		toolRuntime:     toolRuntime,
 	}
 	request := engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
 	if ShouldCompact(estimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
@@ -414,6 +418,7 @@ type preparedExecution struct {
 	systemPrompt    string
 	freeFormTool    bool
 	maxOutputTokens int64
+	toolRuntime     ToolRuntime
 	userMessage     conversation.Message
 	eventSequence   uint64
 }
@@ -431,6 +436,8 @@ func (engine *Engine) prepare(
 	sessionID uuid.UUID,
 	content conversation.Content,
 ) (*preparedExecution, error) {
+	toolRuntime := engine.snapshotTools()
+
 	session, err := engine.sessions.Load(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, conversation.ErrSessionNotFound) {
@@ -498,6 +505,7 @@ func (engine *Engine) prepare(
 		systemPrompt:    resources.systemPrompt,
 		freeFormTool:    resources.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(resources.model),
+		toolRuntime:     toolRuntime,
 		userMessage:     userMessage,
 	}, nil
 }
@@ -579,15 +587,25 @@ func (engine *Engine) sessionRequestForWindow(
 	request := Request{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        sessionMessages(prepared.session),
-		Tools:           engine.toolDefinitions(prepared.freeFormTool),
+		Tools:           engine.toolDefinitions(prepared.toolRuntime, prepared.freeFormTool),
 		MaxOutputTokens: maxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared),
 	}
 	return fitCompactedRequest(request, contextWindow)
 }
 
-func (engine *Engine) toolDefinitions(freeFormTool bool) []ToolDefinition {
-	definitions := engine.tools.Definitions()
+func (engine *Engine) snapshotTools() ToolRuntime {
+	if snapshotter, ok := engine.tools.(interface{ SnapshotToolRuntime() ToolRuntime }); ok {
+		return snapshotter.SnapshotToolRuntime()
+	}
+	return engine.tools
+}
+
+func (engine *Engine) toolDefinitions(toolRuntime ToolRuntime, freeFormTool bool) []ToolDefinition {
+	if toolRuntime == nil {
+		toolRuntime = engine.tools
+	}
+	definitions := toolRuntime.Definitions()
 	if freeFormTool {
 		return definitions
 	}
@@ -651,102 +669,102 @@ func (engine *Engine) executeLoop(
 	ctx context.Context,
 	prepared *preparedExecution,
 ) (conversation.TokenUsage, error) {
-	totalUsage := conversation.TokenUsage{}
 	lastCompacted := false
-
-	for iteration := 1; iteration <= maxAgentLoopIterations; iteration++ {
-		if err := ctx.Err(); err != nil {
-			return totalUsage, err
-		}
-
-		request := engine.sessionRequest(prepared)
-		if ShouldCompact(
-			estimateRequestTokens(request),
-			modelContextWindow(prepared),
-			prepared.maxOutputTokens,
-		) && !lastCompacted {
-			compaction, err := engine.compactPrepared(ctx, prepared, conversation.CompactionTriggerAuto)
-			if err != nil {
-				return totalUsage, fmt.Errorf("compact session before iteration %d: %w", iteration, err)
-			}
-			totalUsage = totalUsage.Add(compaction.Usage)
-			lastCompacted = true
-			request = engine.sessionRequest(prepared)
-		}
-		response, err := engine.call(ctx, prepared, iteration, request)
-		if err != nil {
-			return totalUsage, fmt.Errorf("invoke LLM at iteration %d: %w", iteration, err)
-		}
-		if response == nil {
-			return totalUsage, fmt.Errorf("invoke LLM at iteration %d: empty response", iteration)
-		}
-		lastCompacted = false
-
-		totalUsage = totalUsage.Add(response.Usage)
-		message, err := prepared.session.AppendAssistantMessage(
-			prepared.roundID,
-			response.Content,
-			prepared.session.Rounds[len(prepared.session.Rounds)-1].Model,
-			&response.Usage,
-		)
-		if err != nil {
-			return totalUsage, fmt.Errorf("append assistant message at iteration %d: %w", iteration, err)
-		}
-		if err := engine.saveProgress(ctx, prepared.session); err != nil {
-			return totalUsage, fmt.Errorf("save assistant message at iteration %d: %w", iteration, err)
-		}
-		if err := engine.emit(ctx, prepared, SessionEvent{
-			Type:      SessionEventMessageAppended,
-			Iteration: iteration,
-			Message:   &message,
-		}); err != nil {
-			return totalUsage, fmt.Errorf("emit assistant message at iteration %d: %w", iteration, err)
-		}
-
-		toolCalls := toolCalls(response.Content)
-		if len(toolCalls) == 0 {
-			if response.StopReason == StopReasonError {
-				return totalUsage, fmt.Errorf("LLM stopped with an error")
-			}
-			return totalUsage, nil
-		}
-
-		cwd := ""
-		round := prepared.session.Rounds[len(prepared.session.Rounds)-1]
-		if round.Cwd != nil {
-			cwd = *round.Cwd
-		}
-		results := engine.tools.ExecuteBatch(ctx, CallContext{
-			SessionID: prepared.session.ID,
-			RoundID:   prepared.roundID,
-			Cwd:       cwd,
-		}, toolCalls)
-		markNativeShellResults(response.Content, results)
-		if err := ctx.Err(); err != nil {
-			return totalUsage, err
-		}
-
-		content := make(conversation.Content, 0, len(results))
-		for _, result := range results {
-			content = append(content, result)
-		}
-		message, err = prepared.session.AppendUserMessage(prepared.roundID, content)
-		if err != nil {
-			return totalUsage, fmt.Errorf("append tool results at iteration %d: %w", iteration, err)
-		}
-		if err := engine.saveProgress(ctx, prepared.session); err != nil {
-			return totalUsage, fmt.Errorf("save tool results at iteration %d: %w", iteration, err)
-		}
-		if err := engine.emit(ctx, prepared, SessionEvent{
-			Type:      SessionEventMessageAppended,
-			Iteration: iteration,
-			Message:   &message,
-		}); err != nil {
-			return totalUsage, fmt.Errorf("emit tool results at iteration %d: %w", iteration, err)
-		}
+	toolRuntime := prepared.toolRuntime
+	if toolRuntime == nil {
+		toolRuntime = engine.tools
 	}
 
-	return totalUsage, fmt.Errorf("agent loop exceeded %d iterations", maxAgentLoopIterations)
+	result, err := runAgentLoop(ctx, agentLoopConfig{
+		name: "agent loop",
+		request: func(ctx context.Context, iteration int) (Request, conversation.TokenUsage, error) {
+			// Automatic compaction is a request-building policy of real sessions.
+			request := engine.sessionRequest(prepared)
+			var compactionUsage conversation.TokenUsage
+			if ShouldCompact(
+				estimateRequestTokens(request),
+				modelContextWindow(prepared),
+				prepared.maxOutputTokens,
+			) && !lastCompacted {
+				compaction, err := engine.compactPrepared(ctx, prepared, conversation.CompactionTriggerAuto)
+				if err != nil {
+					return Request{}, conversation.TokenUsage{}, fmt.Errorf(
+						"compact session before iteration %d: %w",
+						iteration,
+						err,
+					)
+				}
+				compactionUsage = compaction.Usage
+				lastCompacted = true
+				request = engine.sessionRequest(prepared)
+			}
+			return request, compactionUsage, nil
+		},
+		invoke: func(ctx context.Context, iteration int, request Request) (*Response, error) {
+			return engine.call(ctx, prepared, iteration, request)
+		},
+		toolRuntime: toolRuntime,
+		callContext: func() CallContext {
+			cwd := ""
+			round := prepared.session.Rounds[len(prepared.session.Rounds)-1]
+			if round.Cwd != nil {
+				cwd = *round.Cwd
+			}
+			return CallContext{
+				SessionID: prepared.session.ID,
+				RoundID:   prepared.roundID,
+				Cwd:       cwd,
+			}
+		},
+		appendAssistant: func(ctx context.Context, iteration int, response *Response, _ bool) error {
+			// Persist each assistant response before continuing with tools.
+			message, err := prepared.session.AppendAssistantMessage(
+				prepared.roundID,
+				response.Content,
+				prepared.session.Rounds[len(prepared.session.Rounds)-1].Model,
+				&response.Usage,
+			)
+			if err != nil {
+				return fmt.Errorf("append assistant message at iteration %d: %w", iteration, err)
+			}
+			if err := engine.saveProgress(ctx, prepared.session); err != nil {
+				return fmt.Errorf("save assistant message at iteration %d: %w", iteration, err)
+			}
+			if err := engine.emit(ctx, prepared, SessionEvent{
+				Type:      SessionEventMessageAppended,
+				Iteration: iteration,
+				Message:   &message,
+			}); err != nil {
+				return fmt.Errorf("emit assistant message at iteration %d: %w", iteration, err)
+			}
+			return nil
+		},
+		appendToolResults: func(ctx context.Context, iteration int, content conversation.Content) error {
+			// Tool results remain ordinary user-role transcript messages.
+			message, err := prepared.session.AppendUserMessage(prepared.roundID, content)
+			if err != nil {
+				return fmt.Errorf("append tool results at iteration %d: %w", iteration, err)
+			}
+			if err := engine.saveProgress(ctx, prepared.session); err != nil {
+				return fmt.Errorf("save tool results at iteration %d: %w", iteration, err)
+			}
+			if err := engine.emit(ctx, prepared, SessionEvent{
+				Type:      SessionEventMessageAppended,
+				Iteration: iteration,
+				Message:   &message,
+			}); err != nil {
+				return fmt.Errorf("emit tool results at iteration %d: %w", iteration, err)
+			}
+			return nil
+		},
+		afterResponse: func(*Response) {
+			lastCompacted = false
+		},
+	})
+	if err != nil {
+		return result.usage, err
+	}
+	return result.usage, nil
 }
 
 func modelContextWindow(prepared *preparedExecution) int64 {

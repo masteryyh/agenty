@@ -64,6 +64,36 @@ func TestRegistryRegistrationAndDefinitions(t *testing.T) {
 	}
 }
 
+func TestRegistrySnapshotIsStableAcrossRegistrations(t *testing.T) {
+	t.Parallel()
+
+	registry := agentloop.NewRegistry()
+	if err := registry.Register(&testTool{
+		definition: agentloop.ToolDefinition{Name: "before"},
+		execute: func(context.Context, agentloop.CallContext, []byte) (conversation.Content, error) {
+			return conversation.Text("ok"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.SnapshotToolRuntime()
+	if err := registry.Register(&testTool{definition: agentloop.ToolDefinition{Name: "after"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	definitions := snapshot.Definitions()
+	if len(definitions) != 1 || definitions[0].Name != "before" {
+		t.Fatalf("snapshot definitions = %#v", definitions)
+	}
+	results := snapshot.ExecuteBatch(t.Context(), agentloop.CallContext{}, []conversation.ToolUseBlock{
+		{ID: "before", Name: "before"},
+		{ID: "after", Name: "after"},
+	})
+	if len(results) != 2 || results[0].IsError || !results[1].IsError {
+		t.Fatalf("snapshot results = %#v", results)
+	}
+}
+
 func TestRegistryExecuteBatchRunsInParallelAndPreservesOrder(t *testing.T) {
 	t.Parallel()
 

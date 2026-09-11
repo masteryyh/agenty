@@ -15,6 +15,8 @@ Agenty 的核心运行时。它围绕本地优先的存储模型（文件系统 
 | Session index | `~/.agenty/agenty.sqlite` -> `sessions` | 读模型，用于快速列表和搜索的投影 |
 | 全局配置 | `~/.agenty/config.json` | 应用配置 |
 | Providers | 内置 catalog 固化在 core；自定义 provider 使用 `~/.agenty/providers/<provider-code>.json` | 内置元数据/模型只读，内置 provider 文件仅保存 API key |
+| MCP servers | `~/.agenty/mcp/<server-name>.json` | 每个 server 一个简洁配置文件，权限 `0600` |
+| MCP OAuth 凭据 | `~/.agenty/mcp-auth/<server-name>.json` | OAuth token，权限 `0600`，与 server 配置分开 |
 | Core 日志 | `~/.agenty/logs/<yyyy>/<mm>/<dd>/core.log` | 结构化文本诊断信息（JSONL 模式下为 `core.jsonl`） |
 
 Session 的 messages 和 rounds 永远不会存入 SQLite；`sessions` 表是摘要投影，可以通过
@@ -30,7 +32,8 @@ reasoning effort。
 pkg/domain/
 ├── shared/        Shared kernel: Code, ModelRef, ReasoningEffort, Metadata, Event, ID
 ├── conversation/  Session aggregate (Session -> Round -> Message), content blocks, events
-└── catalog/       Provider aggregate (Provider -> Model)
+├── catalog/       Provider aggregate (Provider -> Model)
+└── mcp/           MCP server 配置、状态和工具投影
 ```
 
 Conversation transcript 采用 event sourcing：每一行 JSONL 都是一个 domain event
@@ -98,6 +101,7 @@ pkg/infra/
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── catalog.go      CatalogRepository（内置 provider 与自定义 provider JSON）
 │   └── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
+├── mcp/                MCP client registry 及 stdio/Streamable HTTP/SSE transport
 └── rpc/                stdio JSON-RPC 2.0 接口层
     ├── message.go      Request/Response/Notification/Error/ID wire types
     ├── codes.go        标准错误码 + server-defined 错误码
@@ -169,7 +173,21 @@ Methods 使用 `resource.action` 命名：
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
 | Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
+| MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
+
+MCP server 配置位于 `<AGENTY_DATA_DIR>/mcp/<server-name>.json`，文件名就是 server 名称。
+`stdio` 使用 `command`、字符串数组形式的 `args`（每个进程参数一个元素）和可选的 `env`；`http` 使用 Streamable HTTP 的 `url` 和可选
+`headers` 或 `bearerTokenEnvVar`；`sse` 保留对 legacy server 的兼容，并标记为 deprecated。配置不保存 `cwd` 字段；
+`env` 和 `headers` 的值会在连接时展开 core 进程环境变量。
+
+中心 registry 会以异步、有限并发方式连接启用的 server，并记录 `connecting`、`connected`、
+`auth-required` 和 `error` 状态，通过 `mcp.event` notification 推送变化。Streamable HTTP
+使用官方 SDK 的 OAuth authorization-code handler，支持动态或预注册 client；`mcp.login`
+（配置 `oauth.clientId`，可选 `oauth.clientSecret`/`oauth.issuer`）会把 loopback callback 授权 URL 交给 CLI，并将 token 保存到 `mcp-auth`。工具名称统一为
+`mcp__<server-name>__<tool-name>`。每个 session round 开始时快照当时已连接的工具，因此较晚
+完成的连接从下一轮开始可见。core 退出时会关闭所有 MCP session 及 stdio 子进程。
+`mcp.logs` 返回 server 最近的有界内存诊断日志，包括连接错误和 stdio 子进程 stderr；配置中的敏感值会脱敏，日志不会持久化到磁盘。
 
 `skill.list` 返回已发现的 skill registry 和非致命诊断信息。core 先扫描
 `<AGENTY_DATA_DIR>/skills`（默认是 `~/.agenty/skills`），再扫描 `~/.agents/skills` 和

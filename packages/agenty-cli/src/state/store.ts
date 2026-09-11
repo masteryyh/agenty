@@ -19,7 +19,7 @@ import { pickStreamingPhrase } from "../consts/streamingPhrases";
 import { startLocalCore } from "../localCore";
 
 export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
-export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | null;
+export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | "mcp" | null;
 export type SystemMessageVariant = "compacted";
 const TOAST_DURATION_MS = 3000;
 

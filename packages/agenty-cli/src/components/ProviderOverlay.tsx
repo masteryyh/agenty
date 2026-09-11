@@ -15,8 +15,7 @@ import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
-import type { FormField } from "./FormPanel";
-import { FormPanel } from "./FormPanel";
+import { type FormField, FormPanel, formString, type FormValues } from "./FormPanel";
 import { List, useListNavigation } from "./List";
 import { Panel } from "./Panel";
 import {
@@ -119,9 +118,9 @@ export function buildProviderFields(
 }
 
 export function buildBuiltinProviderUpdate(
-    values: Record<string, string>,
+    values: FormValues,
 ): UpdateModelProviderDto | null {
-    const apiKey = values.apiKey?.trim() ?? "";
+    const apiKey = formString(values, "apiKey").trim();
     return apiKey ? { apiKey } : null;
 }
 
@@ -171,14 +170,14 @@ function buildModelFields(
     ];
 }
 
-export function parseModelValues(values: Record<string, string>): CreateModelDto | string {
-    const modelCode = values.code?.trim() ?? "";
-    const name = values.name?.trim() ?? "";
-    const contextWindow = Number(values.contextWindow);
-    const maxOutputTokens = Number(values.maxOutputTokens || "8192");
+export function parseModelValues(values: FormValues): CreateModelDto | string {
+    const modelCode = formString(values, "code").trim();
+    const name = formString(values, "name").trim();
+    const contextWindow = Number(formString(values, "contextWindow"));
+    const maxOutputTokens = Number(formString(values, "maxOutputTokens") || "8192");
     let reasoningEfforts: ReasoningEffort[] = [];
     try {
-        const parsed: unknown = JSON.parse(values.reasoningEfforts || "[]");
+        const parsed: unknown = JSON.parse(formString(values, "reasoningEfforts") || "[]");
         if (Array.isArray(parsed)) {
             reasoningEfforts = parsed.filter((value): value is ReasoningEffort =>
                 typeof value === "string" && (STANDARD_REASONING_EFFORTS as readonly string[]).includes(value),
@@ -199,15 +198,15 @@ export function parseModelValues(values: Record<string, string>): CreateModelDto
     if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
         return "Max output tokens must be a positive integer.";
     }
-    const reasoning = values.reasoning === "true";
+    const reasoning = formString(values, "reasoning") === "true";
     return {
         providerCode: "",
         modelCode,
         name,
         contextWindow,
         maxOutputTokens,
-        multiModal: values.multiModal === "true",
-        light: values.light === "true",
+        multiModal: formString(values, "multiModal") === "true",
+        light: formString(values, "light") === "true",
         reasoning,
         reasoningEfforts: reasoning ? reasoningEfforts : [],
     };
@@ -346,21 +345,23 @@ export function ProviderOverlay() {
         });
     };
 
-    const handleCreateProvider = async (values: Record<string, string>) => {
+    const handleCreateProvider = async (values: FormValues) => {
         if (!client) {
             return;
         }
         try {
-            const type = values.type as APIType;
+            const type = formString(values, "type") as APIType;
+            const code = formString(values, "code").trim();
+            const name = formString(values, "name").trim();
             await client.createProvider({
-                code: values.code.trim(),
-                name: values.name.trim(),
+                code,
+                name,
                 type,
-                baseUrl: values.baseUrl.trim(),
-                apiKey: values.apiKey.trim(),
-                freeFormTool: type === "openai" && values.freeFormTool === "true",
+                baseUrl: formString(values, "baseUrl").trim(),
+                apiKey: formString(values, "apiKey").trim(),
+                freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
             });
-            setToast(`Provider created: ${values.name.trim()}`);
+            setToast(`Provider created: ${name}`);
             await reload();
             returnToList();
         } catch (cause: unknown) {
@@ -368,24 +369,27 @@ export function ProviderOverlay() {
         }
     };
 
-    const handleEditProvider = async (target: ModelProviderDto, values: Record<string, string>) => {
+    const handleEditProvider = async (target: ModelProviderDto, values: FormValues) => {
         if (!client || target.builtin === true) {
             returnToList();
             return;
         }
         try {
-            const type = values.type as APIType;
+            const type = formString(values, "type") as APIType;
+            const name = formString(values, "name").trim();
+            const baseUrl = formString(values, "baseUrl").trim();
+            const apiKey = formString(values, "apiKey").trim();
             const update: UpdateModelProviderDto = {
-                name: values.name.trim(),
+                name,
                 type,
-                baseUrl: values.baseUrl.trim(),
-                freeFormTool: type === "openai" && values.freeFormTool === "true",
+                baseUrl,
+                freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
             };
-            if (values.apiKey.trim()) {
-                update.apiKey = values.apiKey.trim();
+            if (apiKey) {
+                update.apiKey = apiKey;
             }
             await client.updateProvider(target.code, update);
-            setToast(`Provider updated: ${values.name.trim()}`);
+            setToast(`Provider updated: ${name}`);
             await reload();
             returnToList();
         } catch (cause: unknown) {
@@ -395,7 +399,7 @@ export function ProviderOverlay() {
 
     const handleConfigureProvider = async (
         target: ModelProviderDto,
-        values: Record<string, string>,
+        values: FormValues,
     ) => {
         if (!client || target.builtin !== true) {
             returnToList();
@@ -431,7 +435,7 @@ export function ProviderOverlay() {
         }
     };
 
-    const handleCreateModel = async (provider: ModelProviderDto, values: Record<string, string>) => {
+    const handleCreateModel = async (provider: ModelProviderDto, values: FormValues) => {
         if (!client || provider.builtin === true) {
             returnToList();
             return;
@@ -454,7 +458,7 @@ export function ProviderOverlay() {
     const handleEditModel = async (
         provider: ModelProviderDto,
         target: CoreModelDto,
-        values: Record<string, string>,
+        values: FormValues,
     ) => {
         if (!client || provider.builtin === true) {
             returnToList();
@@ -497,7 +501,7 @@ export function ProviderOverlay() {
                 fields={buildCreateProviderFields(formType)}
                 onChange={(key, values) => {
                     if (key === "type") {
-                        setFormType(values.type);
+                        setFormType(formString(values, "type"));
                     }
                 }}
                 onAction={(action, values) => {
@@ -550,7 +554,7 @@ export function ProviderOverlay() {
                 fields={buildCreateModelFields(advancedModelOptions)}
                 onChange={(key, values) => {
                     if (key === "advanced") {
-                        setAdvancedModelOptions(values.advanced === "true");
+                        setAdvancedModelOptions(formString(values, "advanced") === "true");
                     }
                 }}
                 onAction={(action, values) => {
@@ -574,7 +578,7 @@ export function ProviderOverlay() {
                 fields={buildModelFields(target, readOnly, advancedModelOptions)}
                 onChange={(key, values) => {
                     if (key === "advanced") {
-                        setAdvancedModelOptions(values.advanced === "true");
+                        setAdvancedModelOptions(formString(values, "advanced") === "true");
                     }
                 }}
                 actions={readOnly ? [{ key: "back", label: "Back" }] : undefined}
