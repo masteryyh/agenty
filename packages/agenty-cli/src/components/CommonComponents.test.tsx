@@ -511,6 +511,16 @@ describe("common TUI components", () => {
             });
 
             expect(input?.focused).toBe(true);
+
+            input?.blur();
+            const lines = setup.captureCharFrame().split("\n");
+            const labelY = lines.findIndex((line) => line.includes("Model Code:"));
+            const labelX = lines[labelY]!.indexOf("Model Code:");
+            await act(async () => {
+                await setup.mockMouse.click(labelX, labelY);
+                await setup.flush();
+            });
+            expect(input?.focused).toBe(true);
         } finally {
             act(() => setup.renderer.destroy());
         }

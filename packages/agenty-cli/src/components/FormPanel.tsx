@@ -1,20 +1,21 @@
-import type { InputRenderable, KeyEvent } from "@opentui/core";
+import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core";
 import type { ReactNode } from "react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { InputKey } from "../hooks/useInput";
 import { useInput } from "../hooks/useInput";
+import { useWindowSize } from "../hooks/useWindowSize";
 import { useBottomDialogSize } from "./BottomDialog";
 import { dropdownFieldMode, DropdownMenu, dropdownValueForField } from "./DropdownMenu";
-import { Panel } from "./Panel";
+import { FormFieldRow } from "./FormFieldRow";
+import { layoutFormActions, resolveFormLayout, wrapFormLabel } from "./formLayout";
+import { FormShell } from "./FormShell";
 import { StringListInput } from "./StringListInput";
-import { textWidth, truncateText } from "./Table";
-import { ActionBar, Box, Pressable, Text, TextInput } from "./ui";
+import { truncateText } from "./Table";
+import { ActionBar, Box, Text, TextInput } from "./ui";
 
-const FORM_LABEL_MAX_WIDTH = 24;
-const FORM_VALUE_WIDTH = 48;
-const FORM_MIN_VALUE_WIDTH = 12;
-const FORM_COLUMN_GAP = 2;
+export { wrapFormLabel } from "./formLayout";
+
 const FORM_MENU_BORDER_HEIGHT = 2;
 const FORM_MENU_MIN_ROWS = 4;
 const FORM_MENU_MAX_ROWS = 8;
@@ -157,56 +158,6 @@ export function formStringList(values: FormValues, key: string): string[] {
     return Array.isArray(value) ? value : [];
 }
 
-function splitWord(word: string, width: number): string[] {
-    const chunks: string[] = [];
-    let chunk = "";
-    let chunkWidth = 0;
-
-    for (const character of word) {
-        const characterWidth = textWidth(character);
-        if (chunk && chunkWidth + characterWidth > width) {
-            chunks.push(chunk);
-            chunk = "";
-            chunkWidth = 0;
-        }
-        chunk += character;
-        chunkWidth += characterWidth;
-    }
-    if (chunk) {
-        chunks.push(chunk);
-    }
-
-    return chunks;
-}
-
-export function wrapFormLabel(value: string, width: number): string[] {
-    if (width <= 0) {
-        return [""];
-    }
-
-    const lines: string[] = [];
-    let current = "";
-    for (const word of value.trim().split(/\s+/)) {
-        const chunks = textWidth(word) > width ? splitWord(word, width) : [word];
-        for (const chunk of chunks) {
-            const candidate = current ? `${current} ${chunk}` : chunk;
-            if (textWidth(candidate) <= width) {
-                current = candidate;
-                continue;
-            }
-            if (current) {
-                lines.push(current);
-            }
-            current = chunk;
-        }
-    }
-    if (current) {
-        lines.push(current);
-    }
-
-    return lines.length > 0 ? lines : [""];
-}
-
 type ChoiceState =
     | { kind: "idle" }
     | { kind: "open"; visibleIndex: number };
@@ -226,6 +177,7 @@ export function FormPanel({
     onClose,
 }: FormPanelProps) {
     const dialogSize = useBottomDialogSize();
+    const terminal = useWindowSize();
     const visibleFields = useMemo(
         () => fields.filter((field) => field.visible !== false),
         [fields],
@@ -246,43 +198,42 @@ export function FormPanel({
     const [values, setValues] = useState<FormValues>(() =>
         Object.fromEntries(fields.map((field) => [field.key, field.value])),
     );
-    const [cursor, setCursor] = useState(navigationIndexes[0] ?? 0);
+    const focusKeys = [
+        ...visibleFields.map((field) => `field:${field.key}`),
+        ...actionDefs.map((action) => `action:${action.key}`),
+    ];
+    const [focusKey, setFocusKey] = useState(focusKeys[navigationIndexes[0] ?? 0]);
+    const focusIndex = focusKeys.indexOf(focusKey ?? "");
+    const cursor = navigationIndexes.includes(focusIndex) ? focusIndex : navigationIndexes[0] ?? 0;
+    const setCursor = (index: number) => setFocusKey(focusKeys[index]);
     const [choice, setChoice] = useState<ChoiceState>({ kind: "idle" });
     const textInputRef = useRef<InputRenderable | null>(null);
 
-    const hasMeasuredDialog = dialogSize.width > 1;
-    const formColumnBudget = Math.max(dialogSize.width - 2, 1);
-    const labelContentWidth = Math.max(
-        ...fields
-            .filter((field) => field.kind !== "disclosure")
-            .map((field) => textWidth(`${field.label}:`)),
-        1,
-    );
-    const preferredLabelWidth = Math.min(labelContentWidth, FORM_LABEL_MAX_WIDTH);
-    const labelWidth = hasMeasuredDialog
-        ? Math.min(
-            preferredLabelWidth,
-            Math.max(formColumnBudget - FORM_MIN_VALUE_WIDTH - FORM_COLUMN_GAP, 1),
-        )
-        : preferredLabelWidth;
-    const valueWidth = hasMeasuredDialog
-        ? Math.max(
-            Math.min(FORM_VALUE_WIDTH, formColumnBudget - labelWidth - FORM_COLUMN_GAP),
-            1,
-        )
-        : undefined;
+    const width = dialogSize.width > 1 ? dialogSize.width : terminal.columns;
+    const height = dialogSize.width > 1 ? dialogSize.height : terminal.rows;
+    const layout = resolveFormLayout(width, fields.filter((field) => field.kind !== "disclosure").map((field) => field.label));
     const fieldLayouts = visibleFields.map((field) => {
-        const labelLines = field.kind === "disclosure"
-            ? [field.label]
-            : wrapFormLabel(`${field.label}:`, labelWidth);
+        const labelLines = wrapFormLabel(`${field.label}:`, layout.labelWidth);
+        const valueTop = layout.mode === "stacked" ? labelLines.length : 0;
         return {
             labelLines,
-            height: field.kind === "disclosure" ? 1 : Math.max(labelLines.length, 1),
+            valueTop,
+            height: field.kind === "disclosure" ? 1 : Math.max(labelLines.length, valueTop + 1),
         };
     });
-    const menuRowBudget = hasMeasuredDialog
-        ? preferredDropdownRows(Math.max(dialogSize.height - 4, 1))
-        : 6;
+    const fieldOffsets: number[] = [];
+    let fieldsHeight = 0;
+    for (const fieldLayout of fieldLayouts) {
+        fieldOffsets.push(fieldsHeight);
+        fieldsHeight += fieldLayout.height;
+    }
+    const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+    const [scrollOffset, setScrollOffset] = useState(0);
+    const [afterFieldsHeight, setAfterFieldsHeight] = useState(0);
+    const titleLines = wrapFormLabel(title, width);
+    const errorLines = error ? wrapFormLabel(error, width) : [];
+    const actionRows = layoutFormActions(actionDefs, width);
+    const menuRowBudget = preferredDropdownRows(Math.max(terminal.rows - 8, 1));
     const valuesRef = useRef(values);
     valuesRef.current = values;
     const cursorRef = useRef(cursor);
@@ -364,10 +315,16 @@ export function FormPanel({
             onClose();
             return;
         }
+        if (key.pageUp || key.pageDown) {
+            event.preventDefault();
+            scrollRef.current?.scrollBy(key.pageUp ? -bodyHeight : bodyHeight);
+            setScrollOffset(scrollRef.current?.scrollTop ?? 0);
+            return;
+        }
         if (editingList) {
             if (key.tab) {
                 event.preventDefault();
-                moveCursor(1);
+                moveCursor(key.shift ? -1 : 1);
             }
             return;
         }
@@ -378,7 +335,7 @@ export function FormPanel({
         }
         if (key.downArrow || key.tab) {
             event.preventDefault();
-            moveCursor(1);
+            moveCursor(key.tab && key.shift ? -1 : 1);
             return;
         }
 
@@ -416,73 +373,96 @@ export function FormPanel({
         }
     }, { isActive: active });
 
-    const hasDisclosure = visibleFields.some((field) => field.kind === "disclosure");
-    const hasStringList = visibleFields.some((field) => field.kind === "string-list");
-    const navigationHint = hintOverride ?? (dialogSize.width < 60
-        ? hasDisclosure
-            ? "↑↓ move · ←→ expand/collapse · Enter choose · Esc back"
-            : "↑↓ move · Enter choose · Esc back"
-        : hasDisclosure
-            ? "↑↓ navigate · ←→ expand/collapse · type to edit · Enter open/choose · Space toggle · Esc back"
-            : "↑↓ navigate · type to edit · Enter open/choose · Space toggle · Esc back");
-    const hint = hasStringList
-        ? `${hintOverride ? `${hintOverride} · ` : ""}${dialogSize.width < 60 ? "↑↓ move" : "↑↓ navigate"} · type + Enter adds tag · Backspace removes tag · Esc back`
-        : navigationHint;
-    const choiceField = choice.kind === "idle"
-        ? undefined
-        : visibleFields[choice.visibleIndex];
+    const focusedField = visibleFields[cursor];
+    const choiceField = choice.kind === "open" ? visibleFields[choice.visibleIndex] : undefined;
     const choiceScalarField = choiceField?.kind === "select" || choiceField?.kind === "multiselect"
         ? choiceField
         : undefined;
-    const choiceFieldTop = choiceScalarField && choice.kind !== "idle"
-        ? fieldLayouts
-            .slice(0, choice.visibleIndex)
-            .reduce((total, layout) => total + layout.height, 0)
-        : 0;
     const choiceIndex = choice.kind === "open" ? choice.visibleIndex : 0;
-    const dropdownPlacement = choiceScalarField && choice.kind !== "idle"
-        ? hasMeasuredDialog
-            ? chooseDropdownPlacement(
-                choiceFieldTop,
-                fieldLayouts[choice.visibleIndex]?.height ?? 1,
-                Math.max(dialogSize.height - 4, 1),
-                choiceScalarField.options?.length ?? 0,
-                menuRowBudget,
-            )
-            : {
-                side: "below" as const,
-                visibleRows: menuRowBudget,
-                height: menuRowBudget + FORM_MENU_BORDER_HEIGHT,
-            }
+    const choiceFieldTop = (fieldOffsets[choiceIndex] ?? 0) + (fieldLayouts[choiceIndex]?.valueTop ?? 0);
+    const menuHeight = choiceScalarField
+        ? Math.min(choiceScalarField.options?.length ?? 0, menuRowBudget) + FORM_MENU_BORDER_HEIGHT
+        : 0;
+    const preferredBodyHeight = Math.max(
+        fieldsHeight + (afterFields ? afterFieldsHeight + 1 : 0),
+        choiceScalarField ? choiceFieldTop + 1 + menuHeight : 1,
+    );
+    const compact = height < titleLines.length + errorLines.length + actionRows.length + 5;
+    const bodyHeight = Math.max(1, Math.min(
+        preferredBodyHeight,
+        height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3),
+    ));
+
+    // Keep keyboard focus in view when fields expand or the terminal resizes.
+    useLayoutEffect(() => {
+        if (!scrollRef.current || cursor >= visibleFields.length) {
+            return;
+        }
+        const top = fieldOffsets[cursor] ?? 0;
+        const bottom = top + (fieldLayouts[cursor]?.height ?? 1);
+        const current = scrollRef.current.scrollTop;
+        const next = top < current ? top : bottom > current + bodyHeight ? bottom - bodyHeight : current;
+        scrollRef.current.scrollTo(Math.max(next, 0));
+        setScrollOffset(scrollRef.current.scrollTop);
+    }, [cursor, bodyHeight, fieldsHeight, layout.mode]);
+
+    const dropdownPlacement = choiceScalarField
+        ? bodyHeight < 3
+            ? { side: "below" as const, visibleRows: bodyHeight, height: bodyHeight }
+            : chooseDropdownPlacement(choiceFieldTop - scrollOffset, 1, bodyHeight, choiceScalarField.options?.length ?? 0, menuRowBudget)
         : undefined;
+    const moreBelow = fieldsHeight + (afterFields ? afterFieldsHeight + 1 : 0) > scrollOffset + bodyHeight;
+    const scrollHint = scrollOffset > 0 || moreBelow
+        ? `${scrollOffset > 0 ? "↑" : ""}${moreBelow ? "↓" : ""} more · `
+        : "";
+    const hint = hintOverride ?? formHint(focusedField, width - scrollHint.length, choice.kind === "open");
 
     return (
-        <Panel
-            title={title}
-            error={error}
-            contentOverflow="visible"
-            footer={(
+        <FormShell
+            titleLines={titleLines}
+            errorLines={errorLines}
+            preferredBodyHeight={preferredBodyHeight}
+            bodyHeight={bodyHeight}
+            compact={compact}
+            footerHeight={actionRows.length}
+            footer={actionRows.map((row, index) => (
                 <ActionBar
-                    actions={actionDefs}
+                    key={index}
+                    actions={row}
                     activeKey={cursor >= actionStart ? actionDefs[cursor - actionStart]?.key : undefined}
                     gap={3}
                     onAction={(key) => {
-                        const index = actionDefs.findIndex((action) => action.key === key);
-                        if (index >= 0) {
-                            setCursor(actionStart + index);
-                            runAction(index);
+                        if (!active) {
+                            return;
+                        }
+                        const actionIndex = actionDefs.findIndex((action) => action.key === key);
+                        if (actionIndex >= 0) {
+                            setCursor(actionStart + actionIndex);
+                            runAction(actionIndex);
                         }
                     }}
                 />
-            )}
-            hint={shortcutHint ? `${hint} · ${shortcutHint}` : hint}
+            ))}
+            hint={`${scrollHint}${hint}${shortcutHint ? ` · ${shortcutHint}` : ""}`}
         >
-            <Box
-                flexDirection="column"
-                flexGrow={1}
+            <scrollbox
+                ref={scrollRef}
                 width="100%"
-                position="relative"
-                overflow="visible"
+                height={bodyHeight}
+                scrollX={false}
+                scrollY
+                focused={false}
+                viewportCulling={false}
+                verticalScrollbarOptions={{ visible: false }}
+                contentOptions={{ flexDirection: "column" }}
+                onMouseScroll={() => {
+                    setChoice({ kind: "idle" });
+                    queueMicrotask(() => {
+                        if (scrollRef.current && !scrollRef.current.isDestroyed) {
+                            setScrollOffset(scrollRef.current.scrollTop);
+                        }
+                    });
+                }}
             >
                 {visibleFields.map((field, visibleIndex) => {
                     const selected = cursor === visibleIndex;
@@ -491,232 +471,145 @@ export function FormPanel({
                     const listValue = Array.isArray(value) ? value : [];
                     const options = field.kind === "string-list" ? [] : field.options ?? [];
                     const editingText = active && selected && field.kind === "text" && !field.readOnly;
-                    const layout = fieldLayouts[visibleIndex];
-                    const rowHeight = layout?.height ?? 1;
-                    const labelLines = layout?.labelLines ?? [field.label];
+                    const fieldLayout = fieldLayouts[visibleIndex]!;
+                    const activate = () => {
+                        setCursor(visibleIndex);
+                        setChoice({ kind: "idle" });
+                        if (editingText) {
+                            textInputRef.current?.focus();
+                        }
+                    };
                     return (
-                        <Pressable
+                        <FormFieldRow
                             key={field.key}
-                            width="100%"
-                            height={rowHeight}
-                            position="relative"
-                            overflow="visible"
-                            alignItems="flex-start"
+                            layout={layout}
+                            height={fieldLayout.height}
+                            labelLines={fieldLayout.labelLines}
+                            selected={selected}
                             disabled={!active || field.focusable === false}
+                            disclosure={field.kind === "disclosure"
+                                ? `${scalarValue === "true" ? "▾" : "▸"} ${field.label}`
+                                : undefined}
                             onPress={() => {
-                                if (field.focusable === false) {
-                                    return;
-                                }
-                                setCursor(visibleIndex);
-                                setChoice({ kind: "idle" });
-                                if (field.kind === "disclosure") {
-                                    updateValue(field.key, scalarValue === "true" ? "false" : "true");
-                                } else if (field.kind === "boolean" && !field.readOnly) {
+                                activate();
+                                if (field.kind === "disclosure" || (field.kind === "boolean" && !field.readOnly)) {
                                     updateValue(field.key, scalarValue === "true" ? "false" : "true");
                                 }
                             }}
                         >
-                            <Box width={2} height={rowHeight}>
-                                <Text color={selected ? "cyan" : "gray"}>
-                                    {selected ? "❯" : " "}
-                                </Text>
-                            </Box>
-                            {field.kind === "disclosure" ? (
-                                <Box
-                                    flexGrow={1}
-                                    flexBasis={0}
-                                    height={rowHeight}
-                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
-                                    alignItems="flex-start"
-                                    overflow="hidden"
-                                >
-                                    <Box
-                                        width={labelWidth}
-                                        height={1}
-                                        justifyContent="flex-end"
-                                        overflow="hidden"
-                                    >
-                                        <Text color={selected ? "cyan" : "gray"} bold={selected}>
-                                            {`${scalarValue === "true" ? "▾" : "▸"} ${field.label}`}
-                                        </Text>
-                                    </Box>
-                                    <Box width={valueWidth} height={1} flexShrink={0} />
-                                </Box>
-                            ) : field.kind === "string-list" ? (
-                                <Box
-                                    flexGrow={1}
-                                    flexBasis={0}
-                                    height={rowHeight}
-                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
-                                    alignItems="flex-start"
-                                    overflow="hidden"
-                                >
-                                    <Box
-                                        width={labelWidth}
-                                        height={rowHeight}
-                                        flexDirection="column"
-                                        overflow="hidden"
-                                    >
-                                        {labelLines.map((line, lineIndex) => (
-                                            <Box
-                                                key={`${field.key}:label:${lineIndex}`}
-                                                width={labelWidth}
-                                                height={1}
-                                                justifyContent="flex-end"
-                                                overflow="hidden"
-                                            >
-                                                <Text color={selected ? "cyan" : "gray"} bold={selected}>
-                                                    {line}
-                                                </Text>
-                                            </Box>
-                                        ))}
-                                    </Box>
-                                    <Box
-                                        width={valueWidth}
-                                        height={rowHeight}
-                                        flexGrow={valueWidth === undefined ? 1 : 0}
-                                        flexShrink={valueWidth === undefined ? 1 : 0}
-                                        justifyContent="flex-start"
-                                        overflow="hidden"
-                                    >
-                                        <StringListInput
-                                            value={listValue}
-                                            width={valueWidth ?? 48}
-                                            active={active && selected && !field.readOnly}
-                                            onChange={(next) => updateValue(field.key, next)}
-                                            onActivate={() => {
-                                                setCursor(visibleIndex);
-                                                setChoice({ kind: "idle" });
-                                            }}
-                                            onMoveOutside={(direction) => moveCursor(direction, visibleIndex)}
-                                            onClose={onClose}
-                                        />
-                                    </Box>
-                                </Box>
+                            {field.kind === "string-list" ? (
+                                <StringListInput
+                                    value={listValue}
+                                    width={layout.valueWidth}
+                                    active={active && selected && !field.readOnly}
+                                    onChange={(next) => updateValue(field.key, next)}
+                                    onActivate={activate}
+                                    onMoveOutside={(direction) => moveCursor(direction, visibleIndex)}
+                                    onClose={onClose}
+                                />
+                            ) : editingText ? (
+                                <TextInput
+                                    ref={textInputRef}
+                                    value={scalarValue}
+                                    onChange={(next) => updateValue(field.key, next)}
+                                    onSubmit={() => moveCursor(1, visibleIndex)}
+                                    placeholder={field.placeholder ?? ""}
+                                    focus={active}
+                                    onKeyDown={(event) => {
+                                        if (event.name === "up") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            moveCursor(-1, visibleIndex);
+                                        } else if (event.name === "down" || event.name === "tab") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            moveCursor(event.name === "tab" && event.shift ? -1 : 1, visibleIndex);
+                                        } else if (event.name === "escape") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            onClose();
+                                        }
+                                    }}
+                                />
                             ) : (
-                                <Box
-                                    flexGrow={1}
-                                    flexBasis={0}
-                                    height={rowHeight}
-                                    justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
-                                    alignItems="flex-start"
-                                    overflow="hidden"
-                                >
-                                    <Box
-                                        width={labelWidth}
-                                        height={rowHeight}
-                                        flexDirection="column"
-                                        overflow="hidden"
-                                    >
-                                        {labelLines.map((line, lineIndex) => (
-                                            <Box
-                                                key={`${field.key}:label:${lineIndex}`}
-                                                width={labelWidth}
-                                                height={1}
-                                                justifyContent="flex-end"
-                                                overflow="hidden"
-                                            >
-                                                <Text color={selected ? "cyan" : "gray"} bold={selected}>
-                                                    {line}
-                                                </Text>
-                                            </Box>
-                                        ))}
-                                    </Box>
-                                    <Box
-                                        width={valueWidth}
-                                        height={1}
-                                        flexGrow={valueWidth === undefined ? 1 : 0}
-                                        flexShrink={valueWidth === undefined ? 1 : 0}
-                                        justifyContent="flex-start"
-                                        overflow="hidden"
-                                    >
-                                        {editingText ? (
-                                            <TextInput
-                                                ref={textInputRef}
-                                                value={scalarValue}
-                                                onChange={(next) => updateValue(field.key, next)}
-                                                onSubmit={() => moveCursor(1, visibleIndex)}
-                                                placeholder={field.placeholder ?? ""}
-                                                focus={active}
-                                                onKeyDown={(event) => {
-                                                    if (event.name === "up") {
-                                                        event.preventDefault();
-                                                        event.stopPropagation();
-                                                        moveCursor(-1, visibleIndex);
-                                                    } else if (event.name === "down" || event.name === "tab") {
-                                                        event.preventDefault();
-                                                        event.stopPropagation();
-                                                        moveCursor(1, visibleIndex);
-                                                    } else if (event.name === "escape") {
-                                                        event.preventDefault();
-                                                        event.stopPropagation();
-                                                        onClose();
-                                                    }
-                                                }}
-                                            />
-                                        ) : (
-                                            <Text color={selected ? "cyan" : "white"}>
-                                                {field.kind === "boolean"
-                                                    ? renderBoolean(selected, scalarValue)
-                                                    : field.kind === "multiselect"
-                                                        ? renderMultiValue(scalarValue)
-                                                        : renderTextValue(field, scalarValue, options, valueWidth ?? 48)}
-                                            </Text>
-                                        )}
-                                    </Box>
-                                </Box>
+                                <Text color={selected ? "cyan" : "white"} wrap="truncate">
+                                    {field.kind === "boolean"
+                                        ? renderBoolean(selected, scalarValue)
+                                        : field.kind === "multiselect"
+                                            ? renderMultiValue(scalarValue)
+                                            : renderTextValue(field, scalarValue, options, layout.valueWidth)}
+                                </Text>
                             )}
-                        </Pressable>
+                        </FormFieldRow>
                     );
                 })}
                 {afterFields ? (
-                    <Box width="100%" marginTop={1}>
-                        {afterFields}
-                    </Box>
-                ) : null}
-                {choiceScalarField && dropdownPlacement ? (
-                    <Box
-                        position="absolute"
-                        top={dropdownPlacement.side === "above"
-                            ? choiceFieldTop - dropdownPlacement.height
-                            : choiceFieldTop + (fieldLayouts[choiceIndex]?.height ?? 1)}
-                        left={0}
-                        right={0}
-                        height={dropdownPlacement.height}
-                        zIndex={10}
-                        overflow="hidden"
+                    <box
+                        width="100%"
+                        flexDirection="column"
+                        flexShrink={0}
+                        marginTop={1}
+                        onSizeChange={function () {
+                            setAfterFieldsHeight(this.height);
+                        }}
                     >
-                        <Box width={2} height={dropdownPlacement.height} />
-                        <Box
-                            flexGrow={1}
-                            flexBasis={0}
-                            height={dropdownPlacement.height}
-                            justifyContent={hasMeasuredDialog ? "space-around" : "flex-start"}
-                            alignItems="flex-start"
-                        >
-                            <Box width={labelWidth} height={dropdownPlacement.height} />
-                            <DropdownMenu
-                                options={choiceScalarField.options ?? []}
-                                mode={dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect")}
-                                value={dropdownValueForField(
-                                    dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect"),
-                                    formString(values, choiceScalarField.key) || choiceScalarField.value,
-                                )}
-                                width={valueWidth ?? 48}
-                                maxVisible={dropdownPlacement.visibleRows}
-                                onSubmit={(next) => {
-                                    const submitted = Array.isArray(next) ? serializeMulti(new Set(next)) : next;
-                                    updateValue(choiceScalarField.key, submitted);
-                                    setChoice({ kind: "idle" });
-                                }}
-                                onClose={() => setChoice({ kind: "idle" })}
-                            />
-                        </Box>
-                    </Box>
+                        {afterFields}
+                    </box>
                 ) : null}
-            </Box>
-        </Panel>
+            </scrollbox>
+            {choiceScalarField && dropdownPlacement ? (
+                <Box
+                    position="absolute"
+                    top={Math.max(0, Math.min(
+                        dropdownPlacement.side === "above"
+                            ? choiceFieldTop - scrollOffset - dropdownPlacement.height
+                            : choiceFieldTop - scrollOffset + 1,
+                        bodyHeight - dropdownPlacement.height,
+                    ))}
+                    left={layout.valueStart}
+                    width={layout.valueWidth}
+                    height={dropdownPlacement.height}
+                    zIndex={10}
+                >
+                    <DropdownMenu
+                        options={choiceScalarField.options ?? []}
+                        mode={dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect")}
+                        value={dropdownValueForField(
+                            dropdownFieldMode(choiceScalarField.kind === "select" ? "select" : "multiselect"),
+                            formString(values, choiceScalarField.key) || choiceScalarField.value,
+                        )}
+                        width={layout.valueWidth}
+                        bordered={bodyHeight >= 3}
+                        maxVisible={dropdownPlacement.visibleRows}
+                        onSubmit={(next) => {
+                            const submitted = Array.isArray(next) ? serializeMulti(new Set(next)) : next;
+                            updateValue(choiceScalarField.key, submitted);
+                            setChoice({ kind: "idle" });
+                        }}
+                        onClose={() => setChoice({ kind: "idle" })}
+                    />
+                </Box>
+            ) : null}
+        </FormShell>
     );
+}
+
+function formHint(field: FormField | undefined, width: number, choosing: boolean): string {
+    let action = !field ? "Enter confirm"
+        : field.kind === "disclosure" ? "←→ expand/collapse"
+            : field.readOnly ? ""
+                : field.kind === "text" ? "type to edit · Enter next"
+                    : field.kind === "string-list" ? "Enter add · Backspace remove"
+                        : field.kind === "boolean" ? "Space toggle"
+                            : choosing && field.kind === "multiselect" ? "Space toggle · Enter confirm" : "Enter choose";
+    if (width < 60) {
+        action = action.replace("type to edit · ", "").replace("Backspace remove", "⌫ remove");
+    }
+    const parts = ["↑↓ move", action, "Esc back"].filter(Boolean);
+    if (parts.join(" · ").length > width) {
+        parts.shift();
+    }
+    return parts.join(" · ");
 }
 
 function renderTextValue(
@@ -739,7 +632,7 @@ function renderTextValue(
 function renderBoolean(selected: boolean, value: string): React.ReactNode {
     const enabled = value === "true";
     return (
-        <Text color={selected && enabled ? "cyan" : "gray"} bold={selected && enabled}>
+        <Text color={selected ? "cyan" : "white"} bold={selected}>
             {enabled ? "◉ true" : "○ false"}
         </Text>
     );

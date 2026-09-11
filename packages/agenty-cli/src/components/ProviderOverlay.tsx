@@ -523,7 +523,6 @@ export function ProviderOverlay() {
             <FormPanel
                 title={`${configuringBuiltin ? "Configure" : "Edit"}: ${target.name}`}
                 fields={buildProviderFields(target, configuringBuiltin ? "configure" : "edit")}
-                hint={configuringBuiltin ? "↑↓ navigate · type to edit · Esc back" : undefined}
                 shortcutHint={!configuringBuiltin ? "d delete" : undefined}
                 onShortcut={(input) => {
                     if (!configuringBuiltin && input.toLowerCase() === "d") {

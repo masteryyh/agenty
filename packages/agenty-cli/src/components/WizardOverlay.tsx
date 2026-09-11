@@ -479,8 +479,8 @@ function WizardContent() {
     if (step === "provider-form" && editing) {
         return (
             <Box flexDirection="column" flexGrow={1}>
-                {error ? <Text color="red">{error}</Text> : null}
                 <FormPanel
+                    error={error}
                     key={editing.id}
                     title={editing.source === "builtin" ? `Configure ${editing.name}` : "Add compatible provider"}
                     fields={providerFields(editing)}

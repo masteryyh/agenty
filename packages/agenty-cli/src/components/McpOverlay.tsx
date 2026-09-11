@@ -27,7 +27,6 @@ type Mode =
     | { kind: "confirm-delete"; target: McpServerDto };
 
 export const MCP_OVERLAY_HEIGHT = 20;
-export const MCP_EDIT_OVERLAY_HEIGHT = 30;
 
 const transportOptions = [
     { label: "Streamable HTTP", value: "http" },
@@ -145,11 +144,7 @@ export function buildConfig(values: FormValues, target?: McpServerDto): McpServe
     return config;
 }
 
-export function McpOverlay({
-    onPreferredHeightChange,
-}: {
-    onPreferredHeightChange?: (height: number) => void;
-} = {}) {
+export function McpOverlay() {
     const client = useAppStore((state) => state.client);
     const setOverlay = useAppStore((state) => state.setOverlay);
     const setToast = useAppStore((state) => state.setToast);
@@ -160,10 +155,6 @@ export function McpOverlay({
     const [logs, setLogs] = useState<McpLogEntry[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState<string | null>(null);
-
-    useEffect(() => {
-        onPreferredHeightChange?.(mode.kind === "edit" ? MCP_EDIT_OVERLAY_HEIGHT : MCP_OVERLAY_HEIGHT);
-    }, [mode.kind, onPreferredHeightChange]);
 
     const reload = async () => {
         if (!client) {
