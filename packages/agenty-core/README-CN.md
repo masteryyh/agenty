@@ -61,30 +61,46 @@ provider adapter 会原样发送选择的等级，不支持的等级通过正常
 
 ## Agent loop 运行时
 
-`pkg/agentloop/` 是独立的 Agent 运行时模块。它拥有 provider-neutral 的模型调用
-contract、tool contract、JSON Schema、线程安全的 tool registry，以及统一管理多个
-session 的 `Engine`。不同 session 可以并行执行，同一 session 只允许一个 active round；
-`Engine` 统一管理所有运行中 round 的取消和 shutdown。
+`pkg/infra/modelcall/` 负责一次无状态的 provider-neutral 模型调用。它只接收连接与模型配置
+（base URL、API type、API key、model code 和能力）以及面向模型的上下文和 tools，返回已解析的
+response 与 stream event。`pkg/infra/agentloop/` 负责原子化的 model/tool loop，并直接调用
+`modelcall`。loop 负责连续调用、tool dispatch、usage 统计、取消和迭代上限，不包含 session
+repository、model catalog、prompt renderer、tool registry、MCP client、skill scanner 或压缩策略。
+`pkg/infra/session` 负责协调多个 session、持久化 round、资源、事件分发和 shutdown。
 
-每次 loop 会解析内置 system prompt，重建有效会话上下文，通过选定 provider adapter
-转换上游数据结构，调用 LLM、持久化 assistant 响应，并在返回 tool calls 时继续循环。
-自定义 model 未填写时默认使用 `8192` 最大输出 token；内置 model 使用嵌入 catalog
-中的精确限制。估算上下文达到
-`contextWindow` 的 `90%` 时自动压缩；TUI 的 `/compact`
-可以手动触发同一流程。压缩会在 `session_compacted` 事件中只保存生成的总结和压缩审计数据；
-重放和构造模型请求时，再从 transcript 动态计算最多三条最近 user 消息、总结、metadata
-以及最多五条最近 assistant 消息，原始 JSONL transcript 不变。保留消息会移除 reasoning
-和未配对的 tool-use block。当前单个 round 最多执行 20 次 LLM/tool 迭代。压缩请求
-保持原有 system、消息和工具前缀不变，只在内存中追加一条 user 压缩指令；压缩过程中的
-工具调用和结果也只保存在临时缓冲区。切换到上下文窗口较小的 model 时，如果达到目标
-窗口的 90%，先使用当前 model 压缩，必要时裁剪保留消息以适配目标窗口，再写入 model
-切换事件。
-共享 tool registry 实现 `ToolRuntime` port；同一批次内每个 tool call 并行执行，结果按
-调用顺序返回。`pkg/agentloop/builtin/` 提供 `read_file`、`apply_patch`、`grep`、`glob`
+session host 构造 request，调用原子 loop，将 assistant response 和 tool result 转为 session
+message，并将每个运行时事件交给 `OnEvent` 消费者。自定义 model 未填写时默认使用 `8192`
+最大输出 token；内置 model 使用嵌入 catalog 中的精确限制。`pkg/infra/prompt` 负责渲染基础 system prompt；`pkg/infra/compaction`
+负责 token 估算、阈值策略和临时 summary conversation，自动压缩与 `/compact` 共用同一
+executor。压缩请求保持原有 system 和消息前缀，只在内存中追加一条 user 压缩指令，清空所有
+工具定义，并通过 `modelcall.Call` 只调用模型一次。模型返回 tool call 时压缩失败，既不会执行也
+不会持久化该调用。当前单个 round 最多执行 20 次 LLM/tool 迭代。
+生产 registry 位于 `pkg/infra/tools`，实现 `ToolRuntime` port；同一批次内每个 tool call
+并行执行，结果按调用顺序返回。`pkg/infra/tools/builtin/` 提供 `read_file`、`apply_patch`、`grep`、`glob`
 和 `ls`，由 `cmd/main.go` 显式注册。`apply_patch` 会调用同名 Rust 可执行文件完成 V4A
 解析和原子化文件修改。支持 free-form tool 的 provider 会收到模型工具定义；其他 provider
 会在 system prompt 中收到通过 `shell` 执行同一命令的说明。相对路径基于该 round 捕获的
 session 工作目录解析。
+
+Session host 暴露生命周期，原子 loop 暴露单次调用的 hook port。`pkg/infra/middleware` 定义
+平铺 hook 的 `Middleware` 结构和 `MiddlewareManager`；manager 按注册顺序收集非空 hook，
+只编译一次，编译后拒绝继续注册。当前时机为 `BeforeSessionStart`、`BeforeRound`、
+`AfterRound`、`BeforeModelCall`、`AfterModelCall`、`BeforeToolCall`、`AfterToolCall`、
+`AfterSessionStop` 和 `OnEvent`。`BeforeRound` 在持久化 round 分配前执行，因此 middleware 可以在
+round 写入前原子地修改输入内容、system prompt、tool runtime，或排队追加隐藏上下文。
+Hook 可以替换为派生的 `context.Context`；manager 会沿链传递它，loop 会在后续模型和工具
+调用中继续使用。生命周期 context 类型与编译后的生命周期 bridge 位于
+`pkg/infra/middleware`；原子 loop
+只接收执行期间所需的 model/tool hook bridge。AgentLoop 和各个 hook context 都能通过 event
+emitter 广播事件，`OnEvent` 是这些事件共用的消费路径。
+
+生产 middleware 与基础设施实现放在同一包：`infra/skill` 负责扫描 skill 并将会话级
+skill catalog 拼接到 system prompt，`infra/mcp` 在每个轮次提供当前 MCP tool 快照，
+`infra/metadata` 注入全量或变化的会话 metadata，`infra/compaction` 负责自动压缩策略，
+`infra/tools` 负责可动态更新的 tool registry。`infra/storage` 在 `OnEvent` 中持久化 pending
+session events，`infra/rpc` 将运行时事件投影为 CLI notification。`cmd/main.go` 按 Skill、MCP、
+Metadata、Compaction、Storage、RPC notification 顺序注册它们，再把编译后的 hook chain 交给
+`infra/session.Engine`，因此客户端收到 notification 前数据已经写入。
 
 ## 基础设施层
 
@@ -95,14 +111,23 @@ pkg/infra/
 ├── config/             将配置文件和 env override 合并到单例中；解析 data-dir 路径
 ├── initialize/         OpenRepositories：一次性初始化所有 stores
 ├── catalogdata/        内嵌的 provider/model JSON
-├── llm/                实现 agentloop caller contract 的 provider SDK adapters
+├── modelcall/          无状态模型调用 contract、protocol adapter 与 response 解析
+├── agentloop/          直接调用 modelcall 的原子 model/tool loop
 ├── logging/            slog 初始化、环境配置解析和按日生成日志路径
 ├── storage/            Repository 实现 + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── catalog.go      CatalogRepository（内置 provider 与自定义 provider JSON）
-│   └── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
+│   ├── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
+│   └── middleware.go   Session 持久化事件消费者
+├── compaction/         自动压缩 middleware 和请求阈值策略
 ├── mcp/                MCP client registry 及 stdio/Streamable HTTP/SSE transport
-└── rpc/                stdio JSON-RPC 2.0 接口层
+├── middleware/         Middleware contract、hook context 和 MiddlewareManager
+├── metadata/            Session metadata middleware 和隐藏上下文消息
+├── prompt/             基础 system prompt renderer
+├── session/            Session execution host、持久化 round lifecycle 和 event dispatch
+├── skill/              Skill discovery registry 和 skill middleware
+├── tools/              可变基础设施 tool registry 和 round 快照
+└── rpc/                stdio JSON-RPC 2.0 接口层和 notification 事件消费者
     ├── message.go      Request/Response/Notification/Error/ID wire types
     ├── codes.go        标准错误码 + server-defined 错误码
     ├── handler.go      Handler interface + Dispatcher
@@ -299,7 +324,6 @@ process isolation contracts，不会访问用户的数据目录。
 ## 状态
 
 领域层、agent loop 运行时、基础设施层、应用层和 stdio JSON-RPC 接口层均已实现。
-基础设施层还提供
-OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google GenAI 的统一
-非流式/流式 SDK 调用器。执行引擎当前使用非流式 caller；尚未实现 streaming agent turn
-传输、命令和 todo 工具、基于该 core 的 HTTP API 和 CLI 集成。
+基础设施层还提供 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages 和 Google
+GenAI 的统一无状态非流式/流式模型调用。执行引擎直接调用 `modelcall`；尚未实现 streaming
+agent turn 传输、命令和 todo 工具、基于该 core 的 HTTP API 和 CLI 集成。

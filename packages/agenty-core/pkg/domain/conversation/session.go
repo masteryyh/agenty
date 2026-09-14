@@ -143,7 +143,7 @@ func (s *Session) AppendUserMessage(roundID uuid.UUID, content Content) (Message
 }
 
 func (s *Session) AppendHiddenUserMessage(roundID uuid.UUID, content Content) (Message, error) {
-	return s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	return s.AppendHiddenMessage(roundID, RoleUser, content, nil)
 }
 
 func (s *Session) AppendHiddenUserMessageWithMetadata(
@@ -151,9 +151,21 @@ func (s *Session) AppendHiddenUserMessageWithMetadata(
 	content Content,
 	metadata shared.Metadata,
 ) (Message, error) {
-	message, err := s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	return s.AppendHiddenMessage(roundID, RoleUser, content, metadata)
+}
+
+func (s *Session) AppendHiddenMessage(
+	roundID uuid.UUID,
+	role Role,
+	content Content,
+	metadata shared.Metadata,
+) (Message, error) {
+	message, err := s.appendMessage(roundID, role, content, nil, nil, MessageHidden)
 	if err != nil {
 		return Message{}, err
+	}
+	if metadata == nil {
+		return message, nil
 	}
 	message.Metadata = metadata
 	lastEvent := s.pending[len(s.pending)-1]

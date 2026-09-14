@@ -1,9 +1,9 @@
 package adapter
 
 import (
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
+	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 )
 
 type codeParams struct {
@@ -15,7 +15,7 @@ func RegisterAll(
 	providerSvc *application.ProviderService,
 	initializeSvc *application.InitializeService,
 	sessionSvc *application.SessionService,
-	execution *agentloop.Engine,
+	execution *infrasession.Engine,
 ) {
 	RegisterProviderHandlers(d, providerSvc)
 	RegisterInitializeHandlers(d, initializeSvc)

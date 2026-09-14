@@ -24,19 +24,19 @@ type MetadataUpdate struct {
 func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
 	update := MetadataUpdate{}
 	if previous == nil || metadata.Cwd != previous.Cwd {
-		update.Cwd = metadataStringPointer(metadata.Cwd)
+		update.Cwd = new(metadata.Cwd)
 	}
 	if previous == nil || metadata.Model != previous.Model {
-		update.Model = metadataStringPointer(metadata.Model)
+		update.Model = new(metadata.Model)
 	}
 	if previous == nil || metadata.Provider != previous.Provider {
-		update.Provider = metadataStringPointer(metadata.Provider)
+		update.Provider = new(metadata.Provider)
 	}
 	if previous == nil || metadata.Timezone != previous.Timezone {
-		update.Timezone = metadataStringPointer(metadata.Timezone)
+		update.Timezone = new(metadata.Timezone)
 	}
 	if previous == nil || metadata.ReasoningEffort != previous.ReasoningEffort {
-		update.ReasoningEffort = metadataStringPointer(metadata.ReasoningEffort)
+		update.ReasoningEffort = new(metadata.ReasoningEffort)
 	}
 
 	return update
@@ -60,11 +60,11 @@ func (update MetadataUpdate) XML() (string, error) {
 
 func (metadata SessionMetadata) XML() (string, error) {
 	return MetadataUpdate{
-		Cwd:             metadataStringPointer(metadata.Cwd),
-		Model:           metadataStringPointer(metadata.Model),
-		Provider:        metadataStringPointer(metadata.Provider),
-		Timezone:        metadataStringPointer(metadata.Timezone),
-		ReasoningEffort: metadataStringPointer(metadata.ReasoningEffort),
+		Cwd:             new(metadata.Cwd),
+		Model:           new(metadata.Model),
+		Provider:        new(metadata.Provider),
+		Timezone:        new(metadata.Timezone),
+		ReasoningEffort: new(metadata.ReasoningEffort),
 	}.XML()
 }
 
@@ -118,8 +118,4 @@ func parseMetadataMessage(message Message) (MetadataUpdate, bool) {
 		return MetadataUpdate{}, false
 	}
 	return update, true
-}
-
-func metadataStringPointer(value string) *string {
-	return &value
 }

@@ -37,7 +37,7 @@ export interface UIToolCall {
 
 export interface UIMessage {
     id: string;
-    role: "user" | "assistant" | "system";
+    role: "user" | "assistant" | "system" | "developer";
     content: string;
     reasoning?: string;
     reasoningStartedAt?: number;

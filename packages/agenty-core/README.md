@@ -64,35 +64,58 @@ Provider-specific levels such as `minimal` are not exposed.
 
 ## Agent-loop runtime
 
-`pkg/agentloop/` is the dedicated Agent runtime module. It owns the provider-neutral
-model-calling contract, tool contract, JSON Schema, thread-safe tool registry, and the
-`Engine` that manages multiple sessions. Different sessions can run concurrently, one
-session permits one active round, and `Engine` owns cancellation and shutdown for all
-active rounds.
+`pkg/infra/modelcall/` performs one stateless provider-neutral model invocation. It receives
+only connection/model configuration (base URL, API type, API key, model code, and
+capabilities) plus model-facing context and tools, then returns parsed responses and stream
+events. `pkg/infra/agentloop/` owns the atomic model/tool loop and calls `modelcall` directly.
+The loop owns continuation, tool dispatch, usage accounting, cancellation, and the iteration
+limit. It has no session repository, model catalog, prompt renderer, tool registry, MCP
+client, skill scanner, or compaction policy.
+`pkg/infra/session` is the host that coordinates multiple sessions, persisted rounds,
+resources, event dispatch, and shutdown.
 
-Each loop resolves the built-in system prompt, rebuilds the effective conversation context,
-converts it through the selected provider adapter, invokes the LLM, persists the
-assistant response, and repeats when tool calls are returned. Custom models use `8192` output
-tokens when omitted; built-in models use the exact limit from
-the embedded catalog. Automatic compaction runs when the estimated context reaches
-`contextWindow * 90%`. `/compact` triggers the same flow
-manually. Compaction stores only the generated summary and compaction audit data in a
-`session_compacted` event. During replay and request construction, the effective model
-context is rebuilt from the transcript as up to three recent user messages, the summary,
-metadata, and up to five recent assistant messages; the original JSONL transcript remains
-unchanged. Reasoning and unresolved tool-use blocks are omitted from retained messages.
-The compaction request keeps the existing system, message, and tool prefix intact, appends
-only an in-memory user instruction, and keeps any compaction tool calls and results in an
-ephemeral buffer. Switching to a model whose 90% context threshold is reached first
-compacts with the current model, trims retained context to fit the target when necessary,
-then persists the model change. The loop currently permits at most 20 LLM/tool
-iterations. The shared registry implements the `ToolRuntime` port, executes one tool
-batch concurrently, and returns results in call order. `pkg/agentloop/builtin/` provides
-`read_file`, `apply_patch`, `grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly.
+The session host builds a request, invokes the atomic loop, turns assistant responses and
+tool results into session messages, and dispatches every runtime event to `OnEvent` consumers.
+Custom models use `8192` output tokens when omitted;
+built-in models use the exact limit from the embedded catalog. `pkg/infra/prompt` renders the
+base system prompt. `pkg/infra/compaction` owns the token estimate, threshold policy, and
+ephemeral summary conversation; automatic compaction and `/compact` use the same executor.
+Compaction keeps the existing system and message prefix, appends an in-memory user
+instruction, clears all tool definitions, and calls the model once through `modelcall.Call`.
+A tool-use response fails compaction and is never executed or persisted. The loop currently
+permits at most 20 LLM/tool iterations. The production registry in
+`pkg/infra/tools` implements the `ToolRuntime` port, executes one tool batch concurrently,
+and returns results in call order. `pkg/infra/tools/builtin/` provides `read_file`,
+`apply_patch`, `grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly.
 `apply_patch` delegates V4A parsing and atomic filesystem mutation to the bundled Rust
 executable of the same name. Providers with free-form tool support receive `apply_patch`
 as a model tool. Other providers receive a system instruction to run the same executable
 through `shell`. Relative paths resolve from the round's captured session working directory.
+
+The session host exposes lifecycle and the atomic loop exposes per-call hook ports. The
+infrastructure contract in `pkg/infra/middleware` defines a flat `Middleware` structure and
+`MiddlewareManager`; the manager collects its non-nil hooks in registration order, compiles
+them once, and rejects later registration.
+The available phases are `BeforeSessionStart`, `BeforeRound`, `AfterRound`,
+`BeforeModelCall`, `AfterModelCall`, `BeforeToolCall`, `AfterToolCall`, and
+`AfterSessionStop`, plus `OnEvent`. `BeforeRound` runs before a persisted round is allocated, so middleware
+can transform the incoming content, system prompt, tool runtime, or queue hidden context
+atomically before the round is written. Hooks may replace their context with a derived
+`context.Context`; the manager carries it through the chain and the loop uses it for later
+model and tool calls. Lifecycle context types and the compiled lifecycle
+bridge live in `pkg/infra/middleware`; the atomic loop only receives the model/tool hook
+bridge it needs during execution. AgentLoop and every hook context receive an event emitter;
+`OnEvent` is the shared consumer path for their emitted events.
+
+Production middleware lives beside its infrastructure implementation: `infra/skill` scans
+skill files and appends the session-level skill catalog to the system prompt, `infra/mcp`
+projects the current MCP tool snapshot for each round, `infra/metadata` injects full or
+changed session metadata, `infra/compaction` owns automatic compaction policy, and
+`infra/tools` owns the mutable dynamic tool registry. `infra/storage` persists pending
+session events, and `infra/rpc` projects runtime events into CLI notifications. `cmd/main.go`
+registers them in the order Skill, MCP, Metadata, Compaction, Storage, RPC notification and
+passes the compiled hook chains into `infra/session.Engine`; persistence therefore happens
+before a client observes the corresponding notification.
 
 ## Infrastructure layer
 
@@ -104,14 +127,23 @@ pkg/infra/
 ├── config/             Load config file + env overrides into a merged singleton; resolve data-dir paths
 ├── initialize/         OpenRepositories: one-call setup of all stores
 ├── catalogdata/        Embedded built-in provider/model JSON
-├── llm/                Provider SDK adapters implementing the agentloop caller contract
+├── modelcall/          Stateless model-call contract, protocol adapters, and response parsing
+├── agentloop/          Atomic model/tool loop that invokes modelcall directly
 ├── logging/            slog setup, environment parsing, and daily log path
 ├── storage/            Repository implementations + SQLite connection factory
 │   ├── db.go           OpenDB/OpenIsolatedDB + sessions schema
 │   ├── catalog.go      CatalogRepository (embedded built-ins plus custom provider JSON)
-│   └── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
+│   ├── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
+│   └── middleware.go   Session-persistence event consumer
+├── compaction/         Automatic compaction middleware and request threshold policy
 ├── mcp/                MCP client registry and stdio/Streamable HTTP/SSE transports
-└── rpc/                stdio JSON-RPC 2.0 interface layer
+├── middleware/         Middleware contract, hook contexts, and MiddlewareManager
+├── metadata/            Session metadata middleware and hidden context messages
+├── prompt/             Base system-prompt renderer
+├── session/            Session execution host, persisted round lifecycle, and event dispatch
+├── skill/              Skill discovery registry and skill middleware
+├── tools/              Mutable infrastructure tool registry and round snapshots
+└── rpc/                stdio JSON-RPC 2.0 interface layer and notification event consumer
     ├── message.go      Request/Response/Notification/Error/ID wire types
     ├── codes.go        standard + server-defined error codes
     ├── handler.go      Handler interface + Dispatcher
@@ -340,8 +372,8 @@ See [TESTING.md](./TESTING.md) for the full testing strategy and command guide, 
 ## Status
 
 The domain, agent-loop runtime, infrastructure, application and stdio JSON-RPC interface
-layers are implemented. Infrastructure also provides unified non-streaming and streaming SDK
-callers for OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Google
-GenAI. The execution engine currently uses the non-streaming caller; streaming agent
-turn delivery, command and todo tools, the HTTP API, and CLI integration against this
-core are not yet implemented.
+layers are implemented. Infrastructure also provides stateless non-streaming and streaming
+model calls for OpenAI Responses, OpenAI Chat Completions, Anthropic Messages, and Google
+GenAI. The execution engine invokes `modelcall` directly; streaming agent turn delivery,
+command and todo tools, the HTTP API, and CLI integration against this core are not yet
+implemented.

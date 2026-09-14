@@ -14,21 +14,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
-	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
+	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
+	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 )
 
 func newDispatcher(t *testing.T) *rpc.Dispatcher {
-	return newDispatcherWithCaller(t, &adapterTestCaller{})
+	return newDispatcherWithCaller(t, (&adapterTestCaller{}).Call)
 }
 
-func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatcher {
+func newDispatcherWithCaller(t *testing.T, invokeModel modelcall.InvokeFunc) *rpc.Dispatcher {
 	t.Helper()
 	dir := t.TempDir()
 	catalogRepo := storage.NewCatalogRepository(filepath.Join(dir, "providers"))
@@ -38,13 +40,13 @@ func newDispatcherWithCaller(t *testing.T, caller agentloop.Caller) *rpc.Dispatc
 	}
 	t.Cleanup(func() { db.Close() })
 	convRepo := storage.NewConversationRepository(db, filepath.Join(dir, "sessions"))
-	execution, err := agentloop.NewEngine(t.Context(), agentloop.Dependencies{
-		Sessions: convRepo,
-		Catalog:  catalogRepo,
-		Tools:    agentloop.NewRegistry(),
-		NewCaller: func(context.Context, catalog.Provider, catalog.Model) (agentloop.Caller, error) {
-			return caller, nil
-		},
+	sessionStorage := storage.NewSessionMiddleware(convRepo)
+	execution, err := infrasession.NewEngine(t.Context(), infrasession.Dependencies{
+		Sessions:    convRepo,
+		Catalog:     catalogRepo,
+		Tools:       infratools.NewRegistry(),
+		InvokeModel: invokeModel,
+		Lifecycle:   inframiddleware.LifecycleHooks{OnEvent: sessionStorage.OnEvent},
 	})
 	if err != nil {
 		t.Fatalf("create execution engine: %v", err)
@@ -100,41 +102,75 @@ func (s *initializationState) SetDefaultModel(model shared.ModelRef, effort shar
 
 type adapterTestCaller struct{}
 
-func (*adapterTestCaller) Invoke(context.Context, agentloop.Request) (*agentloop.Response, error) {
-	return &agentloop.Response{
+func (caller *adapterTestCaller) Call(
+	ctx context.Context,
+	_ modelcall.Config,
+	request modelcall.Request,
+	handler modelcall.StreamHandler,
+) (*modelcall.Response, error) {
+	if handler == nil {
+		return caller.Invoke(ctx, request)
+	}
+	return caller.Stream(ctx, request, handler)
+}
+
+func (*adapterTestCaller) Invoke(context.Context, modelcall.Request) (*modelcall.Response, error) {
+	return &modelcall.Response{
 		Content:    conversation.Text("completed"),
-		StopReason: agentloop.StopReasonEndTurn,
+		StopReason: modelcall.StopReasonEndTurn,
 	}, nil
 }
 
 func (*adapterTestCaller) Stream(
-	context.Context,
-	agentloop.Request,
-	agentloop.StreamHandler,
-) (*agentloop.Response, error) {
-	return nil, fmt.Errorf("unexpected stream invocation")
+	ctx context.Context,
+	request modelcall.Request,
+	handler modelcall.StreamHandler,
+) (*modelcall.Response, error) {
+	response, err := (&adapterTestCaller{}).Invoke(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if err := handler(modelcall.StreamEvent{
+		Type:     modelcall.StreamEventCompleted,
+		Response: response,
+	}); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 type blockingAdapterCaller struct {
 	started chan struct{}
 }
 
+func (caller *blockingAdapterCaller) Call(
+	ctx context.Context,
+	_ modelcall.Config,
+	request modelcall.Request,
+	handler modelcall.StreamHandler,
+) (*modelcall.Response, error) {
+	if handler == nil {
+		return caller.Invoke(ctx, request)
+	}
+	return caller.Stream(ctx, request, handler)
+}
+
 func (caller *blockingAdapterCaller) Invoke(
 	ctx context.Context,
-	_ agentloop.Request,
-) (*agentloop.Response, error) {
+	_ modelcall.Request,
+) (*modelcall.Response, error) {
 	close(caller.started)
 	<-ctx.Done()
 
 	return nil, ctx.Err()
 }
 
-func (*blockingAdapterCaller) Stream(
-	context.Context,
-	agentloop.Request,
-	agentloop.StreamHandler,
-) (*agentloop.Response, error) {
-	return nil, fmt.Errorf("unexpected stream invocation")
+func (caller *blockingAdapterCaller) Stream(
+	ctx context.Context,
+	request modelcall.Request,
+	_ modelcall.StreamHandler,
+) (*modelcall.Response, error) {
+	return caller.Invoke(ctx, request)
 }
 
 func request(id int, method string, params any) string {
@@ -336,7 +372,7 @@ func TestAdapterSessionStartCompletesRound(t *testing.T) {
 
 func TestAdapterSessionStopCancelsRound(t *testing.T) {
 	caller := &blockingAdapterCaller{started: make(chan struct{})}
-	d := newDispatcherWithCaller(t, caller)
+	d := newDispatcherWithCaller(t, caller.Call)
 	id := createExecutableSession(t, d)
 
 	started := call(t, d, request(10, "session.start", map[string]any{

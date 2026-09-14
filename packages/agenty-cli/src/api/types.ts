@@ -197,7 +197,7 @@ export type ContentBlock =
     | { type: "tool_result"; toolUseId: string; content: ContentBlock[]; isError: boolean }
     | { type: "image"; mediaType: string; data: string };
 
-export type MessageRole = "user" | "assistant" | "system";
+export type MessageRole = "user" | "assistant" | "system" | "developer";
 
 export interface TokenUsage {
     input: number;
