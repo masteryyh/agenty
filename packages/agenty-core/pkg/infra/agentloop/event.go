@@ -42,6 +42,9 @@ type Event struct {
 	Status      conversation.RoundStatus
 	Usage       *conversation.TokenUsage
 	Error       *string
+	// Payload carries an infrastructure-owned event type's data. Its producer
+	// and consumers share a concrete type without coupling the loop to it.
+	Payload any
 
 	CompactionID        uuid.UUID
 	Trigger             conversation.CompactionTrigger

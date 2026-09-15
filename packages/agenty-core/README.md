@@ -113,9 +113,16 @@ projects the current MCP tool snapshot for each round, `infra/metadata` injects 
 changed session metadata, `infra/compaction` owns automatic compaction policy, and
 `infra/tools` owns the mutable dynamic tool registry. `infra/storage` persists pending
 session events, and `infra/rpc` projects runtime events into CLI notifications. `cmd/main.go`
-registers them in the order Skill, MCP, Metadata, Compaction, Storage, RPC notification and
+registers them in the order Skill, MCP, Metadata, Compaction, Storage, RPC notification, HITL and
 passes the compiled hook chains into `infra/session.Engine`; persistence therefore happens
 before a client observes the corresponding notification.
+
+`infra/hitl` intercepts every tool call through `BeforeToolCall`. A before hook can
+provide `Result` to replace execution; the loop merges these results with executed
+results in call order and delivers both through `AfterToolCall` and the normal event path.
+Built-in tools supply display-only approval previews alongside their implementation;
+previews resolve through the same tool snapshot used for execution. Other tools show
+their name and formatted arguments.
 
 ## Infrastructure layer
 
@@ -136,6 +143,7 @@ pkg/infra/
 │   ├── conversation.go ConversationRepository (JSONL transcript + SQLite projection)
 │   └── middleware.go   Session-persistence event consumer
 ├── compaction/         Automatic compaction middleware and request threshold policy
+├── hitl/               Tool approval middleware and pending decisions
 ├── mcp/                MCP client registry and stdio/Streamable HTTP/SSE transports
 ├── middleware/         Middleware contract, hook contexts, and MiddlewareManager
 ├── metadata/            Session metadata middleware and hidden context messages
@@ -224,7 +232,7 @@ Methods follow a `resource.action` naming:
 | Initialize | `initialize.already`, `initialize.complete` |
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
 | MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
@@ -279,6 +287,28 @@ route notifications independently from responses. `round_ended` carries the term
 `session.stop` accepts `{id}` and requests cancellation. Starting a second round for the
 same session, or deleting that session while it is running, returns `already exists`.
 Different sessions can run in parallel.
+
+Every tool call requires a separate user decision, including read-only and MCP tools.
+`session.event` also carries `tool_approval_requested` with
+`approval: {approvalId, toolCall, cwd, preview: {title, detail}}`. Respond using
+`session.resolveToolApproval` with `{sessionId, roundId, approvalId, decision}`;
+`decision` must be `allow` or `deny`. An accepted decision emits
+`tool_approval_resolved` with `resolution` containing those same fields. Both events
+use the existing round sequence. Clients must handle the next request arriving before
+the previous decision's RPC response and clear requests only by matching identity.
+
+Calls in one batch are approved in order, then only allowed calls execute in parallel.
+A denial produces an error `tool_result` with the original `toolUseId` and text
+`The user denied this tool call. The tool was not executed.` The result is persisted
+and sent to the next model invocation; denial does not fail the round. Pending approvals
+are in memory, consume at most one decision, and expire on cancellation or shutdown.
+Duplicate, mismatched or expired decisions are rejected. Approvals are not restored
+after restarting core.
+
+The TUI opens a tool approval overlay automatically. It shows built-in tool-specific
+content or generic tool arguments in a scrollable preview. Use arrows/Tab to choose,
+Enter to confirm, Y to allow once, or N/Esc to deny. Deny is selected initially;
+Ctrl+C retains its exit behavior. Submission errors remain visible for retry.
 
 `session.compact` accepts `{id}` and performs a temporary summarization request using the
 current conversation plus a user-only compaction instruction. It emits

@@ -26,6 +26,7 @@ import type {
     SessionSummaryDto,
     SkillDiagnosticDto,
     SkillDto,
+    ToolApprovalResolution,
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
@@ -318,6 +319,10 @@ export class AgentyClient {
 
     async stopSession(id: string): Promise<void> {
         await this.rpc.call("session.stop", { id });
+    }
+
+    async resolveToolApproval(resolution: ToolApprovalResolution): Promise<void> {
+        await this.rpc.call("session.resolveToolApproval", resolution);
     }
 
     async compactSession(id: string): Promise<void> {

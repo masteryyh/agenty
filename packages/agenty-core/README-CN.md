@@ -99,8 +99,13 @@ skill catalog 拼接到 system prompt，`infra/mcp` 在每个轮次提供当前 
 `infra/metadata` 注入全量或变化的会话 metadata，`infra/compaction` 负责自动压缩策略，
 `infra/tools` 负责可动态更新的 tool registry。`infra/storage` 在 `OnEvent` 中持久化 pending
 session events，`infra/rpc` 将运行时事件投影为 CLI notification。`cmd/main.go` 按 Skill、MCP、
-Metadata、Compaction、Storage、RPC notification 顺序注册它们，再把编译后的 hook chain 交给
+Metadata、Compaction、Storage、RPC notification、HITL 顺序注册它们，再把编译后的 hook chain 交给
 `infra/session.Engine`，因此客户端收到 notification 前数据已经写入。
+
+`infra/hitl` 通过 `BeforeToolCall` 拦截所有工具调用。before hook 可以设置 `Result`
+替代实际执行；loop 按调用顺序合并替代结果和执行结果，两者都会经过 `AfterToolCall`
+及现有事件链。内置工具在实现旁提供专属审批预览，通过执行所用的同一工具快照查询；
+其他工具展示名称和格式化参数。
 
 ## 基础设施层
 
@@ -120,6 +125,7 @@ pkg/infra/
 │   ├── conversation.go ConversationRepository（JSONL transcript + SQLite projection）
 │   └── middleware.go   Session 持久化事件消费者
 ├── compaction/         自动压缩 middleware 和请求阈值策略
+├── hitl/               工具审批中间件和待处理决策
 ├── mcp/                MCP client registry 及 stdio/Streamable HTTP/SSE transport
 ├── middleware/         Middleware contract、hook context 和 MiddlewareManager
 ├── metadata/            Session metadata middleware 和隐藏上下文消息
@@ -197,7 +203,7 @@ Methods 使用 `resource.action` 命名：
 | Initialize | `initialize.already`, `initialize.complete` |
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
 | MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
@@ -242,6 +248,23 @@ notification 与 response 分开路由。`round_ended` 携带 `completed`、`fai
 
 `session.stop` 接收 `{id}` 并请求取消。同一 session 重复启动，或在运行期间删除该
 session，会返回 `already exists`；不同 sessions 可以并行运行。
+
+所有工具调用都需要单独审批，包括只读工具和 MCP 工具。`session.event` 新增
+`tool_approval_requested`，携带 `approval: {approvalId, toolCall, cwd, preview: {title, detail}}`。
+客户端调用 `session.resolveToolApproval`，提交 `{sessionId, roundId, approvalId, decision}`，
+其中 `decision` 只能是 `allow` 或 `deny`。决策被接受后发出 `tool_approval_resolved`，
+其 `resolution` 包含上述决策字段。两种事件沿用 round 的 sequence；下一条审批可能先于
+上一条决策的 RPC 响应到达，客户端必须按审批身份清理状态。
+
+同批工具依次完成审批后，只并行执行获准的调用。拒绝会生成原 `toolUseId` 对应的
+错误 `tool_result`，文本为 `The user denied this tool call. The tool was not executed.`。
+结果沿用既有持久化流程并进入下一次模型请求；拒绝本身不会使 round 失败。
+待审批状态只保存在内存中，每条只接受一次决策，取消或关闭时失效；重复、错配和过期
+决策都会被拒绝。重启 core 后不会恢复待审批请求。
+
+TUI 自动弹出审批界面，展示内置工具的专属说明或其他工具的参数，预览区域支持滚动。
+左右方向键或 Tab 切换选项，Enter 确认，Y 允许本次调用，N/Esc 拒绝，默认选中 Deny。
+Ctrl+C 保留退出行为；提交失败时保留错误提示和重试入口。
 
 `session.compact` 接收 `{id}`，基于当前会话临时追加一条 user 压缩指令执行总结请求。
 执行期间通过 `session.compaction` notification 发出 `started`、`completed` 或 `failed`

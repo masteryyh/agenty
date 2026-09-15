@@ -10,6 +10,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
+	"github.com/masteryyh/agenty-core/pkg/infra/hitl"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
 )
@@ -20,16 +21,18 @@ type NotificationSender func(context.Context, string, any) error
 // SessionEvent is the stable session.event notification payload consumed by
 // RPC clients. It is projected from an agentloop.Event by this middleware.
 type SessionEvent struct {
-	Type      SessionEventType                `json:"type"`
-	SessionID uuid.UUID                       `json:"sessionId"`
-	RoundID   uuid.UUID                       `json:"roundId"`
-	Sequence  uint64                          `json:"sequence"`
-	Iteration int                             `json:"iteration,omitempty"`
-	Stream    *modelcall.ModelCallStreamEvent `json:"stream,omitempty"`
-	Message   *conversation.Message           `json:"message,omitempty"`
-	Status    conversation.RoundStatus        `json:"status,omitempty"`
-	Usage     *conversation.TokenUsage        `json:"usage,omitempty"`
-	Error     *string                         `json:"error,omitempty"`
+	Type       SessionEventType                `json:"type"`
+	SessionID  uuid.UUID                       `json:"sessionId"`
+	RoundID    uuid.UUID                       `json:"roundId"`
+	Sequence   uint64                          `json:"sequence"`
+	Iteration  int                             `json:"iteration,omitempty"`
+	Stream     *modelcall.ModelCallStreamEvent `json:"stream,omitempty"`
+	Message    *conversation.Message           `json:"message,omitempty"`
+	Status     conversation.RoundStatus        `json:"status,omitempty"`
+	Usage      *conversation.TokenUsage        `json:"usage,omitempty"`
+	Error      *string                         `json:"error,omitempty"`
+	Approval   *hitl.Request                   `json:"approval,omitempty"`
+	Resolution *hitl.Resolution                `json:"resolution,omitempty"`
 }
 
 type SessionEventType string
@@ -93,7 +96,9 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 	case agentloop.EventRoundStarted,
 		agentloop.EventMessageAppended,
 		agentloop.EventModelStream,
-		agentloop.EventRoundEnded:
+		agentloop.EventRoundEnded,
+		hitl.EventRequested,
+		hitl.EventResolved:
 	default:
 		return SessionEvent{}, false
 	}
@@ -106,7 +111,7 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 	}
 	notifier.mu.Unlock()
 
-	return SessionEvent{
+	projected := SessionEvent{
 		Type:      SessionEventType(event.Type),
 		SessionID: event.SessionID,
 		RoundID:   event.RoundID,
@@ -117,7 +122,14 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		Status:    event.Status,
 		Usage:     event.Usage,
 		Error:     event.Error,
-	}, true
+	}
+	if approval, ok := event.Payload.(hitl.Request); ok {
+		projected.Approval = &approval
+	}
+	if resolution, ok := event.Payload.(hitl.Resolution); ok {
+		projected.Resolution = &resolution
+	}
+	return projected, true
 }
 
 func compactionEvent(event agentloop.Event) (compaction.Event, bool) {

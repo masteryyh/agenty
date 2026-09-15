@@ -11,6 +11,8 @@ import type {
     SessionEvent,
     SkillDiagnosticDto,
     SkillDto,
+    ToolApprovalRequest,
+    ToolApprovalResolution,
     ToolResult,
 } from "../api/types";
 import type { CliOptions } from "../config";
@@ -50,6 +52,13 @@ export interface UIMessage {
 
 type Phase = "loading" | "error" | "wizard" | "ready";
 
+export interface PendingToolApproval extends ToolApprovalRequest {
+    sessionId: string;
+    roundId: string;
+    submitting: boolean;
+    error: string | null;
+}
+
 interface AppState {
     phase: Phase;
     initError: string | null;
@@ -70,6 +79,8 @@ interface AppState {
     tokenConsumed: number;
     phrase: string | null;
     activeSessionId: string | null;
+    pendingApproval: PendingToolApproval | null;
+    resolveToolApproval: (decision: ToolApprovalResolution["decision"]) => Promise<void>;
     _localCoreStop: (() => Promise<void>) | null;
     init: () => Promise<void>;
     finishWizard: () => Promise<void>;
@@ -365,6 +376,26 @@ export const useAppStore = create<AppState>((set, get) => {
     };
 
     const handleEvent = (event: SessionEvent) => {
+        if (event.type === "tool_approval_requested" && event.approval) {
+            set({
+                pendingApproval: {
+                    ...event.approval,
+                    sessionId: event.sessionId,
+                    roundId: event.roundId,
+                    submitting: false,
+                    error: null,
+                },
+            });
+            return;
+        }
+        if (event.type === "tool_approval_resolved" && event.resolution) {
+            set((state) => state.pendingApproval?.approvalId === event.resolution!.approvalId
+                ? { pendingApproval: null } : {});
+            return;
+        }
+        if (event.type === "round_ended") {
+            set({ pendingApproval: null });
+        }
         if (event.type === "model_stream" && event.stream) {
             const stream = event.stream;
             if (stream.type === "text_delta" && stream.delta) {
@@ -567,6 +598,7 @@ export const useAppStore = create<AppState>((set, get) => {
         tokenConsumed: 0,
         phrase: null,
         activeSessionId: null,
+        pendingApproval: null,
         _localCoreStop: null,
 
         init: async () => {
@@ -612,6 +644,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 chatError: null,
                 phrase: pickStreamingPhrase(),
                 activeSessionId: session.id,
+                pendingApproval: null,
             }));
 
             let resolveTerminal!: (event: SessionEvent) => void;
@@ -620,10 +653,23 @@ export const useAppStore = create<AppState>((set, get) => {
                 resolveTerminal = resolve;
                 rejectTerminal = reject;
             });
-            const unsubscribeClose = client.onClose(rejectTerminal);
+            // A close can arrive while startSession is still awaiting its response.
+            void terminal.catch(() => undefined);
+            const unsubscribeClose = client.onClose((error) => {
+                set({ pendingApproval: null });
+                rejectTerminal(error);
+            });
             let lastSequence = 0;
+            let activeRoundId: string | null = null;
             const unsubscribe = client.onSessionEvent((event) => {
-                if (event.sessionId !== session.id) {
+                if (event.sessionId !== session.id || get().activeSessionId !== session.id) {
+                    return;
+                }
+                if (activeRoundId !== null && activeRoundId !== event.roundId) {
+                    return;
+                }
+                activeRoundId = event.roundId;
+                if (event.sequence <= lastSequence) {
                     return;
                 }
                 if (event.sequence !== lastSequence + 1) {
@@ -674,7 +720,28 @@ export const useAppStore = create<AppState>((set, get) => {
                 unsubscribe();
                 unsubscribeClose();
                 flushCurrent();
-                set({ status: "idle", phrase: null, activeSessionId: null });
+                set({ status: "idle", phrase: null, activeSessionId: null, pendingApproval: null });
+            }
+        },
+
+        resolveToolApproval: async (decision) => {
+            const { client, pendingApproval } = get();
+            if (!client || !pendingApproval || pendingApproval.submitting) {
+                return;
+            }
+            const { sessionId, roundId, approvalId } = pendingApproval;
+            set({ pendingApproval: { ...pendingApproval, submitting: true, error: null } });
+            try {
+                await client.resolveToolApproval({ sessionId, roundId, approvalId, decision });
+                set((state) => state.pendingApproval?.approvalId === approvalId
+                    ? { pendingApproval: null } : {});
+            } catch (error) {
+                set((state) => state.pendingApproval?.approvalId === approvalId
+                    ? { pendingApproval: {
+                        ...state.pendingApproval,
+                        submitting: false,
+                        error: error instanceof Error ? error.message : String(error),
+                    } } : {});
             }
         },
 
@@ -718,10 +785,15 @@ export const useAppStore = create<AppState>((set, get) => {
                 phrase: null,
                 activeSessionId: null,
                 overlay: null,
+                pendingApproval: null,
             });
         },
 
         newSession: async () => {
+            if (get().activeSessionId) {
+                setToast("Stop the current round before starting another session.");
+                return;
+            }
             const { client, model, thinkingEnabled, thinkingLevel } = get();
             if (!client || !model) {
                 return;
@@ -738,6 +810,10 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         switchModel: async (model) => {
+            if (get().activeSessionId) {
+                setToast("Stop the current round before switching models.");
+                return;
+            }
             const { client, session } = get();
             if (!client || !session) {
                 return;
@@ -768,6 +844,10 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         resumeSession: async (session) => {
+            if (get().activeSessionId) {
+                setToast("Stop the current round before switching sessions.");
+                return;
+            }
             const { client } = get();
             if (!client) {
                 return;

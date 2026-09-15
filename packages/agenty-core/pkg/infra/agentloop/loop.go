@@ -248,12 +248,19 @@ func runAgentLoop(
 			callContext = config.callContext()
 		}
 		mutableCalls := append([]conversation.ToolUseBlock(nil), calls...)
+		results := make([]conversation.ToolResultBlock, len(calls))
+		executableCalls := make([]conversation.ToolUseBlock, 0, len(calls))
+		executableIndexes := make([]int, 0, len(calls))
 		for callIndex := range mutableCalls {
+			if err := loopCtx.Err(); err != nil {
+				return agentLoopResult{usage: totalUsage}, err
+			}
 			toolCall := &ToolCallState{
 				Context:   loopCtx,
 				Session:   config.session,
 				Iteration: iteration,
 				Call:      &mutableCalls[callIndex],
+				Tools:     config.toolRuntime,
 				Emit:      config.emit,
 			}
 			if config.round != nil {
@@ -282,13 +289,29 @@ func runAgentLoop(
 				)
 			}
 			mutableCalls[callIndex] = *toolCall.Call
+			if toolCall.Result != nil {
+				results[callIndex] = *toolCall.Result
+				results[callIndex].ToolUseID = calls[callIndex].ID
+			} else {
+				executableCalls = append(executableCalls, *toolCall.Call)
+				executableIndexes = append(executableIndexes, callIndex)
+			}
 		}
-		results := config.toolRuntime.ExecuteBatch(loopCtx, callContext, mutableCalls)
-		if len(results) < len(mutableCalls) {
-			resultCount := len(results)
-			results = append(results, make([]conversation.ToolResultBlock, len(mutableCalls)-resultCount)...)
-			for index := resultCount; index < len(results); index++ {
-				results[index].ToolUseID = mutableCalls[index].ID
+		if err := loopCtx.Err(); err != nil {
+			return agentLoopResult{usage: totalUsage}, err
+		}
+		if len(executableCalls) > 0 {
+			executed := config.toolRuntime.ExecuteBatch(loopCtx, callContext, executableCalls)
+			for index, callIndex := range executableIndexes {
+				if index < len(executed) {
+					results[callIndex] = executed[index]
+				} else {
+					results[callIndex] = conversation.ToolResultBlock{
+						ToolUseID: mutableCalls[callIndex].ID,
+						IsError:   true,
+						Content:   conversation.Text("Tool returned no result."),
+					}
+				}
 			}
 		}
 		markNativeShellResults(response.Content, results)
@@ -299,6 +322,7 @@ func runAgentLoop(
 					Session:   config.session,
 					Iteration: iteration,
 					Call:      &mutableCalls[callIndex],
+					Tools:     config.toolRuntime,
 					Emit:      config.emit,
 				}
 				if config.round != nil {

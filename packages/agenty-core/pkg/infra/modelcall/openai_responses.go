@@ -456,6 +456,28 @@ func openAIResponsesMessageWithNativeCallIDs(
 				continue
 			}
 			useNativeShellOutput := false
+			// Middleware may reject a native shell call with a text-only error.
+			// Preserve its native response type instead of emitting a function result.
+			if _, hasOutput := shellCallOutput(value.Content); !hasOutput &&
+				nativeOpenAI && callSources[value.ToolUseID].nativeShell && value.IsError {
+				message, err := textContent(value.Content)
+				if err != nil {
+					return nil, err
+				}
+				exitCode := int64(1)
+				item, err := openAIResponsesShellCallOutput(conversation.ShellCallOutputBlock{
+					CallID: value.ToolUseID,
+					Output: []conversation.ShellCommandOutput{{
+						Stderr:  message,
+						Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &exitCode},
+					}},
+				})
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, item)
+				continue
+			}
 			if output, ok := shellCallOutput(value.Content); ok {
 				if output.OpenAINative != nil {
 					useNativeShellOutput = nativeOpenAI && *output.OpenAINative

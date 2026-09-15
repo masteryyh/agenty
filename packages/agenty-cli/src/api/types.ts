@@ -265,8 +265,22 @@ export interface StreamEvent {
     toolInput?: unknown;
 }
 
+export interface ToolApprovalRequest {
+    approvalId: string;
+    toolCall: { type: "tool_use"; id: string; name: string; input: unknown };
+    cwd: string;
+    preview: { title: string; detail: string };
+}
+
+export interface ToolApprovalResolution {
+    sessionId: string;
+    roundId: string;
+    approvalId: string;
+    decision: "allow" | "deny";
+}
+
 export interface SessionEvent {
-    type: "round_started" | "message_appended" | "model_stream" | "round_ended";
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved";
     sessionId: string;
     roundId: string;
     sequence: number;
@@ -276,6 +290,8 @@ export interface SessionEvent {
     status?: RoundStatus;
     usage?: TokenUsage;
     error?: string;
+    approval?: ToolApprovalRequest;
+    resolution?: ToolApprovalResolution;
 }
 
 export interface CompactionEvent {

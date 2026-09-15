@@ -87,9 +87,11 @@ type ToolCallContext struct {
 	Round     *conversation.Round
 	Iteration int
 	Call      *conversation.ToolUseBlock
-	Result    *conversation.ToolResultBlock
-	Err       error
-	Emit      agentloop.EventEmitter
+	Tools     agentloop.ToolRuntime
+	// A result supplied by BeforeToolCall replaces execution of this call.
+	Result *conversation.ToolResultBlock
+	Err    error
+	Emit   agentloop.EventEmitter
 }
 
 type SessionStopContext struct {

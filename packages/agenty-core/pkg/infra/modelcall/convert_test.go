@@ -1017,6 +1017,34 @@ func TestOpenAIResponsesShellOutputUsesPersistedSource(t *testing.T) {
 	}
 }
 
+func TestRejectedNativeShellResultPreservesWireType(t *testing.T) {
+	t.Parallel()
+	message := "The user denied this tool call. The tool was not executed."
+	history := []ModelCallMessage{
+		{Role: conversation.RoleAssistant, Content: conversation.Content{
+			conversation.ShellCallBlock{CallID: "denied-shell", Commands: []string{"echo never"}},
+		}},
+		{Role: conversation.RoleUser, Content: conversation.Content{
+			conversation.ToolResultBlock{ToolUseID: "denied-shell", IsError: true, Content: conversation.Text(message)},
+		}},
+	}
+	items, err := openAIResponsesMessages(history, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[1].OfShellCallOutput == nil {
+		t.Fatalf("items = %#v", items)
+	}
+	output := items[1].OfShellCallOutput
+	if output.CallID != "denied-shell" || len(output.Output) != 1 || output.Output[0].Stderr != message {
+		t.Fatalf("output = %+v", output)
+	}
+	compatible, err := openAIResponsesMessages(history, false)
+	if err != nil || len(compatible) != 2 || compatible[1].OfFunctionCallOutput == nil {
+		t.Fatalf("compatible = %#v, err = %v", compatible, err)
+	}
+}
+
 func TestStreamEventConversions(t *testing.T) {
 	t.Parallel()
 

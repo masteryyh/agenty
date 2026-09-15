@@ -35,9 +35,11 @@ type ToolCallState struct {
 	Round     *conversation.Round
 	Iteration int
 	Call      *conversation.ToolUseBlock
-	Result    *conversation.ToolResultBlock
-	Err       error
-	Emit      EventEmitter
+	Tools     ToolRuntime
+	// A result supplied by BeforeToolCall replaces execution of this call.
+	Result *conversation.ToolResultBlock
+	Err    error
+	Emit   EventEmitter
 }
 
 // LoopHooks are the low-level callback ports used by AgentLoop. The

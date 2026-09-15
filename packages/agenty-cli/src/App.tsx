@@ -5,6 +5,7 @@ import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { HITL_OVERLAY_HEIGHT, HitlOverlay } from "./components/HitlOverlay";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
 import {
@@ -110,6 +111,8 @@ function ChatView() {
     const [cursorOffset, setCursorOffset] = useState(0);
     const inputRef = useRef<StructuredTextInputHandle | null>(null);
     const skills = useAppStore((s) => s.skills);
+    const approval = useAppStore((s) => s.pendingApproval);
+    const resolveToolApproval = useAppStore((s) => s.resolveToolApproval);
 
     const { palette, height: paletteHeight, tab } = useCommandPalette(
         renderDocument(document),
@@ -125,7 +128,7 @@ function ChatView() {
     const busy = streaming || chat.status === "compacting";
     const reasoningActive = streaming && !!chat.current?.reasoning && !chat.current.content;
 
-    const panelH = panelHeight(app.overlay);
+    const panelH = approval ? HITL_OVERLAY_HEIGHT : panelHeight(app.overlay);
     const hasPanelOverlay = panelH !== null;
     // Bottom dialogs float over the chat and input instead of changing the main
     // flex flow. This keeps scroll position and message layout stable.
@@ -262,7 +265,7 @@ function ChatView() {
     };
 
     // Full-screen overlays
-    if (app.overlay === "session-select") {
+    if (!approval && app.overlay === "session-select") {
         return (
             <SessionSelectOverlay
                 onClose={() => app.setOverlay(null)}
@@ -270,7 +273,7 @@ function ChatView() {
             />
         );
     }
-    if (app.overlay === "help") {
+    if (!approval && app.overlay === "help") {
         return <HelpOverlay onClose={() => app.setOverlay(null)} />;
     }
 
@@ -284,7 +287,7 @@ function ChatView() {
                 header={<LogoHeader />}
                 interactive={!hasPanelOverlay && paletteHeight === 0}
             />
-            <CommandPalette
+            {!approval ? <CommandPalette
                 palette={palette}
                 marginTop={-paletteHeight}
                 onChoose={(value) => {
@@ -292,7 +295,7 @@ function ChatView() {
                     setCursorOffset(value.length);
                 }}
                 onChooseSkill={chooseSkill}
-            />
+            /> : null}
             <Box marginTop={INPUT_TOP_GAP}>
                 <InputBox
                     ref={inputRef}
@@ -303,7 +306,7 @@ function ChatView() {
                     onCursorChange={setCursorOffset}
                     onTab={handleTab}
                     streaming={busy}
-                    phrase={chat.phrase}
+                    phrase={approval ? "Waiting for your approval…" : chat.phrase}
                     modelName={`${app.model?.providerName ?? "?"} · ${app.model?.name ?? "?"}`}
                     cwd={app.session?.cwd ?? process.cwd()}
                     contextWindow={app.session?.contextWindow ?? 0}
@@ -320,7 +323,13 @@ function ChatView() {
                     width={Math.max(columns - 2, 1)}
                     height={Math.max(Math.min(panelH!, Math.max(rows - 2, 1)), 1)}
                 >
-                    <OverlayPanel kind={app.overlay!} />
+                    {approval ? (
+                        <HitlOverlay
+                            key={approval.approvalId}
+                            approval={approval}
+                            onDecision={(decision) => void resolveToolApproval(decision)}
+                        />
+                    ) : <OverlayPanel kind={app.overlay!} />}
                 </BottomDialog>
             ) : null}
         </Box>
@@ -330,7 +339,7 @@ function ChatView() {
 function OverlayPanel({
     kind,
 }: {
-    kind: "provider" | "status" | "model-select" | "mcp";
+    kind: OverlayKind;
 }) {
     return kind === "model-select" ? (
         <ModelOverlay />
@@ -338,9 +347,9 @@ function OverlayPanel({
         <ProviderOverlay />
     ) : kind === "status" ? (
         <StatusOverlay />
-    ) : (
+    ) : kind === "mcp" ? (
         <McpOverlay />
-    );
+    ) : null;
 }
 
 function SessionSelectOverlay({

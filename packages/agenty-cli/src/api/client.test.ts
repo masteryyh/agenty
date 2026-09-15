@@ -5,6 +5,19 @@ import { AgentyClient } from "./client";
 import type { ChatMessageDto, ChatSessionDto, ModelDto, ModelProviderDto } from "./types";
 
 describe("AgentyClient session list", () => {
+    test("sends a scoped tool approval decision", async () => {
+        const calls: Array<{ method: string; params: unknown }> = [];
+        const rpc = {
+            async call(method: string, params: unknown) {
+                calls.push({ method, params });
+                return {};
+            },
+        } as unknown as StdioRPCClient;
+        const resolution = { sessionId: "session", roundId: "round", approvalId: "approval", decision: "deny" as const };
+        await new AgentyClient(rpc).resolveToolApproval(resolution);
+        expect(calls).toEqual([{ method: "session.resolveToolApproval", params: resolution }]);
+    });
+
     test("treats a null initialize status as not initialized", async () => {
         const rpc = {
             call: async () => null,

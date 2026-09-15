@@ -13,6 +13,7 @@ import (
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
+	"github.com/masteryyh/agenty-core/pkg/infra/hitl"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
 	mcpregistry "github.com/masteryyh/agenty-core/pkg/infra/mcp"
@@ -115,6 +116,7 @@ func run() (exitCode int) {
 		}
 	}()
 
+	hitlManager := hitl.NewManager()
 	middlewareManager := inframiddleware.NewManager()
 	if err := middlewareManager.Register(skill.NewMiddleware(skillRegistry)); err != nil {
 		slog.ErrorContext(ctx, "failed to register skill middleware", "error", err)
@@ -138,6 +140,10 @@ func run() (exitCode int) {
 	}
 	if err := middlewareManager.Register(rpc.NewSessionNotificationMiddleware(srv.Notify)); err != nil {
 		slog.ErrorContext(ctx, "failed to register session notification middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(hitlManager.Middleware()); err != nil {
+		slog.ErrorContext(ctx, "failed to register HITL middleware", "error", err)
 		return 1
 	}
 	middlewareChain, err := middlewareManager.Compile()
@@ -179,6 +185,7 @@ func run() (exitCode int) {
 	)
 	adapter.RegisterMCPHandlers(disp, mcpRegistry)
 	adapter.RegisterSkillHandlers(disp, skillRegistry)
+	adapter.RegisterHITLHandlers(disp, hitlManager)
 
 	asm := rpc.NewChunkAssembler(disp)
 	rpc.RegisterChunkHandlers(disp, asm)
