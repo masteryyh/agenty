@@ -732,7 +732,7 @@ func TestShellMessageConversionsAcrossProviders(t *testing.T) {
 		Content: conversation.Content{conversation.ToolResultBlock{
 			ToolUseID: "call_1",
 			Content: conversation.Content{conversation.ShellCallOutputBlock{
-				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: boolPointer(true),
+				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: new(true),
 				Output: []conversation.ShellCommandOutput{{
 					Stdout: "hi", Outcome: conversation.ShellOutcome{Type: "exit", ExitCode: &exitCode},
 				}},
@@ -973,8 +973,8 @@ func TestOpenAIResponsesShellOutputUsesPersistedSource(t *testing.T) {
 		native     *bool
 		wantNative bool
 	}{
-		{name: "native", native: boolPointer(true), wantNative: true},
-		{name: "function", native: boolPointer(false), wantNative: false},
+		{name: "native", native: new(true), wantNative: true},
+		{name: "function", native: new(false), wantNative: false},
 		{name: "legacy native", native: nil, wantNative: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1241,10 +1241,6 @@ func testModel() ModelCallConfig {
 		SupportsReasoning: true,
 		ReasoningEfforts:  shared.StandardReasoningEfforts(),
 	}
-}
-
-func boolPointer(value bool) *bool {
-	return &value
 }
 
 func testTool() ToolDefinition {

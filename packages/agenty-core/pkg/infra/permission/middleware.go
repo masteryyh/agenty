@@ -1,5 +1,4 @@
-// Package hitl pauses tool calls until the connected user makes a decision.
-package hitl
+package permission
 
 import (
 	"context"
@@ -53,25 +52,55 @@ type pendingRequest struct {
 	decision  chan Decision
 }
 
-type Manager struct {
+type PermissionManager struct {
 	mu      sync.Mutex
 	pending map[uuid.UUID]*pendingRequest
 }
 
-func NewManager() *Manager {
-	return &Manager{pending: make(map[uuid.UUID]*pendingRequest)}
+func NewPermissionManager() *PermissionManager {
+	return &PermissionManager{pending: make(map[uuid.UUID]*pendingRequest)}
 }
 
-func (manager *Manager) Middleware() middleware.Middleware {
-	return middleware.Middleware{Name: "hitl", BeforeToolCall: manager.beforeToolCall}
+func (manager *PermissionManager) Middleware() middleware.Middleware {
+	return middleware.Middleware{Name: "permissions", BeforeToolCall: manager.beforeToolCall}
 }
 
-func (manager *Manager) beforeToolCall(ctx context.Context, state *middleware.ToolCallContext) error {
+// PermissionModeChanged releases approvals that are no longer needed after a
+// session switches to yolo mode. The existing BeforeToolCall waiter emits the
+// resolved event and performs the normal one-shot cleanup.
+func (manager *PermissionManager) PermissionModeChanged(
+	ctx context.Context,
+	sessionID uuid.UUID,
+	mode conversation.PermissionMode,
+) error {
+	if mode != conversation.PermissionYolo {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for approvalID, pending := range manager.pending {
+		if pending.sessionID != sessionID || pending.ctx.Err() != nil {
+			continue
+		}
+		delete(manager.pending, approvalID)
+		pending.decision <- Allow
+	}
+	return nil
+}
+
+func (manager *PermissionManager) beforeToolCall(ctx context.Context, state *middleware.ToolCallContext) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if state == nil || state.Session == nil || state.Round == nil || state.Call == nil || state.Emit == nil {
 		return fmt.Errorf("HITL requires a session, round, tool call and event emitter")
+	}
+	if state.Session.CurrentPermissionMode() == conversation.PermissionYolo {
+		return nil
 	}
 	cwd := ""
 	if state.Round.Cwd != nil {
@@ -111,6 +140,9 @@ func (manager *Manager) beforeToolCall(ctx context.Context, state *middleware.To
 		delete(manager.pending, request.ApprovalID)
 		manager.mu.Unlock()
 	}()
+	if state.Session.CurrentPermissionMode() == conversation.PermissionYolo {
+		return nil
+	}
 
 	// Register before publishing: a client can answer before Emit returns.
 	if err := state.Emit(ctx, agentloop.Event{Type: EventRequested, Iteration: state.Iteration, Payload: request}); err != nil {
@@ -137,7 +169,7 @@ func (manager *Manager) beforeToolCall(ctx context.Context, state *middleware.To
 }
 
 // Resolve consumes one approval without waiting for tool execution.
-func (manager *Manager) Resolve(ctx context.Context, resolution Resolution) error {
+func (manager *PermissionManager) Resolve(ctx context.Context, resolution Resolution) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

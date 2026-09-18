@@ -166,7 +166,7 @@ func (fixture *executionFixture) createSession(t *testing.T) *conversation.Sessi
 		shared.NewModelRef("openai", "gpt-5"),
 		128_000,
 		shared.ReasoningOff,
-		ptr("/workspace"),
+		new("/workspace"),
 	)
 	if err := fixture.sessions.Save(t.Context(), session); err != nil {
 		t.Fatal(err)
@@ -805,7 +805,7 @@ func TestEngineAppendsOnlyChangedMetadataAfterTheFirstRound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated.SetCwd(ptr("/workspace/two"))
+	updated.SetCwd(new("/workspace/two"))
 	updated.SetReasoningEffort(shared.ReasoningMax)
 	if err := fixture.sessions.Save(t.Context(), updated); err != nil {
 		t.Fatal(err)

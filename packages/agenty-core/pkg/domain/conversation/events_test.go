@@ -27,6 +27,7 @@ func TestEventEnvelopeRoundTrip(t *testing.T) {
 		{name: "model set", event: SessionModelSet{SessionID: sessionID, Model: model, ContextWindow: 200_000, At: at}},
 		{name: "reasoning effort set", event: SessionReasoningEffortSet{SessionID: sessionID, ReasoningEffort: shared.ReasoningHigh, At: at}},
 		{name: "cwd cleared", event: SessionCwdSet{SessionID: sessionID, Cwd: nil, At: at}},
+		{name: "permission mode changed", event: SessionPermissionModeChanged{SessionID: sessionID, RoundID: roundID, PreviousMode: PermissionAsk, PermissionMode: PermissionYolo, At: at}},
 		{name: "round started", event: RoundStarted{SessionID: sessionID, RoundID: roundID, Sequence: 1, Model: model, ContextWindow: 200_000, ReasoningEffort: shared.ReasoningHigh, Cwd: &cwd, At: at}},
 		{name: "message appended", event: MessageAppended{SessionID: sessionID, Message: Message{ID: shared.NewID(), RoundID: roundID, Role: RoleAssistant, Content: Text("hi"), Model: &model, Usage: &TokenUsage{Input: 10, Output: 20, Total: 30}, CreatedAt: at}, At: at}},
 		{name: "session compacted", event: SessionCompacted{SessionID: sessionID, CompactionID: shared.NewID(), Trigger: CompactionTriggerAuto, Summary: "done", ContextTokensBefore: 100, Usage: TokenUsage{Input: 10, Output: 20, Total: 30}, At: at}},

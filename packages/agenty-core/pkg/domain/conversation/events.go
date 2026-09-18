@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	EventSessionStarted            = "session_started"
-	EventSessionModelSet           = "session_model_set"
-	EventSessionReasoningEffortSet = "session_reasoning_effort_set"
-	EventSessionCwdSet             = "session_cwd_set"
-	EventRoundStarted              = "round_started"
-	EventMessageAppended           = "message_appended"
-	EventSessionCompacted          = "session_compacted"
+	EventSessionStarted               = "session_started"
+	EventSessionModelSet              = "session_model_set"
+	EventSessionReasoningEffortSet    = "session_reasoning_effort_set"
+	EventSessionCwdSet                = "session_cwd_set"
+	EventSessionPermissionModeChanged = "session_permission_mode_changed"
+	EventRoundStarted                 = "round_started"
+	EventMessageAppended              = "message_appended"
+	EventSessionCompacted             = "session_compacted"
 	// EventSessionMetadataRefreshed is retained for replaying development
 	// transcripts written before compaction metadata became derived state.
 	EventSessionMetadataRefreshed = "session_metadata_refreshed"
@@ -30,6 +31,7 @@ type SessionStarted struct {
 	Model           shared.ModelRef        `json:"model"`
 	ContextWindow   int64                  `json:"contextWindow"`
 	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
+	PermissionMode  PermissionMode         `json:"permissionMode,omitempty"`
 	Cwd             *string                `json:"cwd,omitempty"`
 	At              time.Time              `json:"occurredAt"`
 }
@@ -82,6 +84,22 @@ func (SessionCwdSet) EventType() string {
 }
 
 func (e SessionCwdSet) OccurredAt() time.Time {
+	return e.At
+}
+
+type SessionPermissionModeChanged struct {
+	SessionID      uuid.UUID      `json:"sessionId"`
+	RoundID        uuid.UUID      `json:"roundId,omitempty"`
+	PreviousMode   PermissionMode `json:"previousMode"`
+	PermissionMode PermissionMode `json:"permissionMode"`
+	At             time.Time      `json:"occurredAt"`
+}
+
+func (SessionPermissionModeChanged) EventType() string {
+	return EventSessionPermissionModeChanged
+}
+
+func (e SessionPermissionModeChanged) OccurredAt() time.Time {
 	return e.At
 }
 
@@ -200,6 +218,8 @@ func DecodeEvent(env shared.Envelope) (shared.Event, error) {
 		return decodePayload[SessionReasoningEffortSet](env.Payload)
 	case EventSessionCwdSet:
 		return decodePayload[SessionCwdSet](env.Payload)
+	case EventSessionPermissionModeChanged:
+		return decodePayload[SessionPermissionModeChanged](env.Payload)
 	case EventRoundStarted:
 		return decodePayload[RoundStarted](env.Payload)
 	case EventMessageAppended:

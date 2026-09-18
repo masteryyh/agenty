@@ -337,7 +337,7 @@ func TestNewRemoteToolMapsReadOnlyAnnotation(t *testing.T) {
 		{
 			name: "read only takes precedence",
 			annotations: &sdkmcp.ToolAnnotations{
-				DestructiveHint: mcpBoolPointer(true),
+				DestructiveHint: new(true),
 				ReadOnlyHint:    true,
 			},
 			wantDestructive: false,
@@ -345,14 +345,14 @@ func TestNewRemoteToolMapsReadOnlyAnnotation(t *testing.T) {
 		{
 			name: "additive hint still permits writes",
 			annotations: &sdkmcp.ToolAnnotations{
-				DestructiveHint: mcpBoolPointer(false),
+				DestructiveHint: new(false),
 			},
 			wantDestructive: true,
 		},
 		{
 			name: "destructive hint",
 			annotations: &sdkmcp.ToolAnnotations{
-				DestructiveHint: mcpBoolPointer(true),
+				DestructiveHint: new(true),
 			},
 			wantDestructive: true,
 		},
@@ -375,10 +375,6 @@ func TestNewRemoteToolMapsReadOnlyAnnotation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mcpBoolPointer(value bool) *bool {
-	return &value
 }
 
 func TestNewRemoteToolNormalizesAndTruncatesProviderName(t *testing.T) {

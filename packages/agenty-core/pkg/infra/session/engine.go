@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/google/uuid"
@@ -34,12 +35,13 @@ type ExecutionCatalogRepository interface {
 }
 
 type Dependencies struct {
-	Sessions    ExecutionSessionRepository
-	Catalog     ExecutionCatalogRepository
-	Tools       agentloop.ToolRuntime
-	InvokeModel modelcall.InvokeFunc
-	LoopHooks   agentloop.LoopHooks
-	Lifecycle   inframiddleware.LifecycleHooks
+	Sessions              ExecutionSessionRepository
+	Catalog               ExecutionCatalogRepository
+	Tools                 agentloop.ToolRuntime
+	InvokeModel           modelcall.InvokeFunc
+	LoopHooks             agentloop.LoopHooks
+	Lifecycle             inframiddleware.LifecycleHooks
+	PermissionModeChanged func(context.Context, uuid.UUID, conversation.PermissionMode) error
 }
 
 type StartResult struct {
@@ -64,28 +66,32 @@ type StopResult struct {
 }
 
 type activeExecution struct {
-	roundID uuid.UUID
-	cancel  context.CancelFunc
+	roundID  uuid.UUID
+	session  *conversation.Session
+	provider catalog.Provider
+	cancel   context.CancelFunc
 }
 
 type Engine struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	sessions    ExecutionSessionRepository
-	catalog     ExecutionCatalogRepository
-	tools       agentloop.ToolRuntime
-	invokeModel modelcall.InvokeFunc
-	loopHooks   agentloop.LoopHooks
-	lifecycle   inframiddleware.LifecycleHooks
-	logger      *slog.Logger
-	mu          sync.Mutex
-	active      map[uuid.UUID]*activeExecution
-	started     map[uuid.UUID]struct{}
-	resources   map[uuid.UUID]executionResources
-	waitGroup   sync.WaitGroup
-	shutdown    bool
-	stopOnce    sync.Once
-	stopped     chan struct{}
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	sessions              ExecutionSessionRepository
+	catalog               ExecutionCatalogRepository
+	tools                 agentloop.ToolRuntime
+	invokeModel           modelcall.InvokeFunc
+	loopHooks             agentloop.LoopHooks
+	lifecycle             inframiddleware.LifecycleHooks
+	permissionModeChanged func(context.Context, uuid.UUID, conversation.PermissionMode) error
+	logger                *slog.Logger
+	mu                    sync.Mutex
+	sessionMu             sync.Mutex
+	active                map[uuid.UUID]*activeExecution
+	started               map[uuid.UUID]struct{}
+	resources             map[uuid.UUID]executionResources
+	waitGroup             sync.WaitGroup
+	shutdown              bool
+	stopOnce              sync.Once
+	stopped               chan struct{}
 }
 
 func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, error) {
@@ -107,19 +113,20 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Engine{
-		ctx:         ctx,
-		cancel:      cancel,
-		sessions:    dependencies.Sessions,
-		catalog:     dependencies.Catalog,
-		tools:       dependencies.Tools,
-		invokeModel: dependencies.InvokeModel,
-		loopHooks:   dependencies.LoopHooks,
-		lifecycle:   dependencies.Lifecycle,
-		logger:      slog.Default(),
-		active:      make(map[uuid.UUID]*activeExecution),
-		started:     make(map[uuid.UUID]struct{}),
-		resources:   make(map[uuid.UUID]executionResources),
-		stopped:     make(chan struct{}),
+		ctx:                   ctx,
+		cancel:                cancel,
+		sessions:              dependencies.Sessions,
+		catalog:               dependencies.Catalog,
+		tools:                 dependencies.Tools,
+		invokeModel:           dependencies.InvokeModel,
+		loopHooks:             dependencies.LoopHooks,
+		lifecycle:             dependencies.Lifecycle,
+		permissionModeChanged: dependencies.PermissionModeChanged,
+		logger:                slog.Default(),
+		active:                make(map[uuid.UUID]*activeExecution),
+		started:               make(map[uuid.UUID]struct{}),
+		resources:             make(map[uuid.UUID]executionResources),
+		stopped:               make(chan struct{}),
 	}, nil
 }
 
@@ -154,6 +161,8 @@ func (engine *Engine) Start(
 
 	engine.mu.Lock()
 	execution.roundID = prepared.roundID
+	execution.session = prepared.session
+	execution.provider = prepared.provider
 	engine.mu.Unlock()
 
 	launched = true
@@ -361,6 +370,104 @@ func (engine *Engine) IsRunning(sessionID uuid.UUID) bool {
 
 	_, ok := engine.active[sessionID]
 	return ok
+}
+
+func (engine *Engine) SetPermissionMode(
+	ctx context.Context,
+	sessionID string,
+	mode conversation.PermissionMode,
+) (*conversation.Session, error) {
+	engine.sessionMu.Lock()
+	defer engine.sessionMu.Unlock()
+
+	id, err := uuid.Parse(sessionID)
+	if err != nil {
+		return nil, apperrors.Validation("invalid session id: " + err.Error())
+	}
+	if !mode.Valid() {
+		return nil, apperrors.Validation("invalid permission mode: " + string(mode))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	engine.mu.Lock()
+	active, running := engine.active[id]
+	var session *conversation.Session
+	var roundID uuid.UUID
+	if running && active != nil && active.session != nil {
+		session = active.session
+		roundID = active.roundID
+	}
+	engine.mu.Unlock()
+	if running {
+		round := currentRound(session, roundID)
+		if roundID == uuid.Nil || round == nil || round.Status != conversation.RoundRunning {
+			running = false
+			roundID = uuid.Nil
+		}
+	}
+
+	if session == nil {
+		session, err = engine.sessions.Load(ctx, id)
+		if err != nil {
+			if errors.Is(err, conversation.ErrSessionNotFound) {
+				return nil, apperrors.NotFound("session " + sessionID + " not found")
+			}
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
+		}
+	}
+	if !session.SetPermissionMode(mode, roundID) {
+		return session.VisibleCopy(), nil
+	}
+	if running && roundID != uuid.Nil {
+		permissionMode := string(mode)
+		text, encodeErr := (conversation.MetadataUpdate{PermissionMode: &permissionMode}).XML()
+		if encodeErr != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "encode permission metadata", encodeErr)
+		}
+		role := conversation.RoleUser
+		if active.provider.SupportsDeveloperMessages() {
+			role = conversation.RoleDeveloper
+		}
+		if _, appendErr := session.AppendHiddenMessage(
+			roundID,
+			role,
+			conversation.Text(text),
+			map[string]any{"kind": "metadata", "scope": "round"},
+		); appendErr != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "append permission metadata", appendErr)
+		}
+	}
+
+	change := conversation.SessionPermissionModeChanged{
+		SessionID:      session.ID,
+		RoundID:        roundID,
+		PreviousMode:   session.CurrentPermissionMode(),
+		PermissionMode: mode,
+	}
+	// SetPermissionMode has already recorded the event. Read it back so the
+	// emitted payload includes the exact previous mode from the event.
+	if pending := session.PendingEvents(); len(pending) > 0 {
+		for _, p := range slices.Backward(pending) {
+			if recorded, ok := p.(conversation.SessionPermissionModeChanged); ok {
+				change = recorded
+				break
+			}
+		}
+	}
+	if err := engine.emitForSession(ctx, session, roundID, nil, nil, agentloop.Event{
+		Type:    agentloop.EventPermissionModeChanged,
+		Payload: change,
+	}); err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist permission mode", err)
+	}
+	if engine.permissionModeChanged != nil {
+		if err := engine.permissionModeChanged(ctx, session.ID, mode); err != nil {
+			return nil, apperrors.WrapError(apperrors.CodeInternal, "apply permission mode", err)
+		}
+	}
+	return session.VisibleCopy(), nil
 }
 
 func (engine *Engine) ExecuteSessionIfIdle(
@@ -846,6 +953,9 @@ func (engine *Engine) compactPreparedForWindow(
 	contextWindow int64,
 	maxOutputTokens int64,
 ) (*conversation.SessionCompacted, error) {
+	engine.sessionMu.Lock()
+	defer engine.sessionMu.Unlock()
+
 	return (infracompaction.Executor{
 		Emit: func(eventCtx context.Context, event agentloop.Event) error {
 			return engine.emitEvent(eventCtx, prepared, event)
@@ -975,7 +1085,9 @@ func (engine *Engine) run(
 		}
 		engine.finish(ctx, prepared, status, usage, runErr)
 	}()
+	engine.sessionMu.Lock()
 	if err := engine.emitEvent(ctx, prepared, agentloop.Event{Type: agentloop.EventRoundStarted}); err != nil {
+		engine.sessionMu.Unlock()
 		status = conversation.RoundFailed
 		runErr = err
 		return
@@ -984,10 +1096,12 @@ func (engine *Engine) run(
 		Type:    agentloop.EventMessageAppended,
 		Message: &prepared.userMessage,
 	}); err != nil {
+		engine.sessionMu.Unlock()
 		status = conversation.RoundFailed
 		runErr = err
 		return
 	}
+	engine.sessionMu.Unlock()
 
 	usage, runErr = engine.executeLoop(ctx, prepared)
 	if runErr != nil {
@@ -1084,6 +1198,9 @@ func (engine *Engine) handleLoopEvent(
 	prepared *preparedExecution,
 	event agentloop.Event,
 ) error {
+	engine.sessionMu.Lock()
+	defer engine.sessionMu.Unlock()
+
 	switch event.Type {
 	case agentloop.EventModelStream:
 		return engine.emitEvent(ctx, prepared, event)
@@ -1132,6 +1249,9 @@ func (engine *Engine) finish(
 	usage conversation.TokenUsage,
 	runErr error,
 ) {
+	engine.sessionMu.Lock()
+	defer engine.sessionMu.Unlock()
+
 	var errorMessage *string
 	if runErr != nil {
 		message := runErr.Error()

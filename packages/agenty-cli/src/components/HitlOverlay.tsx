@@ -13,6 +13,7 @@ export const HITL_OVERLAY_HEIGHT = 22;
 interface HitlOverlayProps {
     approval: PendingToolApproval;
     onDecision: (decision: ToolApprovalResolution["decision"]) => void;
+    onTogglePermission?: () => void;
 }
 
 // Control characters must never become terminal instructions in an approval.
@@ -21,7 +22,7 @@ function displayText(value: string): string {
         ? character : `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
-export function HitlOverlay({ approval, onDecision }: HitlOverlayProps) {
+export function HitlOverlay({ approval, onDecision, onTogglePermission = () => undefined }: HitlOverlayProps) {
     const { width, height } = useBottomDialogSize();
     const [choice, setChoice] = useState<ToolApprovalResolution["decision"]>("deny");
     const scroll = useRef<ScrollBoxRenderable | null>(null);
@@ -41,6 +42,12 @@ export function HitlOverlay({ approval, onDecision }: HitlOverlayProps) {
     const previewHeight = Math.max(height - (showHints ? 4 : 2), 1);
 
     useInput((input, key, event) => {
+        if (key.ctrl && event.name === "p") {
+            event.preventDefault();
+            event.stopPropagation();
+            onTogglePermission();
+            return;
+        }
         if (key.ctrl || key.meta) {
             return;
         }

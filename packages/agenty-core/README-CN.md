@@ -99,13 +99,14 @@ skill catalog 拼接到 system prompt，`infra/mcp` 在每个轮次提供当前 
 `infra/metadata` 注入全量或变化的会话 metadata，`infra/compaction` 负责自动压缩策略，
 `infra/tools` 负责可动态更新的 tool registry。`infra/storage` 在 `OnEvent` 中持久化 pending
 session events，`infra/rpc` 将运行时事件投影为 CLI notification。`cmd/main.go` 按 Skill、MCP、
-Metadata、Compaction、Storage、RPC notification、HITL 顺序注册它们，再把编译后的 hook chain 交给
+Metadata、Compaction、Storage、RPC notification、权限中间件（实现仍位于 `infra/hitl`）顺序注册它们，再把编译后的 hook chain 交给
 `infra/session.Engine`，因此客户端收到 notification 前数据已经写入。
 
-`infra/hitl` 通过 `BeforeToolCall` 拦截所有工具调用。before hook 可以设置 `Result`
+`infra/metadata` 会把当前会话权限模式写入隐藏 metadata 的 `<permission-mode>` 字段。
+`infra/hitl` 通过 `BeforeToolCall` 拦截所有工具调用并读取会话模式。`ask` 模式下，before hook 可以设置 `Result`
 替代实际执行；loop 按调用顺序合并替代结果和执行结果，两者都会经过 `AfterToolCall`
-及现有事件链。内置工具在实现旁提供专属审批预览，通过执行所用的同一工具快照查询；
-其他工具展示名称和格式化参数。
+及现有事件链。`yolo` 模式下工具调用不会被审批中断；模式保存在 `Session` 中，运行期间切换到
+`yolo` 会释放已经等待的审批。内置工具在实现旁提供专属审批预览，通过执行所用的同一工具快照查询；其他工具展示名称和格式化参数。
 
 ## 基础设施层
 
@@ -203,7 +204,7 @@ Methods 使用 `resource.action` 命名：
 | Initialize | `initialize.already`, `initialize.complete` |
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.setPermissionMode`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
 | MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
@@ -239,7 +240,7 @@ server 名称只允许 ASCII 字母、数字、`_` 和 `-`，且大小写不敏�
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
 `running` 状态，完整 agent turn 由引擎异步继续执行。执行期间，core 会写出
 `session.event` JSON-RPC notifications，事件类型包括 `round_started`、
-`message_appended`、`model_stream` 和 `round_ended`。每个事件都携带 `sessionId`、
+`message_appended`、`model_stream`、`permission_mode_changed` 和 `round_ended`。每个事件都携带 `sessionId`、
 `roundId` 和 round 内单调递增的 `sequence`；模型事件还包含 provider-neutral stream
 event 和 agent loop 的 `iteration`。由于 round 与 request response 并发，notification
 可能早于 `session.start` response 写出，因此 client 必须先订阅再发起请求，并把
@@ -249,20 +250,24 @@ notification 与 response 分开路由。`round_ended` 携带 `completed`、`fai
 `session.stop` 接收 `{id}` 并请求取消。同一 session 重复启动，或在运行期间删除该
 session，会返回 `already exists`；不同 sessions 可以并行运行。
 
-所有工具调用都需要单独审批，包括只读工具和 MCP 工具。`session.event` 新增
-`tool_approval_requested`，携带 `approval: {approvalId, toolCall, cwd, preview: {title, detail}}`。
+默认的 `ask` 模式要求所有工具调用单独审批，包括只读工具和 MCP 工具。`session.event` 新增
+`permission_mode_changed`（携带切换前后的模式）以及 `tool_approval_requested`，后者携带
+`approval: {approvalId, toolCall, cwd, preview: {title, detail}}`。
 客户端调用 `session.resolveToolApproval`，提交 `{sessionId, roundId, approvalId, decision}`，
 其中 `decision` 只能是 `allow` 或 `deny`。决策被接受后发出 `tool_approval_resolved`，
 其 `resolution` 包含上述决策字段。两种事件沿用 round 的 sequence；下一条审批可能先于
 上一条决策的 RPC 响应到达，客户端必须按审批身份清理状态。
 
-同批工具依次完成审批后，只并行执行获准的调用。拒绝会生成原 `toolUseId` 对应的
+在 `ask` 模式下，同批工具依次完成审批后，只并行执行获准的调用；`yolo` 模式下所有调用都无需审批。
+调用 `session.setPermissionMode` 并提交 `{id, permissionMode: "ask" | "yolo"}` 可以切换会话，
+切换会持久化为会话事件，并立即作用于后续工具调用。拒绝会生成原 `toolUseId` 对应的
 错误 `tool_result`，文本为 `The user denied this tool call. The tool was not executed.`。
 结果沿用既有持久化流程并进入下一次模型请求；拒绝本身不会使 round 失败。
 待审批状态只保存在内存中，每条只接受一次决策，取消或关闭时失效；重复、错配和过期
 决策都会被拒绝。重启 core 后不会恢复待审批请求。
 
-TUI 自动弹出审批界面，展示内置工具的专属说明或其他工具的参数，预览区域支持滚动。
+TUI 在输入状态行和 Status overlay 中显示当前权限模式，可使用 `/permissions [ask|yolo]` 或 Ctrl+P 切换。
+`ask` 模式下自动弹出审批界面，展示内置工具的专属说明或其他工具的参数，预览区域支持滚动。
 左右方向键或 Tab 切换选项，Enter 确认，Y 允许本次调用，N/Esc 拒绝，默认选中 Deny。
 Ctrl+C 保留退出行为；提交失败时保留错误提示和重试入口。
 

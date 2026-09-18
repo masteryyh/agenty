@@ -20,6 +20,7 @@ import type {
     ModelProviderDto,
     ModelRef,
     PagedResponse,
+    PermissionMode,
     ReasoningEffort,
     RoundDto,
     SessionEvent,
@@ -191,12 +192,17 @@ export class AgentyClient {
         await this.rpc.call("provider.removeModel", { providerCode, modelCode });
     }
 
-    async createSession(model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
+    async createSession(
+        model: ModelDto,
+        effort: ReasoningEffort = "off",
+        permissionMode: PermissionMode = "ask",
+    ): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
             providerCode: model.providerCode,
             modelCode: model.code,
             contextWindow: model.contextWindow,
             reasoningEffort: effort,
+            permissionMode,
         });
         return requireSession(session, "session.create");
     }
@@ -311,6 +317,14 @@ export class AgentyClient {
     async setSessionCwd(id: string, cwd: string | null): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.setCwd", { id, cwd });
         return requireSession(session, `session.setCwd ${id}`);
+    }
+
+    async setSessionPermissionMode(id: string, permissionMode: PermissionMode): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.setPermissionMode", {
+            id,
+            permissionMode,
+        });
+        return requireSession(session, `session.setPermissionMode ${id}`);
     }
 
     startSession(id: string, text: string): Promise<ExecutionStart> {
@@ -436,6 +450,7 @@ function normalizeSession(session: ChatSessionDto): ChatSessionDto {
         : [];
     return {
         ...session,
+        permissionMode: session.permissionMode === "yolo" ? "yolo" : "ask",
         rounds: rounds.map((round) => ({
             ...round,
             messages: Array.isArray(round.messages)

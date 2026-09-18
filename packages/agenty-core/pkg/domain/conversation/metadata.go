@@ -10,6 +10,7 @@ type SessionMetadata struct {
 	Provider        string
 	Timezone        string
 	ReasoningEffort string
+	PermissionMode  PermissionMode
 }
 
 type MetadataUpdate struct {
@@ -19,6 +20,7 @@ type MetadataUpdate struct {
 	Provider        *string  `xml:"provider,omitempty"`
 	Timezone        *string  `xml:"timezone,omitempty"`
 	ReasoningEffort *string  `xml:"reasoning-effort,omitempty"`
+	PermissionMode  *string  `xml:"permission-mode,omitempty"`
 }
 
 func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
@@ -38,6 +40,9 @@ func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
 	if previous == nil || metadata.ReasoningEffort != previous.ReasoningEffort {
 		update.ReasoningEffort = new(metadata.ReasoningEffort)
 	}
+	if metadata.PermissionMode != "" && (previous == nil || metadata.PermissionMode != previous.PermissionMode) {
+		update.PermissionMode = new(string(metadata.PermissionMode))
+	}
 
 	return update
 }
@@ -47,7 +52,8 @@ func (update MetadataUpdate) Empty() bool {
 		update.Model == nil &&
 		update.Provider == nil &&
 		update.Timezone == nil &&
-		update.ReasoningEffort == nil
+		update.ReasoningEffort == nil &&
+		update.PermissionMode == nil
 }
 
 func (update MetadataUpdate) XML() (string, error) {
@@ -59,12 +65,18 @@ func (update MetadataUpdate) XML() (string, error) {
 }
 
 func (metadata SessionMetadata) XML() (string, error) {
+	var permissionMode *string
+	if metadata.PermissionMode != "" {
+		permissionMode = new(string(metadata.PermissionMode))
+	}
+
 	return MetadataUpdate{
 		Cwd:             new(metadata.Cwd),
 		Model:           new(metadata.Model),
 		Provider:        new(metadata.Provider),
 		Timezone:        new(metadata.Timezone),
 		ReasoningEffort: new(metadata.ReasoningEffort),
+		PermissionMode:  permissionMode,
 	}.XML()
 }
 
@@ -100,6 +112,9 @@ func (s *Session) applyMessageMetadata(message Message) {
 	}
 	if update.ReasoningEffort != nil {
 		s.metadata.ReasoningEffort = *update.ReasoningEffort
+	}
+	if update.PermissionMode != nil {
+		s.metadata.PermissionMode = PermissionMode(*update.PermissionMode).Normalized()
 	}
 }
 

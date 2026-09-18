@@ -27,6 +27,7 @@ export function StatusOverlay() {
         { key: "Session", value: session?.id ?? "?" },
         { key: "Model", value: `${model?.providerName ?? "?"} · ${model?.name ?? "?"}` },
         { key: "Thinking", value: thinking },
+        { key: "Permissions", value: session?.permissionMode ?? "ask" },
         { key: "Messages", value: String(history.length) },
         { key: "Context", value: `${session?.contextWindow ?? 0}/${tokenConsumed}` },
         { key: "CWD", value: session?.cwd ?? process.cwd() },

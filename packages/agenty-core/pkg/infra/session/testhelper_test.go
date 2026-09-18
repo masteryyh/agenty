@@ -139,7 +139,3 @@ func appErrorCode(err error) application.Code {
 	}
 	return application.Code(-1)
 }
-
-func ptr[T any](value T) *T {
-	return &value
-}

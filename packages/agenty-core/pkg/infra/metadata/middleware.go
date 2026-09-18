@@ -137,6 +137,7 @@ func buildMetadata(
 	result := conversation.SessionMetadata{
 		Cwd:             cwd,
 		ReasoningEffort: string(session.CurrentReasoningEffort),
+		PermissionMode:  session.CurrentPermissionMode(),
 		Timezone:        timezoneName(),
 	}
 	if session.CurrentModel != nil {

@@ -220,5 +220,3 @@ func cloneMetadata(metadata shared.Metadata) shared.Metadata {
 	}
 	return copy
 }
-
-func ptr[T any](v T) *T { return &v }

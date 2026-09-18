@@ -24,6 +24,7 @@ func RegisterSessionHandlers(
 	d.Register("session.setModel", sessionSetModel(execution))
 	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
+	d.Register("session.setPermissionMode", sessionSetPermissionMode(execution))
 	d.Register("session.start", sessionStart(execution))
 	d.Register("session.compact", sessionCompact(execution))
 	d.Register("session.stop", sessionStop(execution))
@@ -142,6 +143,21 @@ func sessionSetCwd(svc *application.SessionService) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(svc.SetCwd(ctx, p.ID, p.Cwd))
+	}
+}
+
+type sessionSetPermissionModeParams struct {
+	ID             string                      `json:"id"`
+	PermissionMode conversation.PermissionMode `json:"permissionMode"`
+}
+
+func sessionSetPermissionMode(execution *infrasession.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p sessionSetPermissionModeParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.SetPermissionMode(ctx, p.ID, p.PermissionMode))
 	}
 }
 

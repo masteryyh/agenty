@@ -145,7 +145,7 @@ func TestJSONSchemaAdditionalPropertiesRejectsInvalidState(t *testing.T) {
 		{
 			name: "boolean and schema",
 			properties: JSONSchemaAdditionalProperties{
-				Allowed: schemaPointer(false),
+				Allowed: new(false),
 				Schema:  &JSONSchema{Type: JSONSchemaTypeString},
 			},
 		},
@@ -185,7 +185,7 @@ func TestJSONSchemaAdditionalPropertiesHelpers(t *testing.T) {
 			name: "schema",
 			properties: AdditionalPropertiesSchema(JSONSchema{
 				Type:      JSONSchemaTypeString,
-				MinLength: schemaPointer(uint64(1)),
+				MinLength: new(uint64(1)),
 			}),
 			wantJSON: `{"type":"string","minLength":1}`,
 		},
@@ -338,7 +338,7 @@ func TestJSONSchemaAdditionalPropertiesUnmarshalResetsState(t *testing.T) {
 	t.Parallel()
 
 	properties := JSONSchemaAdditionalProperties{
-		Allowed: schemaPointer(true),
+		Allowed: new(true),
 	}
 	if err := json.Unmarshal([]byte(`{"type":"integer"}`), &properties); err != nil {
 		t.Fatalf("unmarshal schema: %v", err)
@@ -400,7 +400,7 @@ func TestJSONSchemaToMapMatchesJSONContract(t *testing.T) {
 
 	stringSchema := JSONSchema{
 		Type:      JSONSchemaTypeString,
-		MinLength: schemaPointer(uint64(0)),
+		MinLength: new(uint64(0)),
 	}
 	schema := JSONSchema{
 		Version:    "https://json-schema.org/draft/2020-12/schema",
@@ -436,21 +436,21 @@ func TestJSONSchemaToMapMatchesJSONContract(t *testing.T) {
 		Type:                 JSONSchemaTypeObject,
 		Enum:                 []any{"first", float64(2), false},
 		Const:                false,
-		MultipleOf:           schemaPointer(0.5),
-		Maximum:              schemaPointer(100.0),
-		ExclusiveMaximum:     schemaPointer(101.0),
-		Minimum:              schemaPointer(0.0),
-		ExclusiveMinimum:     schemaPointer(-1.0),
-		MaxLength:            schemaPointer(uint64(200)),
-		MinLength:            schemaPointer(uint64(0)),
+		MultipleOf:           new(0.5),
+		Maximum:              new(100.0),
+		ExclusiveMaximum:     new(101.0),
+		Minimum:              new(0.0),
+		ExclusiveMinimum:     new(-1.0),
+		MaxLength:            new(uint64(200)),
+		MinLength:            new(uint64(0)),
 		Pattern:              "^[a-z]+$",
-		MaxItems:             schemaPointer(uint64(10)),
-		MinItems:             schemaPointer(uint64(0)),
+		MaxItems:             new(uint64(10)),
+		MinItems:             new(uint64(0)),
 		UniqueItems:          true,
-		MaxContains:          schemaPointer(uint64(5)),
-		MinContains:          schemaPointer(uint64(0)),
-		MaxProperties:        schemaPointer(uint64(20)),
-		MinProperties:        schemaPointer(uint64(0)),
+		MaxContains:          new(uint64(5)),
+		MinContains:          new(uint64(0)),
+		MaxProperties:        new(uint64(20)),
+		MinProperties:        new(uint64(0)),
 		Required:             []string{"name"},
 		DependentRequired: map[string][]string{
 			"name": {"enabled"},
@@ -543,8 +543,4 @@ func assertJSONEquivalent(t *testing.T, want, got []byte) {
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Errorf("JSON mismatch\n got: %s\nwant: %s", got, want)
 	}
-}
-
-func schemaPointer[T any](value T) *T {
-	return &value
 }

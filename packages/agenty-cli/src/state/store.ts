@@ -7,6 +7,7 @@ import type {
     CompactionEvent,
     ContentBlock,
     ModelDto,
+    PermissionMode,
     ReasoningEffort,
     SessionEvent,
     SkillDiagnosticDto,
@@ -96,6 +97,8 @@ interface AppState {
     notify: (text: string, error?: boolean) => void;
     setThinking: (enabled: boolean, level: string) => void;
     setCwd: (path: string | null) => Promise<void>;
+    setPermissionMode: (mode: PermissionMode) => Promise<void>;
+    togglePermissionMode: () => Promise<void>;
 }
 
 let idCounter = 0;
@@ -376,6 +379,13 @@ export const useAppStore = create<AppState>((set, get) => {
     };
 
     const handleEvent = (event: SessionEvent) => {
+        if (event.type === "permission_mode_changed") {
+            const permissionMode = event.permissionMode ?? "ask";
+            set((state) => state.session?.id === event.sessionId
+                ? { session: { ...state.session, permissionMode } }
+                : {});
+            return;
+        }
         if (event.type === "tool_approval_requested" && event.approval) {
             set({
                 pendingApproval: {
@@ -892,6 +902,29 @@ export const useAppStore = create<AppState>((set, get) => {
             } catch (error) {
                 setToast(`cwd failed: ${(error as Error).message}`, true);
             }
+        },
+
+        setPermissionMode: async (mode) => {
+            const { client, session } = get();
+            if (!client || !session || (mode !== "ask" && mode !== "yolo")) {
+                return;
+            }
+            if ((session.permissionMode ?? "ask") === mode) {
+                setToast(`permissions: ${mode}`);
+                return;
+            }
+            try {
+                const updated = await client.setSessionPermissionMode(session.id, mode);
+                set({ session: updated });
+                setToast(`permissions: ${mode}`);
+            } catch (error) {
+                setToast(`permissions: ${(error as Error).message}`, true);
+            }
+        },
+
+        togglePermissionMode: async () => {
+            const mode = get().session?.permissionMode === "yolo" ? "ask" : "yolo";
+            await get().setPermissionMode(mode);
         },
     };
 });

@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/masteryyh/agenty-core/pkg/infra/hitl"
+	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 )
 
-func RegisterHITLHandlers(dispatcher *rpc.Dispatcher, manager *hitl.Manager) {
+func RegisterHITLHandlers(dispatcher *rpc.Dispatcher, manager *permission.PermissionManager) {
 	dispatcher.Register("session.resolveToolApproval", resolveToolApproval(manager))
 }
 
-func resolveToolApproval(manager *hitl.Manager) rpc.Handler {
+func resolveToolApproval(manager *permission.PermissionManager) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		var resolution hitl.Resolution
+		var resolution permission.Resolution
 		if err := decodeParams(params, &resolution); err != nil {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}

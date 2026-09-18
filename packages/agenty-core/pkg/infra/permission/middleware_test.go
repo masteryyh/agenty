@@ -1,4 +1,4 @@
-package hitl_test
+package permission_test
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
-	"github.com/masteryyh/agenty-core/pkg/infra/hitl"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
+	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 )
 
 type recordingRuntime struct {
@@ -37,15 +37,15 @@ func (runtime *recordingRuntime) ExecuteBatch(_ context.Context, _ agentloop.Cal
 func TestMiddlewareToolDecisions(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
-		decisions []hitl.Decision
+		decisions []permission.Decision
 		wantCalls []string
 	}{
-		{name: "allow all", decisions: []hitl.Decision{hitl.Allow, hitl.Allow, hitl.Allow}, wantCalls: []string{"read", "shell", "patch"}},
-		{name: "deny all", decisions: []hitl.Decision{hitl.Deny, hitl.Deny, hitl.Deny}},
-		{name: "mixed", decisions: []hitl.Decision{hitl.Deny, hitl.Allow, hitl.Deny}, wantCalls: []string{"shell"}},
+		{name: "allow all", decisions: []permission.Decision{permission.Allow, permission.Allow, permission.Allow}, wantCalls: []string{"read", "shell", "patch"}},
+		{name: "deny all", decisions: []permission.Decision{permission.Deny, permission.Deny, permission.Deny}},
+		{name: "mixed", decisions: []permission.Decision{permission.Deny, permission.Allow, permission.Deny}, wantCalls: []string{"shell"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			manager := hitl.NewManager()
+			manager := permission.NewPermissionManager()
 			middlewares := middleware.NewManager()
 			if err := middlewares.Register(manager.Middleware()); err != nil {
 				t.Fatal(err)
@@ -89,12 +89,12 @@ func TestMiddlewareToolDecisions(t *testing.T) {
 				},
 				Emit: func(ctx context.Context, event agentloop.Event) error {
 					switch event.Type {
-					case hitl.EventRequested:
+					case permission.EventRequested:
 						if runtime.batches != 0 {
 							t.Fatal("tools executed before all approvals")
 						}
-						request := event.Payload.(hitl.Request)
-						resolution := hitl.Resolution{SessionID: session.ID, RoundID: round.ID, ApprovalID: request.ApprovalID, Decision: tt.decisions[requested]}
+						request := event.Payload.(permission.Request)
+						resolution := permission.Resolution{SessionID: session.ID, RoundID: round.ID, ApprovalID: request.ApprovalID, Decision: tt.decisions[requested]}
 						wrongScope := resolution
 						wrongScope.SessionID = uuid.New()
 						if manager.Resolve(ctx, wrongScope) == nil {
@@ -112,7 +112,7 @@ func TestMiddlewareToolDecisions(t *testing.T) {
 							t.Fatal("accepted duplicate decision")
 						}
 						requested++
-					case hitl.EventResolved:
+					case permission.EventResolved:
 						resolved++
 					case agentloop.EventToolResults:
 						results = event.ToolResults
@@ -137,14 +137,76 @@ func TestMiddlewareToolDecisions(t *testing.T) {
 			}
 			for i, id := range []string{"read", "shell", "patch"} {
 				result := results[i].(conversation.ToolResultBlock)
-				if result.ToolUseID != id || result.IsError != (tt.decisions[i] == hitl.Deny) {
+				if result.ToolUseID != id || result.IsError != (tt.decisions[i] == permission.Deny) {
 					t.Fatalf("result: %+v", result)
 				}
-				if result.IsError && result.Content[0].(conversation.TextBlock).Text != hitl.DeniedMessage {
+				if result.IsError && result.Content[0].(conversation.TextBlock).Text != permission.DeniedMessage {
 					t.Fatal("missing denial message")
 				}
 			}
 		})
+	}
+}
+
+func TestMiddlewareYoloSkipsApproval(t *testing.T) {
+	manager := permission.NewPermissionManager()
+	session := &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionYolo}
+	state := &middleware.ToolCallContext{
+		Session: session,
+		Round:   &conversation.Round{ID: uuid.New()},
+		Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
+	}
+	emitted := 0
+	state.Emit = func(context.Context, agentloop.Event) error {
+		emitted++
+		return nil
+	}
+	if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	if emitted != 0 {
+		t.Fatalf("yolo emitted %d approval events", emitted)
+	}
+	if state.Result != nil {
+		t.Fatal("yolo replaced the tool call result")
+	}
+}
+
+func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
+	manager := permission.NewPermissionManager()
+	session := &conversation.Session{ID: uuid.New()}
+	round := &conversation.Round{ID: uuid.New()}
+	state := &middleware.ToolCallContext{
+		Session: session,
+		Round:   round,
+		Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
+	}
+	requested := make(chan permission.Request, 1)
+	state.Emit = func(_ context.Context, event agentloop.Event) error {
+		if request, ok := event.Payload.(permission.Request); ok {
+			requested <- request
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
+	request := <-requested
+	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionYolo); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if state.Result != nil {
+		t.Fatal("switching to yolo denied the pending call")
+	}
+	if manager.Resolve(t.Context(), permission.Resolution{
+		SessionID:  session.ID,
+		RoundID:    round.ID,
+		ApprovalID: request.ApprovalID,
+		Decision:   permission.Allow,
+	}) == nil {
+		t.Fatal("released approval remained resolvable")
 	}
 }
 
@@ -157,17 +219,17 @@ func TestMiddlewareCancellationAndPublicationFailure(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				manager := hitl.NewManager()
+				manager := permission.NewPermissionManager()
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				state := &middleware.ToolCallContext{
 					Session: &conversation.Session{ID: uuid.New()}, Round: &conversation.Round{ID: uuid.New()},
 					Call: &conversation.ToolUseBlock{ID: "call", Name: "mcp_lookup", Input: []byte(`{}`)},
 				}
-				var request hitl.Request
+				var request permission.Request
 				publishErr := errors.New("connection closed")
 				state.Emit = func(_ context.Context, event agentloop.Event) error {
-					request = event.Payload.(hitl.Request)
+					request = event.Payload.(permission.Request)
 					if tt.publishError {
 						return publishErr
 					}
@@ -191,7 +253,7 @@ func TestMiddlewareCancellationAndPublicationFailure(t *testing.T) {
 				if state.Result != nil {
 					t.Fatal("cancellation became a denial")
 				}
-				if manager.Resolve(t.Context(), hitl.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: hitl.Allow}) == nil {
+				if manager.Resolve(t.Context(), permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Allow}) == nil {
 					t.Fatal("resolved stale request")
 				}
 			})
@@ -201,8 +263,8 @@ func TestMiddlewareCancellationAndPublicationFailure(t *testing.T) {
 
 func TestConcurrentApprovalsStayIndependent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		manager := hitl.NewManager()
-		requests := make(chan hitl.Resolution, 2)
+		manager := permission.NewPermissionManager()
+		requests := make(chan permission.Resolution, 2)
 		results := make(chan *conversation.ToolResultBlock, 2)
 		for range 2 {
 			go func() {
@@ -211,8 +273,8 @@ func TestConcurrentApprovalsStayIndependent(t *testing.T) {
 					Call: &conversation.ToolUseBlock{ID: "same-provider-call-id", Name: "mcp_lookup", Input: []byte(`{}`)},
 				}
 				state.Emit = func(_ context.Context, event agentloop.Event) error {
-					if request, ok := event.Payload.(hitl.Request); ok {
-						requests <- hitl.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID}
+					if request, ok := event.Payload.(permission.Request); ok {
+						requests <- permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID}
 					}
 					return nil
 				}
@@ -224,7 +286,7 @@ func TestConcurrentApprovalsStayIndependent(t *testing.T) {
 		}
 		synctest.Wait()
 		first, second := <-requests, <-requests
-		first.Decision = hitl.Deny
+		first.Decision = permission.Deny
 		if err := manager.Resolve(t.Context(), first); err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +297,7 @@ func TestConcurrentApprovalsStayIndependent(t *testing.T) {
 		if result := <-results; result == nil || !result.IsError {
 			t.Fatal("first call was not denied")
 		}
-		second.Decision = hitl.Allow
+		second.Decision = permission.Allow
 		if err := manager.Resolve(t.Context(), second); err != nil {
 			t.Fatal(err)
 		}
@@ -246,18 +308,18 @@ func TestConcurrentApprovalsStayIndependent(t *testing.T) {
 }
 
 func TestGenericPreviewPreservesLargeNumbers(t *testing.T) {
-	manager := hitl.NewManager()
+	manager := permission.NewPermissionManager()
 	state := &middleware.ToolCallContext{
 		Session: &conversation.Session{ID: uuid.New()}, Round: &conversation.Round{ID: uuid.New()},
 		Call: &conversation.ToolUseBlock{ID: "call", Name: "mcp_lookup", Input: []byte(`{"id":9007199254740993}`)},
 	}
 	state.Emit = func(ctx context.Context, event agentloop.Event) error {
-		if request, ok := event.Payload.(hitl.Request); ok {
+		if request, ok := event.Payload.(permission.Request); ok {
 			if !strings.Contains(request.Preview.Detail, "9007199254740993") {
 				t.Fatalf("preview rounded tool arguments: %s", request.Preview.Detail)
 			}
-			return manager.Resolve(ctx, hitl.Resolution{
-				SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: hitl.Deny,
+			return manager.Resolve(ctx, permission.Resolution{
+				SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Deny,
 			})
 		}
 		return nil

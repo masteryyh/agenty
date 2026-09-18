@@ -1,7 +1,7 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
 import { useRef, useState } from "react";
 
-import type { ChatSessionDto } from "./api/types";
+import type { ChatSessionDto, PermissionMode } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
@@ -113,6 +113,16 @@ function ChatView() {
     const skills = useAppStore((s) => s.skills);
     const approval = useAppStore((s) => s.pendingApproval);
     const resolveToolApproval = useAppStore((s) => s.resolveToolApproval);
+    const setPermissionMode = useAppStore((s) => s.setPermissionMode);
+    const togglePermissionMode = useAppStore((s) => s.togglePermissionMode);
+
+    useInput((_input, key, event) => {
+        if (key.ctrl && event.name === "p") {
+            event.preventDefault();
+            event.stopPropagation();
+            void togglePermissionMode();
+        }
+    });
 
     const { palette, height: paletteHeight, tab } = useCommandPalette(
         renderDocument(document),
@@ -215,6 +225,17 @@ function ChatView() {
                     }
                     return;
                 }
+                case "/permissions": {
+                    const mode = arg.toLowerCase() as PermissionMode;
+                    if (!arg) {
+                        app.setToast(`permissions: ${app.session?.permissionMode ?? "ask"}`);
+                    } else if (mode === "ask" || mode === "yolo") {
+                        void setPermissionMode(mode);
+                    } else {
+                        app.notify(`invalid permissions mode: ${arg}`, true);
+                    }
+                    return;
+                }
                 case "/status":
                     app.setOverlay("status");
                     return;
@@ -311,6 +332,7 @@ function ChatView() {
                     cwd={app.session?.cwd ?? process.cwd()}
                     contextWindow={app.session?.contextWindow ?? 0}
                     tokenConsumed={chat.tokenConsumed}
+                    permissionMode={app.session?.permissionMode ?? "ask"}
                     thinkingLevel={thinkingLevel}
                     reasoningActive={reasoningActive}
                     abort={chat.abort}
@@ -328,6 +350,7 @@ function ChatView() {
                             key={approval.approvalId}
                             approval={approval}
                             onDecision={(decision) => void resolveToolApproval(decision)}
+                            onTogglePermission={() => void togglePermissionMode()}
                         />
                     ) : <OverlayPanel kind={app.overlay!} />}
                 </BottomDialog>

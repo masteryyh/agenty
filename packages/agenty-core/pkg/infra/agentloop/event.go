@@ -14,16 +14,17 @@ import (
 type EventType string
 
 const (
-	EventRoundStarted      EventType = "round_started"
-	EventMessageAppended   EventType = "message_appended"
-	EventModelStream       EventType = "model_stream"
-	EventRoundEnded        EventType = "round_ended"
-	EventAssistantResponse EventType = "assistant_response"
-	EventToolResults       EventType = "tool_results"
-	EventSessionChanged    EventType = "session_changed"
-	EventCompactionStarted EventType = "compaction_started"
-	EventCompactionDone    EventType = "compaction_completed"
-	EventCompactionFailed  EventType = "compaction_failed"
+	EventRoundStarted          EventType = "round_started"
+	EventMessageAppended       EventType = "message_appended"
+	EventModelStream           EventType = "model_stream"
+	EventRoundEnded            EventType = "round_ended"
+	EventAssistantResponse     EventType = "assistant_response"
+	EventToolResults           EventType = "tool_results"
+	EventSessionChanged        EventType = "session_changed"
+	EventPermissionModeChanged EventType = "permission_mode_changed"
+	EventCompactionStarted     EventType = "compaction_started"
+	EventCompactionDone        EventType = "compaction_completed"
+	EventCompactionFailed      EventType = "compaction_failed"
 )
 
 // Event carries the data produced during agent execution. Session lifecycle

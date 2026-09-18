@@ -1,4 +1,5 @@
 export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type PermissionMode = "ask" | "yolo";
 export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
     "low",
     "medium",
@@ -240,6 +241,7 @@ export interface ChatSessionDto {
     currentModel?: ModelRef;
     contextWindow: number;
     currentReasoningEffort?: ReasoningEffort;
+    permissionMode?: PermissionMode;
     rounds: RoundDto[];
     createdAt: string;
     updatedAt: string;
@@ -280,7 +282,7 @@ export interface ToolApprovalResolution {
 }
 
 export interface SessionEvent {
-    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved";
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "permission_mode_changed";
     sessionId: string;
     roundId: string;
     sequence: number;
@@ -292,6 +294,8 @@ export interface SessionEvent {
     error?: string;
     approval?: ToolApprovalRequest;
     resolution?: ToolApprovalResolution;
+    permissionMode?: PermissionMode;
+    previousPermissionMode?: PermissionMode;
 }
 
 export interface CompactionEvent {

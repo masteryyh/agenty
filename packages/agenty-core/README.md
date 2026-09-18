@@ -113,13 +113,18 @@ projects the current MCP tool snapshot for each round, `infra/metadata` injects 
 changed session metadata, `infra/compaction` owns automatic compaction policy, and
 `infra/tools` owns the mutable dynamic tool registry. `infra/storage` persists pending
 session events, and `infra/rpc` projects runtime events into CLI notifications. `cmd/main.go`
-registers them in the order Skill, MCP, Metadata, Compaction, Storage, RPC notification, HITL and
+registers them in the order Skill, MCP, Metadata, Compaction, Storage, RPC notification, and the
+permission middleware (implemented in `infra/hitl`),
 passes the compiled hook chains into `infra/session.Engine`; persistence therefore happens
 before a client observes the corresponding notification.
 
-`infra/hitl` intercepts every tool call through `BeforeToolCall`. A before hook can
+`infra/metadata` includes the current session permission mode in the hidden
+`<permission-mode>` metadata field. `infra/hitl` intercepts every tool call through
+`BeforeToolCall` and reads that session mode. In `ask` mode, a before hook can
 provide `Result` to replace execution; the loop merges these results with executed
-results in call order and delivers both through `AfterToolCall` and the normal event path.
+results in call order and delivers both through `AfterToolCall` and the normal event path. In
+`yolo` mode, calls continue without an approval interruption. The mode is stored on `Session`
+and can be changed while a round is running; switching to `yolo` releases pending approvals.
 Built-in tools supply display-only approval previews alongside their implementation;
 previews resolve through the same tool snapshot used for execution. Other tools show
 their name and formatted arguments.
@@ -232,7 +237,7 @@ Methods follow a `resource.action` naming:
 | Initialize | `initialize.already`, `initialize.complete` |
 | Skill | `skill.list` |
 | Provider | `provider.create`, `provider.get`, `provider.list`, `provider.listModels`, `provider.update`, `provider.delete`, `provider.addModel`, `provider.removeModel` |
-| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
+| Session | `session.create`, `session.get`, `session.list`, `session.delete`, `session.setTitle`, `session.setModel`, `session.setReasoningEffort`, `session.setCwd`, `session.setPermissionMode`, `session.start`, `session.compact`, `session.stop`, `session.resolveToolApproval` |
 | MCP | `mcp.list`, `mcp.get`, `mcp.logs`, `mcp.create`, `mcp.update`, `mcp.enable`, `mcp.reconnect`, `mcp.login`, `mcp.logout`, `mcp.remove` |
 | Chunk | `chunk.begin`, `chunk.part`, `chunk.commit`, `chunk.abort` |
 
@@ -276,7 +281,8 @@ capability as an empty `reasoningEfforts` array. Transactional `apply_patch` loc
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
 and `running` status immediately; the engine continues the full agent turn
 asynchronously. While it runs, core writes `session.event` JSON-RPC notifications with
-`round_started`, `message_appended`, `model_stream`, and `round_ended` event types.
+`round_started`, `message_appended`, `model_stream`, `permission_mode_changed`, and
+`round_ended` event types.
 Every event carries `sessionId`, `roundId`, and a per-round monotonically increasing
 `sequence`; model events also carry the provider-neutral stream event and loop
 `iteration`. A notification may be written before the `session.start` response because
@@ -288,8 +294,9 @@ route notifications independently from responses. `round_ended` carries the term
 same session, or deleting that session while it is running, returns `already exists`.
 Different sessions can run in parallel.
 
-Every tool call requires a separate user decision, including read-only and MCP tools.
-`session.event` also carries `tool_approval_requested` with
+The default `ask` mode requires a separate user decision for every tool call, including
+read-only and MCP tools. `session.event` also carries `permission_mode_changed` with the
+previous and current mode, and `tool_approval_requested` with
 `approval: {approvalId, toolCall, cwd, preview: {title, detail}}`. Respond using
 `session.resolveToolApproval` with `{sessionId, roundId, approvalId, decision}`;
 `decision` must be `allow` or `deny`. An accepted decision emits
@@ -297,7 +304,10 @@ Every tool call requires a separate user decision, including read-only and MCP t
 use the existing round sequence. Clients must handle the next request arriving before
 the previous decision's RPC response and clear requests only by matching identity.
 
-Calls in one batch are approved in order, then only allowed calls execute in parallel.
+Calls in one batch are approved in order in `ask` mode, then only allowed calls execute in
+parallel. In `yolo` mode all calls proceed without approval. Call
+`session.setPermissionMode` with `{id, permissionMode: "ask" | "yolo"}` to switch a session;
+the change is persisted as a session event and takes effect for subsequent tool calls.
 A denial produces an error `tool_result` with the original `toolUseId` and text
 `The user denied this tool call. The tool was not executed.` The result is persisted
 and sent to the next model invocation; denial does not fail the round. Pending approvals
@@ -305,7 +315,8 @@ are in memory, consume at most one decision, and expire on cancellation or shutd
 Duplicate, mismatched or expired decisions are rejected. Approvals are not restored
 after restarting core.
 
-The TUI opens a tool approval overlay automatically. It shows built-in tool-specific
+The TUI displays the current permission mode in the input status line and the status overlay.
+Use `/permissions [ask|yolo]` or Ctrl+P to switch it. In `ask` mode, the TUI opens a tool approval overlay automatically. It shows built-in tool-specific
 content or generic tool arguments in a scrollable preview. Use arrows/Tab to choose,
 Enter to confirm, Y to allow once, or N/Esc to deny. Deny is selected initially;
 Ctrl+C retains its exit behavior. Submission errors remain visible for retry.

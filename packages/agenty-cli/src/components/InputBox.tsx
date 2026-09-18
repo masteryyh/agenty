@@ -1,6 +1,6 @@
 import { forwardRef } from "react";
 
-import type { SkillDto } from "../api/types";
+import type { PermissionMode, SkillDto } from "../api/types";
 import type { ComposerDocument } from "../composer/document";
 import { effortColor, theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
@@ -32,6 +32,7 @@ interface InputBoxProps {
     cwd: string;
     contextWindow: number;
     tokenConsumed: number;
+    permissionMode: PermissionMode;
     thinkingLevel: string;
     reasoningActive: boolean;
     abort: () => void;
@@ -52,6 +53,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     cwd,
     contextWindow,
     tokenConsumed,
+    permissionMode,
     thinkingLevel,
     reasoningActive,
     abort,
@@ -94,9 +96,10 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                 </Box>
                 {toast ? (
                     <Text color={toast.error ? theme.danger : theme.success}>{toast.text}</Text>
-                ) : (
+                ) : <>
                     <Text color={theme.accent}>{` ▸ ${modelName}`}</Text>
-                )}
+                    {thinkingLevel ? <Text color={effortColor(thinkingLevel)}>{` (${thinkingLevel})`}</Text> : null}
+                </>}
             </Box>
 
             <Box flexDirection="row" height={1} overflow="hidden">
@@ -133,9 +136,11 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     <Text color={theme.textFaint} wrap="truncate-start">
                         {abbreviateCwd(cwd)}
                     </Text>
-                    {thinkingLevel ? <Text> </Text> : null}
-                    {thinkingLevel ? (
-                        <Text color={effortColor(thinkingLevel)}>{`thinking: ${thinkingLevel}`}</Text>
+                    {permissionMode !== "ask" ? (
+                        <>
+                            <Text> </Text>
+                            <Text color={theme.danger}>{`${permissionMode} mode`}</Text>
+                        </>
                     ) : null}
                 </Box>
                 <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden" />

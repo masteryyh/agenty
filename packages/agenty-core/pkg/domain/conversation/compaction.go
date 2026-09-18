@@ -183,6 +183,13 @@ func (s *Session) updateMetadataCwd(cwd *string) {
 	s.metadata.Cwd = *cwd
 }
 
+func (s *Session) updateMetadataPermissionMode(mode PermissionMode) {
+	if s.metadata == nil || !s.hasCompactionSummary() {
+		return
+	}
+	s.metadata.PermissionMode = mode.Normalized()
+}
+
 func (s *Session) hasCompactionSummary() bool {
 	for _, message := range s.context {
 		if kind, _ := message.Metadata["compactionKind"].(string); kind == compactionKindSummary {

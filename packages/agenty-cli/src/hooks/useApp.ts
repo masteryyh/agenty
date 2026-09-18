@@ -1,6 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 
-import type { ChatSessionDto, ModelDto } from "../api/types";
+import type { ChatSessionDto, ModelDto, PermissionMode } from "../api/types";
 import type { CliOptions } from "../config";
 import {
     type OverlayKind,
@@ -28,6 +28,8 @@ export interface AppSlice {
     notify: (text: string, error?: boolean) => void;
     setThinking: (enabled: boolean, level: string) => void;
     setCwd: (path: string | null) => Promise<void>;
+    setPermissionMode: (mode: PermissionMode) => Promise<void>;
+    togglePermissionMode: () => Promise<void>;
 }
 
 export function useApp(): AppSlice {
@@ -52,6 +54,8 @@ export function useApp(): AppSlice {
             notify: s.notify,
             setThinking: s.setThinking,
             setCwd: s.setCwd,
+            setPermissionMode: s.setPermissionMode,
+            togglePermissionMode: s.togglePermissionMode,
         })),
     );
 }

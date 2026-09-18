@@ -42,7 +42,7 @@ func TestReplaySessionCachesMetadataAndVisibleCopyFiltersIt(t *testing.T) {
 		shared.NewModelRef("provider", "model"),
 		128_000,
 		shared.ReasoningHigh,
-		stringPointerForTest("/workspace/one"),
+		new("/workspace/one"),
 	)
 	roundID, err := session.StartRound()
 	if err != nil {
@@ -122,8 +122,4 @@ func TestReplaySessionMergesIncrementalMetadata(t *testing.T) {
 	if got := replayed.LastMetadata(); got == nil || *got != want {
 		t.Fatalf("cached incremental metadata = %+v, want %+v", got, want)
 	}
-}
-
-func stringPointerForTest(value string) *string {
-	return &value
 }

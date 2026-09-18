@@ -10,9 +10,9 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
-	"github.com/masteryyh/agenty-core/pkg/infra/hitl"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
+	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 )
 
 // NotificationSender writes one protocol notification to a connected client.
@@ -21,27 +21,30 @@ type NotificationSender func(context.Context, string, any) error
 // SessionEvent is the stable session.event notification payload consumed by
 // RPC clients. It is projected from an agentloop.Event by this middleware.
 type SessionEvent struct {
-	Type       SessionEventType                `json:"type"`
-	SessionID  uuid.UUID                       `json:"sessionId"`
-	RoundID    uuid.UUID                       `json:"roundId"`
-	Sequence   uint64                          `json:"sequence"`
-	Iteration  int                             `json:"iteration,omitempty"`
-	Stream     *modelcall.ModelCallStreamEvent `json:"stream,omitempty"`
-	Message    *conversation.Message           `json:"message,omitempty"`
-	Status     conversation.RoundStatus        `json:"status,omitempty"`
-	Usage      *conversation.TokenUsage        `json:"usage,omitempty"`
-	Error      *string                         `json:"error,omitempty"`
-	Approval   *hitl.Request                   `json:"approval,omitempty"`
-	Resolution *hitl.Resolution                `json:"resolution,omitempty"`
+	Type                   SessionEventType                `json:"type"`
+	SessionID              uuid.UUID                       `json:"sessionId"`
+	RoundID                uuid.UUID                       `json:"roundId"`
+	Sequence               uint64                          `json:"sequence"`
+	Iteration              int                             `json:"iteration,omitempty"`
+	Stream                 *modelcall.ModelCallStreamEvent `json:"stream,omitempty"`
+	Message                *conversation.Message           `json:"message,omitempty"`
+	Status                 conversation.RoundStatus        `json:"status,omitempty"`
+	Usage                  *conversation.TokenUsage        `json:"usage,omitempty"`
+	Error                  *string                         `json:"error,omitempty"`
+	Approval               *permission.Request             `json:"approval,omitempty"`
+	Resolution             *permission.Resolution          `json:"resolution,omitempty"`
+	PermissionMode         conversation.PermissionMode     `json:"permissionMode,omitempty"`
+	PreviousPermissionMode conversation.PermissionMode     `json:"previousPermissionMode,omitempty"`
 }
 
 type SessionEventType string
 
 const (
-	SessionEventRoundStarted    SessionEventType = "round_started"
-	SessionEventMessageAppended SessionEventType = "message_appended"
-	SessionEventModelStream     SessionEventType = "model_stream"
-	SessionEventRoundEnded      SessionEventType = "round_ended"
+	SessionEventRoundStarted          SessionEventType = "round_started"
+	SessionEventMessageAppended       SessionEventType = "message_appended"
+	SessionEventModelStream           SessionEventType = "model_stream"
+	SessionEventRoundEnded            SessionEventType = "round_ended"
+	SessionEventPermissionModeChanged SessionEventType = "permission_mode_changed"
 )
 
 type sessionNotificationMiddleware struct {
@@ -97,8 +100,9 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		agentloop.EventMessageAppended,
 		agentloop.EventModelStream,
 		agentloop.EventRoundEnded,
-		hitl.EventRequested,
-		hitl.EventResolved:
+		permission.EventRequested,
+		permission.EventResolved,
+		agentloop.EventPermissionModeChanged:
 	default:
 		return SessionEvent{}, false
 	}
@@ -123,11 +127,15 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		Usage:     event.Usage,
 		Error:     event.Error,
 	}
-	if approval, ok := event.Payload.(hitl.Request); ok {
+	if approval, ok := event.Payload.(permission.Request); ok {
 		projected.Approval = &approval
 	}
-	if resolution, ok := event.Payload.(hitl.Resolution); ok {
+	if resolution, ok := event.Payload.(permission.Resolution); ok {
 		projected.Resolution = &resolution
+	}
+	if change, ok := event.Payload.(conversation.SessionPermissionModeChanged); ok {
+		projected.PermissionMode = change.PermissionMode
+		projected.PreviousPermissionMode = change.PreviousMode
 	}
 	return projected, true
 }
