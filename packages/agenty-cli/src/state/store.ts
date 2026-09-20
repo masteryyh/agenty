@@ -19,6 +19,7 @@ import type {
 import type { CliOptions } from "../config";
 import { loadOptions, parseThinking } from "../config";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
+import type { LoadedInputHistory } from "../history/inputHistory";
 import {
     appendInputHistory,
     loadInputHistory,
@@ -682,13 +683,19 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const options = get().opts;
                 const inputHistoryPath = resolveInputHistoryPath(options.dataDir);
-                const loadedInputHistory = await loadInputHistory(inputHistoryPath);
+                let loadedInputHistory: LoadedInputHistory = { entries: [], invalidLines: 0 };
+                let inputHistoryWarning: string | null = null;
+                try {
+                    loadedInputHistory = await loadInputHistory(inputHistoryPath);
+                } catch (error) {
+                    inputHistoryWarning = `Input history could not be loaded; continuing without it: ${(error as Error).message}`;
+                }
                 set({
                     inputHistoryPath,
                     promptHistory: loadedInputHistory.entries,
-                    inputHistoryWarning: loadedInputHistory.invalidLines > 0
+                    inputHistoryWarning: inputHistoryWarning ?? (loadedInputHistory.invalidLines > 0
                         ? `${loadedInputHistory.invalidLines} invalid input history line(s) were skipped.`
-                        : null,
+                        : null),
                 });
                 const local = await startLocalCore({ dataDir: options.dataDir });
                 const client = new AgentyClient(local.rpc);
@@ -770,10 +777,27 @@ export const useAppStore = create<AppState>((set, get) => {
                 if (event.sessionId !== session.id || get().activeSessionId !== session.id) {
                     return;
                 }
+
+                const sessionLevelPermissionChange = event.type === "permission_mode_changed" &&
+                    (!event.roundId || event.roundId === "00000000-0000-0000-0000-000000000000");
+                if (sessionLevelPermissionChange) {
+                    handleEvent(event);
+                    return;
+                }
+
+                if (event.type === "round_started") {
+                    if (activeRoundId !== null && activeRoundId !== event.roundId) {
+                        return;
+                    }
+                    activeRoundId = event.roundId;
+                } else if (activeRoundId === null && event.type === "permission_mode_changed") {
+                    activeRoundId = event.roundId;
+                } else if (activeRoundId === null) {
+                    return;
+                }
                 if (activeRoundId !== null && activeRoundId !== event.roundId) {
                     return;
                 }
-                activeRoundId = event.roundId;
                 if (event.sequence <= lastSequence) {
                     return;
                 }

@@ -305,8 +305,10 @@ use the existing round sequence. Clients must handle the next request arriving b
 the previous decision's RPC response and clear requests only by matching identity.
 
 Calls in one batch are approved in order in `ask` mode, then only allowed calls execute in
-parallel. In `yolo` mode all calls proceed without approval. Call
-`session.setPermissionMode` with `{id, permissionMode: "ask" | "yolo"}` to switch a session;
+parallel. In `auto` mode every MCP call is sent to the automatic reviewer; built-in calls
+that pass deterministic safety checks can proceed directly, and other calls fall back to
+the reviewer or a manual approval. In `yolo` mode all calls proceed without approval. Call
+`session.setPermissionMode` with `{id, permissionMode: "ask" | "auto" | "yolo"}` to switch a session;
 the change is persisted as a session event and takes effect for subsequent tool calls.
 A denial produces an error `tool_result` with the original `toolUseId` and text
 `The user denied this tool call. The tool was not executed.` The result is persisted
@@ -316,7 +318,7 @@ Duplicate, mismatched or expired decisions are rejected. Approvals are not resto
 after restarting core.
 
 The TUI displays the current permission mode in the input status line and the status overlay.
-Use `/permissions [ask|yolo]` or Ctrl+P to switch it. In `ask` mode, the TUI opens a tool approval overlay automatically. It shows built-in tool-specific
+Use Shift+Tab to cycle `ask`, `auto`, and `yolo`. In `ask` mode, the TUI opens a tool approval overlay automatically. It shows built-in tool-specific
 content or generic tool arguments in a scrollable preview. Use arrows/Tab to choose,
 Enter to confirm, Y to allow once, or N/Esc to deny. Deny is selected initially;
 Ctrl+C retains its exit behavior. Submission errors remain visible for retry.

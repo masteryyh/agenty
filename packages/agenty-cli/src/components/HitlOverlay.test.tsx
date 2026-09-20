@@ -85,7 +85,13 @@ describe("HitlOverlay", () => {
         let toggles = 0;
         const setup = await testRender(
             <BottomDialog width={74} height={22}>
-                <HitlOverlay approval={approval} onDecision={() => undefined} onTogglePermission={() => { toggles++; }} />
+                <HitlOverlay
+                    approval={approval}
+                    onDecision={() => undefined}
+                    onTogglePermission={() => {
+                        toggles++;
+                    }}
+                />
             </BottomDialog>,
             { width: 76, height: 24 },
         );

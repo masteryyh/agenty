@@ -258,15 +258,15 @@ session，会返回 `already exists`；不同 sessions 可以并行运行。
 其 `resolution` 包含上述决策字段。两种事件沿用 round 的 sequence；下一条审批可能先于
 上一条决策的 RPC 响应到达，客户端必须按审批身份清理状态。
 
-在 `ask` 模式下，同批工具依次完成审批后，只并行执行获准的调用；`yolo` 模式下所有调用都无需审批。
-调用 `session.setPermissionMode` 并提交 `{id, permissionMode: "ask" | "yolo"}` 可以切换会话，
+在 `ask` 模式下，同批工具依次完成审批后，只并行执行获准的调用；`auto` 模式下所有 MCP 调用都会交给自动审查器，内置工具只有通过确定性安全检查后才会直接执行，其余调用进入自动审查或人工审批；`yolo` 模式下所有调用都无需审批。
+调用 `session.setPermissionMode` 并提交 `{id, permissionMode: "ask" | "auto" | "yolo"}` 可以切换会话，
 切换会持久化为会话事件，并立即作用于后续工具调用。拒绝会生成原 `toolUseId` 对应的
 错误 `tool_result`，文本为 `The user denied this tool call. The tool was not executed.`。
 结果沿用既有持久化流程并进入下一次模型请求；拒绝本身不会使 round 失败。
 待审批状态只保存在内存中，每条只接受一次决策，取消或关闭时失效；重复、错配和过期
 决策都会被拒绝。重启 core 后不会恢复待审批请求。
 
-TUI 在输入状态行和 Status overlay 中显示当前权限模式，可使用 `/permissions [ask|yolo]` 或 Ctrl+P 切换。
+TUI 在输入状态行和 Status overlay 中显示当前权限模式，可使用 Shift+Tab 在 `ask`、`auto`、`yolo` 之间切换。
 `ask` 模式下自动弹出审批界面，展示内置工具的专属说明或其他工具的参数，预览区域支持滚动。
 左右方向键或 Tab 切换选项，Enter 确认，Y 允许本次调用，N/Esc 拒绝，默认选中 Deny。
 Ctrl+C 保留退出行为；提交失败时保留错误提示和重试入口。

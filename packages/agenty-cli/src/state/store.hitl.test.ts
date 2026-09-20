@@ -26,16 +26,21 @@ function approval(id: string): ToolApprovalRequest {
 
 afterEach(() => useAppStore.setState(useAppStore.getInitialState(), true));
 
-function harness() {
+function harness(options: { sessionPermissionBeforeRound?: boolean } = {}) {
     let listener: ((event: SessionEvent) => void) | undefined;
     let close: ((error: Error) => void) | undefined;
     let sequence = 0;
+    const nilRoundId = "00000000-0000-0000-0000-000000000000";
     const started = Promise.withResolvers<void>();
     const response = Promise.withResolvers<void>();
     const submissions: ToolApprovalResolution[] = [];
-    const emit = (event: Partial<SessionEvent>) => listener?.({
-        type: "round_started", sessionId: session.id, roundId: "round-1", sequence: ++sequence, ...event,
-    });
+    const emit = (event: Partial<SessionEvent>) => {
+        const sessionLevel = event.type === "permission_mode_changed" && event.roundId === nilRoundId;
+        listener?.({
+            type: "round_started", sessionId: session.id, roundId: "round-1",
+            sequence: sessionLevel ? 1 : ++sequence, ...event,
+        });
+    };
     const client = {
         onSessionEvent(callback: (event: SessionEvent) => void) {
             listener = callback;
@@ -51,6 +56,13 @@ function harness() {
         },
         async setSessionReasoningEffort() {},
         async startSession() {
+            if (options.sessionPermissionBeforeRound) {
+                emit({
+                    type: "permission_mode_changed",
+                    roundId: nilRoundId,
+                    permissionMode: "auto",
+                });
+            }
             emit({ type: "round_started" });
             emit({ type: "tool_approval_requested", approval: approval("first") });
             started.resolve();
@@ -90,6 +102,17 @@ describe("tool approval lifecycle", () => {
         expect(useAppStore.getState().pendingApproval?.approvalId).toBe("second");
         h.emit({ type: "round_ended", status: "completed" });
         expect(useAppStore.getState().pendingApproval).toBeNull();
+        await run;
+    });
+
+    test("does not bind a session-level permission event to the active round", async () => {
+        const h = harness({ sessionPermissionBeforeRound: true });
+        const run = useAppStore.getState().sendMessage("read notes");
+        await h.started.promise;
+
+        expect(useAppStore.getState().session?.permissionMode).toBe("auto");
+        expect(useAppStore.getState().history.some((message) => message.content.includes("sequence gap"))).toBe(false);
+        h.emit({ type: "round_ended", status: "completed" });
         await run;
     });
 
