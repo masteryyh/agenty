@@ -139,10 +139,12 @@ type ReviewEvent struct {
 }
 
 type pendingRequest struct {
-	sessionID uuid.UUID
-	roundID   uuid.UUID
-	ctx       context.Context
-	decision  chan Decision
+	sessionID      uuid.UUID
+	roundID        uuid.UUID
+	ctx            context.Context
+	decision       chan Decision
+	rechecking     bool
+	manualDecision Decision
 }
 
 type PermissionManager struct {
@@ -185,6 +187,10 @@ func (manager *PermissionManager) PermissionModeChanged(
 			default:
 			}
 		case conversation.PermissionAuto:
+			if pending.rechecking {
+				continue
+			}
+			pending.rechecking = true
 			select {
 			case pending.decision <- recheck:
 			default:
@@ -261,7 +267,11 @@ func (manager *PermissionManager) autoDecision(
 		return ReviewResult{Decision: Ask}, fmt.Errorf("automatic reviewer has no model configuration")
 	}
 
-	content := autoReviewContent(state.Session, state.Round, call, cwd)
+	reviewSession := state.Session
+	if state.SessionSnapshot != nil {
+		reviewSession = state.SessionSnapshot
+	}
+	content := autoReviewContent(reviewSession, state.Round, call, cwd)
 	review := ReviewEvent{ToolUseID: call.ID}
 	if err := state.Emit(ctx, agentloop.Event{
 		Type:      EventReviewStarted,
@@ -295,18 +305,13 @@ func (manager *PermissionManager) autoDecision(
 }
 
 func automaticallyAllowed(state *middleware.ToolCallContext, call conversation.ToolUseBlock, cwd string) bool {
+	if strings.HasPrefix(call.Name, "mcp__") {
+		return false
+	}
+
 	callContext := agentloop.CallContext{SessionID: state.Session.ID, RoundID: state.Round.ID, Cwd: cwd}
 	if checker, ok := state.Tools.(tools.AutoApprovalChecker); ok && checker.CanAutoApproveToolCall(callContext, call) {
 		return true
-	}
-
-	if !strings.HasPrefix(call.Name, "mcp__") || state.Tools == nil {
-		return false
-	}
-	for _, definition := range state.Tools.Definitions() {
-		if definition.Name == call.Name {
-			return !definition.Destructive
-		}
 	}
 	return false
 }
@@ -368,6 +373,23 @@ func (manager *PermissionManager) awaitManualDecision(
 					return err
 				}
 				if err != nil || autoDecision.Decision == Ask {
+					var manual bool
+					decision, manual = manager.finishRecheck(request.ApprovalID, Ask)
+					if manual {
+						if decision == Deny {
+							state.Result = deniedResult(call.ID, DeniedMessage)
+						}
+						return state.Emit(ctx, agentloop.Event{
+							Type:      EventResolved,
+							Iteration: state.Iteration,
+							Payload: Resolution{
+								SessionID:  pending.sessionID,
+								RoundID:    pending.roundID,
+								ApprovalID: request.ApprovalID,
+								Decision:   decision,
+							},
+						})
+					}
 					request.Message = autoDecision.Message
 					if err != nil {
 						request.Message = reviewFailureMessage(err)
@@ -377,10 +399,15 @@ func (manager *PermissionManager) awaitManualDecision(
 					}
 					continue
 				}
-				if autoDecision.Decision == Deny {
+				var manual bool
+				decision, manual = manager.finishRecheck(request.ApprovalID, autoDecision.Decision)
+				if manual {
+					if decision == Deny {
+						state.Result = deniedResult(call.ID, DeniedMessage)
+					}
+				} else if decision == Deny {
 					state.Result = deniedResult(call.ID, AutoDeniedMessage+" "+autoDecision.Message)
 				}
-				decision = autoDecision.Decision
 			default:
 				continue
 			}
@@ -445,7 +472,38 @@ func (manager *PermissionManager) Resolve(ctx context.Context, resolution Resolu
 	if !ok || pending.sessionID != resolution.SessionID || pending.roundID != resolution.RoundID || pending.ctx.Err() != nil {
 		return application.NotFound("tool approval is no longer pending")
 	}
+	if pending.rechecking {
+		if pending.manualDecision != "" {
+			return application.NotFound("tool approval already has a pending decision")
+		}
+		pending.manualDecision = resolution.Decision
+		return nil
+	}
 	delete(manager.pending, resolution.ApprovalID)
 	pending.decision <- resolution.Decision
 	return nil
+}
+
+func (manager *PermissionManager) finishRecheck(
+	approvalID uuid.UUID,
+	automatic Decision,
+) (Decision, bool) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+
+	pending, ok := manager.pending[approvalID]
+	if !ok {
+		return automatic, false
+	}
+	if pending.manualDecision != "" {
+		decision := pending.manualDecision
+		delete(manager.pending, approvalID)
+		return decision, true
+	}
+	if automatic == Ask {
+		pending.rechecking = false
+		return automatic, false
+	}
+	delete(manager.pending, approvalID)
+	return automatic, false
 }

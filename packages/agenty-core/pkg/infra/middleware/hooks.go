@@ -82,13 +82,16 @@ type ModelCallContext struct {
 type ToolCallContext struct {
 	// Context is the context used for this hook and tool batch. Hooks may replace
 	// it with a derived context for later hooks and iterations.
-	Context   context.Context
-	Session   *conversation.Session
-	Round     *conversation.Round
-	Iteration int
-	Call      *conversation.ToolUseBlock
-	Tools     agentloop.ToolRuntime
-	Model     modelcall.ModelCallConfig
+	Context context.Context
+	Session *conversation.Session
+	// SessionSnapshot is a detached read-only view for hooks that build
+	// evidence while the live session may continue changing.
+	SessionSnapshot *conversation.Session
+	Round           *conversation.Round
+	Iteration       int
+	Call            *conversation.ToolUseBlock
+	Tools           agentloop.ToolRuntime
+	Model           modelcall.ModelCallConfig
 	// A result supplied by BeforeToolCall replaces execution of this call.
 	Result *conversation.ToolResultBlock
 	Err    error

@@ -297,16 +297,17 @@ func (chain *HookChain) AgentLoopHooks() agentloop.LoopHooks {
 		},
 		BeforeToolCall: func(ctx context.Context, state *agentloop.ToolCallState) error {
 			middlewareState := &ToolCallContext{
-				Context:   hookContext(ctx, state.Context),
-				Session:   state.Session,
-				Round:     state.Round,
-				Iteration: state.Iteration,
-				Call:      state.Call,
-				Tools:     state.Tools,
-				Model:     state.Model,
-				Result:    state.Result,
-				Err:       state.Err,
-				Emit:      state.Emit,
+				Context:         hookContext(ctx, state.Context),
+				Session:         state.Session,
+				SessionSnapshot: state.SessionSnapshot,
+				Round:           state.Round,
+				Iteration:       state.Iteration,
+				Call:            state.Call,
+				Tools:           state.Tools,
+				Model:           state.Model,
+				Result:          state.Result,
+				Err:             state.Err,
+				Emit:            state.Emit,
 			}
 			err := chain.BeforeToolCall(ctx, middlewareState)
 			copyToolCallState(state, middlewareState)
@@ -314,16 +315,17 @@ func (chain *HookChain) AgentLoopHooks() agentloop.LoopHooks {
 		},
 		AfterToolCall: func(ctx context.Context, state *agentloop.ToolCallState) error {
 			middlewareState := &ToolCallContext{
-				Context:   hookContext(ctx, state.Context),
-				Session:   state.Session,
-				Round:     state.Round,
-				Iteration: state.Iteration,
-				Call:      state.Call,
-				Tools:     state.Tools,
-				Model:     state.Model,
-				Result:    state.Result,
-				Err:       state.Err,
-				Emit:      state.Emit,
+				Context:         hookContext(ctx, state.Context),
+				Session:         state.Session,
+				SessionSnapshot: state.SessionSnapshot,
+				Round:           state.Round,
+				Iteration:       state.Iteration,
+				Call:            state.Call,
+				Tools:           state.Tools,
+				Model:           state.Model,
+				Result:          state.Result,
+				Err:             state.Err,
+				Emit:            state.Emit,
 			}
 			err := chain.AfterToolCall(ctx, middlewareState)
 			copyToolCallState(state, middlewareState)

@@ -339,6 +339,40 @@ func (s *Session) VisibleCopy() *Session {
 	return &copy
 }
 
+// Snapshot returns a detached copy suitable for read-only work that may run
+// concurrently with session execution, such as permission review context
+// construction.
+func (s *Session) Snapshot() *Session {
+	if s == nil {
+		return nil
+	}
+	mu := s.permissionMutex()
+	mu.RLock()
+	copy := *s
+	copy.PermissionMode = s.PermissionMode.Normalized()
+	mu.RUnlock()
+	copy.permissionMu = &sync.RWMutex{}
+	copy.Title = cloneString(s.Title)
+	copy.Cwd = cloneString(s.Cwd)
+	if s.CurrentModel != nil {
+		model := *s.CurrentModel
+		copy.CurrentModel = &model
+	}
+	copy.Rounds = make([]Round, len(s.Rounds))
+	for index, round := range s.Rounds {
+		copy.Rounds[index] = round
+		copy.Rounds[index].Cwd = cloneString(round.Cwd)
+		copy.Rounds[index].Messages = cloneMessages(round.Messages)
+	}
+	if s.metadata != nil {
+		metadata := *s.metadata
+		copy.metadata = &metadata
+	}
+	copy.pending = append([]shared.Event(nil), s.pending...)
+	copy.context = cloneMessages(s.context)
+	return &copy
+}
+
 func (s *Session) ContextMessages() []Message {
 	messages := make([]Message, len(s.context))
 	copy(messages, s.context)

@@ -55,6 +55,8 @@ type sessionRepositoryFake struct {
 	mu            sync.RWMutex
 	events        map[uuid.UUID][]shared.Event
 	loadAttempted chan struct{}
+	loadRelease   chan struct{}
+	loadOnce      sync.Once
 	deleteStarted chan struct{}
 	deleteRelease chan struct{}
 }
@@ -68,7 +70,10 @@ func (repository *sessionRepositoryFake) Load(
 	id uuid.UUID,
 ) (*conversation.Session, error) {
 	if repository.loadAttempted != nil {
-		close(repository.loadAttempted)
+		repository.loadOnce.Do(func() { close(repository.loadAttempted) })
+	}
+	if repository.loadRelease != nil {
+		<-repository.loadRelease
 	}
 
 	repository.mu.RLock()

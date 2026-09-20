@@ -15,13 +15,14 @@ const maxAgentLoopIterations = 20
 type agentLoopConfig struct {
 	name string
 
-	request func(context.Context, int) (modelcall.ModelCallRequest, conversation.TokenUsage, error)
-	model   modelcall.ModelCallConfig
-	invoke  modelcall.InvokeFunc
-	emit    EventEmitter
-	hooks   LoopHooks
-	session *conversation.Session
-	round   func() *conversation.Round
+	request         func(context.Context, int) (modelcall.ModelCallRequest, conversation.TokenUsage, error)
+	model           modelcall.ModelCallConfig
+	invoke          modelcall.InvokeFunc
+	emit            EventEmitter
+	hooks           LoopHooks
+	session         *conversation.Session
+	round           func() *conversation.Round
+	sessionSnapshot func() *conversation.Session
 
 	toolRuntime ToolRuntime
 	callContext func() CallContext
@@ -60,6 +61,9 @@ type AgentLoopOptions struct {
 	Session *conversation.Session
 	// Round returns the persisted round currently being executed.
 	Round func() *conversation.Round
+	// SessionSnapshot returns a detached read-only session view for hooks that
+	// need evidence while the live session may continue changing.
+	SessionSnapshot func() *conversation.Session
 }
 
 type AgentLoop struct {
@@ -81,16 +85,17 @@ func NewAgentLoop(options AgentLoopOptions) (*AgentLoop, error) {
 	}
 
 	return &AgentLoop{config: agentLoopConfig{
-		name:        options.Name,
-		request:     options.BuildRequest,
-		model:       options.Model,
-		invoke:      invoke,
-		emit:        options.Emit,
-		toolRuntime: options.ToolRuntime,
-		callContext: options.CallContext,
-		hooks:       options.Hooks,
-		session:     options.Session,
-		round:       options.Round,
+		name:            options.Name,
+		request:         options.BuildRequest,
+		model:           options.Model,
+		invoke:          invoke,
+		emit:            options.Emit,
+		toolRuntime:     options.ToolRuntime,
+		callContext:     options.CallContext,
+		hooks:           options.Hooks,
+		session:         options.Session,
+		round:           options.Round,
+		sessionSnapshot: options.SessionSnapshot,
 	}}, nil
 }
 
@@ -256,13 +261,14 @@ func runAgentLoop(
 				return agentLoopResult{usage: totalUsage}, err
 			}
 			toolCall := &ToolCallState{
-				Context:   loopCtx,
-				Session:   config.session,
-				Iteration: iteration,
-				Call:      &mutableCalls[callIndex],
-				Tools:     config.toolRuntime,
-				Model:     config.model,
-				Emit:      config.emit,
+				Context:         loopCtx,
+				Session:         config.session,
+				SessionSnapshot: sessionSnapshot(config),
+				Iteration:       iteration,
+				Call:            &mutableCalls[callIndex],
+				Tools:           config.toolRuntime,
+				Model:           config.model,
+				Emit:            config.emit,
 			}
 			if config.round != nil {
 				toolCall.Round = config.round()
@@ -319,12 +325,13 @@ func runAgentLoop(
 		if config.hooks.AfterToolCall != nil {
 			for callIndex := range mutableCalls {
 				toolCall := &ToolCallState{
-					Context:   loopCtx,
-					Session:   config.session,
-					Iteration: iteration,
-					Call:      &mutableCalls[callIndex],
-					Tools:     config.toolRuntime,
-					Emit:      config.emit,
+					Context:         loopCtx,
+					Session:         config.session,
+					SessionSnapshot: sessionSnapshot(config),
+					Iteration:       iteration,
+					Call:            &mutableCalls[callIndex],
+					Tools:           config.toolRuntime,
+					Emit:            config.emit,
 				}
 				if config.round != nil {
 					toolCall.Round = config.round()
@@ -375,6 +382,16 @@ func runAgentLoop(
 		name,
 		maxAgentLoopIterations,
 	)
+}
+
+func sessionSnapshot(config agentLoopConfig) *conversation.Session {
+	if config.sessionSnapshot != nil {
+		return config.sessionSnapshot()
+	}
+	if config.session == nil {
+		return nil
+	}
+	return config.session.Snapshot()
 }
 
 func invokeModel(

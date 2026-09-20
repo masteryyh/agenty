@@ -30,13 +30,14 @@ type ModelCallState struct {
 type ToolCallState struct {
 	// Context is the context used for this hook and tool batch. A hook may
 	// replace it with a derived context for the remainder of the iteration.
-	Context   context.Context
-	Session   *conversation.Session
-	Round     *conversation.Round
-	Iteration int
-	Call      *conversation.ToolUseBlock
-	Tools     ToolRuntime
-	Model     modelcall.ModelCallConfig
+	Context         context.Context
+	Session         *conversation.Session
+	SessionSnapshot *conversation.Session
+	Round           *conversation.Round
+	Iteration       int
+	Call            *conversation.ToolUseBlock
+	Tools           ToolRuntime
+	Model           modelcall.ModelCallConfig
 	// A result supplied by BeforeToolCall replaces execution of this call.
 	Result *conversation.ToolResultBlock
 	Err    error

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -782,6 +783,202 @@ func TestModelSwitchCompactsWithCurrentModelBeforePersistingTarget(t *testing.T)
 	}
 	if compactedIndex < 0 || modelSetIndex < 0 || compactedIndex >= modelSetIndex {
 		t.Fatalf("event order = %+v", events)
+	}
+}
+
+func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	targetProvider, err := catalog.NewProvider("alternate", "Alternate", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetProvider.APIKey = "test-key"
+	targetProvider.FreeFormTool = true
+	targetProvider.AddModel(catalog.Model{
+		Code:            "free-form-model",
+		Name:            "Free Form Model",
+		ContextWindow:   128_000,
+		MaxOutputTokens: 8_192,
+	})
+	if err := fixture.catalog.Save(t.Context(), targetProvider); err != nil {
+		t.Fatal(err)
+	}
+
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
+		{Content: conversation.Text("first"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+		{Content: conversation.Text("second"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+	}}
+	engine := fixture.newEngine(t, caller.Call)
+	session := fixture.createSession(t)
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("first input")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	if _, err := engine.SetModel(t.Context(), session.ID.String(), "alternate", "free-form-model"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("second input")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	const shellPrompt = "shell tool with one complete apply_patch command"
+	if !strings.Contains(requests[0].SystemPrompt, shellPrompt) {
+		t.Fatalf("initial provider prompt lost shell instructions: %q", requests[0].SystemPrompt)
+	}
+	if strings.Contains(requests[1].SystemPrompt, shellPrompt) {
+		t.Fatalf("switched provider retained stale shell instructions: %q", requests[1].SystemPrompt)
+	}
+}
+
+func TestEngineCompactionDoesNotBlockAnotherSession(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	compactionSession := fixture.createSession(t)
+	roundID, err := compactionSession.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compactionSession.AppendUserMessage(roundID, conversation.Text("retain this context")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sessions.Save(t.Context(), compactionSession); err != nil {
+		t.Fatal(err)
+	}
+	compactionSession.ClearPending()
+	otherSession := fixture.createSession(t)
+
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	invoke := func(ctx context.Context, _ modelcall.ModelCallConfig, _ modelcall.ModelCallRequest, _ modelcall.ModelCallStreamHandler) (*modelcall.ModelCallResponse, error) {
+		call := calls.Add(1)
+		switch call {
+		case 1:
+			close(firstStarted)
+			select {
+			case <-releaseFirst:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		case 2:
+			close(secondStarted)
+		}
+		content := "compacted"
+		if call == 2 {
+			content = "completed"
+		}
+		return &modelcall.ModelCallResponse{
+			Content:    conversation.Text(content),
+			StopReason: modelcall.ModelCallStopReasonEndTurn,
+		}, nil
+	}
+	engine := fixture.newEngine(t, invoke)
+
+	compactionDone := make(chan error, 1)
+	go func() {
+		_, err := engine.Compact(t.Context(), compactionSession.ID.String())
+		compactionDone <- err
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("compaction did not reach the model")
+	}
+
+	if _, err := engine.Start(t.Context(), otherSession.ID.String(), conversation.Text("run concurrently")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("another session was blocked by compaction")
+	}
+
+	close(releaseFirst)
+	if err := <-compactionDone; err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, otherSession.ID)
+}
+
+func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	session := fixture.createSession(t)
+	fixture.sessions.loadAttempted = make(chan struct{})
+	fixture.sessions.loadRelease = make(chan struct{})
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{{
+		Content:    conversation.Text("done"),
+		StopReason: modelcall.ModelCallStopReasonEndTurn,
+	}}}
+	engine := fixture.newEngine(t, caller.Call)
+
+	startResult := make(chan struct {
+		result *infrasession.StartResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello"))
+		startResult <- struct {
+			result *infrasession.StartResult
+			err    error
+		}{result: result, err: err}
+	}()
+	select {
+	case <-fixture.sessions.loadAttempted:
+	case <-time.After(time.Second):
+		t.Fatal("start did not reach the session repository")
+	}
+
+	permissionResult := make(chan struct {
+		result *conversation.Session
+		err    error
+	}, 1)
+	go func() {
+		result, err := engine.SetPermissionMode(t.Context(), session.ID.String(), conversation.PermissionAuto)
+		permissionResult <- struct {
+			result *conversation.Session
+			err    error
+		}{result: result, err: err}
+	}()
+	select {
+	case result := <-permissionResult:
+		t.Fatalf("permission mode changed before start preparation completed: %+v", result.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(fixture.sessions.loadRelease)
+	started := <-startResult
+	if started.err != nil {
+		t.Fatal(started.err)
+	}
+	changed := <-permissionResult
+	if changed.err != nil {
+		t.Fatal(changed.err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	var modeEvent conversation.SessionPermissionModeChanged
+	found := false
+	for _, event := range fixture.sessions.events[session.ID] {
+		if candidate, ok := event.(conversation.SessionPermissionModeChanged); ok {
+			modeEvent = candidate
+			found = true
+		}
+	}
+	if !found || modeEvent.RoundID != started.result.RoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
+		t.Fatalf("permission event = %+v, start = %+v", modeEvent, started.result)
 	}
 }
 

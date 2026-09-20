@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -66,10 +67,12 @@ type StopResult struct {
 }
 
 type activeExecution struct {
-	roundID  uuid.UUID
-	session  *conversation.Session
-	provider catalog.Provider
-	cancel   context.CancelFunc
+	roundID      uuid.UUID
+	session      *conversation.Session
+	provider     catalog.Provider
+	cancel       context.CancelFunc
+	sessionReady chan struct{}
+	readyOnce    sync.Once
 }
 
 type Engine struct {
@@ -84,7 +87,8 @@ type Engine struct {
 	permissionModeChanged func(context.Context, uuid.UUID, conversation.PermissionMode) error
 	logger                *slog.Logger
 	mu                    sync.Mutex
-	sessionMu             sync.Mutex
+	sessionLocksMu        sync.Mutex
+	sessionLocks          map[uuid.UUID]*sync.Mutex
 	active                map[uuid.UUID]*activeExecution
 	started               map[uuid.UUID]struct{}
 	resources             map[uuid.UUID]executionResources
@@ -126,6 +130,7 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 		active:                make(map[uuid.UUID]*activeExecution),
 		started:               make(map[uuid.UUID]struct{}),
 		resources:             make(map[uuid.UUID]executionResources),
+		sessionLocks:          make(map[uuid.UUID]*sync.Mutex),
 		stopped:               make(chan struct{}),
 	}, nil
 }
@@ -154,14 +159,13 @@ func (engine *Engine) Start(
 		}
 	}()
 
-	prepared, err := engine.prepare(ctx, runCtx, id, content)
+	prepared, err := engine.prepare(ctx, runCtx, id, content, execution)
 	if err != nil {
 		return nil, err
 	}
 
 	engine.mu.Lock()
 	execution.roundID = prepared.roundID
-	execution.session = prepared.session
 	execution.provider = prepared.provider
 	engine.mu.Unlock()
 
@@ -219,6 +223,9 @@ func (engine *Engine) Compact(
 	}
 	defer engine.release(id, execution)
 	toolRuntime := engine.snapshotTools()
+	sessionLock := engine.sessionLock(id)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 
 	session, err := engine.sessions.Load(ctx, id)
 	if err != nil {
@@ -227,6 +234,7 @@ func (engine *Engine) Compact(
 		}
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
+	engine.bindExecutionSession(id, execution, session)
 	resources, ok := engine.cachedSessionResourcesForModel(id, session)
 	if !ok {
 		resources, err = engine.loadResources(ctx, runCtx, session)
@@ -246,7 +254,13 @@ func (engine *Engine) Compact(
 		maxOutputTokens: modelMaxOutputTokens(resources.model),
 		toolRuntime:     toolRuntime,
 	}
-	event, err := engine.compactPrepared(runCtx, prepared, conversation.CompactionTriggerManual)
+	event, err := engine.compactPreparedForWindowLocked(
+		runCtx,
+		prepared,
+		conversation.CompactionTriggerManual,
+		modelContextWindow(prepared),
+		prepared.maxOutputTokens,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +299,9 @@ func (engine *Engine) SetModel(
 	}
 	defer engine.release(id, execution)
 	toolRuntime := engine.snapshotTools()
+	sessionLock := engine.sessionLock(id)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 
 	session, err := engine.sessions.Load(ctx, id)
 	if err != nil {
@@ -293,6 +310,7 @@ func (engine *Engine) SetModel(
 		}
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
+	engine.bindExecutionSession(id, execution, session)
 	if session.CurrentModel != nil &&
 		session.CurrentModel.ProviderCode == providerCodeValue &&
 		session.CurrentModel.ModelCode == modelCodeValue {
@@ -340,7 +358,7 @@ func (engine *Engine) SetModel(
 	}
 	request := engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
 	if infracompaction.ShouldCompact(infracompaction.EstimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
-		if _, err := engine.compactPreparedForWindow(
+		if _, err := engine.compactPreparedForWindowLocked(
 			runCtx,
 			prepared,
 			conversation.CompactionTriggerModelSwitch,
@@ -377,9 +395,6 @@ func (engine *Engine) SetPermissionMode(
 	sessionID string,
 	mode conversation.PermissionMode,
 ) (*conversation.Session, error) {
-	engine.sessionMu.Lock()
-	defer engine.sessionMu.Unlock()
-
 	id, err := uuid.Parse(sessionID)
 	if err != nil {
 		return nil, apperrors.Validation("invalid session id: " + err.Error())
@@ -391,16 +406,51 @@ func (engine *Engine) SetPermissionMode(
 		return nil, err
 	}
 
-	engine.mu.Lock()
-	active, running := engine.active[id]
-	var session *conversation.Session
+	active, running, session := engine.waitForActiveSession(ctx, id)
 	var roundID uuid.UUID
-	if running && active != nil && active.session != nil {
-		session = active.session
-		roundID = active.roundID
-	}
-	engine.mu.Unlock()
+	var provider catalog.Provider
+
+	sessionLock := engine.sessionLock(id)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 	if running {
+		// prepare binds the session before it allocates the round. Refresh the
+		// execution snapshot after taking the session lock so a permission
+		// change cannot retain the pre-prepare zero round ID.
+		engine.mu.Lock()
+		current, stillRunning := engine.active[id]
+		if stillRunning && current == active {
+			active = current
+			session = current.session
+			roundID = current.roundID
+			provider = current.provider
+		} else if stillRunning && current != nil {
+			active = current
+			if current.session == nil {
+				// A newer Start has reserved the session but has not loaded it
+				// yet. Keep the mode change session-scoped; that Start will
+				// load the event after this lock is released.
+				running = false
+				session = nil
+			} else {
+				session = current.session
+				roundID = current.roundID
+				provider = current.provider
+			}
+		} else if !stillRunning {
+			running = false
+		}
+		engine.mu.Unlock()
+	}
+	if running {
+		if roundID == uuid.Nil && session != nil {
+			for index := len(session.Rounds) - 1; index >= 0; index-- {
+				if session.Rounds[index].Status == conversation.RoundRunning {
+					roundID = session.Rounds[index].ID
+					break
+				}
+			}
+		}
 		round := currentRound(session, roundID)
 		if roundID == uuid.Nil || round == nil || round.Status != conversation.RoundRunning {
 			running = false
@@ -427,7 +477,7 @@ func (engine *Engine) SetPermissionMode(
 			return nil, apperrors.WrapError(apperrors.CodeInternal, "encode permission metadata", encodeErr)
 		}
 		role := conversation.RoleUser
-		if active.provider.SupportsDeveloperMessages() {
+		if provider.SupportsDeveloperMessages() {
 			role = conversation.RoleDeveloper
 		}
 		if _, appendErr := session.AppendHiddenMessage(
@@ -523,11 +573,64 @@ func (engine *Engine) reserve(
 	}
 
 	runCtx, cancel := context.WithCancel(engine.ctx)
-	execution := &activeExecution{cancel: cancel}
+	execution := &activeExecution{cancel: cancel, sessionReady: make(chan struct{})}
 	engine.active[sessionID] = execution
 	engine.waitGroup.Add(1)
 
 	return runCtx, execution, nil
+}
+
+func (engine *Engine) sessionLock(sessionID uuid.UUID) *sync.Mutex {
+	engine.sessionLocksMu.Lock()
+	defer engine.sessionLocksMu.Unlock()
+
+	lock, ok := engine.sessionLocks[sessionID]
+	if !ok {
+		lock = &sync.Mutex{}
+		engine.sessionLocks[sessionID] = lock
+	}
+	return lock
+}
+
+func (engine *Engine) bindExecutionSession(
+	sessionID uuid.UUID,
+	execution *activeExecution,
+	session *conversation.Session,
+) {
+	engine.mu.Lock()
+	if engine.active[sessionID] == execution {
+		execution.session = session
+	}
+	engine.mu.Unlock()
+	if execution != nil {
+		execution.readyOnce.Do(func() { close(execution.sessionReady) })
+	}
+}
+
+func (engine *Engine) waitForActiveSession(
+	ctx context.Context,
+	sessionID uuid.UUID,
+) (*activeExecution, bool, *conversation.Session) {
+	for {
+		engine.mu.Lock()
+		active, running := engine.active[sessionID]
+		var session *conversation.Session
+		var ready <-chan struct{}
+		if running && active != nil {
+			session = active.session
+			ready = active.sessionReady
+		}
+		engine.mu.Unlock()
+		if !running || session != nil {
+			return active, running, session
+		}
+
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return active, running, nil
+		}
+	}
 }
 
 type preparedExecution struct {
@@ -545,12 +648,15 @@ type preparedExecution struct {
 }
 
 type executionResources struct {
-	sourceModel  shared.ModelRef
-	provider     catalog.Provider
-	model        catalog.Model
-	modelCall    modelcall.ModelCallConfig
-	systemPrompt string
-	freeFormTool bool
+	sourceModel           shared.ModelRef
+	provider              catalog.Provider
+	model                 catalog.Model
+	modelCall             modelcall.ModelCallConfig
+	baseSystemPrompt      string
+	systemPrompt          string
+	sessionPromptSuffix   string
+	sessionPromptOverride *string
+	freeFormTool          bool
 }
 
 func (engine *Engine) prepare(
@@ -558,8 +664,12 @@ func (engine *Engine) prepare(
 	runCtx context.Context,
 	sessionID uuid.UUID,
 	content conversation.Content,
+	execution *activeExecution,
 ) (*preparedExecution, error) {
 	toolRuntime := engine.snapshotTools()
+	sessionLock := engine.sessionLock(sessionID)
+	sessionLock.Lock()
+	defer sessionLock.Unlock()
 
 	session, err := engine.sessions.Load(ctx, sessionID)
 	if err != nil {
@@ -568,6 +678,7 @@ func (engine *Engine) prepare(
 		}
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
+	engine.bindExecutionSession(sessionID, execution, session)
 
 	resources, err := engine.loadResources(ctx, runCtx, session)
 	if err != nil {
@@ -581,6 +692,7 @@ func (engine *Engine) prepare(
 	// from per-round mutations made by BeforeRound. In particular, a custom
 	// round hook must not accidentally replace the cached skill prompt for
 	// later rounds.
+	baseSystemPrompt := resources.baseSystemPrompt
 	sessionResources := *resources
 
 	type hiddenMessage struct {
@@ -602,7 +714,6 @@ func (engine *Engine) prepare(
 	}
 
 	if engine.shouldStartSession(sessionID) {
-		modelCall := resources.modelCall
 		model := resources.model
 		provider := resources.provider
 		systemPrompt := resources.systemPrompt
@@ -644,11 +755,20 @@ func (engine *Engine) prepare(
 		}
 		resources.provider = provider
 		resources.model = model
-		modelCall = newModelCallConfig(provider, model)
+		modelCall := newModelCallConfig(provider, model)
 		modelCall.FreeFormTool = freeFormTool
 		resources.modelCall = modelCall
+		resources.baseSystemPrompt = baseSystemPrompt
 		resources.systemPrompt = systemPrompt
 		resources.freeFormTool = freeFormTool
+		if strings.HasPrefix(systemPrompt, baseSystemPrompt) {
+			resources.sessionPromptSuffix = strings.TrimPrefix(systemPrompt, baseSystemPrompt)
+			resources.sessionPromptOverride = nil
+		} else {
+			resources.sessionPromptSuffix = ""
+			override := systemPrompt
+			resources.sessionPromptOverride = &override
+		}
 		sessionResources = *resources
 		if state.Tools == nil {
 			toolRuntime = nil
@@ -731,6 +851,12 @@ func (engine *Engine) prepare(
 		toolRuntime:     toolRuntime,
 		userMessage:     userMessage,
 	}
+	engine.mu.Lock()
+	if engine.active[sessionID] == execution {
+		execution.roundID = roundID
+		execution.provider = prepared.provider
+	}
+	engine.mu.Unlock()
 	if err := engine.emitEvent(runCtx, prepared, agentloop.Event{Type: agentloop.EventSessionChanged}); err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist started round", err)
 	}
@@ -769,19 +895,18 @@ func (engine *Engine) loadResources(
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)
 	}
 	return &executionResources{
-		sourceModel:  *session.CurrentModel,
-		provider:     *provider,
-		model:        *model,
-		modelCall:    newModelCallConfig(*provider, *model),
-		systemPrompt: systemPrompt,
-		freeFormTool: provider.FreeFormTool,
+		sourceModel:      *session.CurrentModel,
+		provider:         *provider,
+		model:            *model,
+		modelCall:        newModelCallConfig(*provider, *model),
+		baseSystemPrompt: systemPrompt,
+		systemPrompt:     systemPrompt,
+		freeFormTool:     provider.FreeFormTool,
 	}, nil
 }
 
-// applySessionResources restores the session-level prompt selected by
-// BeforeSessionStart. Provider and model-call resources are intentionally taken
-// from loaded so switching models can refresh their protocol-specific values;
-// the prompt remains stable for the lifetime of the session.
+// applySessionResources restores session-level prompt additions while retaining
+// the provider-specific base prompt selected by the newly loaded model.
 func (engine *Engine) applySessionResources(
 	sessionID uuid.UUID,
 	loaded *executionResources,
@@ -795,7 +920,16 @@ func (engine *Engine) applySessionResources(
 	}
 
 	merged := *loaded
-	merged.systemPrompt = cached.systemPrompt
+	merged.baseSystemPrompt = loaded.baseSystemPrompt
+	if cached.sessionPromptOverride != nil {
+		merged.systemPrompt = *cached.sessionPromptOverride
+		merged.sessionPromptOverride = cached.sessionPromptOverride
+		merged.sessionPromptSuffix = ""
+	} else {
+		merged.systemPrompt = loaded.baseSystemPrompt + cached.sessionPromptSuffix
+		merged.sessionPromptOverride = nil
+		merged.sessionPromptSuffix = cached.sessionPromptSuffix
+	}
 	return &merged
 }
 
@@ -909,6 +1043,10 @@ func (engine *Engine) loadCatalogModel(
 }
 
 func (engine *Engine) sessionRequest(prepared *preparedExecution) modelcall.ModelCallRequest {
+	lock := engine.sessionLock(prepared.session.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	return engine.sessionRequestForWindow(prepared, modelContextWindow(prepared), prepared.maxOutputTokens)
 }
 
@@ -953,9 +1091,20 @@ func (engine *Engine) compactPreparedForWindow(
 	contextWindow int64,
 	maxOutputTokens int64,
 ) (*conversation.SessionCompacted, error) {
-	engine.sessionMu.Lock()
-	defer engine.sessionMu.Unlock()
+	lock := engine.sessionLock(prepared.session.ID)
+	lock.Lock()
+	defer lock.Unlock()
 
+	return engine.compactPreparedForWindowLocked(ctx, prepared, trigger, contextWindow, maxOutputTokens)
+}
+
+func (engine *Engine) compactPreparedForWindowLocked(
+	ctx context.Context,
+	prepared *preparedExecution,
+	trigger conversation.CompactionTrigger,
+	contextWindow int64,
+	maxOutputTokens int64,
+) (*conversation.SessionCompacted, error) {
 	return (infracompaction.Executor{
 		Emit: func(eventCtx context.Context, event agentloop.Event) error {
 			return engine.emitEvent(eventCtx, prepared, event)
@@ -1085,9 +1234,10 @@ func (engine *Engine) run(
 		}
 		engine.finish(ctx, prepared, status, usage, runErr)
 	}()
-	engine.sessionMu.Lock()
+	lock := engine.sessionLock(prepared.session.ID)
+	lock.Lock()
 	if err := engine.emitEvent(ctx, prepared, agentloop.Event{Type: agentloop.EventRoundStarted}); err != nil {
-		engine.sessionMu.Unlock()
+		lock.Unlock()
 		status = conversation.RoundFailed
 		runErr = err
 		return
@@ -1096,12 +1246,12 @@ func (engine *Engine) run(
 		Type:    agentloop.EventMessageAppended,
 		Message: &prepared.userMessage,
 	}); err != nil {
-		engine.sessionMu.Unlock()
+		lock.Unlock()
 		status = conversation.RoundFailed
 		runErr = err
 		return
 	}
-	engine.sessionMu.Unlock()
+	lock.Unlock()
 
 	usage, runErr = engine.executeLoop(ctx, prepared)
 	if runErr != nil {
@@ -1142,7 +1292,13 @@ func (engine *Engine) executeLoop(
 		Hooks:   engine.loopHooks,
 		Session: prepared.session,
 		Round: func() *conversation.Round {
-			return currentRound(prepared.session, prepared.roundID)
+			return engine.roundSnapshot(prepared.session, prepared.roundID)
+		},
+		SessionSnapshot: func() *conversation.Session {
+			lock := engine.sessionLock(prepared.session.ID)
+			lock.Lock()
+			defer lock.Unlock()
+			return prepared.session.Snapshot()
 		},
 		BuildRequest: func(ctx context.Context, iteration int) (modelcall.ModelCallRequest, conversation.TokenUsage, error) {
 			request := engine.sessionRequest(prepared)
@@ -1151,8 +1307,7 @@ func (engine *Engine) executeLoop(
 		ToolRuntime: toolRuntime,
 		CallContext: func() agentloop.CallContext {
 			cwd := ""
-			round := prepared.session.Rounds[len(prepared.session.Rounds)-1]
-			if round.Cwd != nil {
+			if round := engine.roundSnapshot(prepared.session, prepared.roundID); round != nil && round.Cwd != nil {
 				cwd = *round.Cwd
 			}
 			return agentloop.CallContext{
@@ -1198,8 +1353,9 @@ func (engine *Engine) handleLoopEvent(
 	prepared *preparedExecution,
 	event agentloop.Event,
 ) error {
-	engine.sessionMu.Lock()
-	defer engine.sessionMu.Unlock()
+	lock := engine.sessionLock(prepared.session.ID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	switch event.Type {
 	case agentloop.EventModelStream:
@@ -1249,8 +1405,9 @@ func (engine *Engine) finish(
 	usage conversation.TokenUsage,
 	runErr error,
 ) {
-	engine.sessionMu.Lock()
-	defer engine.sessionMu.Unlock()
+	lock := engine.sessionLock(prepared.session.ID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	var errorMessage *string
 	if runErr != nil {
@@ -1320,6 +1477,7 @@ func (engine *Engine) release(
 	execution *activeExecution,
 ) {
 	execution.cancel()
+	execution.readyOnce.Do(func() { close(execution.sessionReady) })
 
 	engine.mu.Lock()
 	if engine.active[sessionID] == execution {
@@ -1344,4 +1502,29 @@ func currentRound(session *conversation.Session, roundID uuid.UUID) *conversatio
 		}
 	}
 	return nil
+}
+
+func (engine *Engine) roundSnapshot(
+	session *conversation.Session,
+	roundID uuid.UUID,
+) *conversation.Round {
+	if session == nil {
+		return nil
+	}
+	lock := engine.sessionLock(session.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	round := currentRound(session, roundID)
+	if round == nil {
+		return nil
+	}
+	snapshot := *round
+	snapshot.Cwd = nil
+	if round.Cwd != nil {
+		cwd := *round.Cwd
+		snapshot.Cwd = &cwd
+	}
+	snapshot.Messages = append([]conversation.Message(nil), round.Messages...)
+	return &snapshot
 }
