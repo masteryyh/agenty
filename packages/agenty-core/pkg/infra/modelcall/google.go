@@ -126,6 +126,15 @@ func (caller *googleCaller) params(request ModelCallRequest) ([]*genai.Content, 
 		config.ThinkingConfig = thinking
 	}
 
+	if request.OutputFormat != nil {
+		schema, err := request.OutputFormat.Schema.toMap()
+		if err != nil {
+			return nil, nil, err
+		}
+		config.ResponseMIMEType = "application/json"
+		config.ResponseJsonSchema = schema
+	}
+
 	return contents, config, nil
 }
 

@@ -42,7 +42,7 @@ export function HitlOverlay({ approval, onDecision, onTogglePermission = () => u
     const previewHeight = Math.max(height - (showHints ? 4 : 2), 1);
 
     useInput((input, key, event) => {
-        if (key.ctrl && event.name === "p") {
+        if (key.shift && key.tab) {
             event.preventDefault();
             event.stopPropagation();
             onTogglePermission();
@@ -89,6 +89,7 @@ export function HitlOverlay({ approval, onDecision, onTogglePermission = () => u
                 }}
             >
                 <Box flexDirection="column" width="100%" flexShrink={0} paddingY={showHints ? 1 : 0} gap={1}>
+                    {approval.message ? <Text width="100%" color={theme.warning} wrap="wrap">{displayText(approval.message)}</Text> : null}
                     <Text width="100%" bold wrap="wrap">{displayText(approval.preview.title)}</Text>
                     <Text width="100%" color={theme.textMuted} wrap="wrap">{`Working directory: ${displayText(approval.cwd)}`}</Text>
                     <Box flexDirection="column" width="100%" flexShrink={0} backgroundColor={theme.surfaceRaised} paddingX={1} paddingY={showHints ? 1 : 0}>
@@ -111,7 +112,7 @@ export function HitlOverlay({ approval, onDecision, onTogglePermission = () => u
                 onAction={(key) => choose(key === "allow" ? "allow" : "deny")}
             />
             {showHints ? (
-                <Text dimColor>{width >= 56 ? "← → Choose · Enter Confirm · Esc Deny · ↑ ↓ Scroll" : "Enter · Esc Deny · ↑ ↓ Scroll"}</Text>
+                <Text dimColor>{width >= 56 ? "Shift+Tab Cycle mode · ← → Choose · Enter Confirm · Esc Deny · ↑ ↓ Scroll" : "Enter · Esc Deny · ↑ ↓ Scroll"}</Text>
             ) : null}
         </Box>
     );

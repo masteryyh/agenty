@@ -23,7 +23,7 @@ Sometimes there will be a piece of XML data that follows user's message, which c
 </metadata>
 ` + "```" + `
 
-You will receive this at the very beginning of the session, and maybe more after if something has changed by user or harness. The permission-mode value is the current tool execution policy: ask means tool calls require user approval, while yolo means tool calls may execute without approval. You must follow these messages and treat them as truth.
+You will receive this at the very beginning of the session, and maybe more after if something has changed by user or harness. The permission-mode value is the current tool execution policy: ask means tool calls require user approval; auto lets the harness directly allow low-risk workspace reads and changes, then uses a separate reviewer for other calls; yolo means tool calls may execute without approval. You must follow these messages and treat them as truth.
 </basic>
 
 {{ if .UseApplyPatchShell }}<file-editing>

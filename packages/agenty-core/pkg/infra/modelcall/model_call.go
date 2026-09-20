@@ -3,6 +3,7 @@ package modelcall
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 )
 
@@ -12,6 +13,7 @@ type caller interface {
 }
 
 type callConfig struct {
+	maxRetries    *int
 	httpClient    *http.Client
 	streamHandler ModelCallStreamHandler
 }
@@ -19,6 +21,19 @@ type callConfig struct {
 // Option modifies a single model call. No option is retained after Call
 // returns.
 type Option func(*callConfig) error
+
+// WithMaxRetries sets additional HTTP attempts, excluding the initial attempt.
+// Omission preserves the SDK default. It does not replay completed responses
+// or streams after content has been delivered to the caller.
+func WithMaxRetries(retries int) Option {
+	return func(config *callConfig) error {
+		if retries < 0 || retries >= math.MaxInt32 {
+			return invalidRequest("max retries must be between 0 and %d", math.MaxInt32-1)
+		}
+		config.maxRetries = &retries
+		return nil
+	}
+}
 
 func WithHTTPClient(client *http.Client) Option {
 	return func(config *callConfig) error {

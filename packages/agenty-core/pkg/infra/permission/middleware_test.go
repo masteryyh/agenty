@@ -3,6 +3,9 @@ package permission_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +23,23 @@ import (
 type recordingRuntime struct {
 	calls   []string
 	batches int
+}
+
+type autoApprovalRuntime struct {
+	automaticallyAllowed bool
+	definitions          []modelcall.ToolDefinition
+}
+
+func (runtime *autoApprovalRuntime) Definitions() []modelcall.ToolDefinition {
+	return runtime.definitions
+}
+
+func (*autoApprovalRuntime) ExecuteBatch(context.Context, agentloop.CallContext, []conversation.ToolUseBlock) []conversation.ToolResultBlock {
+	return nil
+}
+
+func (runtime *autoApprovalRuntime) CanAutoApproveToolCall(agentloop.CallContext, conversation.ToolUseBlock) bool {
+	return runtime.automaticallyAllowed
 }
 
 func (*recordingRuntime) Definitions() []modelcall.ToolDefinition { return nil }
@@ -172,6 +192,109 @@ func TestMiddlewareYoloSkipsApproval(t *testing.T) {
 	}
 }
 
+func TestMiddlewareAutoSkipsLowRiskToolCalls(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		call    conversation.ToolUseBlock
+		runtime *autoApprovalRuntime
+	}{
+		{
+			name:    "cwd checked builtin",
+			call:    conversation.ToolUseBlock{ID: "read", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
+			runtime: &autoApprovalRuntime{automaticallyAllowed: true},
+		},
+		{
+			name: "read only MCP",
+			call: conversation.ToolUseBlock{ID: "mcp", Name: "mcp__docs__lookup", Input: []byte(`{"query":"permission modes"}`)},
+			runtime: &autoApprovalRuntime{definitions: []modelcall.ToolDefinition{{
+				Name: "mcp__docs__lookup",
+			}}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := permission.NewPermissionManager()
+			cwd := t.TempDir()
+			state := &middleware.ToolCallContext{
+				Session: &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAuto},
+				Round:   &conversation.Round{ID: uuid.New(), Cwd: &cwd},
+				Call:    &test.call,
+				Tools:   test.runtime,
+			}
+			state.Emit = func(context.Context, agentloop.Event) error {
+				t.Fatal("low-risk tool call emitted a manual approval event")
+				return nil
+			}
+
+			if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			if state.Result != nil {
+				t.Fatal("low-risk tool call was denied")
+			}
+		})
+	}
+}
+
+func TestMiddlewareAutoReviewLifecycleAndRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/chat/completions" {
+			t.Errorf("review request = %s %s", request.Method, request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(writer, `{
+			"id":"chat-review","object":"chat.completion","created":1,"model":"review-model",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"deny\",\"message\":\"The command is not authorized.\"}"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}
+		}`)
+	}))
+	t.Cleanup(server.Close)
+
+	manager := permission.NewPermissionManager()
+	cwd := t.TempDir()
+	state := &middleware.ToolCallContext{
+		Session: &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAuto},
+		Round:   &conversation.Round{ID: uuid.New(), Cwd: &cwd},
+		Call:    &conversation.ToolUseBlock{ID: "call-review", Name: "shell", Input: []byte(`{"commands":["touch outside"]}`)},
+		Model: modelcall.ModelCallConfig{
+			BaseURL:   server.URL + "/v1",
+			APIType:   modelcall.APIOpenAICompletions,
+			APIKey:    "test-key",
+			ModelCode: "review-model",
+		},
+	}
+	var eventTypes []agentloop.EventType
+	state.Emit = func(_ context.Context, event agentloop.Event) error {
+		switch event.Type {
+		case permission.EventReviewStarted, permission.EventReviewResolved:
+			review, ok := event.Payload.(permission.ReviewEvent)
+			if !ok || review.ToolUseID != state.Call.ID {
+				t.Fatalf("review payload = %#v", event.Payload)
+			}
+			eventTypes = append(eventTypes, event.Type)
+		case permission.EventRequested:
+			t.Fatal("review rejection fell back to manual approval")
+		}
+		return nil
+	}
+
+	if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(eventTypes, []agentloop.EventType{
+		permission.EventReviewStarted,
+		permission.EventReviewResolved,
+	}) {
+		t.Fatalf("review events = %v", eventTypes)
+	}
+	if state.Result == nil || !state.Result.IsError {
+		t.Fatalf("review result = %#v", state.Result)
+	}
+	message, ok := state.Result.Content[0].(conversation.TextBlock)
+	if !ok || message.Text != permission.AutoDeniedMessage+" The command is not authorized." {
+		t.Fatalf("review rejection message = %#v", state.Result.Content)
+	}
+}
+
 func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
 	manager := permission.NewPermissionManager()
 	session := &conversation.Session{ID: uuid.New()}
@@ -207,6 +330,47 @@ func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
 		Decision:   permission.Allow,
 	}) == nil {
 		t.Fatal("released approval remained resolvable")
+	}
+}
+
+func TestPermissionModeChangedRechecksPendingApprovalInAutoMode(t *testing.T) {
+	manager := permission.NewPermissionManager()
+	cwd := t.TempDir()
+	session := &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAsk}
+	round := &conversation.Round{ID: uuid.New(), Cwd: &cwd}
+	state := &middleware.ToolCallContext{
+		Session: session,
+		Round:   round,
+		Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
+		Tools:   &autoApprovalRuntime{automaticallyAllowed: true},
+	}
+	requested := make(chan permission.Request, 1)
+	resolved := make(chan permission.Resolution, 1)
+	state.Emit = func(_ context.Context, event agentloop.Event) error {
+		switch event.Type {
+		case permission.EventRequested:
+			requested <- event.Payload.(permission.Request)
+		case permission.EventResolved:
+			resolved <- event.Payload.(permission.Resolution)
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
+	request := <-requested
+	session.PermissionMode = conversation.PermissionAuto
+	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionAuto); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if state.Result != nil {
+		t.Fatalf("result = %#v", state.Result)
+	}
+	resolution := <-resolved
+	if resolution.ApprovalID != request.ApprovalID || resolution.Decision != permission.Allow {
+		t.Fatalf("resolution = %#v", resolution)
 	}
 }
 
@@ -326,5 +490,135 @@ func TestGenericPreviewPreservesLargeNumbers(t *testing.T) {
 	}
 	if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
+	for _, scenario := range []string{"ask", "request error", "manual recheck"} {
+		t.Run(scenario, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				w.Header().Set("Content-Type", "application/json")
+				if scenario == "request error" {
+					w.WriteHeader(401)
+					fmt.Fprint(w, `{"error":{"message":"secret must not be displayed"}}`)
+					return
+				}
+				answer := `{"decision":"ask","message":"Confirm discarding uncommitted changes."}`
+				fmt.Fprintf(w, `{"id":"review","choices":[{"message":{"role":"assistant","content":%q},"finish_reason":"stop"}]}`, answer)
+			}))
+			defer server.Close()
+			manager := permission.NewPermissionManager()
+			cwd := t.TempDir()
+			state := &middleware.ToolCallContext{
+				Session: &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAuto},
+				Round:   &conversation.Round{ID: uuid.New(), Cwd: &cwd},
+				Call:    &conversation.ToolUseBlock{ID: "shell", Name: "shell", Input: []byte(`{"commands":["git reset --hard"]}`)},
+				Model:   modelcall.ModelCallConfig{APIType: modelcall.APIOpenAICompletions, BaseURL: server.URL, APIKey: "test", ModelCode: "test"},
+			}
+			if scenario == "manual recheck" {
+				state.Session.PermissionMode = conversation.PermissionAsk
+			}
+			seen := 0
+			state.Emit = func(ctx context.Context, event agentloop.Event) error {
+				if event.Type != permission.EventRequested {
+					return nil
+				}
+				request := event.Payload.(permission.Request)
+				seen++
+				if scenario == "manual recheck" && seen == 1 {
+					if request.Message != "" {
+						t.Fatal("manual mode unexpectedly has a review reason")
+					}
+					state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID)
+					return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+				}
+				if request.Message == "" || strings.Contains(request.Message, "secret must") {
+					t.Fatalf("bad approval reason: %q", request.Message)
+				}
+				if (scenario == "ask" || scenario == "manual recheck") && request.Message != "Confirm discarding uncommitted changes." {
+					t.Fatalf("message = %q", request.Message)
+				}
+				return manager.Resolve(ctx, permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Allow})
+			}
+			if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			if seen == 0 || state.Result != nil {
+				t.Fatalf("approvals = %d, result = %#v", seen, state.Result)
+			}
+			if requests != 1 {
+				t.Fatalf("requests = %d", requests)
+			}
+		})
+	}
+}
+
+func TestInvalidReviewAfterRetryDeniesCurrentCall(t *testing.T) {
+	for _, answer := range []string{
+		`{"decision":"ask"}`,
+		`{"message":"Missing decision."}`,
+		`{"decision":true,"message":null}`,
+		`{"decision":"allow",`,
+	} {
+		for _, initialMode := range []conversation.PermissionMode{conversation.PermissionAuto, conversation.PermissionAsk} {
+			t.Run(string(initialMode)+"/"+answer, func(t *testing.T) {
+				requests := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					requests++
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"id":"review","choices":[{"message":{"role":"assistant","content":%q},"finish_reason":"stop"}]}`, answer)
+				}))
+				defer server.Close()
+				manager := permission.NewPermissionManager()
+				cwd := t.TempDir()
+				state := &middleware.ToolCallContext{
+					Session: &conversation.Session{ID: uuid.New(), PermissionMode: initialMode},
+					Round:   &conversation.Round{ID: uuid.New(), Cwd: &cwd},
+					Call:    &conversation.ToolUseBlock{ID: "current-call", Name: "shell", Input: []byte(`{"commands":["printf hello"]}`)},
+					Model:   modelcall.ModelCallConfig{APIType: modelcall.APIOpenAICompletions, BaseURL: server.URL, APIKey: "test", ModelCode: "test"},
+				}
+				approvals, reviews, resolutions := 0, 0, 0
+				state.Emit = func(ctx context.Context, event agentloop.Event) error {
+					switch event.Type {
+					case permission.EventRequested:
+						approvals++
+						if initialMode == conversation.PermissionAuto || approvals > 1 {
+							t.Fatal("invalid reviewer output fell back to manual approval")
+						}
+						state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID)
+						return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+					case permission.EventReviewResolved:
+						reviews++
+					case permission.EventResolved:
+						resolutions++
+						if event.Payload.(permission.Resolution).Decision != permission.Deny {
+							t.Fatal("pending approval was not resolved as deny")
+						}
+					}
+					return nil
+				}
+				if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+					t.Fatal(err)
+				}
+				if requests != 2 || reviews != 1 {
+					t.Fatalf("requests = %d, review resolutions = %d", requests, reviews)
+				}
+				if initialMode == conversation.PermissionAsk && (approvals != 1 || resolutions != 1) {
+					t.Fatalf("approvals = %d, resolutions = %d", approvals, resolutions)
+				}
+				if state.Result == nil || !state.Result.IsError || state.Result.ToolUseID != "current-call" {
+					t.Fatalf("call was not rejected: %#v", state.Result)
+				}
+				message, ok := state.Result.Content[0].(conversation.TextBlock)
+				if !ok || message.Text != permission.AutoDeniedMessage+" Auto review failed: invalid output after retry." {
+					t.Fatalf("rejection reason = %#v", state.Result.Content)
+				}
+				if state.Session.CurrentPermissionMode() != conversation.PermissionAuto {
+					t.Fatal("changed session permission mode")
+				}
+			})
+		}
 	}
 }

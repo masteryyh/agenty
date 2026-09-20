@@ -36,6 +36,7 @@ type ToolCallState struct {
 	Iteration int
 	Call      *conversation.ToolUseBlock
 	Tools     ToolRuntime
+	Model     modelcall.ModelCallConfig
 	// A result supplied by BeforeToolCall replaces execution of this call.
 	Result *conversation.ToolResultBlock
 	Err    error

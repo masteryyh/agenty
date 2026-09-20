@@ -87,12 +87,21 @@ type ModelCallMessage struct {
 }
 
 type ModelCallRequest struct {
+	OutputFormat          *OutputFormat          `json:"outputFormat,omitempty"`
 	SystemPrompt          string                 `json:"systemPrompt,omitempty"`
 	Messages              []ModelCallMessage     `json:"messages"`
 	Tools                 []ToolDefinition       `json:"tools,omitempty"`
 	MaxOutputTokens       int64                  `json:"maxOutputTokens"`
 	ReasoningEffort       shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
 	ReasoningBudgetTokens int64                  `json:"reasoningBudgetTokens,omitempty"`
+}
+
+// OutputFormat requests schema-constrained JSON text. Adapters must send the
+// schema to the provider; unsupported models return an error rather than
+// silently falling back to unconstrained text.
+type OutputFormat struct {
+	Name   string     `json:"name"`
+	Schema JSONSchema `json:"schema"`
 }
 
 type ModelCallResponse struct {

@@ -10,6 +10,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
+	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 )
 
 func TestSessionNotificationMiddlewareProjectsEventsWithRoundSequences(t *testing.T) {
@@ -64,5 +65,56 @@ func TestSessionNotificationMiddlewareProjectsEventsWithRoundSequences(t *testin
 	next, ok := sent[3].payload.(SessionEvent)
 	if !ok || next.Sequence != 1 {
 		t.Fatalf("next round event = %+v", sent[3].payload)
+	}
+}
+
+func TestSessionNotificationMiddlewareProjectsToolReviewEvents(t *testing.T) {
+	sessionID := uuid.Must(uuid.NewV7())
+	roundID := uuid.Must(uuid.NewV7())
+	review := permission.ReviewEvent{ToolUseID: "call-review"}
+	var sent []SessionEvent
+	notifier := NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
+		sent = append(sent, payload.(SessionEvent))
+		return nil
+	})
+
+	for _, eventType := range []agentloop.EventType{
+		permission.EventReviewStarted,
+		permission.EventReviewResolved,
+	} {
+		event := agentloop.Event{
+			Type:      eventType,
+			SessionID: sessionID,
+			RoundID:   roundID,
+			Iteration: 2,
+			Payload:   review,
+		}
+		if err := notifier.OnEvent(t.Context(), &middleware.EventContext{Event: &event}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(sent) != 2 {
+		t.Fatalf("review notifications = %d, want 2", len(sent))
+	}
+	for index, event := range sent {
+		if event.Sequence != uint64(index+1) || event.Iteration != 2 || event.Review == nil || *event.Review != review {
+			t.Fatalf("review notification %d = %#v", index, event)
+		}
+	}
+}
+
+func TestApprovalMessageSurvivesNotificationProjection(t *testing.T) {
+	request := permission.Request{ApprovalID: uuid.New(), Message: "Confirm discarding uncommitted changes."}
+	notifier := NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
+		event, ok := payload.(SessionEvent)
+		if !ok || event.Approval == nil || event.Approval.Message != request.Message {
+			t.Fatalf("approval reason was lost: %#v", payload)
+		}
+		return nil
+	})
+	event := agentloop.Event{Type: permission.EventRequested, SessionID: uuid.New(), RoundID: uuid.New(), Payload: request}
+	if err := notifier.OnEvent(t.Context(), &middleware.EventContext{Event: &event}); err != nil {
+		t.Fatal(err)
 	}
 }

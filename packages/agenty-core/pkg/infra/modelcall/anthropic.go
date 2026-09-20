@@ -144,6 +144,14 @@ func (caller *anthropicCaller) params(request ModelCallRequest) (anthropic.Messa
 		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)
 	}
 
+	if request.OutputFormat != nil {
+		schema, err := request.OutputFormat.Schema.toMap()
+		if err != nil {
+			return anthropic.MessageNewParams{}, err
+		}
+		params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: schema}
+	}
+
 	return params, nil
 }
 

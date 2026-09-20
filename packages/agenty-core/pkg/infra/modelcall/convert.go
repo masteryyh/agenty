@@ -13,6 +13,11 @@ import (
 )
 
 func validateRequest(request ModelCallRequest) error {
+	if request.OutputFormat != nil {
+		if err := validateOutputFormat(*request.OutputFormat); err != nil {
+			return err
+		}
+	}
 	if request.MaxOutputTokens <= 0 {
 		return invalidRequest("max output tokens must be greater than zero")
 	}

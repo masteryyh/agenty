@@ -153,6 +153,18 @@ func (caller *openAIChatCaller) params(request ModelCallRequest) (openai.ChatCom
 		params.ReasoningEffort = openaishared.ReasoningEffort(effort)
 	}
 
+	if request.OutputFormat != nil {
+		schema, err := request.OutputFormat.Schema.toMap()
+		if err != nil {
+			return openai.ChatCompletionNewParams{}, err
+		}
+		params.ResponseFormat.OfJSONSchema = &openaishared.ResponseFormatJSONSchemaParam{
+			JSONSchema: openaishared.ResponseFormatJSONSchemaJSONSchemaParam{
+				Name: request.OutputFormat.Name, Schema: schema, Strict: openai.Bool(true),
+			},
+		}
+	}
+
 	return params, nil
 }
 

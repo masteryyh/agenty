@@ -57,11 +57,6 @@ export const commands: Command[] = [
         usage: "/effort [off|on|low|medium|high|xhigh|max]",
     },
     {
-        name: "/permissions",
-        description: "Show or set tool permission mode",
-        usage: "/permissions [ask|yolo]",
-    },
-    {
         name: "/status",
         description: "Show current session status",
         usage: "/status",

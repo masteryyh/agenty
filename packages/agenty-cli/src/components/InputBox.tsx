@@ -71,7 +71,9 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
             }
             if (key.tab) {
                 event.preventDefault();
-                onTab();
+                if (!key.shift) {
+                    onTab();
+                }
             }
         },
         { isActive: active },
@@ -139,7 +141,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     {permissionMode !== "ask" ? (
                         <>
                             <Text> </Text>
-                            <Text color={theme.danger}>{`${permissionMode} mode`}</Text>
+                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>{`${permissionMode} mode`}</Text>
                         </>
                     ) : null}
                 </Box>

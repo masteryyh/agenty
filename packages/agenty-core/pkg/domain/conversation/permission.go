@@ -7,11 +7,12 @@ type PermissionMode string
 
 const (
 	PermissionAsk  PermissionMode = "ask"
+	PermissionAuto PermissionMode = "auto"
 	PermissionYolo PermissionMode = "yolo"
 )
 
 func (mode PermissionMode) Valid() bool {
-	return mode == PermissionAsk || mode == PermissionYolo
+	return mode == PermissionAsk || mode == PermissionAuto || mode == PermissionYolo
 }
 
 func (mode PermissionMode) Normalized() PermissionMode {

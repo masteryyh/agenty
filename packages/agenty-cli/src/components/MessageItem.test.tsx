@@ -30,6 +30,92 @@ const shellItem: MessageRenderItem = {
 };
 
 describe("MessageItem tool output", () => {
+    for (const scenario of [
+        { blinkOn: true, marker: "◐ Reviewing..." },
+        { blinkOn: false, marker: "◑ Reviewing..." },
+    ]) {
+        test(`shows the review marker while preserving the tool display (${scenario.marker})`, async () => {
+            const reviewingItem: MessageRenderItem = {
+                id: "message-review:tool:call-review",
+                groupId: "message-review",
+                type: "tool",
+                expanded: false,
+                blinkOn: scenario.blinkOn,
+                toolCall: {
+                    id: "call-review",
+                    name: "shell",
+                    arguments: JSON.stringify({ commands: ["printf hello"] }),
+                    reviewing: true,
+                },
+            };
+            const setup = await testRender(<MessageItem item={reviewingItem} />, {
+                width: 60,
+                height: 8,
+            });
+
+            try {
+                await act(async () => {
+                    await setup.flush();
+                });
+
+                const frame = setup.captureCharFrame();
+                expect(frame).toContain("Run shell");
+                expect(frame).toContain("$ printf hello");
+                expect(frame).toContain(scenario.marker);
+            } finally {
+                act(() => {
+                    setup.renderer.destroy();
+                });
+            }
+        });
+    }
+
+    for (const reason of [
+        "This would disclose credentials.",
+        "Auto review failed: invalid output after retry.",
+    ]) {
+        test(`shows the automatic reviewer rejection: ${reason}`, async () => {
+            const rejectedItem: MessageRenderItem = {
+                id: "message-review:tool:call-rejected",
+                groupId: "message-review",
+                type: "tool",
+                expanded: false,
+                blinkOn: true,
+                toolCall: {
+                    id: "call-rejected",
+                    name: "shell",
+                    arguments: JSON.stringify({ commands: ["printf hello"] }),
+                    result: {
+                        callId: "call-rejected",
+                        name: "shell",
+                        content: `Auto reviewer rejected this tool execution. ${reason}`,
+                        isError: true,
+                    },
+                },
+            };
+            const setup = await testRender(<MessageItem item={rejectedItem} />, {
+                width: 72,
+                height: 8,
+            });
+
+            try {
+                await act(async () => {
+                    await setup.flush();
+                });
+
+                const frame = setup.captureCharFrame();
+                expect(frame).toContain("✗ Run shell");
+                expect(frame).toContain("Auto reviewer rejected this tool execution.");
+                expect(frame.replaceAll("│", " ").replace(/\s+/g, " ")).toContain(reason);
+                expect(frame).not.toContain("Reviewing...");
+            } finally {
+                act(() => {
+                    setup.renderer.destroy();
+                });
+            }
+        });
+    }
+
     test("connects each shell output to its command with status symbols", async () => {
         const setup = await testRender(<MessageItem item={shellItem} />, {
             width: 60,

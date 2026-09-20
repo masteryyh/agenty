@@ -11,6 +11,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 
+	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 )
 
@@ -115,6 +116,36 @@ func TestApplyPatchToolRequiresPatch(t *testing.T) {
 	_, err := tool.Execute(context.Background(), agentloop.CallContext{}, []byte(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "patch must not be empty") {
 		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestApplyPatchToolEncodesNativeOperation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture uses a POSIX script")
+	}
+
+	directory := t.TempDir()
+	installApplyPatchFixture(t, directory, `#!/bin/sh
+patch=$(cat)
+case "$patch" in
+  *"*** Add File: notes.txt"*) ;;
+  *) echo "missing native patch operation" >&2; exit 2 ;;
+esac
+printf '%s\n' '{"success":true,"cwd":"/workspace","files":[]}'
+`)
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tool := &applyPatchTool{fileSystem: &fileSystem{}}
+	input, err := json.Marshal(applyPatchArguments{Operation: &conversation.ApplyPatchOperation{
+		Type: conversation.ApplyPatchCreateFile,
+		Path: "notes.txt",
+		Diff: "+hello\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.Execute(t.Context(), agentloop.CallContext{Cwd: directory}, input); err != nil {
+		t.Fatal(err)
 	}
 }
 

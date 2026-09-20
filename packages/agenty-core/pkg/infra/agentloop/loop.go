@@ -261,6 +261,7 @@ func runAgentLoop(
 				Iteration: iteration,
 				Call:      &mutableCalls[callIndex],
 				Tools:     config.toolRuntime,
+				Model:     config.model,
 				Emit:      config.emit,
 			}
 			if config.round != nil {

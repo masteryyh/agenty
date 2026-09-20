@@ -17,6 +17,7 @@ const session: ChatSessionDto = {
 function approval(id: string): ToolApprovalRequest {
     return {
         approvalId: id,
+        message: "Confirm discarding uncommitted changes.",
         toolCall: { type: "tool_use", id: `call-${id}`, name: "read_file", input: { path: "notes.txt" } },
         cwd: "/workspace",
         preview: { title: "Agenty wants to read this file: /workspace/notes.txt", detail: "Read the file contents." },
@@ -73,6 +74,7 @@ describe("tool approval lifecycle", () => {
         const run = useAppStore.getState().sendMessage("read notes");
         await h.started.promise;
         expect(useAppStore.getState().pendingApproval?.approvalId).toBe("first");
+        expect(useAppStore.getState().pendingApproval?.message).toBe("Confirm discarding uncommitted changes.");
 
         const decision = useAppStore.getState().resolveToolApproval("deny");
         await useAppStore.getState().resolveToolApproval("allow");
@@ -112,5 +114,85 @@ describe("tool approval lifecycle", () => {
         expect(useAppStore.getState().pendingApproval).toBeNull();
         await run;
         expect(useAppStore.getState().chatError).toBe("core disconnected");
+    });
+
+    test("marks a tool as reviewing only between review lifecycle events", async () => {
+        let listener: ((event: SessionEvent) => void) | undefined;
+        let sequence = 0;
+        const reviewStarted = Promise.withResolvers<void>();
+        const finishReview = Promise.withResolvers<void>();
+        const emit = (event: Partial<SessionEvent>) => listener?.({
+            type: "round_started",
+            sessionId: session.id,
+            roundId: "round-review",
+            sequence: ++sequence,
+            ...event,
+        });
+        const client = {
+            onSessionEvent(callback: (event: SessionEvent) => void) {
+                listener = callback;
+                return () => {
+                    listener = undefined;
+                };
+            },
+            onClose() {
+                return () => {};
+            },
+            async setSessionReasoningEffort() {},
+            async startSession() {
+                emit({ type: "round_started" });
+                emit({
+                    type: "model_stream",
+                    iteration: 1,
+                    stream: { type: "tool_use_start", index: 0, toolUseId: "call-review", toolName: "shell" },
+                });
+                emit({
+                    type: "model_stream",
+                    iteration: 1,
+                    stream: {
+                        type: "tool_use_done",
+                        index: 0,
+                        toolUseId: "call-review",
+                        toolName: "shell",
+                        toolInput: { commands: ["printf hello"] },
+                    },
+                });
+                emit({
+                    type: "message_appended",
+                    iteration: 1,
+                    message: {
+                        id: "assistant-review",
+                        roundId: "round-review",
+                        role: "assistant",
+                        content: [{ type: "tool_use", id: "call-review", name: "shell", input: { commands: ["printf hello"] } }],
+                        createdAt: "2026-09-20T00:00:00Z",
+                    },
+                });
+                emit({ type: "tool_review_started", review: { toolUseId: "call-review" } });
+                reviewStarted.resolve();
+                await finishReview.promise;
+                emit({ type: "tool_review_resolved", review: { toolUseId: "call-review" } });
+                emit({ type: "round_ended", status: "completed" });
+                return { sessionId: session.id, roundId: "round-review", status: "running" };
+            },
+            async getSession() {
+                return session;
+            },
+        } as unknown as AgentyClient;
+        useAppStore.setState({ ...useAppStore.getInitialState(), client, session, phase: "ready" });
+
+        const run = useAppStore.getState().sendMessage("review this tool");
+        await reviewStarted.promise;
+        expect(useAppStore.getState().current?.toolCalls?.[0]).toMatchObject({
+            id: "call-review",
+            reviewing: true,
+        });
+
+        finishReview.resolve();
+        await run;
+        const reviewed = useAppStore.getState().history
+            .flatMap((message) => message.toolCalls ?? [])
+            .find((call) => call.id === "call-review");
+        expect(reviewed?.reviewing).toBeUndefined();
     });
 });

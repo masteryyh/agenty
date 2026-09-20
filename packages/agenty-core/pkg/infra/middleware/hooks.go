@@ -88,6 +88,7 @@ type ToolCallContext struct {
 	Iteration int
 	Call      *conversation.ToolUseBlock
 	Tools     agentloop.ToolRuntime
+	Model     modelcall.ModelCallConfig
 	// A result supplied by BeforeToolCall replaces execution of this call.
 	Result *conversation.ToolResultBlock
 	Err    error

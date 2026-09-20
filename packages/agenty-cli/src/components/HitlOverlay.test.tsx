@@ -80,4 +80,76 @@ describe("HitlOverlay", () => {
             act(() => setup.renderer.destroy());
         }
     });
+
+    test("cycles permission mode with Shift+Tab", async () => {
+        let toggles = 0;
+        const setup = await testRender(
+            <BottomDialog width={74} height={22}>
+                <HitlOverlay approval={approval} onDecision={() => undefined} onTogglePermission={() => { toggles++; }} />
+            </BottomDialog>,
+            { width: 76, height: 24 },
+        );
+        try {
+            await act(async () => {
+                await setup.flush();
+                setup.mockInput.pressTab({ shift: true });
+                await setup.flush();
+            });
+            expect(toggles).toBe(1);
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+});
+
+for (const message of [
+    "Confirm discarding uncommitted changes.",
+    "Auto review failed: invalid output; please review this action.",
+]) {
+    test(`shows review message: ${message}`, async () => {
+        const setup = await testRender(
+            <BottomDialog width={74} height={22}>
+                <HitlOverlay approval={{ ...approval, message }} onDecision={() => undefined} />
+            </BottomDialog>,
+            { width: 76, height: 24 },
+        );
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+            const frame = setup.captureCharFrame();
+            expect(frame).toContain(message);
+            expect(frame).toContain("[Deny]");
+            expect(frame).toContain("Allow once");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+}
+
+test("wraps long review reasons in a small terminal while keeping actions visible", async () => {
+    const setup = await testRender(
+        <BottomDialog width={38} height={12}>
+            <HitlOverlay
+                approval={{ ...approval, message: "Confirm deleting local files because this operation discards uncommitted work and cannot be undone automatically." }}
+                onDecision={() => undefined}
+            />
+        </BottomDialog>,
+        { width: 40, height: 14 },
+    );
+    try {
+        await act(async () => {
+            await setup.flush();
+        });
+        expect(setup.captureCharFrame()).toContain("Confirm deleting local files");
+        expect(setup.captureCharFrame()).toContain("[Deny]");
+        await act(async () => {
+            await setup.mockInput.pressKeys(Array.from({ length: 15 }, () => "ARROW_DOWN"), 5);
+            await setup.flush();
+        });
+        expect(setup.captureCharFrame()).toContain("End line: 5");
+        expect(setup.captureCharFrame()).toContain("Allow once");
+    } finally {
+        act(() => setup.renderer.destroy());
+    }
 });

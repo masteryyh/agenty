@@ -1,7 +1,7 @@
 import { useRenderer, useSelectionHandler } from "@opentui/react";
 import { useRef, useState } from "react";
 
-import type { ChatSessionDto, PermissionMode } from "./api/types";
+import type { ChatSessionDto } from "./api/types";
 import { commands, parseCommandTokens } from "./commands/registry";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
@@ -113,11 +113,10 @@ function ChatView() {
     const skills = useAppStore((s) => s.skills);
     const approval = useAppStore((s) => s.pendingApproval);
     const resolveToolApproval = useAppStore((s) => s.resolveToolApproval);
-    const setPermissionMode = useAppStore((s) => s.setPermissionMode);
     const togglePermissionMode = useAppStore((s) => s.togglePermissionMode);
 
     useInput((_input, key, event) => {
-        if (key.ctrl && event.name === "p") {
+        if (key.shift && key.tab) {
             event.preventDefault();
             event.stopPropagation();
             void togglePermissionMode();
@@ -222,17 +221,6 @@ function ChatView() {
                         app.setThinking(true, a);
                     } else {
                         app.notify(`invalid effort: ${a}`, true);
-                    }
-                    return;
-                }
-                case "/permissions": {
-                    const mode = arg.toLowerCase() as PermissionMode;
-                    if (!arg) {
-                        app.setToast(`permissions: ${app.session?.permissionMode ?? "ask"}`);
-                    } else if (mode === "ask" || mode === "yolo") {
-                        void setPermissionMode(mode);
-                    } else {
-                        app.notify(`invalid permissions mode: ${arg}`, true);
                     }
                     return;
                 }

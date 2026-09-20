@@ -57,16 +57,16 @@ func TestSessionPermissionModeChangeIsPersistedAndReplayed(t *testing.T) {
 	if got := session.CurrentPermissionMode(); got != PermissionAsk {
 		t.Fatalf("default permission mode = %q, want ask", got)
 	}
-	if !session.SetPermissionMode(PermissionYolo, uuid.Nil) {
+	if !session.SetPermissionMode(PermissionAuto, uuid.Nil) {
 		t.Fatal("permission mode change was not recorded")
 	}
-	if got := session.CurrentPermissionMode(); got != PermissionYolo {
-		t.Fatalf("permission mode = %q, want yolo", got)
+	if got := session.CurrentPermissionMode(); got != PermissionAuto {
+		t.Fatalf("permission mode = %q, want auto", got)
 	}
 
 	replayed := ReplaySession(session.PendingEvents())
-	if got := replayed.CurrentPermissionMode(); got != PermissionYolo {
-		t.Fatalf("replayed permission mode = %q, want yolo", got)
+	if got := replayed.CurrentPermissionMode(); got != PermissionAuto {
+		t.Fatalf("replayed permission mode = %q, want auto", got)
 	}
 	if len(session.PendingEvents()) != 2 {
 		t.Fatalf("recorded events = %d, want session start and permission change", len(session.PendingEvents()))

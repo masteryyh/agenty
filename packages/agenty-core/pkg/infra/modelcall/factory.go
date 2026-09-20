@@ -47,6 +47,9 @@ func nativeOpenAIResponsesProvider(model ModelCallConfig) bool {
 
 func newOpenAIClient(model ModelCallConfig, config callConfig) openai.Client {
 	options := []openaioption.RequestOption{openaioption.WithAPIKey(model.APIKey)}
+	if config.maxRetries != nil {
+		options = append(options, openaioption.WithMaxRetries(*config.maxRetries))
+	}
 	if model.BaseURL != "" {
 		options = append(options, openaioption.WithBaseURL(model.BaseURL))
 	}
@@ -59,6 +62,9 @@ func newOpenAIClient(model ModelCallConfig, config callConfig) openai.Client {
 
 func newAnthropicClient(model ModelCallConfig, config callConfig) anthropic.Client {
 	options := []anthropicoption.RequestOption{anthropicoption.WithAPIKey(model.APIKey)}
+	if config.maxRetries != nil {
+		options = append(options, anthropicoption.WithMaxRetries(*config.maxRetries))
+	}
 	if model.BaseURL != "" {
 		options = append(options, anthropicoption.WithBaseURL(model.BaseURL))
 	}
@@ -77,6 +83,10 @@ func newGoogleClient(ctx context.Context, model ModelCallConfig, config callConf
 	}
 	if model.BaseURL != "" {
 		clientConfig.HTTPOptions.BaseURL = model.BaseURL
+	}
+	if config.maxRetries != nil {
+		attempts := int32(*config.maxRetries + 1)
+		clientConfig.HTTPOptions.RetryOptions = &genai.HTTPRetryOptions{Attempts: &attempts}
 	}
 
 	return genai.NewClient(ctx, clientConfig)

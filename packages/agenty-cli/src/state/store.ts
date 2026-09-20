@@ -36,6 +36,7 @@ export interface UIToolCall {
     name: string;
     arguments: string;
     result?: ToolResult;
+    reviewing?: boolean;
 }
 
 export interface UIMessage {
@@ -209,6 +210,39 @@ function attachToolResults(history: UIMessage[], message: ChatMessageDto): UIMes
         }
     }
     return nextHistory;
+}
+
+function setToolReviewing(message: UIMessage, toolUseId: string, reviewing: boolean): UIMessage {
+    const calls = message.toolCalls;
+    const callIndex = calls?.findIndex((call) => call.id === toolUseId) ?? -1;
+    if (!calls || callIndex < 0) {
+        return message;
+    }
+
+    const updatedCalls = [...calls];
+    const updatedCall = { ...updatedCalls[callIndex] };
+    if (reviewing) {
+        updatedCall.reviewing = true;
+    } else {
+        delete updatedCall.reviewing;
+    }
+    updatedCalls[callIndex] = updatedCall;
+    return { ...message, toolCalls: updatedCalls };
+}
+
+function clearToolReviews(message: UIMessage): UIMessage {
+    if (!message.toolCalls?.some((call) => call.reviewing)) {
+        return message;
+    }
+
+    return {
+        ...message,
+        toolCalls: message.toolCalls.map((call) => {
+            const updatedCall = { ...call };
+            delete updatedCall.reviewing;
+            return updatedCall;
+        }),
+    };
 }
 
 function buildHistory(session: ChatSessionDto): UIMessage[] {
@@ -403,8 +437,22 @@ export const useAppStore = create<AppState>((set, get) => {
                 ? { pendingApproval: null } : {});
             return;
         }
+        if ((event.type === "tool_review_started" || event.type === "tool_review_resolved") && event.review) {
+            const reviewing = event.type === "tool_review_started";
+            set((state) => ({
+                history: state.history.map((message) => setToolReviewing(message, event.review!.toolUseId, reviewing)),
+                current: state.current
+                    ? setToolReviewing(state.current, event.review!.toolUseId, reviewing)
+                    : null,
+            }));
+            return;
+        }
         if (event.type === "round_ended") {
-            set({ pendingApproval: null });
+            set((state) => ({
+                pendingApproval: null,
+                history: state.history.map(clearToolReviews),
+                current: state.current ? clearToolReviews(state.current) : null,
+            }));
         }
         if (event.type === "model_stream" && event.stream) {
             const stream = event.stream;
@@ -906,7 +954,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
         setPermissionMode: async (mode) => {
             const { client, session } = get();
-            if (!client || !session || (mode !== "ask" && mode !== "yolo")) {
+            if (!client || !session || (mode !== "ask" && mode !== "auto" && mode !== "yolo")) {
                 return;
             }
             if ((session.permissionMode ?? "ask") === mode) {
@@ -923,7 +971,8 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         togglePermissionMode: async () => {
-            const mode = get().session?.permissionMode === "yolo" ? "ask" : "yolo";
+            const current = get().session?.permissionMode ?? "ask";
+            const mode = current === "ask" ? "auto" : current === "auto" ? "yolo" : "ask";
             await get().setPermissionMode(mode);
         },
     };

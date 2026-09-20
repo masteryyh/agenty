@@ -1,5 +1,5 @@
 export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
-export type PermissionMode = "ask" | "yolo";
+export type PermissionMode = "ask" | "auto" | "yolo";
 export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
     "low",
     "medium",
@@ -268,6 +268,7 @@ export interface StreamEvent {
 }
 
 export interface ToolApprovalRequest {
+    message?: string;
     approvalId: string;
     toolCall: { type: "tool_use"; id: string; name: string; input: unknown };
     cwd: string;
@@ -281,8 +282,12 @@ export interface ToolApprovalResolution {
     decision: "allow" | "deny";
 }
 
+export interface ToolReviewEvent {
+    toolUseId: string;
+}
+
 export interface SessionEvent {
-    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "permission_mode_changed";
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "tool_review_started" | "tool_review_resolved" | "permission_mode_changed";
     sessionId: string;
     roundId: string;
     sequence: number;
@@ -294,6 +299,7 @@ export interface SessionEvent {
     error?: string;
     approval?: ToolApprovalRequest;
     resolution?: ToolApprovalResolution;
+    review?: ToolReviewEvent;
     permissionMode?: PermissionMode;
     previousPermissionMode?: PermissionMode;
 }

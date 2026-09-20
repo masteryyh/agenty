@@ -450,7 +450,9 @@ function normalizeSession(session: ChatSessionDto): ChatSessionDto {
         : [];
     return {
         ...session,
-        permissionMode: session.permissionMode === "yolo" ? "yolo" : "ask",
+        permissionMode: session.permissionMode === "yolo" || session.permissionMode === "auto"
+            ? session.permissionMode
+            : "ask",
         rounds: rounds.map((round) => ({
             ...round,
             messages: Array.isArray(round.messages)

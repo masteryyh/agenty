@@ -196,6 +196,16 @@ func (caller *openAIResponsesCaller) params(request ModelCallRequest) (responses
 		}
 	}
 
+	if request.OutputFormat != nil {
+		schema, err := request.OutputFormat.Schema.toMap()
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		params.Text.Format.OfJSONSchema = &responses.ResponseFormatTextJSONSchemaConfigParam{
+			Name: request.OutputFormat.Name, Schema: schema, Strict: openai.Bool(true),
+		}
+	}
+
 	return params, nil
 }
 

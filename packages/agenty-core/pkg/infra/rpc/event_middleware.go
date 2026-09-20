@@ -33,6 +33,7 @@ type SessionEvent struct {
 	Error                  *string                         `json:"error,omitempty"`
 	Approval               *permission.Request             `json:"approval,omitempty"`
 	Resolution             *permission.Resolution          `json:"resolution,omitempty"`
+	Review                 *permission.ReviewEvent         `json:"review,omitempty"`
 	PermissionMode         conversation.PermissionMode     `json:"permissionMode,omitempty"`
 	PreviousPermissionMode conversation.PermissionMode     `json:"previousPermissionMode,omitempty"`
 }
@@ -102,6 +103,8 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		agentloop.EventRoundEnded,
 		permission.EventRequested,
 		permission.EventResolved,
+		permission.EventReviewStarted,
+		permission.EventReviewResolved,
 		agentloop.EventPermissionModeChanged:
 	default:
 		return SessionEvent{}, false
@@ -132,6 +135,9 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 	}
 	if resolution, ok := event.Payload.(permission.Resolution); ok {
 		projected.Resolution = &resolution
+	}
+	if review, ok := event.Payload.(permission.ReviewEvent); ok {
+		projected.Review = &review
 	}
 	if change, ok := event.Payload.(conversation.SessionPermissionModeChanged); ok {
 		projected.PermissionMode = change.PermissionMode
