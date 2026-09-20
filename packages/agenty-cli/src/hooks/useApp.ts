@@ -18,6 +18,7 @@ export interface AppSlice {
     toast: ToastMsg | null;
     thinkingEnabled: boolean;
     thinkingLevel: string;
+    promptHistory: string[];
     init: () => Promise<void>;
     reset: () => void;
     newSession: () => Promise<void>;
@@ -30,6 +31,7 @@ export interface AppSlice {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
+    recordInput: (text: string) => Promise<boolean>;
 }
 
 export function useApp(): AppSlice {
@@ -44,6 +46,7 @@ export function useApp(): AppSlice {
             toast: s.toast,
             thinkingEnabled: s.thinkingEnabled,
             thinkingLevel: s.thinkingLevel,
+            promptHistory: s.promptHistory,
             init: s.init,
             reset: s.reset,
             newSession: s.newSession,
@@ -56,6 +59,7 @@ export function useApp(): AppSlice {
             setCwd: s.setCwd,
             setPermissionMode: s.setPermissionMode,
             togglePermissionMode: s.togglePermissionMode,
+            recordInput: s.recordInput,
         })),
     );
 }

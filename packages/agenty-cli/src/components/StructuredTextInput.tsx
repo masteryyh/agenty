@@ -15,6 +15,7 @@ import { TextInput } from "./ui";
 
 export interface StructuredTextInputHandle {
     insertSkill: (start: number, end: number, skill: Pick<SkillDto, "name" | "location" | "autoEnabled">) => void;
+    setDocument: (document: ComposerDocument) => void;
     focus: () => void;
 }
 
@@ -82,6 +83,16 @@ export const StructuredTextInput = forwardRef<StructuredTextInputHandle, Structu
                 }
                 onChange(nextDocument);
                 onCursorChange(start + selectedSkill.name.length + 1);
+            },
+            setDocument: (nextDocument) => {
+                documentRef.current = nextDocument;
+                const nextText = renderDocument(nextDocument);
+                if (inputRef.current) {
+                    inputRef.current.value = nextText;
+                    inputRef.current.cursorOffset = nextText.length;
+                }
+                onChange(nextDocument);
+                onCursorChange(nextText.length);
             },
             focus: () => inputRef.current?.focus(),
         }), [onChange, onCursorChange]);

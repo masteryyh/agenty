@@ -11,11 +11,6 @@ export interface Command {
 
 export const commands: Command[] = [
     {
-        name: "/help",
-        description: "Show available commands",
-        usage: "/help",
-    },
-    {
         name: "/model",
         description: "Manage and switch chat models",
         usage: "/model [provider-code/model-code]",

@@ -28,8 +28,8 @@ interface MessageListProps {
     height: number;
     // Rendered as the first, scroll-away item at the top of the list (the logo).
     header?: ReactNode;
-    // Whether keyboard scrolling (PageUp/PageDown, arrows, End, and wheel-via-
-    // 1007 arrows) is active. Turned off while an overlay/palette owns input.
+    // Whether keyboard scrolling (PageUp/PageDown and End) is active. Mouse
+    // wheel input remains native to ScrollBox. Overlays and palettes disable it.
     interactive?: boolean;
 }
 
@@ -286,20 +286,10 @@ export function MessageList({
                 return;
             }
             const viewport = listRef.current?.viewport.height ?? 1;
-            if (
-                key.upArrow ||
-                key.downArrow ||
-                key.pageUp ||
-                key.pageDown ||
-                key.end
-            ) {
+            if (key.pageUp || key.pageDown || key.end) {
                 event.preventDefault();
             }
-            if (key.upArrow) {
-                scrollByLines(-1);
-            } else if (key.downArrow) {
-                scrollByLines(1);
-            } else if (key.pageUp) {
+            if (key.pageUp) {
                 scrollByLines(-viewport);
             } else if (key.pageDown) {
                 scrollByLines(viewport);
@@ -316,7 +306,7 @@ export function MessageList({
                 {header ? <Box>{header}</Box> : null}
                 <Box flexGrow={1} justifyContent="center">
                     <Text dimColor>
-                        Start chatting by typing a message below. Type /help for commands.
+                        Start chatting by typing a message below. Type ? for help.
                     </Text>
                 </Box>
             </Box>

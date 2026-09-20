@@ -2,9 +2,10 @@ import { useRenderer, useSelectionHandler } from "@opentui/react";
 import { useRef, useState } from "react";
 
 import type { ChatSessionDto } from "./api/types";
-import { commands, parseCommandTokens } from "./commands/registry";
+import { parseCommandTokens } from "./commands/registry";
 import { BottomDialog } from "./components/BottomDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { HelpPanel } from "./components/HelpPanel";
 import { HITL_OVERLAY_HEIGHT, HitlOverlay } from "./components/HitlOverlay";
 import { InputBox } from "./components/InputBox";
 import { LogoHeader } from "./components/LogoHeader";
@@ -22,6 +23,7 @@ import { Box, Text } from "./components/ui";
 import { WizardOverlay } from "./components/WizardOverlay";
 import {
     type ComposerDocument,
+    documentFromSerialized,
     emptyDocument,
     rangesForDocument,
     renderDocument,
@@ -33,11 +35,12 @@ import { useCommandPalette } from "./hooks/useCommandPalette";
 import { type OverlayKind, useAppStore } from "./state/store";
 import { useTuiRuntime } from "./tui/runtime";
 
-const INPUT_HEIGHT = 4;
+const INPUT_HEIGHT = 5;
 const INPUT_TOP_GAP = 1;
 const PROVIDER_OVERLAY_HEIGHT = 18;
 const STATUS_OVERLAY_HEIGHT = 14;
 const MODEL_OVERLAY_HEIGHT = 20;
+const HELP_OVERLAY_HEIGHT = 22;
 
 function panelHeight(overlay: OverlayKind): number | null {
     switch (overlay) {
@@ -49,6 +52,8 @@ function panelHeight(overlay: OverlayKind): number | null {
             return MODEL_OVERLAY_HEIGHT;
         case "mcp":
             return MCP_OVERLAY_HEIGHT;
+        case "help":
+            return HELP_OVERLAY_HEIGHT;
         default:
             return null;
     }
@@ -110,18 +115,88 @@ function ChatView() {
     const [document, setDocument] = useState<ComposerDocument>(() => emptyDocument());
     const [cursorOffset, setCursorOffset] = useState(0);
     const inputRef = useRef<StructuredTextInputHandle | null>(null);
+    const documentRef = useRef(document);
+    const historyIndexRef = useRef(-1);
+    const historyDraftRef = useRef<ComposerDocument | null>(null);
+    const applyingHistoryRef = useRef(false);
+    const submittingInputRef = useRef(false);
+    documentRef.current = document;
     const skills = useAppStore((s) => s.skills);
     const approval = useAppStore((s) => s.pendingApproval);
     const resolveToolApproval = useAppStore((s) => s.resolveToolApproval);
     const togglePermissionMode = useAppStore((s) => s.togglePermissionMode);
 
-    useInput((_input, key, event) => {
+    useInput((input, key, event) => {
         if (key.shift && key.tab) {
             event.preventDefault();
             event.stopPropagation();
             void togglePermissionMode();
+            return;
+        }
+        if (
+            !approval &&
+            app.overlay === null &&
+            renderDocument(document).trim() === "" &&
+            (input === "?" || event.name === "?")
+        ) {
+            event.preventDefault();
+            event.stopPropagation();
+            app.setOverlay("help");
         }
     });
+
+    const applyDocument = (nextDocument: ComposerDocument) => {
+        applyingHistoryRef.current = true;
+        documentRef.current = nextDocument;
+        if (inputRef.current) {
+            inputRef.current.setDocument(nextDocument);
+        } else {
+            setDocument(nextDocument);
+            setCursorOffset(renderDocument(nextDocument).length);
+        }
+        applyingHistoryRef.current = false;
+    };
+
+    const handleDocumentChange = (nextDocument: ComposerDocument) => {
+        documentRef.current = nextDocument;
+        if (!applyingHistoryRef.current && historyIndexRef.current >= 0) {
+            historyIndexRef.current = -1;
+            historyDraftRef.current = null;
+        }
+        setDocument(nextDocument);
+    };
+
+    const moveHistory = (direction: "up" | "down"): boolean => {
+        const entries = app.promptHistory;
+        if (entries.length === 0) {
+            return false;
+        }
+        if (historyIndexRef.current < 0) {
+            if (direction === "down") {
+                return false;
+            }
+            historyDraftRef.current = documentRef.current;
+            const nextIndex = entries.length - 1;
+            historyIndexRef.current = nextIndex;
+            applyDocument(documentFromSerialized(entries[nextIndex], skills));
+            return true;
+        }
+
+        const nextIndex = historyIndexRef.current + (direction === "up" ? -1 : 1);
+        if (nextIndex < 0) {
+            return true;
+        }
+        if (nextIndex >= entries.length) {
+            const draft = historyDraftRef.current ?? emptyDocument();
+            historyIndexRef.current = -1;
+            historyDraftRef.current = null;
+            applyDocument(draft);
+            return true;
+        }
+        historyIndexRef.current = nextIndex;
+        applyDocument(documentFromSerialized(entries[nextIndex], skills));
+        return true;
+    };
 
     const { palette, height: paletteHeight, tab } = useCommandPalette(
         renderDocument(document),
@@ -159,7 +234,7 @@ function ChatView() {
         inputRef.current?.insertSkill(start, end, skill);
     };
 
-    const handleSubmit = (submitted: ComposerDocument) => {
+    const handleSubmit = async (submitted: ComposerDocument) => {
         if (palette.mode === "skills") {
             const skill = palette.matches[palette.highlight];
             if (skill) {
@@ -171,92 +246,105 @@ function ChatView() {
         if (!trimmed) {
             return;
         }
-        setDocument(emptyDocument());
-        setCursorOffset(0);
-        if (trimmed.startsWith("/")) {
-            const tokens = parseCommandTokens(trimmed);
-            const cmd = (tokens[0] ?? "").toLowerCase();
-            const arg = tokens.slice(1).join(" ").trim();
-            switch (cmd) {
-                case "/exit":
-                case "/quit":
-                    exit();
-                    return;
-                case "/help":
-                    app.setOverlay("help");
-                    return;
-                case "/model":
-                    if (arg) {
-                        void switchModelByRef(arg);
-                    } else {
-                        app.setOverlay("model-select");
-                    }
-                    return;
-                case "/new":
-                    void app.newSession();
-                    return;
-                case "/provider":
-                    app.setOverlay("provider");
-                    return;
-                case "/mcp":
-                    app.setOverlay("mcp");
-                    return;
-                case "/resume":
-                    app.setOverlay("session-select");
-                    return;
-                case "/effort": {
-                    const a = arg.toLowerCase();
-                    if (!a) {
-                        if (app.thinkingEnabled) {
-                            const lvl = app.thinkingLevel || "on";
-                            app.setToast(`effort: ${lvl}${app.thinkingLevel ? ` (${app.thinkingLevel})` : ""}`);
-                        } else {
-                            app.setToast("effort: off");
-                        }
-                    } else if (a === "off") {
-                        app.setThinking(false, "");
-                    } else if (a === "on") {
-                        app.setThinking(true, "");
-                    } else if (["low", "medium", "high", "xhigh", "max"].includes(a)) {
-                        app.setThinking(true, a);
-                    } else {
-                        app.notify(`invalid effort: ${a}`, true);
-                    }
-                    return;
-                }
-                case "/status":
-                    app.setOverlay("status");
-                    return;
-                case "/compact":
-                    void chat.compactSession();
-                    return;
-                case "/cwd": {
-                    if (!arg) {
-                        app.setToast(`CWD: ${app.session?.cwd ?? process.cwd()}`);
-                    } else if (arg === "clear") {
-                        void app.setCwd(null);
-                    } else {
-                        let resolved = arg;
-                        if (resolved.startsWith("~")) {
-                            const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-                            if (home) {
-                                resolved = home + resolved.slice(1);
-                            }
-                        }
-                        if (resolved.includes("..")) {
-                            app.setToast("cwd: path traversal (..) is not allowed", true);
-                        } else {
-                            void app.setCwd(resolved);
-                        }
-                    }
-                    return;
-                }
-                default:
-                    app.notify(`unknown command: ${cmd}`, true);
-            }
+        if (trimmed === "?") {
+            app.setOverlay("help");
             return;
         }
-        void chat.sendMessage(trimmed);
+        if (submittingInputRef.current) {
+            return;
+        }
+        submittingInputRef.current = true;
+        try {
+            if (!(await app.recordInput(trimmed))) {
+                return;
+            }
+            applyDocument(emptyDocument());
+            historyIndexRef.current = -1;
+            historyDraftRef.current = null;
+            if (trimmed.startsWith("/")) {
+                const tokens = parseCommandTokens(trimmed);
+                const cmd = (tokens[0] ?? "").toLowerCase();
+                const arg = tokens.slice(1).join(" ").trim();
+                switch (cmd) {
+                    case "/exit":
+                    case "/quit":
+                        exit();
+                        return;
+                    case "/model":
+                        if (arg) {
+                            void switchModelByRef(arg);
+                        } else {
+                            app.setOverlay("model-select");
+                        }
+                        return;
+                    case "/new":
+                        void app.newSession();
+                        return;
+                    case "/provider":
+                        app.setOverlay("provider");
+                        return;
+                    case "/mcp":
+                        app.setOverlay("mcp");
+                        return;
+                    case "/resume":
+                        app.setOverlay("session-select");
+                        return;
+                    case "/effort": {
+                        const a = arg.toLowerCase();
+                        if (!a) {
+                            if (app.thinkingEnabled) {
+                                const lvl = app.thinkingLevel || "on";
+                                app.setToast(`effort: ${lvl}${app.thinkingLevel ? ` (${app.thinkingLevel})` : ""}`);
+                            } else {
+                                app.setToast("effort: off");
+                            }
+                        } else if (a === "off") {
+                            app.setThinking(false, "");
+                        } else if (a === "on") {
+                            app.setThinking(true, "");
+                        } else if (["low", "medium", "high", "xhigh", "max"].includes(a)) {
+                            app.setThinking(true, a);
+                        } else {
+                            app.notify(`invalid effort: ${a}`, true);
+                        }
+                        return;
+                    }
+                    case "/status":
+                        app.setOverlay("status");
+                        return;
+                    case "/compact":
+                        void chat.compactSession();
+                        return;
+                    case "/cwd": {
+                        if (!arg) {
+                            app.setToast(`CWD: ${app.session?.cwd ?? process.cwd()}`);
+                        } else if (arg === "clear") {
+                            void app.setCwd(null);
+                        } else {
+                            let resolved = arg;
+                            if (resolved.startsWith("~")) {
+                                const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+                                if (home) {
+                                    resolved = home + resolved.slice(1);
+                                }
+                            }
+                            if (resolved.includes("..")) {
+                                app.setToast("cwd: path traversal (..) is not allowed", true);
+                            } else {
+                                void app.setCwd(resolved);
+                            }
+                        }
+                        return;
+                    }
+                    default:
+                        app.notify(`unknown command: ${cmd}`, true);
+                }
+                return;
+            }
+            void chat.sendMessage(trimmed);
+        } finally {
+            submittingInputRef.current = false;
+        }
     };
 
     const handleTab = (): boolean => {
@@ -273,7 +361,7 @@ function ChatView() {
         return false;
     };
 
-    // Full-screen overlays
+    // Session selection keeps its own full-screen flow; other overlays float over the chat.
     if (!approval && app.overlay === "session-select") {
         return (
             <SessionSelectOverlay
@@ -282,10 +370,6 @@ function ChatView() {
             />
         );
     }
-    if (!approval && app.overlay === "help") {
-        return <HelpOverlay onClose={() => app.setOverlay(null)} />;
-    }
-
     return (
         <Box flexDirection="column" height={rows}>
             <MessageList
@@ -310,9 +394,10 @@ function ChatView() {
                     ref={inputRef}
                     document={document}
                     skills={skills}
-                    onChange={setDocument}
+                    onChange={handleDocumentChange}
                     onSubmit={handleSubmit}
                     onCursorChange={setCursorOffset}
+                    onHistoryMove={moveHistory}
                     onTab={handleTab}
                     streaming={busy}
                     phrase={approval ? "Waiting for your approval…" : chat.phrase}
@@ -360,6 +445,8 @@ function OverlayPanel({
         <StatusOverlay />
     ) : kind === "mcp" ? (
         <McpOverlay />
+    ) : kind === "help" ? (
+        <HelpPanel onClose={() => useAppStore.getState().setOverlay(null)} />
     ) : null;
 }
 
@@ -385,31 +472,5 @@ function SessionSelectOverlay({
                 }));
             }}
         />
-    );
-}
-
-function HelpOverlay({ onClose }: { onClose: () => void }) {
-    useInput((_input, key) => {
-        if (key.escape) {
-            onClose();
-        }
-    });
-    return (
-        <Box flexDirection="column" paddingX={2} paddingY={1}>
-            <Box marginBottom={1}>
-                <Text color={theme.accent} bold>
-                    Commands
-                </Text>
-                <Text dimColor> · Esc to close</Text>
-            </Box>
-            {commands.map((c) => (
-                <Box key={c.name} gap={1}>
-                    <Text color={theme.accent} bold>
-                        {c.name}
-                    </Text>
-                    <Text color={theme.textMuted}>— {c.description}</Text>
-                </Box>
-            ))}
-        </Box>
     );
 }

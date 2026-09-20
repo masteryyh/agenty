@@ -7,5 +7,6 @@ describe("command registry", () => {
         expect(findCommand("/effort")?.usage).toBe("/effort [off|on|low|medium|high|xhigh|max]");
         expect(findCommand("/think")).toBeUndefined();
         expect(findCommand("/permissions")).toBeUndefined();
+        expect(findCommand("/help")).toBeUndefined();
     });
 });

@@ -19,6 +19,11 @@ import type {
 import type { CliOptions } from "../config";
 import { loadOptions, parseThinking } from "../config";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
+import {
+    appendInputHistory,
+    loadInputHistory,
+    resolveInputHistoryPath,
+} from "../history/inputHistory";
 import { startLocalCore } from "../localCore";
 
 export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
@@ -80,6 +85,9 @@ interface AppState {
     chatError: string | null;
     tokenConsumed: number;
     phrase: string | null;
+    promptHistory: string[];
+    inputHistoryPath: string | null;
+    inputHistoryWarning: string | null;
     activeSessionId: string | null;
     pendingApproval: PendingToolApproval | null;
     resolveToolApproval: (decision: ToolApprovalResolution["decision"]) => Promise<void>;
@@ -88,6 +96,7 @@ interface AppState {
     finishWizard: () => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
     compactSession: () => Promise<void>;
+    recordInput: (text: string) => Promise<boolean>;
     abort: () => void;
     reset: () => void;
     newSession: () => Promise<void>;
@@ -103,6 +112,8 @@ interface AppState {
 }
 
 let idCounter = 0;
+let inputHistoryWriteQueue: Promise<void> = Promise.resolve();
+
 function nextId(): string {
     idCounter += 1;
     return `msg-${idCounter}`;
@@ -621,6 +632,11 @@ export const useAppStore = create<AppState>((set, get) => {
             thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
             initError: null,
         });
+        const inputHistoryWarning = get().inputHistoryWarning;
+        if (inputHistoryWarning) {
+            setToast(inputHistoryWarning, true);
+            set({ inputHistoryWarning: null });
+        }
         try {
             const discovered = await client.listSkills();
             set({ skills: discovered.skills, skillDiagnostics: discovered.diagnostics });
@@ -655,6 +671,9 @@ export const useAppStore = create<AppState>((set, get) => {
         chatError: null,
         tokenConsumed: 0,
         phrase: null,
+        promptHistory: [],
+        inputHistoryPath: null,
+        inputHistoryWarning: null,
         activeSessionId: null,
         pendingApproval: null,
         _localCoreStop: null,
@@ -662,6 +681,15 @@ export const useAppStore = create<AppState>((set, get) => {
         init: async () => {
             try {
                 const options = get().opts;
+                const inputHistoryPath = resolveInputHistoryPath(options.dataDir);
+                const loadedInputHistory = await loadInputHistory(inputHistoryPath);
+                set({
+                    inputHistoryPath,
+                    promptHistory: loadedInputHistory.entries,
+                    inputHistoryWarning: loadedInputHistory.invalidLines > 0
+                        ? `${loadedInputHistory.invalidLines} invalid input history line(s) were skipped.`
+                        : null,
+                });
                 const local = await startLocalCore({ dataDir: options.dataDir });
                 const client = new AgentyClient(local.rpc);
                 set({ client, _localCoreStop: local.stop });
@@ -685,6 +713,25 @@ export const useAppStore = create<AppState>((set, get) => {
                 await prepareAndReady(client, opts);
             } catch (error) {
                 set({ phase: "error", initError: (error as Error).message });
+            }
+        },
+
+        recordInput: async (text) => {
+            const inputHistoryPath = get().inputHistoryPath;
+            if (!inputHistoryPath) {
+                setToast("Input history is not ready.", true);
+                return false;
+            }
+
+            const write = inputHistoryWriteQueue.then(() => appendInputHistory(inputHistoryPath, text));
+            inputHistoryWriteQueue = write.catch(() => undefined);
+            try {
+                await write;
+                set((state) => ({ promptHistory: [...state.promptHistory, text] }));
+                return true;
+            } catch (error) {
+                setToast((error as Error).message, true);
+                return false;
             }
         },
 
