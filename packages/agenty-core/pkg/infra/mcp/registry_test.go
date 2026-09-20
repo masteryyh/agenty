@@ -21,8 +21,8 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 )
 
 func TestRegistryLoadsSeparateServerFiles(t *testing.T) {
@@ -40,7 +40,7 @@ func TestRegistryLoadsSeparateServerFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRegistryLoadsSeparateServerFiles(t *testing.T) {
 func TestRegistryCRUDPersistsOneFilePerServer(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "mcp")
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestRegistryCRUDPersistsOneFilePerServer(t *testing.T) {
 func TestRegistryServerNamesAreCaseInsensitive(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "mcp")
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestRegistryServerNamesAreCaseInsensitive(t *testing.T) {
 func TestRegistryPersistsStdioArgumentsAsArray(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "mcp")
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestRegistryStartSchedulesConnectionsAsynchronously(t *testing.T) {
 		Enabled: true,
 		URL:     "http://127.0.0.1:1/mcp",
 	})
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{ConnectTimeout: 10 * time.Second})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{ConnectTimeout: 10 * time.Second})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestRegistryHTTPConnectSkipsSubscriptionListener(t *testing.T) {
 		Enabled: true,
 		URL:     httpServer.URL,
 	})
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{
 		ConnectTimeout: 2 * time.Second,
 		ToolTimeout:    2 * time.Second,
 	})
@@ -313,6 +313,68 @@ func TestNewRemoteToolUsesNamespacedDefinition(t *testing.T) {
 	if got := tool.remoteName; got != "search" {
 		t.Fatalf("remoteName = %q", got)
 	}
+	if !tool.Definition().Destructive {
+		t.Fatal("missing annotations should classify the tool as destructive")
+	}
+}
+
+func TestNewRemoteToolMapsReadOnlyAnnotation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		annotations     *sdkmcp.ToolAnnotations
+		wantDestructive bool
+	}{
+		{name: "missing annotations", wantDestructive: true},
+		{
+			name: "read only",
+			annotations: &sdkmcp.ToolAnnotations{
+				ReadOnlyHint: true,
+			},
+			wantDestructive: false,
+		},
+		{
+			name: "read only takes precedence",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: new(true),
+				ReadOnlyHint:    true,
+			},
+			wantDestructive: false,
+		},
+		{
+			name: "additive hint still permits writes",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: new(false),
+			},
+			wantDestructive: true,
+		},
+		{
+			name: "destructive hint",
+			annotations: &sdkmcp.ToolAnnotations{
+				DestructiveHint: new(true),
+			},
+			wantDestructive: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			tool, err := newRemoteTool(nil, &sdkmcp.Tool{
+				Name:        "search",
+				Annotations: test.annotations,
+				InputSchema: map[string]any{"type": "object"},
+			}, "github", time.Second)
+			if err != nil {
+				t.Fatalf("newRemoteTool: %v", err)
+			}
+			if got := tool.Definition().Destructive; got != test.wantDestructive {
+				t.Fatalf("destructive = %t, want %t", got, test.wantDestructive)
+			}
+		})
+	}
 }
 
 func TestNewRemoteToolNormalizesAndTruncatesProviderName(t *testing.T) {
@@ -361,7 +423,7 @@ func TestRemoteToolNameCollisionsAreRejectedBeforeInstall(t *testing.T) {
 }
 
 func TestInstallRejectsRemoteToolNameCollisionsBeforeMutation(t *testing.T) {
-	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -411,7 +473,14 @@ func TestInstallRejectsRemoteToolNameCollisionsBeforeMutation(t *testing.T) {
 	if err := registry.install("remote", 0, nil, nil, []*remoteTool{first, second}, first.lifecycle); err == nil {
 		t.Fatal("install accepted a normalized collision")
 	}
-	if _, ok := registry.tools.Get(existing.exposedName); !ok {
+	foundExisting := false
+	for _, definition := range registry.SnapshotToolRuntime().Definitions() {
+		if definition.Name == existing.exposedName {
+			foundExisting = true
+			break
+		}
+	}
+	if !foundExisting {
 		t.Fatal("collision removed the previously installed tool")
 	}
 	if server, ok := registry.Get(t.Context(), "remote"); !ok || server.ToolCount != 1 {
@@ -436,7 +505,7 @@ func TestRegistryIgnoresNonCanonicalConfigSuffix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -507,7 +576,7 @@ func TestMCPHTTPClientAllowsSameOriginRedirectWithHeaders(t *testing.T) {
 func TestRegistryRefreshKeepsToolSnapshotActive(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "mcp")
-	registry, err := NewRegistry(context.Background(), dir, agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), dir, infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -558,7 +627,7 @@ func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
 	}))
 	defer tokenServer.Close()
 
-	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -608,7 +677,7 @@ func TestOAuthRefreshPersistsUpdatedToken(t *testing.T) {
 }
 
 func TestOAuthSessionTargetBinding(t *testing.T) {
-	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+	registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), infratools.NewRegistry(), Options{})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -673,7 +742,7 @@ func TestStaleOAuthRefreshCannotRestoreCredentials(t *testing.T) {
 
 	for _, mutation := range mutations {
 		t.Run(mutation.name, func(t *testing.T) {
-			registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), agentloop.NewRegistry(), Options{})
+			registry, err := NewRegistry(context.Background(), filepath.Join(t.TempDir(), "mcp"), infratools.NewRegistry(), Options{})
 			if err != nil {
 				t.Fatalf("NewRegistry: %v", err)
 			}

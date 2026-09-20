@@ -1,9 +1,10 @@
 import { forwardRef } from "react";
 
-import type { SkillDto } from "../api/types";
+import type { PermissionMode, SkillDto } from "../api/types";
 import type { ComposerDocument } from "../composer/document";
 import { effortColor, theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
+import { useWindowSize } from "../hooks/useWindowSize";
 import type { ToastMsg } from "../state/store";
 import { StructuredTextInput, type StructuredTextInputHandle } from "./StructuredTextInput";
 import { Box, Spinner, Text } from "./ui";
@@ -25,6 +26,7 @@ interface InputBoxProps {
     onChange: (document: ComposerDocument) => void;
     onSubmit: (document: ComposerDocument) => void;
     onCursorChange: (offset: number) => void;
+    onHistoryMove: (direction: "up" | "down") => boolean;
     onTab: () => boolean;
     streaming: boolean;
     phrase: string | null;
@@ -32,6 +34,7 @@ interface InputBoxProps {
     cwd: string;
     contextWindow: number;
     tokenConsumed: number;
+    permissionMode: PermissionMode;
     thinkingLevel: string;
     reasoningActive: boolean;
     abort: () => void;
@@ -45,6 +48,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     onChange,
     onSubmit,
     onCursorChange,
+    onHistoryMove,
     onTab,
     streaming,
     phrase,
@@ -52,12 +56,19 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     cwd,
     contextWindow,
     tokenConsumed,
+    permissionMode,
     thinkingLevel,
     reasoningActive,
     abort,
     toast,
     active = true,
 }: InputBoxProps, ref) => {
+    const { columns } = useWindowSize();
+    const shortcuts = columns >= 100
+        ? "? Help · Shift+Tab Permissions · ↑↓ History · Tab Complete · PgUp/PgDn Scroll"
+        : columns >= 60
+            ? "? Help · Shift+Tab Mode · ↑↓ History · PgUp/PgDn Scroll"
+            : "? Help · Shift+Tab · ↑↓ History";
 
     useInput(
         (_input, key, event) => {
@@ -67,9 +78,17 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                 }
                 return;
             }
+            if (key.upArrow || key.downArrow) {
+                event.preventDefault();
+                event.stopPropagation();
+                onHistoryMove(key.upArrow ? "up" : "down");
+                return;
+            }
             if (key.tab) {
                 event.preventDefault();
-                onTab();
+                if (!key.shift) {
+                    onTab();
+                }
             }
         },
         { isActive: active },
@@ -94,9 +113,10 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                 </Box>
                 {toast ? (
                     <Text color={toast.error ? theme.danger : theme.success}>{toast.text}</Text>
-                ) : (
+                ) : <>
                     <Text color={theme.accent}>{` ▸ ${modelName}`}</Text>
-                )}
+                    {thinkingLevel ? <Text color={effortColor(thinkingLevel)}>{` (${thinkingLevel})`}</Text> : null}
+                </>}
             </Box>
 
             <Box flexDirection="row" height={1} overflow="hidden">
@@ -133,13 +153,20 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     <Text color={theme.textFaint} wrap="truncate-start">
                         {abbreviateCwd(cwd)}
                     </Text>
-                    {thinkingLevel ? <Text> </Text> : null}
-                    {thinkingLevel ? (
-                        <Text color={effortColor(thinkingLevel)}>{`thinking: ${thinkingLevel}`}</Text>
+                    {permissionMode !== "ask" ? (
+                        <>
+                            <Text> </Text>
+                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>{`${permissionMode} mode`}</Text>
+                        </>
                     ) : null}
                 </Box>
                 <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden" />
                 <Text color={theme.textFaint}>{`context: ${contextWindow}/${tokenConsumed}`}</Text>
+            </Box>
+            <Box height={1} overflow="hidden">
+                <Text color={theme.textFaint} wrap="truncate">
+                    {shortcuts}
+                </Text>
             </Box>
         </Box>
     );

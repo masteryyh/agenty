@@ -10,6 +10,7 @@ type SessionMetadata struct {
 	Provider        string
 	Timezone        string
 	ReasoningEffort string
+	PermissionMode  PermissionMode
 }
 
 type MetadataUpdate struct {
@@ -19,24 +20,28 @@ type MetadataUpdate struct {
 	Provider        *string  `xml:"provider,omitempty"`
 	Timezone        *string  `xml:"timezone,omitempty"`
 	ReasoningEffort *string  `xml:"reasoning-effort,omitempty"`
+	PermissionMode  *string  `xml:"permission-mode,omitempty"`
 }
 
 func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
 	update := MetadataUpdate{}
 	if previous == nil || metadata.Cwd != previous.Cwd {
-		update.Cwd = metadataStringPointer(metadata.Cwd)
+		update.Cwd = new(metadata.Cwd)
 	}
 	if previous == nil || metadata.Model != previous.Model {
-		update.Model = metadataStringPointer(metadata.Model)
+		update.Model = new(metadata.Model)
 	}
 	if previous == nil || metadata.Provider != previous.Provider {
-		update.Provider = metadataStringPointer(metadata.Provider)
+		update.Provider = new(metadata.Provider)
 	}
 	if previous == nil || metadata.Timezone != previous.Timezone {
-		update.Timezone = metadataStringPointer(metadata.Timezone)
+		update.Timezone = new(metadata.Timezone)
 	}
 	if previous == nil || metadata.ReasoningEffort != previous.ReasoningEffort {
-		update.ReasoningEffort = metadataStringPointer(metadata.ReasoningEffort)
+		update.ReasoningEffort = new(metadata.ReasoningEffort)
+	}
+	if metadata.PermissionMode != "" && (previous == nil || metadata.PermissionMode != previous.PermissionMode) {
+		update.PermissionMode = new(string(metadata.PermissionMode))
 	}
 
 	return update
@@ -47,7 +52,8 @@ func (update MetadataUpdate) Empty() bool {
 		update.Model == nil &&
 		update.Provider == nil &&
 		update.Timezone == nil &&
-		update.ReasoningEffort == nil
+		update.ReasoningEffort == nil &&
+		update.PermissionMode == nil
 }
 
 func (update MetadataUpdate) XML() (string, error) {
@@ -59,12 +65,18 @@ func (update MetadataUpdate) XML() (string, error) {
 }
 
 func (metadata SessionMetadata) XML() (string, error) {
+	var permissionMode *string
+	if metadata.PermissionMode != "" {
+		permissionMode = new(string(metadata.PermissionMode))
+	}
+
 	return MetadataUpdate{
-		Cwd:             metadataStringPointer(metadata.Cwd),
-		Model:           metadataStringPointer(metadata.Model),
-		Provider:        metadataStringPointer(metadata.Provider),
-		Timezone:        metadataStringPointer(metadata.Timezone),
-		ReasoningEffort: metadataStringPointer(metadata.ReasoningEffort),
+		Cwd:             new(metadata.Cwd),
+		Model:           new(metadata.Model),
+		Provider:        new(metadata.Provider),
+		Timezone:        new(metadata.Timezone),
+		ReasoningEffort: new(metadata.ReasoningEffort),
+		PermissionMode:  permissionMode,
 	}.XML()
 }
 
@@ -101,6 +113,9 @@ func (s *Session) applyMessageMetadata(message Message) {
 	if update.ReasoningEffort != nil {
 		s.metadata.ReasoningEffort = *update.ReasoningEffort
 	}
+	if update.PermissionMode != nil {
+		s.metadata.PermissionMode = PermissionMode(*update.PermissionMode).Normalized()
+	}
 }
 
 func parseMetadataMessage(message Message) (MetadataUpdate, bool) {
@@ -118,8 +133,4 @@ func parseMetadataMessage(message Message) (MetadataUpdate, bool) {
 		return MetadataUpdate{}, false
 	}
 	return update, true
-}
-
-func metadataStringPointer(value string) *string {
-	return &value
 }

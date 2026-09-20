@@ -3,6 +3,7 @@ package conversation
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,13 +26,15 @@ type Session struct {
 	CurrentModel           *shared.ModelRef       `json:"currentModel,omitempty"`
 	ContextWindow          int64                  `json:"contextWindow"`
 	CurrentReasoningEffort shared.ReasoningEffort `json:"currentReasoningEffort,omitempty"`
+	PermissionMode         PermissionMode         `json:"permissionMode"`
 	Rounds                 []Round                `json:"rounds"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	UpdatedAt              time.Time              `json:"updatedAt"`
 
-	pending  []shared.Event
-	metadata *SessionMetadata
-	context  []Message
+	pending      []shared.Event
+	metadata     *SessionMetadata
+	context      []Message
+	permissionMu *sync.RWMutex
 }
 
 type CompactionInput struct {
@@ -44,16 +47,64 @@ type CompactionInput struct {
 }
 
 func StartSession(model shared.ModelRef, contextWindow int64, effort shared.ReasoningEffort, cwd *string) *Session {
+	return StartSessionWithPermission(model, contextWindow, effort, cwd, PermissionAsk)
+}
+
+func StartSessionWithPermission(
+	model shared.ModelRef,
+	contextWindow int64,
+	effort shared.ReasoningEffort,
+	cwd *string,
+	permissionMode PermissionMode,
+) *Session {
+	if !permissionMode.Valid() {
+		permissionMode = PermissionAsk
+	}
 	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
 		SessionID:       shared.NewID(),
 		Model:           model,
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
+		PermissionMode:  permissionMode,
 		Cwd:             cloneString(cwd),
 		At:              now(),
 	})
 	return s
+}
+
+func (s *Session) CurrentPermissionMode() PermissionMode {
+	if s == nil {
+		return PermissionAsk
+	}
+	mu := s.permissionMutex()
+	mu.RLock()
+	defer mu.RUnlock()
+
+	return s.PermissionMode.Normalized()
+}
+
+func (s *Session) SetPermissionMode(mode PermissionMode, roundID uuid.UUID) bool {
+	if s == nil || !mode.Valid() {
+		return false
+	}
+	mu := s.permissionMutex()
+	mu.Lock()
+	previous := s.PermissionMode.Normalized()
+	if previous == mode {
+		mu.Unlock()
+		return false
+	}
+	mu.Unlock()
+
+	s.record(SessionPermissionModeChanged{
+		SessionID:      s.ID,
+		RoundID:        roundID,
+		PreviousMode:   previous,
+		PermissionMode: mode,
+		At:             now(),
+	})
+	return true
 }
 
 func (s *Session) SetModel(model shared.ModelRef, contextWindow int64) {
@@ -143,7 +194,7 @@ func (s *Session) AppendUserMessage(roundID uuid.UUID, content Content) (Message
 }
 
 func (s *Session) AppendHiddenUserMessage(roundID uuid.UUID, content Content) (Message, error) {
-	return s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	return s.AppendHiddenMessage(roundID, RoleUser, content, nil)
 }
 
 func (s *Session) AppendHiddenUserMessageWithMetadata(
@@ -151,9 +202,21 @@ func (s *Session) AppendHiddenUserMessageWithMetadata(
 	content Content,
 	metadata shared.Metadata,
 ) (Message, error) {
-	message, err := s.appendMessage(roundID, RoleUser, content, nil, nil, MessageHidden)
+	return s.AppendHiddenMessage(roundID, RoleUser, content, metadata)
+}
+
+func (s *Session) AppendHiddenMessage(
+	roundID uuid.UUID,
+	role Role,
+	content Content,
+	metadata shared.Metadata,
+) (Message, error) {
+	message, err := s.appendMessage(roundID, role, content, nil, nil, MessageHidden)
 	if err != nil {
 		return Message{}, err
+	}
+	if metadata == nil {
+		return message, nil
 	}
 	message.Metadata = metadata
 	lastEvent := s.pending[len(s.pending)-1]
@@ -250,7 +313,12 @@ func (s *Session) ClearPending() {
 }
 
 func (s *Session) VisibleCopy() *Session {
+	mu := s.permissionMutex()
+	mu.RLock()
 	copy := *s
+	copy.PermissionMode = s.PermissionMode.Normalized()
+	mu.RUnlock()
+	copy.permissionMu = &sync.RWMutex{}
 	copy.Rounds = make([]Round, len(s.Rounds))
 	if s.metadata != nil {
 		metadata := *s.metadata
@@ -271,6 +339,40 @@ func (s *Session) VisibleCopy() *Session {
 	return &copy
 }
 
+// Snapshot returns a detached copy suitable for read-only work that may run
+// concurrently with session execution, such as permission review context
+// construction.
+func (s *Session) Snapshot() *Session {
+	if s == nil {
+		return nil
+	}
+	mu := s.permissionMutex()
+	mu.RLock()
+	copy := *s
+	copy.PermissionMode = s.PermissionMode.Normalized()
+	mu.RUnlock()
+	copy.permissionMu = &sync.RWMutex{}
+	copy.Title = cloneString(s.Title)
+	copy.Cwd = cloneString(s.Cwd)
+	if s.CurrentModel != nil {
+		model := *s.CurrentModel
+		copy.CurrentModel = &model
+	}
+	copy.Rounds = make([]Round, len(s.Rounds))
+	for index, round := range s.Rounds {
+		copy.Rounds[index] = round
+		copy.Rounds[index].Cwd = cloneString(round.Cwd)
+		copy.Rounds[index].Messages = cloneMessages(round.Messages)
+	}
+	if s.metadata != nil {
+		metadata := *s.metadata
+		copy.metadata = &metadata
+	}
+	copy.pending = append([]shared.Event(nil), s.pending...)
+	copy.context = cloneMessages(s.context)
+	return &copy
+}
+
 func (s *Session) ContextMessages() []Message {
 	messages := make([]Message, len(s.context))
 	copy(messages, s.context)
@@ -278,7 +380,7 @@ func (s *Session) ContextMessages() []Message {
 }
 
 func ReplaySession(events []shared.Event) *Session {
-	s := &Session{Rounds: make([]Round, 0)}
+	s := &Session{Rounds: make([]Round, 0), permissionMu: &sync.RWMutex{}}
 	for _, e := range events {
 		s.apply(e)
 	}
@@ -297,6 +399,10 @@ func (s *Session) apply(e shared.Event) {
 		s.CurrentModel = &ev.Model
 		s.ContextWindow = ev.ContextWindow
 		s.CurrentReasoningEffort = ev.ReasoningEffort
+		mu := s.permissionMutex()
+		mu.Lock()
+		s.PermissionMode = ev.PermissionMode.Normalized()
+		mu.Unlock()
 		s.Cwd = cloneString(ev.Cwd)
 		s.Rounds = make([]Round, 0)
 		s.context = make([]Message, 0)
@@ -316,6 +422,14 @@ func (s *Session) apply(e shared.Event) {
 	case SessionCwdSet:
 		s.Cwd = cloneString(ev.Cwd)
 		s.updateMetadataCwd(ev.Cwd)
+		s.refreshCompactionMetadata()
+		s.UpdatedAt = ev.At
+	case SessionPermissionModeChanged:
+		mu := s.permissionMutex()
+		mu.Lock()
+		s.PermissionMode = ev.PermissionMode.Normalized()
+		mu.Unlock()
+		s.updateMetadataPermissionMode(ev.PermissionMode)
 		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case RoundStarted:
@@ -360,6 +474,13 @@ func (s *Session) apply(e shared.Event) {
 		s.Title = &title
 		s.UpdatedAt = ev.At
 	}
+}
+
+func (s *Session) permissionMutex() *sync.RWMutex {
+	if s.permissionMu == nil {
+		s.permissionMu = &sync.RWMutex{}
+	}
+	return s.permissionMu
 }
 
 func cloneString(value *string) *string {

@@ -30,6 +30,13 @@ type Provider struct {
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
+// SupportsDeveloperMessages reports whether the provider protocol accepts a
+// developer-role conversation message. OpenAI Chat and Responses compatible
+// APIs support the role; the Anthropic and Gemini adapters do not expose it.
+func (p Provider) SupportsDeveloperMessages() bool {
+	return p.Type == APIOpenAI || p.Type == APIOpenAICompletions
+}
+
 func NewProvider(code, name string, apiType APIType) (*Provider, error) {
 	s, err := shared.NewCode(code)
 	if err != nil {

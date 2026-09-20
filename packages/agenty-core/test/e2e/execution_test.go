@@ -34,7 +34,7 @@ func TestSessionMetadataIsPersistedButHiddenFromClients(t *testing.T) {
 		"metadata",
 	)
 	requireNoError(t, err)
-	_, err = client.SetSessionCwd(ctx, session.ID, stringPointer("/workspace/metadata"))
+	_, err = client.SetSessionCwd(ctx, session.ID, new("/workspace/metadata"))
 	requireNoError(t, err)
 	started, err := client.StartSession(ctx, session.ID, []ContentInput{{
 		Type: "text",

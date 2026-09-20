@@ -1,4 +1,5 @@
 export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type PermissionMode = "ask" | "auto" | "yolo";
 export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
     "low",
     "medium",
@@ -197,7 +198,7 @@ export type ContentBlock =
     | { type: "tool_result"; toolUseId: string; content: ContentBlock[]; isError: boolean }
     | { type: "image"; mediaType: string; data: string };
 
-export type MessageRole = "user" | "assistant" | "system";
+export type MessageRole = "user" | "assistant" | "system" | "developer";
 
 export interface TokenUsage {
     input: number;
@@ -240,6 +241,7 @@ export interface ChatSessionDto {
     currentModel?: ModelRef;
     contextWindow: number;
     currentReasoningEffort?: ReasoningEffort;
+    permissionMode?: PermissionMode;
     rounds: RoundDto[];
     createdAt: string;
     updatedAt: string;
@@ -265,8 +267,27 @@ export interface StreamEvent {
     toolInput?: unknown;
 }
 
+export interface ToolApprovalRequest {
+    message?: string;
+    approvalId: string;
+    toolCall: { type: "tool_use"; id: string; name: string; input: unknown };
+    cwd: string;
+    preview: { title: string; detail: string };
+}
+
+export interface ToolApprovalResolution {
+    sessionId: string;
+    roundId: string;
+    approvalId: string;
+    decision: "allow" | "deny";
+}
+
+export interface ToolReviewEvent {
+    toolUseId: string;
+}
+
 export interface SessionEvent {
-    type: "round_started" | "message_appended" | "model_stream" | "round_ended";
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "tool_review_started" | "tool_review_resolved" | "permission_mode_changed";
     sessionId: string;
     roundId: string;
     sequence: number;
@@ -276,6 +297,11 @@ export interface SessionEvent {
     status?: RoundStatus;
     usage?: TokenUsage;
     error?: string;
+    approval?: ToolApprovalRequest;
+    resolution?: ToolApprovalResolution;
+    review?: ToolReviewEvent;
+    permissionMode?: PermissionMode;
+    previousPermissionMode?: PermissionMode;
 }
 
 export interface CompactionEvent {

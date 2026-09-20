@@ -9,19 +9,23 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
-	"github.com/masteryyh/agenty-core/pkg/agentloop/builtin"
 	"github.com/masteryyh/agenty-core/pkg/application"
-	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
+	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
-	"github.com/masteryyh/agenty-core/pkg/infra/llm"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
-	mcpregistry "github.com/masteryyh/agenty-core/pkg/infra/mcp"
+	"github.com/masteryyh/agenty-core/pkg/infra/mcp"
+	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
+	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
+	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc/adapter"
+	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	"github.com/masteryyh/agenty-core/pkg/infra/skill"
+	"github.com/masteryyh/agenty-core/pkg/infra/storage"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
+	"github.com/masteryyh/agenty-core/pkg/infra/tools/builtin"
 	"github.com/masteryyh/agenty-core/pkg/utils/signal"
 )
 
@@ -83,7 +87,7 @@ func run() (exitCode int) {
 	}()
 
 	slog.InfoContext(ctx, "agenty-core started", "dataDir", dataDir)
-	toolRegistry := agentloop.NewRegistry()
+	toolRegistry := infratools.NewRegistry()
 	if err := builtin.RegisterAll(toolRegistry); err != nil {
 		slog.ErrorContext(ctx, "failed to register built-in tools", "error", err)
 		return 1
@@ -91,7 +95,7 @@ func run() (exitCode int) {
 
 	disp := rpc.NewDispatcher()
 	srv := rpc.NewServer(disp, os.Stdin, os.Stdout)
-	mcpRegistry, err := mcpregistry.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcpregistry.Options{
+	mcpRegistry, err := mcp.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcp.Options{
 		Events: func(eventCtx context.Context, event domainmcp.Event) {
 			if err := srv.Notify(eventCtx, "mcp.event", event); err != nil {
 				slog.DebugContext(eventCtx, "failed to publish MCP event", "error", err)
@@ -111,24 +115,49 @@ func run() (exitCode int) {
 			exitCode = 1
 		}
 	}()
-	execution, err := agentloop.NewEngine(ctx, agentloop.Dependencies{
-		Sessions: repos.Conversation,
-		Catalog:  repos.Catalog,
-		Tools:    toolRegistry,
-		NewCaller: func(
-			callerCtx context.Context,
-			provider catalog.Provider,
-			model catalog.Model,
-		) (agentloop.Caller, error) {
-			return llm.NewCaller(callerCtx, provider, model)
-		},
-		Events: func(eventCtx context.Context, event agentloop.SessionEvent) error {
-			return srv.Notify(eventCtx, "session.event", event)
-		},
-		Compactions: func(eventCtx context.Context, event agentloop.CompactionEvent) error {
-			return srv.Notify(eventCtx, "session.compaction", event)
-		},
-		Skills: skillRegistry,
+
+	permission := permission.NewPermissionManager()
+	middlewareManager := inframiddleware.NewManager()
+	if err := middlewareManager.Register(skill.NewMiddleware(skillRegistry)); err != nil {
+		slog.ErrorContext(ctx, "failed to register skill middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(mcp.NewMiddleware(mcpRegistry)); err != nil {
+		slog.ErrorContext(ctx, "failed to register MCP middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(metadata.NewMiddleware()); err != nil {
+		slog.ErrorContext(ctx, "failed to register metadata middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(compaction.NewMiddleware()); err != nil {
+		slog.ErrorContext(ctx, "failed to register compaction middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(storage.NewSessionMiddleware(repos.Conversation)); err != nil {
+		slog.ErrorContext(ctx, "failed to register session storage middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(rpc.NewSessionNotificationMiddleware(srv.Notify)); err != nil {
+		slog.ErrorContext(ctx, "failed to register session notification middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(permission.Middleware()); err != nil {
+		slog.ErrorContext(ctx, "failed to register HITL middleware", "error", err)
+		return 1
+	}
+	middlewareChain, err := middlewareManager.Compile()
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to compile middleware", "error", err)
+		return 1
+	}
+	execution, err := infrasession.NewEngine(ctx, infrasession.Dependencies{
+		Sessions:              repos.Conversation,
+		Catalog:               repos.Catalog,
+		Tools:                 toolRegistry,
+		LoopHooks:             middlewareChain.AgentLoopHooks(),
+		Lifecycle:             middlewareChain.LifecycleHooks(),
+		PermissionModeChanged: permission.PermissionModeChanged,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to initialize execution engine", "error", err)
@@ -157,6 +186,7 @@ func run() (exitCode int) {
 	)
 	adapter.RegisterMCPHandlers(disp, mcpRegistry)
 	adapter.RegisterSkillHandlers(disp, skillRegistry)
+	adapter.RegisterHITLHandlers(disp, permission)
 
 	asm := rpc.NewChunkAssembler(disp)
 	rpc.RegisterChunkHandlers(disp, asm)

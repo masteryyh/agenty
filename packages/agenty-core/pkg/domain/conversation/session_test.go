@@ -47,6 +47,32 @@ func TestSessionEmptyRoundsEncodeAsArray(t *testing.T) {
 	}
 }
 
+func TestSessionPermissionModeChangeIsPersistedAndReplayed(t *testing.T) {
+	session := StartSession(
+		shared.NewModelRef("anthropic", "claude-opus-4"),
+		200_000,
+		shared.ReasoningOff,
+		nil,
+	)
+	if got := session.CurrentPermissionMode(); got != PermissionAsk {
+		t.Fatalf("default permission mode = %q, want ask", got)
+	}
+	if !session.SetPermissionMode(PermissionAuto, uuid.Nil) {
+		t.Fatal("permission mode change was not recorded")
+	}
+	if got := session.CurrentPermissionMode(); got != PermissionAuto {
+		t.Fatalf("permission mode = %q, want auto", got)
+	}
+
+	replayed := ReplaySession(session.PendingEvents())
+	if got := replayed.CurrentPermissionMode(); got != PermissionAuto {
+		t.Fatalf("replayed permission mode = %q, want auto", got)
+	}
+	if len(session.PendingEvents()) != 2 {
+		t.Fatalf("recorded events = %d, want session start and permission change", len(session.PendingEvents()))
+	}
+}
+
 func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	t.Parallel()
 
@@ -357,7 +383,7 @@ func TestSessionCompleteRoundTerminalStatuses(t *testing.T) {
 		errMsg *string
 	}{
 		{name: "completed", status: RoundCompleted},
-		{name: "failed", status: RoundFailed, errMsg: stringPointer("provider unavailable")},
+		{name: "failed", status: RoundFailed, errMsg: new("provider unavailable")},
 		{name: "cancelled", status: RoundCancelled},
 	}
 	for _, tt := range tests {
@@ -426,5 +452,3 @@ func TestSessionClearPending(t *testing.T) {
 		t.Error("ClearPending changed projected session state")
 	}
 }
-
-func stringPointer(value string) *string { return &value }

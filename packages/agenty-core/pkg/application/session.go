@@ -45,11 +45,12 @@ func NewSessionService(repo sessionRepository, options ...SessionServiceOption) 
 }
 
 type SessionCreateInput struct {
-	ProviderCode    string                 `json:"providerCode"`
-	ModelCode       string                 `json:"modelCode"`
-	ContextWindow   int64                  `json:"contextWindow,omitempty"`
-	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
-	Cwd             *string                `json:"cwd,omitempty"`
+	ProviderCode    string                      `json:"providerCode"`
+	ModelCode       string                      `json:"modelCode"`
+	ContextWindow   int64                       `json:"contextWindow,omitempty"`
+	ReasoningEffort shared.ReasoningEffort      `json:"reasoningEffort,omitempty"`
+	PermissionMode  conversation.PermissionMode `json:"permissionMode,omitempty"`
+	Cwd             *string                     `json:"cwd,omitempty"`
 }
 
 func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*conversation.Session, error) {
@@ -69,12 +70,20 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 	if !effort.Valid() {
 		return nil, Validation("invalid reasoning effort: " + string(effort))
 	}
+	permissionMode := in.PermissionMode
+	if permissionMode == "" {
+		permissionMode = conversation.PermissionAsk
+	}
+	if !permissionMode.Valid() {
+		return nil, Validation("invalid permission mode: " + string(permissionMode))
+	}
 
-	session := conversation.StartSession(
+	session := conversation.StartSessionWithPermission(
 		shared.NewModelRef(providerCode, modelCode),
 		in.ContextWindow,
 		effort,
 		in.Cwd,
+		permissionMode,
 	)
 	if err := s.repo.Save(ctx, session); err != nil {
 		return nil, Internal("failed to save session: " + err.Error())

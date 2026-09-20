@@ -20,12 +20,14 @@ import type {
     ModelProviderDto,
     ModelRef,
     PagedResponse,
+    PermissionMode,
     ReasoningEffort,
     RoundDto,
     SessionEvent,
     SessionSummaryDto,
     SkillDiagnosticDto,
     SkillDto,
+    ToolApprovalResolution,
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
@@ -190,12 +192,17 @@ export class AgentyClient {
         await this.rpc.call("provider.removeModel", { providerCode, modelCode });
     }
 
-    async createSession(model: ModelDto, effort: ReasoningEffort = "off"): Promise<ChatSessionDto> {
+    async createSession(
+        model: ModelDto,
+        effort: ReasoningEffort = "off",
+        permissionMode: PermissionMode = "ask",
+    ): Promise<ChatSessionDto> {
         const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
             providerCode: model.providerCode,
             modelCode: model.code,
             contextWindow: model.contextWindow,
             reasoningEffort: effort,
+            permissionMode,
         });
         return requireSession(session, "session.create");
     }
@@ -312,12 +319,24 @@ export class AgentyClient {
         return requireSession(session, `session.setCwd ${id}`);
     }
 
+    async setSessionPermissionMode(id: string, permissionMode: PermissionMode): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.setPermissionMode", {
+            id,
+            permissionMode,
+        });
+        return requireSession(session, `session.setPermissionMode ${id}`);
+    }
+
     startSession(id: string, text: string): Promise<ExecutionStart> {
         return this.rpc.call("session.start", { id, content: [{ type: "text", text }] });
     }
 
     async stopSession(id: string): Promise<void> {
         await this.rpc.call("session.stop", { id });
+    }
+
+    async resolveToolApproval(resolution: ToolApprovalResolution): Promise<void> {
+        await this.rpc.call("session.resolveToolApproval", resolution);
     }
 
     async compactSession(id: string): Promise<void> {
@@ -431,6 +450,9 @@ function normalizeSession(session: ChatSessionDto): ChatSessionDto {
         : [];
     return {
         ...session,
+        permissionMode: session.permissionMode === "yolo" || session.permissionMode === "auto"
+            ? session.permissionMode
+            : "ask",
         rounds: rounds.map((round) => ({
             ...round,
             messages: Array.isArray(round.messages)

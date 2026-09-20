@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 )
 
 func TestRegistryServerLogsAreBoundedAndSanitized(t *testing.T) {
 	registry, err := NewRegistry(
 		context.Background(),
 		t.TempDir(),
-		agentloop.NewRegistry(),
+		infratools.NewRegistry(),
 		Options{},
 	)
 	if err != nil {

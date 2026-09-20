@@ -49,7 +49,7 @@ func TestInitializeServiceCompletesConfiguredResources(t *testing.T) {
 		t.Fatalf("create provider: %v", err)
 	}
 	provider, err = providers.Update(ctx, "openai", application.ProviderUpdate{
-		Name: ptr("OpenAI Updated"), Type: ptr(catalog.APIOpenAI), APIKey: ptr("secret"),
+		Name: new("OpenAI Updated"), Type: new(catalog.APIOpenAI), APIKey: new("secret"),
 	})
 	if err != nil {
 		t.Fatalf("update provider: %v", err)

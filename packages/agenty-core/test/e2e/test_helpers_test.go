@@ -43,10 +43,6 @@ func requireRPCCode(t *testing.T, err error, code int) *RPCError {
 	return rpcErr
 }
 
-func stringPointer(value string) *string {
-	return &value
-}
-
 func createExecutionResources(
 	ctx context.Context,
 	client *agentyClient,

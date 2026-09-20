@@ -1,6 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 
-import type { ChatSessionDto, ModelDto } from "../api/types";
+import type { ChatSessionDto, ModelDto, PermissionMode } from "../api/types";
 import type { CliOptions } from "../config";
 import {
     type OverlayKind,
@@ -18,6 +18,7 @@ export interface AppSlice {
     toast: ToastMsg | null;
     thinkingEnabled: boolean;
     thinkingLevel: string;
+    promptHistory: string[];
     init: () => Promise<void>;
     reset: () => void;
     newSession: () => Promise<void>;
@@ -28,6 +29,9 @@ export interface AppSlice {
     notify: (text: string, error?: boolean) => void;
     setThinking: (enabled: boolean, level: string) => void;
     setCwd: (path: string | null) => Promise<void>;
+    setPermissionMode: (mode: PermissionMode) => Promise<void>;
+    togglePermissionMode: () => Promise<void>;
+    recordInput: (text: string) => Promise<boolean>;
 }
 
 export function useApp(): AppSlice {
@@ -42,6 +46,7 @@ export function useApp(): AppSlice {
             toast: s.toast,
             thinkingEnabled: s.thinkingEnabled,
             thinkingLevel: s.thinkingLevel,
+            promptHistory: s.promptHistory,
             init: s.init,
             reset: s.reset,
             newSession: s.newSession,
@@ -52,6 +57,9 @@ export function useApp(): AppSlice {
             notify: s.notify,
             setThinking: s.setThinking,
             setCwd: s.setCwd,
+            setPermissionMode: s.setPermissionMode,
+            togglePermissionMode: s.togglePermissionMode,
+            recordInput: s.recordInput,
         })),
     );
 }

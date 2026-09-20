@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
+	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 )
 
 func RegisterSessionHandlers(
 	d *rpc.Dispatcher,
 	svc *application.SessionService,
-	execution *agentloop.Engine,
+	execution *infrasession.Engine,
 ) {
 	d.Register("session.create", sessionCreate(svc))
 	d.Register("session.get", sessionGet(svc))
@@ -24,6 +24,7 @@ func RegisterSessionHandlers(
 	d.Register("session.setModel", sessionSetModel(execution))
 	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
+	d.Register("session.setPermissionMode", sessionSetPermissionMode(execution))
 	d.Register("session.start", sessionStart(execution))
 	d.Register("session.compact", sessionCompact(execution))
 	d.Register("session.stop", sessionStop(execution))
@@ -105,7 +106,7 @@ type sessionSetModelParams struct {
 	ModelCode    string `json:"modelCode"`
 }
 
-func sessionSetModel(execution *agentloop.Engine) rpc.Handler {
+func sessionSetModel(execution *infrasession.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p sessionSetModelParams
 		if err := decodeParams(params, &p); err != nil {
@@ -145,12 +146,27 @@ func sessionSetCwd(svc *application.SessionService) rpc.Handler {
 	}
 }
 
+type sessionSetPermissionModeParams struct {
+	ID             string                      `json:"id"`
+	PermissionMode conversation.PermissionMode `json:"permissionMode"`
+}
+
+func sessionSetPermissionMode(execution *infrasession.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p sessionSetPermissionModeParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.SetPermissionMode(ctx, p.ID, p.PermissionMode))
+	}
+}
+
 type sessionStartParams struct {
 	ID      string               `json:"id"`
 	Content conversation.Content `json:"content"`
 }
 
-func sessionStart(execution *agentloop.Engine) rpc.Handler {
+func sessionStart(execution *infrasession.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p sessionStartParams
 		if err := decodeParams(params, &p); err != nil {
@@ -160,7 +176,7 @@ func sessionStart(execution *agentloop.Engine) rpc.Handler {
 	}
 }
 
-func sessionCompact(execution *agentloop.Engine) rpc.Handler {
+func sessionCompact(execution *infrasession.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p idParams
 		if err := decodeParams(params, &p); err != nil {
@@ -170,7 +186,7 @@ func sessionCompact(execution *agentloop.Engine) rpc.Handler {
 	}
 }
 
-func sessionStop(execution *agentloop.Engine) rpc.Handler {
+func sessionStop(execution *infrasession.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p idParams
 		if err := decodeParams(params, &p); err != nil {

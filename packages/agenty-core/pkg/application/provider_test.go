@@ -243,8 +243,8 @@ func TestProviderUpdate(t *testing.T) {
 	}
 
 	updated, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{
-		Name:    ptr("OpenAI Compatible"),
-		BaseURL: ptr(""),
+		Name:    new("OpenAI Compatible"),
+		BaseURL: new(""),
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -287,7 +287,7 @@ func TestBuiltinProviderAllowsOnlyAPIKeyUpdate(t *testing.T) {
 	repo.providers[provider.Code] = provider
 	providerSvc := application.NewProviderService(repo)
 	ctx := t.Context()
-	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{APIKey: ptr("secret")}); err != nil {
+	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{APIKey: new("secret")}); err != nil {
 		t.Fatalf("API key update: %v", err)
 	}
 	updated, err := providerSvc.Get(ctx, "openai")
@@ -298,10 +298,10 @@ func TestBuiltinProviderAllowsOnlyAPIKeyUpdate(t *testing.T) {
 		t.Fatalf("API key = %q", updated.APIKey)
 	}
 
-	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{Name: ptr("Changed")}); appErrorCode(err) != application.CodeValidation {
+	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{Name: new("Changed")}); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("metadata update error = %v, want validation", err)
 	}
-	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{FreeFormTool: ptr(true)}); appErrorCode(err) != application.CodeValidation {
+	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{FreeFormTool: new(true)}); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("freeFormTool update error = %v, want validation", err)
 	}
 	if _, err := providerSvc.AddModel(ctx, "openai", "other", application.ModelInput{Name: "Other"}); appErrorCode(err) != application.CodeValidation {
@@ -389,7 +389,7 @@ func TestProviderAddModelAndRemoveModel(t *testing.T) {
 		Name:            "Haiku",
 		MaxOutputTokens: 8_000,
 		Light:           true,
-		Reasoning:       ptr(false),
+		Reasoning:       new(false),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestProviderAddModelDefaultsReasoningAndAllowsExplicitDisable(t *testing.T)
 
 	custom, err := providerSvc.AddModel(ctx, "openai", "custom-reasoning", application.ModelInput{
 		Name:             "Custom reasoning",
-		Reasoning:        ptr(true),
+		Reasoning:        new(true),
 		ReasoningEfforts: []shared.ReasoningEffort{shared.ReasoningLow, shared.ReasoningHigh},
 	})
 	if err != nil {
@@ -455,14 +455,14 @@ func TestProviderAddModelDefaultsReasoningAndAllowsExplicitDisable(t *testing.T)
 
 	if _, err := providerSvc.AddModel(ctx, "openai", "invalid-reasoning", application.ModelInput{
 		Name:             "Invalid reasoning",
-		Reasoning:        ptr(true),
+		Reasoning:        new(true),
 		ReasoningEfforts: []shared.ReasoningEffort{"off"},
 	}); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("invalid reasoning efforts error = %v, want validation", err)
 	}
 
 	disabled, err := providerSvc.AddModel(ctx, "openai", "non-reasoning", application.ModelInput{
-		Name: "Non-reasoning", Reasoning: ptr(false),
+		Name: "Non-reasoning", Reasoning: new(false),
 	})
 	if err != nil {
 		t.Fatal(err)

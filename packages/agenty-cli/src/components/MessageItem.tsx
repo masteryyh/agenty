@@ -162,6 +162,13 @@ function ToolCallLine({
                 <Text bold>{display.label}</Text>
                 {hasDetails ? <Text dimColor>{expanded ? " ▾" : " ▸"}</Text> : null}
             </Text>
+            {tc.reviewing ? (
+                <Box marginLeft={2}>
+                    <Text color={theme.warning}>
+                        {blinkOn ? "◐" : "◑"} Reviewing...
+                    </Text>
+                </Box>
+            ) : null}
             {!(expanded && hasShellDetails)
                 ? display.summaryLines.map((line, index) => (
                     <Box key={`${tc.id}-summary-${index}`} marginLeft={2}>

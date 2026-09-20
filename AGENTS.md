@@ -29,12 +29,24 @@ and other capabilities that core has not implemented must remain hidden or empty
   serves stdio until EOF or process cancellation.
 - `pkg/domain`: provider-neutral execution, catalog, conversation, and shared domain types.
 - `pkg/application`: provider, initialization, and session use-case services.
-- `pkg/agentloop`: concurrent session engine, provider streaming contract, tool runtime,
-  and built-in filesystem tools.
+- `pkg/infra/modelcall`: stateless provider-neutral model-call contract and protocol adapters.
+  It accepts connection/model configuration plus model-facing messages and tools, then returns
+  parsed responses and stream events without reading or changing business data.
+- `pkg/infra/agentloop`: atomic model/tool loop, usage accounting, and low-level model/tool
+  hook bridge. It invokes `modelcall` directly and owns no provider client state.
+- `pkg/infra/session`: concurrent session host, persisted round lifecycle, model/resource
+  loading, event dispatch, and shutdown.
 - `pkg/infra/config`: merged config and data-path manager.
-- `pkg/infra/storage`: filesystem source-of-truth repositories plus SQLite session index.
-- `pkg/infra/llm`: provider adapters.
-- `pkg/infra/rpc`: NDJSON JSON-RPC server, notification writer, chunking, and adapters.
+- `pkg/infra/compaction`: compaction policy and single-call ephemeral summary executor.
+- `pkg/infra/metadata`: session metadata middleware and hidden context messages.
+- `pkg/infra/middleware`: middleware contract, hook contexts, MiddlewareManager, and the
+  `OnEvent` consumer chain.
+- `pkg/infra/prompt`: base system-prompt renderer.
+- `pkg/infra/skill`: skill discovery and lifecycle middleware.
+- `pkg/infra/tools`: dynamic tool registry and built-in filesystem tools.
+- `pkg/infra/storage`: filesystem source-of-truth repositories, SQLite session index, and
+  session-persistence middleware.
+- `pkg/infra/rpc`: NDJSON JSON-RPC server, notification middleware/writer, chunking, and adapters.
 
 The setup contract is `initialize.already`, then the regular `provider.create`,
 `provider.addModel` methods, followed by `initialize.complete`. Completion is valid only
@@ -134,8 +146,8 @@ the default cache unavailable.
   for expected failures.
 - Persistent writes use explicit repositories and event-sourced session mutations; do
   not treat SQLite as the transcript source of truth.
-- Built-in tool contracts live in `pkg/agentloop`; implementations live in
-  `pkg/agentloop/builtin`. Tool names and input argument fields use `snake_case`;
+- Built-in tool contracts live in `pkg/infra/modelcall`; implementations live in
+  `pkg/infra/tools/builtin`. Tool names and input argument fields use `snake_case`;
   persisted and RPC JSON fields retain lowerCamelCase.
 - User-facing product text is English unless a localized copy is explicitly required.
 

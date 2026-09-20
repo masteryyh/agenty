@@ -26,10 +26,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"golang.org/x/oauth2"
 
-	"github.com/masteryyh/agenty-core/pkg/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/buildinfo"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
+	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 )
 
 const (
@@ -95,6 +97,13 @@ type Options struct {
 	ConnectConcurrency int
 }
 
+// ToolLookup is the read-only view MCP uses to reject collisions with tools
+// supplied by the host. MCP tools themselves are exposed through the
+// middleware's per-round snapshot rather than registered in this host view.
+type ToolLookup interface {
+	Get(string) (agentloop.Tool, bool)
+}
+
 type Registry struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -102,7 +111,7 @@ type Registry struct {
 	sessionBaseCancel context.CancelFunc
 	dir               string
 	authDir           string
-	tools             *agentloop.Registry
+	tools             ToolLookup
 	logger            *slog.Logger
 	events            EventHandler
 	connectWait       time.Duration
@@ -152,12 +161,12 @@ func serverKey(name string) string {
 	return strings.ToLower(name)
 }
 
-func NewRegistry(parent context.Context, dir string, tools *agentloop.Registry, options Options) (*Registry, error) {
+func NewRegistry(parent context.Context, dir string, tools ToolLookup, options Options) (*Registry, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("mcp: parent context must not be nil")
 	}
 	if tools == nil {
-		return nil, fmt.Errorf("mcp: tool registry must not be nil")
+		return nil, fmt.Errorf("mcp: tool lookup must not be nil")
 	}
 	if dir == "" {
 		return nil, fmt.Errorf("mcp: configuration directory must not be empty")
@@ -897,31 +906,22 @@ func (registry *Registry) install(name string, generation uint64, session *mcp.C
 	if !newSession && entry.toolSession != nil && entry.toolSession != lifecycle {
 		return fmt.Errorf("MCP server %q tool snapshot has an unexpected lifecycle", name)
 	}
-	oldNames := make(map[string]struct{}, len(entry.tools))
-	for exposed := range entry.tools {
-		oldNames[exposed] = struct{}{}
-	}
 	for _, tool := range tools {
-		if _, exists := registry.tools.Get(tool.exposedName); exists {
-			if _, isOld := oldNames[tool.exposedName]; !isOld {
+		if tool == nil {
+			continue
+		}
+		if registry.tools != nil {
+			if _, exists := registry.tools.Get(tool.exposedName); exists {
 				return fmt.Errorf("tool name %q conflicts with an existing tool", tool.exposedName)
 			}
 		}
-	}
-	for exposed := range entry.tools {
-		registry.tools.Unregister(exposed)
-	}
-	wasActive := false
-	if !newSession && entry.toolSession != nil {
-		wasActive = entry.toolSession.active.Load()
-	}
-	for _, tool := range tools {
-		if err := registry.tools.Register(tool); err != nil {
-			for _, registered := range tools {
-				registry.tools.Unregister(registered.exposedName)
+		for key, other := range registry.servers {
+			if key == serverKey(name) || other == nil {
+				continue
 			}
-			lifecycle.active.Store(wasActive)
-			return err
+			if _, exists := other.tools[tool.exposedName]; exists {
+				return fmt.Errorf("tool name %q conflicts with an existing MCP tool", tool.exposedName)
+			}
 		}
 	}
 	lifecycle.active.Store(true)
@@ -934,6 +934,9 @@ func (registry *Registry) install(name string, generation uint64, session *mcp.C
 	entry.loginCancel = nil
 	entry.tools = make(map[string]*remoteTool, len(tools))
 	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
 		entry.tools[tool.exposedName] = tool
 	}
 	entry.toolCount = len(tools)
@@ -1049,9 +1052,6 @@ func (registry *Registry) invalidateLocked(entry *serverEntry) (*mcp.ClientSessi
 	sessionCancel := entry.sessionCancel
 	if entry.toolSession != nil {
 		entry.toolSession.active.Store(false)
-	}
-	for exposed := range entry.tools {
-		registry.tools.Unregister(exposed)
 	}
 	entry.tools = make(map[string]*remoteTool)
 	entry.toolCount = 0
@@ -1268,7 +1268,7 @@ type remoteTool struct {
 	session     *mcp.ClientSession
 	remoteName  string
 	exposedName string
-	definition  agentloop.ToolDefinition
+	definition  modelcall.ToolDefinition
 	lifecycle   *toolSession
 	timeout     time.Duration
 }
@@ -1303,7 +1303,7 @@ func newRemoteToolWithLifecycle(session *mcp.ClientSession, definition *mcp.Tool
 	if err != nil {
 		return nil, fmt.Errorf("mcp: encode input schema for %q: %w", definition.Name, err)
 	}
-	var schema agentloop.JSONSchema
+	var schema modelcall.JSONSchema
 	if err := json.Unmarshal(schemaData, &schema); err != nil {
 		return nil, fmt.Errorf("mcp: decode input schema for %q: %w", definition.Name, err)
 	}
@@ -1311,8 +1311,9 @@ func newRemoteToolWithLifecycle(session *mcp.ClientSession, definition *mcp.Tool
 		session:     session,
 		remoteName:  definition.Name,
 		exposedName: exposedName,
-		definition: agentloop.ToolDefinition{
-			Type:        agentloop.ToolTypeFunction,
+		definition: modelcall.ToolDefinition{
+			Type:        modelcall.ToolTypeFunction,
+			Destructive: definition.Annotations == nil || !definition.Annotations.ReadOnlyHint,
 			Name:        exposedName,
 			Description: definition.Description,
 			InputSchema: schema,
@@ -1339,7 +1340,7 @@ func normalizeToolName(name string) string {
 	return result
 }
 
-func (tool *remoteTool) Definition() agentloop.ToolDefinition {
+func (tool *remoteTool) Definition() modelcall.ToolDefinition {
 	return tool.definition
 }
 
@@ -1364,7 +1365,7 @@ func (tool *remoteTool) Execute(ctx context.Context, _ agentloop.CallContext, in
 		return nil, err
 	}
 	if result.IsError {
-		return content, &agentloop.ToolExecutionError{Content: content, Err: fmt.Errorf("MCP tool %q returned an error", tool.definition.Name)}
+		return content, &infratools.ToolExecutionError{Content: content, Err: fmt.Errorf("MCP tool %q returned an error", tool.definition.Name)}
 	}
 	return content, nil
 }

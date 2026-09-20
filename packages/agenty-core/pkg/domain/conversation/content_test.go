@@ -92,9 +92,9 @@ func TestShellBlocksRoundTrip(t *testing.T) {
 		ToolResultBlock{
 			ToolUseID: "call_1",
 			Content: Content{ShellCallOutputBlock{
-				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: boolPointer(true),
+				CallID: "call_1", MaxOutputLength: 4096, OpenAINative: new(true),
 				Output: []ShellCommandOutput{
-					{Stdout: "/tmp\n", Outcome: ShellOutcome{Type: "exit", ExitCode: int64Pointer(0)}},
+					{Stdout: "/tmp\n", Outcome: ShellOutcome{Type: "exit", ExitCode: new(int64(0))}},
 					{Stderr: "failed\n", Outcome: ShellOutcome{Type: "exit", ExitCode: &exitCode}},
 				},
 			}},
@@ -168,14 +168,6 @@ func TestApplyPatchBlocksRoundTrip(t *testing.T) {
 		string(customInput.Input) != `{"patch":"*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"}` {
 		t.Errorf("custom tool input = %#v", customInput)
 	}
-}
-
-func int64Pointer(value int64) *int64 {
-	return &value
-}
-
-func boolPointer(value bool) *bool {
-	return &value
 }
 
 func TestContentUnmarshalNull(t *testing.T) {

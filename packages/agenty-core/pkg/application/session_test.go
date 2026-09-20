@@ -31,7 +31,7 @@ func TestSessionCreateAndGet(t *testing.T) {
 		ModelCode:       "claude-opus-4-8",
 		ContextWindow:   200_000,
 		ReasoningEffort: shared.ReasoningHigh,
-		Cwd:             ptr("/tmp/work"),
+		Cwd:             new("/tmp/work"),
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -65,7 +65,7 @@ func TestSessionGetFiltersHiddenMetadataMessages(t *testing.T) {
 		shared.NewModelRef("anthropic", "claude-opus-4-8"),
 		200_000,
 		shared.ReasoningHigh,
-		ptr("/tmp/work"),
+		new("/tmp/work"),
 	)
 	roundID, err := session.StartRound()
 	if err != nil {
@@ -201,7 +201,7 @@ func TestSessionSetReasoningEffortAndCwd(t *testing.T) {
 	if _, err := sessionSvc.SetReasoningEffort(ctx, id, shared.ReasoningMax); err != nil {
 		t.Fatalf("SetReasoningEffort: %v", err)
 	}
-	if _, err := sessionSvc.SetCwd(ctx, id, ptr("/repo")); err != nil {
+	if _, err := sessionSvc.SetCwd(ctx, id, new("/repo")); err != nil {
 		t.Fatalf("SetCwd: %v", err)
 	}
 	got, err := sessionSvc.Get(ctx, id)
