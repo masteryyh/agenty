@@ -26,7 +26,7 @@ pub struct PayloadSpec {
 pub struct Footer {
     pub cli: PayloadSpec,
     pub core: PayloadSpec,
-    pub patch_applier: PayloadSpec,
+    pub file_editor: PayloadSpec,
 }
 
 impl Footer {
@@ -38,9 +38,9 @@ impl Footer {
         out[48..56].copy_from_slice(&self.core.offset.to_le_bytes());
         out[56..64].copy_from_slice(&self.core.len.to_le_bytes());
         out[64..96].copy_from_slice(&self.core.sha3_256);
-        out[96..104].copy_from_slice(&self.patch_applier.offset.to_le_bytes());
-        out[104..112].copy_from_slice(&self.patch_applier.len.to_le_bytes());
-        out[112..144].copy_from_slice(&self.patch_applier.sha3_256);
+        out[96..104].copy_from_slice(&self.file_editor.offset.to_le_bytes());
+        out[104..112].copy_from_slice(&self.file_editor.len.to_le_bytes());
+        out[112..144].copy_from_slice(&self.file_editor.sha3_256);
         out[144..148].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
         out[148..156].copy_from_slice(&MAGIC);
         out
@@ -71,8 +71,8 @@ impl Footer {
         cli_sha.copy_from_slice(&bytes[16..48]);
         let mut core_sha = [0u8; 32];
         core_sha.copy_from_slice(&bytes[64..96]);
-        let mut patch_applier_sha = [0u8; 32];
-        patch_applier_sha.copy_from_slice(&bytes[112..144]);
+        let mut file_editor_sha = [0u8; 32];
+        file_editor_sha.copy_from_slice(&bytes[112..144]);
 
         Ok(Footer {
             cli: PayloadSpec {
@@ -85,10 +85,10 @@ impl Footer {
                 len: read_u64(56),
                 sha3_256: core_sha,
             },
-            patch_applier: PayloadSpec {
+            file_editor: PayloadSpec {
                 offset: read_u64(96),
                 len: read_u64(104),
-                sha3_256: patch_applier_sha,
+                sha3_256: file_editor_sha,
             },
         })
     }
@@ -228,7 +228,7 @@ pub fn managed_bin_dir(home: &Path) -> PathBuf {
 pub struct ArtifactPaths {
     pub cli: PathBuf,
     pub core: PathBuf,
-    pub patch_applier: PathBuf,
+    pub file_editor: PathBuf,
 }
 
 pub fn artifact_paths(home: &Path) -> ArtifactPaths {
@@ -237,7 +237,7 @@ pub fn artifact_paths(home: &Path) -> ArtifactPaths {
     ArtifactPaths {
         cli: dir.join(format!("cli{ext}")),
         core: dir.join(format!("core{ext}")),
-        patch_applier: dir.join(format!("apply_patch{ext}")),
+        file_editor: dir.join(format!("fileedit{ext}")),
     }
 }
 
@@ -353,8 +353,8 @@ mod tests {
         for (i, b) in core_sha.iter_mut().enumerate() {
             *b = 0x20 + i as u8;
         }
-        let mut patch_applier_sha = [0u8; 32];
-        for (i, b) in patch_applier_sha.iter_mut().enumerate() {
+        let mut file_editor_sha = [0u8; 32];
+        for (i, b) in file_editor_sha.iter_mut().enumerate() {
             *b = 0x40 + i as u8;
         }
         Footer {
@@ -368,10 +368,10 @@ mod tests {
                 len: 0x0807060504030201,
                 sha3_256: core_sha,
             },
-            patch_applier: PayloadSpec {
+            file_editor: PayloadSpec {
                 offset: 0x0f0e0d0c0b0a0908,
                 len: 0x1716151413121110,
-                sha3_256: patch_applier_sha,
+                sha3_256: file_editor_sha,
             },
         }
     }
@@ -407,7 +407,7 @@ mod tests {
         let footer = Footer {
             cli: spec.clone(),
             core: spec.clone(),
-            patch_applier: spec.clone(),
+            file_editor: spec.clone(),
         };
 
         let path = dir.join("packed");
@@ -590,7 +590,7 @@ mod tests {
         let footer = read_footer(&mut packed).unwrap();
         assert_eq!(footer.cli, spec);
         assert_eq!(footer.core, spec);
-        assert_eq!(footer.patch_applier, spec);
+        assert_eq!(footer.file_editor, spec);
     }
 
     #[test]
@@ -607,8 +607,8 @@ mod tests {
             home.join(".agenty/bin").join(format!("core{ext}"))
         );
         assert_eq!(
-            paths.patch_applier,
-            home.join(".agenty/bin").join(format!("apply_patch{ext}"))
+            paths.file_editor,
+            home.join(".agenty/bin").join(format!("fileedit{ext}"))
         );
     }
 }

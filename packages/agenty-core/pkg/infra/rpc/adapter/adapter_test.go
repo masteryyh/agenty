@@ -104,34 +104,34 @@ type adapterTestCaller struct{}
 
 func (caller *adapterTestCaller) Call(
 	ctx context.Context,
-	_ modelcall.Config,
-	request modelcall.Request,
-	handler modelcall.StreamHandler,
-) (*modelcall.Response, error) {
+	_ modelcall.ModelCallConfig,
+	request modelcall.ModelCallRequest,
+	handler modelcall.ModelCallStreamHandler,
+) (*modelcall.ModelCallResponse, error) {
 	if handler == nil {
 		return caller.Invoke(ctx, request)
 	}
 	return caller.Stream(ctx, request, handler)
 }
 
-func (*adapterTestCaller) Invoke(context.Context, modelcall.Request) (*modelcall.Response, error) {
-	return &modelcall.Response{
+func (*adapterTestCaller) Invoke(context.Context, modelcall.ModelCallRequest) (*modelcall.ModelCallResponse, error) {
+	return &modelcall.ModelCallResponse{
 		Content:    conversation.Text("completed"),
-		StopReason: modelcall.StopReasonEndTurn,
+		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}, nil
 }
 
 func (*adapterTestCaller) Stream(
 	ctx context.Context,
-	request modelcall.Request,
-	handler modelcall.StreamHandler,
-) (*modelcall.Response, error) {
+	request modelcall.ModelCallRequest,
+	handler modelcall.ModelCallStreamHandler,
+) (*modelcall.ModelCallResponse, error) {
 	response, err := (&adapterTestCaller{}).Invoke(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	if err := handler(modelcall.StreamEvent{
-		Type:     modelcall.StreamEventCompleted,
+	if err := handler(modelcall.ModelCallStreamEvent{
+		Type:     modelcall.ModelCallStreamEventCompleted,
 		Response: response,
 	}); err != nil {
 		return nil, err
@@ -145,10 +145,10 @@ type blockingAdapterCaller struct {
 
 func (caller *blockingAdapterCaller) Call(
 	ctx context.Context,
-	_ modelcall.Config,
-	request modelcall.Request,
-	handler modelcall.StreamHandler,
-) (*modelcall.Response, error) {
+	_ modelcall.ModelCallConfig,
+	request modelcall.ModelCallRequest,
+	handler modelcall.ModelCallStreamHandler,
+) (*modelcall.ModelCallResponse, error) {
 	if handler == nil {
 		return caller.Invoke(ctx, request)
 	}
@@ -157,8 +157,8 @@ func (caller *blockingAdapterCaller) Call(
 
 func (caller *blockingAdapterCaller) Invoke(
 	ctx context.Context,
-	_ modelcall.Request,
-) (*modelcall.Response, error) {
+	_ modelcall.ModelCallRequest,
+) (*modelcall.ModelCallResponse, error) {
 	close(caller.started)
 	<-ctx.Done()
 
@@ -167,9 +167,9 @@ func (caller *blockingAdapterCaller) Invoke(
 
 func (caller *blockingAdapterCaller) Stream(
 	ctx context.Context,
-	request modelcall.Request,
-	_ modelcall.StreamHandler,
-) (*modelcall.Response, error) {
+	request modelcall.ModelCallRequest,
+	_ modelcall.ModelCallStreamHandler,
+) (*modelcall.ModelCallResponse, error) {
 	return caller.Invoke(ctx, request)
 }
 

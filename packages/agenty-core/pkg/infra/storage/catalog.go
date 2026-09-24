@@ -302,7 +302,6 @@ func providerConfigurationEqual(left, right *catalog.Provider) bool {
 		left.APIKey == right.APIKey &&
 		left.Builtin == right.Builtin &&
 		left.Official == right.Official &&
-		left.FreeFormTool == right.FreeFormTool &&
 		left.ModelsURL == right.ModelsURL &&
 		left.TokenCountURL == right.TokenCountURL &&
 		reflect.DeepEqual(left.Metadata, right.Metadata)

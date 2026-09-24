@@ -11,6 +11,7 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/application"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
+	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
@@ -126,12 +127,20 @@ func run() (exitCode int) {
 		slog.ErrorContext(ctx, "failed to register MCP middleware", "error", err)
 		return 1
 	}
+	if err := middlewareManager.Register(codexmode.NewMiddleware(codexmode.Config{})); err != nil {
+		slog.ErrorContext(ctx, "failed to register Codex Mode middleware", "error", err)
+		return 1
+	}
 	if err := middlewareManager.Register(metadata.NewMiddleware()); err != nil {
 		slog.ErrorContext(ctx, "failed to register metadata middleware", "error", err)
 		return 1
 	}
 	if err := middlewareManager.Register(compaction.NewMiddleware()); err != nil {
 		slog.ErrorContext(ctx, "failed to register compaction middleware", "error", err)
+		return 1
+	}
+	if err := middlewareManager.Register(infratools.NewValidationMiddleware()); err != nil {
+		slog.ErrorContext(ctx, "failed to register tool input validation middleware", "error", err)
 		return 1
 	}
 	if err := middlewareManager.Register(storage.NewSessionMiddleware(repos.Conversation)); err != nil {

@@ -38,6 +38,7 @@ var publicRPCMethods = []string{
 	"session.setModel",
 	"session.setReasoningEffort",
 	"session.setCwd",
+	"session.enableCodexMode",
 	"session.start",
 	"session.compact",
 	"session.stop",
@@ -138,7 +139,6 @@ type Provider struct {
 	APIKey        string         `json:"apiKey"`
 	Builtin       bool           `json:"builtin"`
 	Official      bool           `json:"official"`
-	FreeFormTool  bool           `json:"freeFormTool"`
 	ModelsURL     string         `json:"modelsUrl"`
 	TokenCountURL string         `json:"tokenCountUrl"`
 	Models        []Model        `json:"models"`
@@ -152,6 +152,7 @@ type Session struct {
 	CurrentModel           *ModelRef `json:"currentModel"`
 	ContextWindow          int64     `json:"contextWindow"`
 	CurrentReasoningEffort string    `json:"currentReasoningEffort"`
+	ToolDialect            string    `json:"toolDialect"`
 	Rounds                 []Round   `json:"rounds"`
 	CreatedAt              time.Time `json:"createdAt"`
 	UpdatedAt              time.Time `json:"updatedAt"`
@@ -225,23 +226,21 @@ type DeleteResult struct {
 }
 
 type ProviderCreateInput struct {
-	Code         string         `json:"code"`
-	Name         string         `json:"name"`
-	Type         string         `json:"type"`
-	BaseURL      string         `json:"baseUrl,omitempty"`
-	APIKey       string         `json:"apiKey,omitempty"`
-	FreeFormTool bool           `json:"freeFormTool,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Code     string         `json:"code"`
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	BaseURL  string         `json:"baseUrl,omitempty"`
+	APIKey   string         `json:"apiKey,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ProviderUpdateInput struct {
-	Code         string         `json:"code"`
-	Name         *string        `json:"name,omitempty"`
-	Type         *string        `json:"type,omitempty"`
-	BaseURL      *string        `json:"baseUrl,omitempty"`
-	APIKey       *string        `json:"apiKey,omitempty"`
-	FreeFormTool *bool          `json:"freeFormTool,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Code     string         `json:"code"`
+	Name     *string        `json:"name,omitempty"`
+	Type     *string        `json:"type,omitempty"`
+	BaseURL  *string        `json:"baseUrl,omitempty"`
+	APIKey   *string        `json:"apiKey,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ModelInput struct {

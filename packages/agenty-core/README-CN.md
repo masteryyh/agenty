@@ -76,11 +76,13 @@ executor。压缩请求保持原有 system 和消息前缀，只在内存中追�
 工具定义，并通过 `modelcall.Call` 只调用模型一次。模型返回 tool call 时压缩失败，既不会执行也
 不会持久化该调用。当前单个 round 最多执行 20 次 LLM/tool 迭代。
 生产 registry 位于 `pkg/infra/tools`，实现 `ToolRuntime` port；同一批次内每个 tool call
-并行执行，结果按调用顺序返回。`pkg/infra/tools/builtin/` 提供 `read_file`、`apply_patch`、`grep`、`glob`
-和 `ls`，由 `cmd/main.go` 显式注册。`apply_patch` 会调用同名 Rust 可执行文件完成 V4A
-解析和原子化文件修改。支持 free-form tool 的 provider 会收到模型工具定义；其他 provider
-会在 system prompt 中收到通过 `shell` 执行同一命令的说明。相对路径基于该 round 捕获的
-session 工作目录解析。
+并行执行，结果按调用顺序返回。`pkg/infra/tools/builtin/` 提供 `read_file`、`apply_patch`、
+`str_replace_based_edit_tool`、`grep`、`glob` 和 `ls`，由 `cmd/main.go` 显式注册。默认文件
+dialect 暴露文本编辑器，其 `view` 命令替代 `read_file`，写操作调用内置的
+`fileedit text_editor`。官方 Anthropic Messages provider 使用 server-side text editor 声明；
+兼容 provider 使用同一规范的 function tool。`/codex-mode` 会把当前 Responses API 会话永久
+切换到 `read_file` 和 free-form `apply_patch`，并通过 `fileedit apply_patch` 执行；之后不能切换
+到其他 API 类型。相对路径基于该 round 捕获的 session 工作目录解析。
 
 Session host 暴露生命周期，原子 loop 暴露单次调用的 hook port。`pkg/infra/middleware` 定义
 平铺 hook 的 `Middleware` 结构和 `MiddlewareManager`；manager 按注册顺序收集非空 hook，
@@ -234,13 +236,13 @@ server 名称只允许 ASCII 字母、数字、`_` 和 `-`，且大小写不敏�
 有效期为 8 小时，不写入磁盘，core 重启后不会保留。过期缓存仍作为旧数据返回，下一次 list 时
 再刷新。它会兼容常见的 `id`、名称和 token 限制字段，自动跟随 provider 分页；上下文窗口或最大
 输出 token 缺失或不为正数时分别使用 `256000` 和 `65536`，缺少 reasoning 能力时返回空的
-`reasoningEfforts` 数组。事务性 `apply_patch` 锁位于 `~/.agenty/locks/`，每个锁都会记录 helper
+`reasoningEfforts` 数组。事务性 `fileedit` 锁位于 `~/.agenty/locks/`，每个锁都会记录 helper
 进程 PID 和完整目标路径。
 
 `session.start` 接收 `{id, content}`，持久化 running round 后立即返回 round 标识和
 `running` 状态，完整 agent turn 由引擎异步继续执行。执行期间，core 会写出
 `session.event` JSON-RPC notifications，事件类型包括 `round_started`、
-`message_appended`、`model_stream`、`permission_mode_changed` 和 `round_ended`。每个事件都携带 `sessionId`、
+`message_appended`、`model_stream`、`permission_mode_changed`、`tool_dialect_changed` 和 `round_ended`。每个事件都携带 `sessionId`、
 `roundId` 和 round 内单调递增的 `sequence`；模型事件还包含 provider-neutral stream
 event 和 agent loop 的 `iteration`。由于 round 与 request response 并发，notification
 可能早于 `session.start` response 写出，因此 client 必须先订阅再发起请求，并把

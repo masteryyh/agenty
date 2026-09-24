@@ -8,8 +8,8 @@ export interface PayloadSpec {
     sha3_256: Uint8Array;
 }
 
-export function encodeFooter(cli: PayloadSpec, core: PayloadSpec, patchApplier: PayloadSpec): Uint8Array {
-    if (cli.sha3_256.length !== 32 || core.sha3_256.length !== 32 || patchApplier.sha3_256.length !== 32) {
+export function encodeFooter(cli: PayloadSpec, core: PayloadSpec, fileEditor: PayloadSpec): Uint8Array {
+    if (cli.sha3_256.length !== 32 || core.sha3_256.length !== 32 || fileEditor.sha3_256.length !== 32) {
         throw new Error("payload SHA3-256 digests must be 32 bytes");
     }
 
@@ -21,9 +21,9 @@ export function encodeFooter(cli: PayloadSpec, core: PayloadSpec, patchApplier: 
     view.setBigUint64(48, core.offset, true);
     view.setBigUint64(56, core.len, true);
     out.set(core.sha3_256, 64);
-    view.setBigUint64(96, patchApplier.offset, true);
-    view.setBigUint64(104, patchApplier.len, true);
-    out.set(patchApplier.sha3_256, 112);
+    view.setBigUint64(96, fileEditor.offset, true);
+    view.setBigUint64(104, fileEditor.len, true);
+    out.set(fileEditor.sha3_256, 112);
     view.setUint32(144, FORMAT_VERSION, true);
     out.set(MAGIC, 148);
     return out;

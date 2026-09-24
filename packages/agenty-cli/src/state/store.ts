@@ -110,6 +110,7 @@ interface AppState {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
+    enableCodexMode: () => Promise<void>;
 }
 
 let idCounter = 0;
@@ -429,6 +430,12 @@ export const useAppStore = create<AppState>((set, get) => {
             const permissionMode = event.permissionMode ?? "ask";
             set((state) => state.session?.id === event.sessionId
                 ? { session: { ...state.session, permissionMode } }
+                : {});
+            return;
+        }
+        if (event.type === "tool_dialect_changed") {
+            set((state) => state.session?.id === event.sessionId
+                ? { session: { ...state.session, toolDialect: event.toolDialect ?? "codex" } }
                 : {});
             return;
         }
@@ -778,9 +785,10 @@ export const useAppStore = create<AppState>((set, get) => {
                     return;
                 }
 
-                const sessionLevelPermissionChange = event.type === "permission_mode_changed" &&
+                const sessionLevelChange = (event.type === "permission_mode_changed" ||
+                    event.type === "tool_dialect_changed") &&
                     (!event.roundId || event.roundId === "00000000-0000-0000-0000-000000000000");
-                if (sessionLevelPermissionChange) {
+                if (sessionLevelChange) {
                     handleEvent(event);
                     return;
                 }
@@ -790,7 +798,8 @@ export const useAppStore = create<AppState>((set, get) => {
                         return;
                     }
                     activeRoundId = event.roundId;
-                } else if (activeRoundId === null && event.type === "permission_mode_changed") {
+                } else if (activeRoundId === null &&
+                    (event.type === "permission_mode_changed" || event.type === "tool_dialect_changed")) {
                     activeRoundId = event.roundId;
                 } else if (activeRoundId === null) {
                     return;
@@ -1045,6 +1054,24 @@ export const useAppStore = create<AppState>((set, get) => {
             const current = get().session?.permissionMode ?? "ask";
             const mode = current === "ask" ? "auto" : current === "auto" ? "yolo" : "ask";
             await get().setPermissionMode(mode);
+        },
+
+        enableCodexMode: async () => {
+            const { client, session } = get();
+            if (!client || !session) {
+                return;
+            }
+            if (session.toolDialect === "codex") {
+                setToast("Codex Mode is already enabled.");
+                return;
+            }
+            try {
+                const updated = await client.enableCodexMode(session.id);
+                set({ session: updated });
+                setToast("Codex Mode enabled for this session.");
+            } catch (error) {
+                setToast(`Codex Mode: ${(error as Error).message}`, true);
+            }
         },
     };
 });

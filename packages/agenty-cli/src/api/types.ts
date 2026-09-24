@@ -1,5 +1,6 @@
 export type ReasoningEffort = "" | "off" | "low" | "medium" | "high" | "xhigh" | "max";
 export type PermissionMode = "ask" | "auto" | "yolo";
+export type ToolDialect = "default" | "codex";
 export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
     "low",
     "medium",
@@ -66,7 +67,6 @@ export interface ModelProviderDto {
     type: APIType;
     baseUrl: string;
     apiKey: string;
-    freeFormTool?: boolean;
     builtin?: boolean;
     official?: boolean;
     modelsUrl?: string;
@@ -153,7 +153,6 @@ export interface CreateModelProviderDto {
     type: APIType;
     baseUrl?: string;
     apiKey?: string;
-    freeFormTool?: boolean;
     metadata?: Record<string, unknown>;
 }
 
@@ -242,6 +241,7 @@ export interface ChatSessionDto {
     contextWindow: number;
     currentReasoningEffort?: ReasoningEffort;
     permissionMode?: PermissionMode;
+    toolDialect?: ToolDialect;
     rounds: RoundDto[];
     createdAt: string;
     updatedAt: string;
@@ -287,7 +287,7 @@ export interface ToolReviewEvent {
 }
 
 export interface SessionEvent {
-    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "tool_review_started" | "tool_review_resolved" | "permission_mode_changed";
+    type: "round_started" | "message_appended" | "model_stream" | "round_ended" | "tool_approval_requested" | "tool_approval_resolved" | "tool_review_started" | "tool_review_resolved" | "permission_mode_changed" | "tool_dialect_changed";
     sessionId: string;
     roundId: string;
     sequence: number;
@@ -302,6 +302,7 @@ export interface SessionEvent {
     review?: ToolReviewEvent;
     permissionMode?: PermissionMode;
     previousPermissionMode?: PermissionMode;
+    toolDialect?: ToolDialect;
 }
 
 export interface CompactionEvent {

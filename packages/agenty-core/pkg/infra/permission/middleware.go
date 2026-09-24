@@ -204,6 +204,9 @@ func (manager *PermissionManager) beforeToolCall(ctx context.Context, state *mid
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if state != nil && state.Result != nil {
+		return nil
+	}
 	if state == nil || state.Session == nil || state.Round == nil || state.Call == nil || state.Emit == nil {
 		return fmt.Errorf("HITL requires a session, round, tool call and event emitter")
 	}

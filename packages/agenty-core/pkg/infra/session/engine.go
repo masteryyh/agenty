@@ -250,7 +250,6 @@ func (engine *Engine) Compact(
 		model:           resources.model,
 		modelCall:       resources.modelCall,
 		systemPrompt:    resources.systemPrompt,
-		freeFormTool:    resources.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(resources.model),
 		toolRuntime:     toolRuntime,
 	}
@@ -330,6 +329,9 @@ func (engine *Engine) SetModel(
 	if err != nil {
 		return nil, err
 	}
+	if session.CurrentToolDialect() == conversation.ToolDialectCodex && targetProvider.Type != catalog.APIOpenAI {
+		return nil, apperrors.Validation("Codex Mode only allows Responses API providers")
+	}
 	targetContextWindow := int64(targetModel.ContextWindow)
 	if targetContextWindow <= 0 {
 		return nil, apperrors.Validation("target model context window must be positive")
@@ -352,7 +354,6 @@ func (engine *Engine) SetModel(
 		model:           source.model,
 		modelCall:       source.modelCall,
 		systemPrompt:    source.systemPrompt,
-		freeFormTool:    source.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(source.model),
 		toolRuntime:     toolRuntime,
 	}
@@ -520,6 +521,61 @@ func (engine *Engine) SetPermissionMode(
 	return session.VisibleCopy(), nil
 }
 
+func (engine *Engine) EnableCodexMode(ctx context.Context, sessionID string) (*conversation.Session, error) {
+	id, err := uuid.Parse(sessionID)
+	if err != nil {
+		return nil, apperrors.Validation("invalid session id: " + err.Error())
+	}
+
+	runCtx, execution, err := engine.reserve(id)
+	if err != nil {
+		return nil, err
+	}
+	defer engine.release(id, execution)
+
+	lock := engine.sessionLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	session, err := engine.sessions.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, conversation.ErrSessionNotFound) {
+			return nil, apperrors.NotFound("session " + sessionID + " not found")
+		}
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
+	}
+	engine.bindExecutionSession(id, execution, session)
+	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
+		return nil, apperrors.Validation("session model is not configured")
+	}
+
+	provider, model, err := engine.loadCatalogModel(ctx, *session.CurrentModel)
+	if err != nil {
+		return nil, err
+	}
+	if provider.Type != catalog.APIOpenAI {
+		return nil, apperrors.Validation("Codex Mode requires a Responses API provider")
+	}
+	if !session.EnableCodexMode() {
+		return session.VisibleCopy(), nil
+	}
+
+	change := conversation.SessionCodexModeEnabled{SessionID: session.ID}
+	for _, pending := range slices.Backward(session.PendingEvents()) {
+		if recorded, ok := pending.(conversation.SessionCodexModeEnabled); ok {
+			change = recorded
+			break
+		}
+	}
+	if err := engine.emitForSession(runCtx, session, uuid.Nil, provider, model, agentloop.Event{
+		Type:    agentloop.EventToolDialectChanged,
+		Payload: change,
+	}); err != nil {
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist Codex Mode", err)
+	}
+	return session.VisibleCopy(), nil
+}
+
 func (engine *Engine) ExecuteSessionIfIdle(
 	sessionID uuid.UUID,
 	execute func() error,
@@ -641,7 +697,6 @@ type preparedExecution struct {
 	model           catalog.Model
 	modelCall       modelcall.ModelCallConfig
 	systemPrompt    string
-	freeFormTool    bool
 	maxOutputTokens int64
 	toolRuntime     agentloop.ToolRuntime
 	userMessage     conversation.Message
@@ -656,7 +711,6 @@ type executionResources struct {
 	systemPrompt          string
 	sessionPromptSuffix   string
 	sessionPromptOverride *string
-	freeFormTool          bool
 }
 
 func (engine *Engine) prepare(
@@ -717,7 +771,6 @@ func (engine *Engine) prepare(
 		model := resources.model
 		provider := resources.provider
 		systemPrompt := resources.systemPrompt
-		freeFormTool := resources.freeFormTool
 		tools := toolRuntime
 		state := &inframiddleware.SessionStartContext{
 			Context:             runCtx,
@@ -725,7 +778,6 @@ func (engine *Engine) prepare(
 			Provider:            &provider,
 			Model:               &model,
 			SystemPrompt:        &systemPrompt,
-			FreeFormTool:        &freeFormTool,
 			Tools:               &tools,
 			AppendHiddenMessage: appendHiddenMessage,
 			Emit: func(eventCtx context.Context, event agentloop.Event) error {
@@ -750,17 +802,13 @@ func (engine *Engine) prepare(
 		} else {
 			systemPrompt = *state.SystemPrompt
 		}
-		if state.FreeFormTool != nil {
-			freeFormTool = *state.FreeFormTool
-		}
 		resources.provider = provider
 		resources.model = model
 		modelCall := newModelCallConfig(provider, model)
-		modelCall.FreeFormTool = freeFormTool
+		modelCall.CodexMode = session.CurrentToolDialect() == conversation.ToolDialectCodex
 		resources.modelCall = modelCall
 		resources.baseSystemPrompt = baseSystemPrompt
 		resources.systemPrompt = systemPrompt
-		resources.freeFormTool = freeFormTool
 		if strings.HasPrefix(systemPrompt, baseSystemPrompt) {
 			resources.sessionPromptSuffix = strings.TrimPrefix(systemPrompt, baseSystemPrompt)
 			resources.sessionPromptOverride = nil
@@ -823,6 +871,7 @@ func (engine *Engine) prepare(
 	} else {
 		resources.systemPrompt = *state.SystemPrompt
 	}
+	resources.modelCall.CodexMode = session.CurrentToolDialect() == conversation.ToolDialectCodex
 
 	roundID, err := session.StartRound()
 	if err != nil {
@@ -846,7 +895,6 @@ func (engine *Engine) prepare(
 		model:           resources.model,
 		modelCall:       resources.modelCall,
 		systemPrompt:    resources.systemPrompt,
-		freeFormTool:    resources.freeFormTool,
 		maxOutputTokens: modelMaxOutputTokens(resources.model),
 		toolRuntime:     toolRuntime,
 		userMessage:     userMessage,
@@ -888,20 +936,19 @@ func (engine *Engine) loadResources(
 		return nil, err
 	}
 
-	systemPrompt, err := infraprompt.ResolveSystemPrompt(infraprompt.SystemPromptOptions{
-		UseApplyPatchShell: !provider.FreeFormTool,
-	})
+	systemPrompt, err := infraprompt.ResolveSystemPrompt(infraprompt.SystemPromptOptions{})
 	if err != nil {
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to resolve system prompt", err)
 	}
+	modelCall := newModelCallConfig(*provider, *model)
+	modelCall.CodexMode = session.CurrentToolDialect() == conversation.ToolDialectCodex
 	return &executionResources{
 		sourceModel:      *session.CurrentModel,
 		provider:         *provider,
 		model:            *model,
-		modelCall:        newModelCallConfig(*provider, *model),
+		modelCall:        modelCall,
 		baseSystemPrompt: systemPrompt,
 		systemPrompt:     systemPrompt,
-		freeFormTool:     provider.FreeFormTool,
 	}, nil
 }
 
@@ -1063,7 +1110,7 @@ func (engine *Engine) sessionRequestForWindow(
 	request := modelcall.ModelCallRequest{
 		SystemPrompt:    prepared.systemPrompt,
 		Messages:        modelMessages(messages),
-		Tools:           engine.toolDefinitions(prepared.toolRuntime, prepared.freeFormTool),
+		Tools:           engine.toolDefinitions(prepared.toolRuntime),
 		MaxOutputTokens: maxOutputTokens,
 		ReasoningEffort: sessionReasoningEffort(prepared.session),
 	}
@@ -1129,25 +1176,11 @@ func (engine *Engine) snapshotTools() agentloop.ToolRuntime {
 	return engine.tools
 }
 
-func (engine *Engine) toolDefinitions(
-	toolRuntime agentloop.ToolRuntime,
-	freeFormTool bool,
-) []modelcall.ToolDefinition {
+func (engine *Engine) toolDefinitions(toolRuntime agentloop.ToolRuntime) []modelcall.ToolDefinition {
 	if toolRuntime == nil {
 		return nil
 	}
-	definitions := toolRuntime.Definitions()
-	if freeFormTool {
-		return definitions
-	}
-
-	filtered := make([]modelcall.ToolDefinition, 0, len(definitions))
-	for _, definition := range definitions {
-		if definition.Type != modelcall.ToolTypeApplyPatch {
-			filtered = append(filtered, definition)
-		}
-	}
-	return filtered
+	return toolRuntime.Definitions()
 }
 
 func sessionReasoningEffort(session *conversation.Session) shared.ReasoningEffort {
@@ -1331,7 +1364,6 @@ func newModelCallConfig(provider catalog.Provider, model catalog.Model) modelcal
 		APIKey:            provider.APIKey,
 		ModelCode:         model.Code.String(),
 		Official:          provider.Official,
-		FreeFormTool:      provider.FreeFormTool,
 		SupportsReasoning: model.SupportsReasoning(),
 		ReasoningEfforts:  append([]shared.ReasoningEffort(nil), model.ReasoningEfforts...),
 	}

@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -36,6 +37,7 @@ type SessionEvent struct {
 	Review                 *permission.ReviewEvent         `json:"review,omitempty"`
 	PermissionMode         conversation.PermissionMode     `json:"permissionMode,omitempty"`
 	PreviousPermissionMode conversation.PermissionMode     `json:"previousPermissionMode,omitempty"`
+	ToolDialect            conversation.ToolDialect        `json:"toolDialect,omitempty"`
 }
 
 type SessionEventType string
@@ -46,6 +48,7 @@ const (
 	SessionEventModelStream           SessionEventType = "model_stream"
 	SessionEventRoundEnded            SessionEventType = "round_ended"
 	SessionEventPermissionModeChanged SessionEventType = "permission_mode_changed"
+	SessionEventToolDialectChanged    SessionEventType = "tool_dialect_changed"
 )
 
 type sessionNotificationMiddleware struct {
@@ -105,7 +108,8 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		permission.EventResolved,
 		permission.EventReviewStarted,
 		permission.EventReviewResolved,
-		agentloop.EventPermissionModeChanged:
+		agentloop.EventPermissionModeChanged,
+		agentloop.EventToolDialectChanged:
 	default:
 		return SessionEvent{}, false
 	}
@@ -124,7 +128,7 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		RoundID:   event.RoundID,
 		Sequence:  sequence,
 		Iteration: event.Iteration,
-		Stream:    event.Stream,
+		Stream:    notificationStream(event.Stream),
 		Message:   event.Message,
 		Status:    event.Status,
 		Usage:     event.Usage,
@@ -143,7 +147,41 @@ func (notifier *sessionNotificationMiddleware) sessionEvent(
 		projected.PermissionMode = change.PermissionMode
 		projected.PreviousPermissionMode = change.PreviousMode
 	}
+	if _, ok := event.Payload.(conversation.SessionCodexModeEnabled); ok {
+		projected.ToolDialect = conversation.ToolDialectCodex
+	}
 	return projected, true
+}
+
+func notificationStream(stream *modelcall.ModelCallStreamEvent) *modelcall.ModelCallStreamEvent {
+	if stream == nil {
+		return nil
+	}
+
+	projected := *stream
+	if len(projected.ToolInput) > 0 && !json.Valid(projected.ToolInput) {
+		projected.ToolInput = nil
+	}
+	if projected.Response != nil {
+		response := *projected.Response
+		response.Content = append(conversation.Content(nil), response.Content...)
+		for index, block := range response.Content {
+			switch value := block.(type) {
+			case conversation.ToolUseBlock:
+				if !json.Valid(value.Input) {
+					value.Input = []byte("{}")
+					response.Content[index] = value
+				}
+			case conversation.ReasoningBlock:
+				if len(value.Extra) > 0 && !json.Valid(value.Extra) {
+					value.Extra = nil
+					response.Content[index] = value
+				}
+			}
+		}
+		projected.Response = &response
+	}
+	return &projected
 }
 
 func compactionEvent(event agentloop.Event) (compaction.Event, bool) {

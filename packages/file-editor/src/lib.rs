@@ -10,7 +10,7 @@ mod transaction;
 #[cfg(test)]
 use file_lock::lock_path;
 use file_lock::{lock_directory, operation_lock_paths, FileLocks, LockMode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 use transaction::Transaction;
 
@@ -137,6 +137,30 @@ pub struct FileResult {
     pub removed_lines: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum TextEditorInput {
+    View {
+        path: String,
+        #[serde(default)]
+        view_range: Option<[i64; 2]>,
+    },
+    StrReplace {
+        path: String,
+        old_str: String,
+        new_str: String,
+    },
+    Create {
+        path: String,
+        file_text: String,
+    },
+    Insert {
+        path: String,
+        insert_line: usize,
+        insert_text: String,
+    },
+}
+
 pub fn apply_patch(cwd: &Path, patch: &str) -> Result<PatchResult, PatchError> {
     let operations = parse_envelope(cwd, patch)?;
     let groups = classify_operations(operations)?;
@@ -166,6 +190,94 @@ pub fn apply_patch(cwd: &Path, patch: &str) -> Result<PatchResult, PatchError> {
         cwd: cwd.display().to_string(),
         files: results,
     })
+}
+
+pub fn text_editor(cwd: &Path, input: TextEditorInput) -> Result<PatchResult, PatchError> {
+    let (path, operation) = match input {
+        TextEditorInput::View { .. } => {
+            return Err(PatchError::Invalid(
+                "view is handled by the core process".to_string(),
+            ));
+        }
+        TextEditorInput::StrReplace {
+            path,
+            old_str,
+            new_str,
+        } => {
+            if old_str.is_empty() {
+                return Err(PatchError::Invalid(
+                    "str_replace old_str must not be empty".to_string(),
+                ));
+            }
+            let path = resolve_path(cwd, &path)?;
+            (path, TextEditorOperation::StrReplace { old_str, new_str })
+        }
+        TextEditorInput::Create { path, file_text } => {
+            let path = resolve_path(cwd, &path)?;
+            (path, TextEditorOperation::Create { file_text })
+        }
+        TextEditorInput::Insert {
+            path,
+            insert_line,
+            insert_text,
+        } => {
+            let path = resolve_path(cwd, &path)?;
+            (
+                path,
+                TextEditorOperation::Insert {
+                    insert_line,
+                    insert_text,
+                },
+            )
+        }
+    };
+
+    let lock_directory = lock_directory()?;
+    let read_locks = FileLocks::acquire(&lock_directory, &[path.clone()], LockMode::Shared)?;
+    let mut transaction = Transaction::new(cwd.to_path_buf());
+    match operation {
+        TextEditorOperation::StrReplace { old_str, new_str } => {
+            transaction.replace_text(&path, &old_str, &new_str)?;
+        }
+        TextEditorOperation::Create { file_text } => {
+            transaction.create_text(&path, file_text)?;
+        }
+        TextEditorOperation::Insert {
+            insert_line,
+            insert_text,
+        } => {
+            transaction.insert_text(&path, insert_line, &insert_text)?;
+        }
+    }
+
+    let results = transaction.prepare_results()?;
+    read_locks.release()?;
+    let lock_paths = transaction.lock_paths()?;
+    let write_locks = FileLocks::acquire(&lock_directory, &lock_paths, LockMode::Exclusive)?;
+    let commit_result = transaction.commit();
+    let release_result = write_locks.release();
+    commit_result?;
+    release_result?;
+
+    Ok(PatchResult {
+        success: true,
+        cwd: cwd.display().to_string(),
+        files: results,
+    })
+}
+
+enum TextEditorOperation {
+    StrReplace {
+        old_str: String,
+        new_str: String,
+    },
+    Create {
+        file_text: String,
+    },
+    Insert {
+        insert_line: usize,
+        insert_text: String,
+    },
 }
 
 fn parse_envelope(cwd: &Path, patch: &str) -> Result<Vec<Operation>, PatchError> {
@@ -822,7 +934,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("agenty-patch-applier-{name}-{suffix}"));
+        let path = std::env::temp_dir().join(format!("agenty-file-editor-{name}-{suffix}"));
         fs::create_dir_all(&path).unwrap();
         path
     }
@@ -837,6 +949,53 @@ mod tests {
         assert_eq!(result.files[0].added_lines, 1);
         assert_eq!(result.files[0].removed_lines, 0);
         assert!(result.files[0].diff.contains("+three"));
+    }
+
+    #[test]
+    fn applies_text_editor_replace_and_insert_with_unique_match() {
+        let cwd = temp_dir("text-editor");
+        let path = cwd.join("notes.txt");
+        fs::write(&path, "one\ntwo\n").unwrap();
+
+        let replaced = text_editor(
+            &cwd,
+            TextEditorInput::StrReplace {
+                path: "notes.txt".to_string(),
+                old_str: "two".to_string(),
+                new_str: "updated".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(replaced.success);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\nupdated\n");
+
+        let inserted = text_editor(
+            &cwd,
+            TextEditorInput::Insert {
+                path: "notes.txt".to_string(),
+                insert_line: 1,
+                insert_text: "between\n".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(inserted.success);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "one\nbetween\nupdated\n"
+        );
+
+        fs::write(&path, "duplicate\nduplicate\n").unwrap();
+        let error = text_editor(
+            &cwd,
+            TextEditorInput::StrReplace {
+                path: "notes.txt".to_string(),
+                old_str: "duplicate".to_string(),
+                new_str: "updated".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("found 2 matches"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "duplicate\nduplicate\n");
     }
 
     #[test]

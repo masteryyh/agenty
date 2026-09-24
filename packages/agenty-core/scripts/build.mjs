@@ -54,7 +54,7 @@ export function resolveCoreBuildPlan(
     const target = targetForGoOS(requestedGoOS);
     const outputDirectory = outputPath(packageRoot, environment.PACKAGE_DIR?.trim() || "bin");
     const coreName = executableName(environment.BIN_NAME?.trim() || "agenty-core", target.extension);
-    const helperName = `apply_patch${target.extension}`;
+    const helperName = `fileedit${target.extension}`;
     const repositoryRoot = resolve(packageRoot, "../..");
     const version = resolveBuildVersion(environment, repositoryRoot);
     return {
@@ -68,7 +68,7 @@ export function resolveCoreBuildPlan(
             "./cmd",
         ],
         helperDestination: join(outputDirectory, helperName),
-        helperSource: join(repositoryRoot, "packages/patch-applier/target/release", helperName),
+        helperSource: join(repositoryRoot, "packages/file-editor/target/release", helperName),
         outputDirectory,
         packageRoot,
         target,
@@ -103,7 +103,7 @@ function run() {
         return buildExitCode;
     }
     if (!existsSync(plan.helperSource)) {
-        throw new Error(`apply_patch binary not found at ${plan.helperSource}`);
+        throw new Error(`fileedit binary not found at ${plan.helperSource}`);
     }
     copyFileSync(plan.helperSource, plan.helperDestination);
     console.log(`agenty-core built -> ${plan.corePath}`);

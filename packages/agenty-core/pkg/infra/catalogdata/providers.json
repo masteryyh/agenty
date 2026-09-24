@@ -5,7 +5,6 @@
         "type": "openai",
         "baseUrl": "https://api.openai.com/v1",
         "official": true,
-        "freeFormTool": true,
         "modelsUrl": "models",
         "tokenCountUrl": "responses/input_tokens",
         "models": [

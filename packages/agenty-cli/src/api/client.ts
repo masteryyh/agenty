@@ -327,6 +327,11 @@ export class AgentyClient {
         return requireSession(session, `session.setPermissionMode ${id}`);
     }
 
+    async enableCodexMode(id: string): Promise<ChatSessionDto> {
+        const session = await this.rpc.call<ChatSessionDto | null>("session.enableCodexMode", { id });
+        return requireSession(session, `session.enableCodexMode ${id}`);
+    }
+
     startSession(id: string, text: string): Promise<ExecutionStart> {
         return this.rpc.call("session.start", { id, content: [{ type: "text", text }] });
     }
@@ -393,7 +398,6 @@ function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
         ...provider,
         builtin: provider.builtin === true,
         official: provider.official === true,
-        freeFormTool: provider.freeFormTool === true,
         modelsCached: provider.modelsCached === true,
         models: Array.isArray(provider.models)
             ? provider.models
@@ -453,6 +457,7 @@ function normalizeSession(session: ChatSessionDto): ChatSessionDto {
         permissionMode: session.permissionMode === "yolo" || session.permissionMode === "auto"
             ? session.permissionMode
             : "ask",
+        toolDialect: session.toolDialect === "codex" ? "codex" : "default",
         rounds: rounds.map((round) => ({
             ...round,
             messages: Array.isArray(round.messages)

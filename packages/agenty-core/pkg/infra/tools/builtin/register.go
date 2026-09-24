@@ -17,6 +17,7 @@ func RegisterAll(registry infratools.Registrar) error {
 		&shellTool{},
 		&readFileTool{fileSystem: fileSystem},
 		&applyPatchTool{fileSystem: fileSystem},
+		&textEditorTool{fileSystem: fileSystem},
 		&grepTool{fileSystem: fileSystem},
 		&globTool{fileSystem: fileSystem},
 		&listTool{fileSystem: fileSystem},

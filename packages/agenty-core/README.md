@@ -86,11 +86,14 @@ A tool-use response fails compaction and is never executed or persisted. The loo
 permits at most 20 LLM/tool iterations. The production registry in
 `pkg/infra/tools` implements the `ToolRuntime` port, executes one tool batch concurrently,
 and returns results in call order. `pkg/infra/tools/builtin/` provides `read_file`,
-`apply_patch`, `grep`, `glob`, and `ls`; `cmd/main.go` registers them explicitly.
-`apply_patch` delegates V4A parsing and atomic filesystem mutation to the bundled Rust
-executable of the same name. Providers with free-form tool support receive `apply_patch`
-as a model tool. Other providers receive a system instruction to run the same executable
-through `shell`. Relative paths resolve from the round's captured session working directory.
+`apply_patch`, `str_replace_based_edit_tool`, `grep`, `glob`, and `ls`; `cmd/main.go` registers
+them explicitly. The default file-tool dialect exposes the text editor, whose `view` command
+replaces `read_file` and whose writes delegate to the bundled `fileedit text_editor` helper.
+The official Anthropic Messages provider receives its server-defined text editor declaration;
+compatible providers receive the same contract as a function tool. `/codex-mode` permanently
+switches one Responses API session to `read_file` plus free-form `apply_patch`, delegated to
+`fileedit apply_patch`; it cannot then switch to another API type. Relative paths resolve from
+the round's captured session working directory.
 
 The session host exposes lifecycle and the atomic loop exposes per-call hook ports. The
 infrastructure contract in `pkg/infra/middleware` defines a flat `Middleware` structure and
@@ -275,13 +278,13 @@ core process for 8 hours. It is not written to disk and does not survive a core
 restart. Expired entries remain available as stale data while a subsequent list refreshes them.
 It maps common `id`/name/token-limit fields, follows provider pagination, defaults missing or
 non-positive context/output limits to `256000` and `65536`, and represents missing reasoning
-capability as an empty `reasoningEfforts` array. Transactional `apply_patch` locks live under
+capability as an empty `reasoningEfforts` array. Transactional `fileedit` locks live under
 `~/.agenty/locks/`; each lock records its helper PID and full target path.
 
 `session.start` accepts `{id, content}` and returns the persisted round's identifiers
 and `running` status immediately; the engine continues the full agent turn
 asynchronously. While it runs, core writes `session.event` JSON-RPC notifications with
-`round_started`, `message_appended`, `model_stream`, `permission_mode_changed`, and
+`round_started`, `message_appended`, `model_stream`, `permission_mode_changed`, `tool_dialect_changed`, and
 `round_ended` event types.
 Every event carries `sessionId`, `roundId`, and a per-round monotonically increasing
 `sequence`; model events also carry the provider-neutral stream event and loop

@@ -27,6 +27,7 @@ type Session struct {
 	ContextWindow          int64                  `json:"contextWindow"`
 	CurrentReasoningEffort shared.ReasoningEffort `json:"currentReasoningEffort,omitempty"`
 	PermissionMode         PermissionMode         `json:"permissionMode"`
+	ToolDialect            ToolDialect            `json:"toolDialect"`
 	Rounds                 []Round                `json:"rounds"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	UpdatedAt              time.Time              `json:"updatedAt"`
@@ -67,6 +68,7 @@ func StartSessionWithPermission(
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
 		PermissionMode:  permissionMode,
+		ToolDialect:     ToolDialectDefault,
 		Cwd:             cloneString(cwd),
 		At:              now(),
 	})
@@ -82,6 +84,21 @@ func (s *Session) CurrentPermissionMode() PermissionMode {
 	defer mu.RUnlock()
 
 	return s.PermissionMode.Normalized()
+}
+
+func (s *Session) CurrentToolDialect() ToolDialect {
+	if s == nil {
+		return ToolDialectDefault
+	}
+	return s.ToolDialect.Normalized()
+}
+
+func (s *Session) EnableCodexMode() bool {
+	if s == nil || s.CurrentToolDialect() == ToolDialectCodex {
+		return false
+	}
+	s.record(SessionCodexModeEnabled{SessionID: s.ID, At: now()})
+	return true
 }
 
 func (s *Session) SetPermissionMode(mode PermissionMode, roundID uuid.UUID) bool {
@@ -403,6 +420,7 @@ func (s *Session) apply(e shared.Event) {
 		mu.Lock()
 		s.PermissionMode = ev.PermissionMode.Normalized()
 		mu.Unlock()
+		s.ToolDialect = ev.ToolDialect.Normalized()
 		s.Cwd = cloneString(ev.Cwd)
 		s.Rounds = make([]Round, 0)
 		s.context = make([]Message, 0)
@@ -430,6 +448,11 @@ func (s *Session) apply(e shared.Event) {
 		s.PermissionMode = ev.PermissionMode.Normalized()
 		mu.Unlock()
 		s.updateMetadataPermissionMode(ev.PermissionMode)
+		s.refreshCompactionMetadata()
+		s.UpdatedAt = ev.At
+	case SessionCodexModeEnabled:
+		s.ToolDialect = ToolDialectCodex
+		s.updateMetadataToolDialect(s.ToolDialect)
 		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case RoundStarted:

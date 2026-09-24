@@ -200,14 +200,67 @@ func TestAgentLoopExecutesThroughEveryProviderProtocol(t *testing.T) {
 					tt.apiType,
 				)
 			}
-			wantTools := []string{"glob", "grep", "ls", "read_file", "shell"}
-			if tt.apiType == "openai" {
-				wantTools = []string{"apply_patch", "glob", "grep", "ls", "read_file", "shell"}
-			}
+			wantTools := []string{"glob", "grep", "ls", "shell", "str_replace_based_edit_tool"}
 			if names := providerToolNames(request, tt.apiType); !slices.Equal(names, wantTools) {
 				t.Errorf("provider tools = %q, want %q", names, wantTools)
 			}
 		})
+	}
+}
+
+func TestCodexModeUsesResponsesToolsAndLocksProviderDialect(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
+		return providerSuccess("openai", "Codex Mode reply", request.Call)
+	})
+	ctx, cancel := testContext(t)
+	defer cancel()
+	client := newAgentyClient(startCore(t))
+
+	session, err := createExecutionResources(ctx, client, fixture, "openai", "codex")
+	requireNoError(t, err)
+	updated, err := client.EnableCodexMode(ctx, session.ID)
+	requireNoError(t, err)
+	if updated.ToolDialect != "codex" {
+		t.Fatalf("tool dialect = %q, want codex", updated.ToolDialect)
+	}
+
+	started, err := client.StartSession(ctx, session.ID, []ContentInput{{
+		Type: "text",
+		Text: "Use the Codex tool dialect.",
+	}})
+	requireNoError(t, err)
+	_, err = client.WaitForRoundStatus(ctx, session.ID, started.RoundID, "completed")
+	requireNoError(t, err)
+
+	request := waitForProviderCall(t, ctx, fixture.requests, 1)
+	wantTools := []string{"apply_patch", "glob", "grep", "ls", "read_file", "shell"}
+	if names := providerToolNames(request, "openai"); !slices.Equal(names, wantTools) {
+		t.Fatalf("provider tools = %q, want %q", names, wantTools)
+	}
+
+	_, err = client.CreateProvider(ctx, ProviderCreateInput{
+		Code:    "codex-legacy",
+		Name:    "Codex Legacy",
+		Type:    "openai_completions",
+		BaseURL: fixture.BaseURL("openai_completions"),
+		APIKey:  "test-key",
+	})
+	requireNoError(t, err)
+	_, err = client.AddModel(ctx, ModelInput{
+		ProviderCode:    "codex-legacy",
+		ModelCode:       "legacy-model",
+		Name:            "Legacy Model",
+		ContextWindow:   128_000,
+		MaxOutputTokens: 8_192,
+	})
+	requireNoError(t, err)
+	if _, err = client.SetSessionModel(ctx, session.ID, ModelRef{
+		ProviderCode: "codex-legacy",
+		ModelCode:    "legacy-model",
+	}); err == nil {
+		t.Fatal("Codex Mode accepted a non-Responses provider")
 	}
 }
 

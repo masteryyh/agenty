@@ -121,15 +121,13 @@ export async function persistWizardSetup(
             providerChanged = existing.name !== draft.name.trim() ||
                 existing.type !== draft.type ||
                 existing.baseUrl !== draft.baseUrl.trim() ||
-                existing.apiKey !== draft.apiKey.trim() ||
-                (existing.freeFormTool === true) !== (draft.type === "openai" && draft.freeFormTool);
+                existing.apiKey !== draft.apiKey.trim();
             if (providerChanged) {
                 await client.updateProvider(providerCode, {
                     name: draft.name.trim(),
                     type: draft.type,
                     baseUrl: draft.baseUrl.trim(),
                     apiKey: draft.apiKey.trim(),
-                    freeFormTool: draft.type === "openai" && draft.freeFormTool,
                 });
             }
         } else {
@@ -139,7 +137,6 @@ export async function persistWizardSetup(
                 type: draft.type,
                 baseUrl: draft.baseUrl.trim(),
                 apiKey: draft.apiKey.trim(),
-                freeFormTool: draft.type === "openai" && draft.freeFormTool,
             };
             await client.createProvider(providerInput);
         }

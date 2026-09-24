@@ -3,7 +3,7 @@
 [简体中文](./README.zh-CN.md)
 
 Agenty is a local-first AI agent application. The current product path consists of
-`agenty-cli`, `agenty-core`, the Rust `patch-applier` helper, and the self-extracting
+`agenty-cli`, `agenty-core`, the Rust `file-editor` helper, and the self-extracting
 `agenty-bootstrap` launcher.
 The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 over
 the child process's stdin/stdout; it does not start an HTTP server.
@@ -26,7 +26,7 @@ agenty
 ```
 
 On first run, the launcher verifies and extracts the bundled CLI, core, and patch helper into
-`~/.agenty/bin/{cli,core,apply_patch}`. The CLI starts core as a child process and opens a setup
+`~/.agenty/bin/{cli,core,fileedit}`. The CLI starts core as a child process and opens a setup
 wizard. The wizard creates one provider and one chat model through the existing `provider.*`
 IPC methods, then calls `initialize.complete` to persist the global default session model.
 
@@ -41,7 +41,7 @@ and atomically replaced. The CLI resolves core in this order:
 3. `~/.agenty/bin/core` from the launcher
 
 Before starting core, the CLI prepends core's directory to `PATH`, making the bundled
-`apply_patch` command available to core and shell tool calls.
+`fileedit` command available to core.
 
 Core reads one compact JSON-RPC message per stdin line and writes responses and
 notifications to stdout. After `session.start`, core sends ordered `session.event`
@@ -50,7 +50,7 @@ and the terminal round status. Notifications may arrive before the `session.star
 response, so clients must subscribe before sending the request. Core exits when stdin
 reaches EOF.
 
-The TUI currently exposes `/provider`, `/model`, `/mcp`, `/cwd`, `/effort`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/mcp`, `/cwd`, `/effort`, `/status`, `/codex-mode`,
 `/new`, `/resume`, `/help`, and `/exit`. Type `$` in the composer to search for an installed
 skill and insert it as a structured reference. Core scans the data directory's `skills/`
 folder first, followed by `~/.agents/skills` and `~/.claude/skills`; set `AGENTY_DATA_DIR` to
@@ -115,7 +115,7 @@ pnpm deepclean
 The build version comes from `AGENTY_VERSION` in the process environment, then from
 the ignored root `.env`; it defaults to `dev`. Copy `.env.example` to `.env` if you
 want a persistent local version, then run `pnpm build` for a complete launcher build.
-The default build includes patch-applier, core, CLI and bootstrap. Build Inspector
+The default build includes file-editor, core, CLI and bootstrap. Build Inspector
 separately with `pnpm inspector:build`.
 
 `pnpm run update` updates dependencies for the pnpm, Go, and Cargo modules. `pnpm tidyup`

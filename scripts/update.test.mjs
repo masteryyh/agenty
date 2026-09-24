@@ -22,7 +22,7 @@ test("updates pnpm, every Go module, and every Cargo module", () => {
             { args: ["get", "-u", "./..."], command: "go", cwd: "packages/agenty-inspector" },
             { args: ["mod", "tidy"], command: "go", cwd: "packages/agenty-inspector" },
             { args: ["update"], command: "cargo", cwd: "packages/agenty-bootstrap" },
-            { args: ["update"], command: "cargo", cwd: "packages/patch-applier" },
+            { args: ["update"], command: "cargo", cwd: "packages/file-editor" },
         ],
     );
 });

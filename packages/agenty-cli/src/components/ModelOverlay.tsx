@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { CoreModelDto, ModelProviderDto, ModelRef } from "../api/types";
+import type { CoreModelDto, ModelProviderDto, ModelRef, ToolDialect } from "../api/types";
 import { theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
@@ -19,9 +19,13 @@ export function isConfiguredProvider(provider: Pick<ModelProviderDto, "apiKey">)
     return provider.apiKey.trim() !== "";
 }
 
-export function configuredProviders(providers: ModelProviderDto[]): ModelProviderDto[] {
+export function configuredProviders(
+    providers: ModelProviderDto[],
+    toolDialect: ToolDialect = "default",
+): ModelProviderDto[] {
     return providers
         .filter(isConfiguredProvider)
+        .filter((provider) => toolDialect !== "codex" || provider.type === "openai")
         .map((provider) => ({
             ...provider,
             models: sortModelsByCode(provider.models),
@@ -92,6 +96,7 @@ export function initialModelIndex(
 export function ModelOverlay() {
     const client = useAppStore((state) => state.client);
     const sessionModel = useAppStore((state) => state.session?.currentModel);
+    const toolDialect = useAppStore((state) => state.session?.toolDialect ?? "default");
     const setToast = useAppStore((state) => state.setToast);
     const setOverlay = useAppStore((state) => state.setOverlay);
     const switchModel = useAppStore((state) => state.switchModel);
@@ -112,7 +117,7 @@ export function ModelOverlay() {
             setLoadingProviderCode(providerCode);
         }
         try {
-            const list = configuredProviders(await client.listProviders(providerCode));
+            const list = configuredProviders(await client.listProviders(providerCode), toolDialect);
             if (requestId !== requestIdRef.current) {
                 return;
             }
@@ -141,7 +146,7 @@ export function ModelOverlay() {
                 setLoadingProviderCode(null);
             }
         }
-    }, [client, setToast]);
+    }, [client, setToast, toolDialect]);
 
     useEffect(() => {
         void reload(selectedProviderCodeRef.current);

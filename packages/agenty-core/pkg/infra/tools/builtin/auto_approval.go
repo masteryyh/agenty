@@ -70,6 +70,17 @@ func (tool *applyPatchTool) CanAutoApprove(ctx agentloop.CallContext, input []by
 	return true
 }
 
+func (tool *textEditorTool) CanAutoApprove(ctx agentloop.CallContext, input []byte) bool {
+	var args textEditorArguments
+	if decodeArguments(input, &args) != nil || validateTextEditorArguments(args) != nil {
+		return false
+	}
+	if args.Command == "view" {
+		return ordinaryPathInsideCwd(args.Path, ctx.Cwd, false)
+	}
+	return ordinaryPathInsideCwd(args.Path, ctx.Cwd, false)
+}
+
 func validPatchOperation(operation *conversation.ApplyPatchOperation) bool {
 	if operation == nil {
 		return false

@@ -36,20 +36,20 @@ fn bootstrap() -> Result<i32> {
     })?;
     let artifacts = artifact_paths(&home);
 
-    if !artifacts.cli.is_file() && !artifacts.core.is_file() && !artifacts.patch_applier.is_file() {
+    if !artifacts.cli.is_file() && !artifacts.core.is_file() && !artifacts.file_editor.is_file() {
         progress.parent("local binary not found, extracting...");
         install_artifact(&mut file, &footer.cli, &artifacts.cli)?;
         install_artifact(&mut file, &footer.core, &artifacts.core)?;
-        install_artifact(&mut file, &footer.patch_applier, &artifacts.patch_applier)?;
+        install_artifact(&mut file, &footer.file_editor, &artifacts.file_editor)?;
     } else {
         progress.parent("checking local binary integrity...");
         ensure_with_progress(&mut file, &footer.cli, &artifacts.cli, "cli", &progress)?;
         ensure_with_progress(&mut file, &footer.core, &artifacts.core, "core", &progress)?;
         ensure_with_progress(
             &mut file,
-            &footer.patch_applier,
-            &artifacts.patch_applier,
-            "apply_patch",
+            &footer.file_editor,
+            &artifacts.file_editor,
+            "fileedit",
             &progress,
         )?;
     }

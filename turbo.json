@@ -59,7 +59,7 @@
             "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
             "passThroughEnv": ["GOCACHE"]
         },
-        "patch-applier#build": {
+        "file-editor#build": {
             "inputs": [
                 "Cargo.toml",
                 "Cargo.lock",
@@ -70,12 +70,12 @@
             ],
             "env": ["OS", "ARCH"],
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-            "outputs": ["target/release/apply_patch", "target/release/apply_patch.exe"]
+            "outputs": ["target/release/fileedit", "target/release/fileedit.exe"]
         },
         "agenty-bootstrap#test": {
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
         },
-        "patch-applier#test": {
+        "file-editor#test": {
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
         },
         "test": {

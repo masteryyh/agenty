@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	json "github.com/bytedance/sonic"
 	"github.com/openai/openai-go/v3"
 	openaishared "github.com/openai/openai-go/v3/shared"
 
@@ -345,13 +344,11 @@ func openAIChatResponse(result *openai.ChatCompletion) (*ModelCallResponse, erro
 		if call.Type != "function" {
 			continue
 		}
-		arguments := shared.RawJSON(call.Function.Arguments)
-		if !json.Valid(arguments) {
-			return nil, fmt.Errorf("modelcall: OpenAI Chat returned invalid tool arguments for %q", call.Function.Name)
-		}
-		content = append(content, conversation.ToolUseBlock{
-			ID: call.ID, Name: call.Function.Name, Input: arguments,
-		})
+		content = append(content, structuredToolUseBlock(
+			call.ID,
+			call.Function.Name,
+			shared.RawJSON(call.Function.Arguments),
+		))
 	}
 
 	return &ModelCallResponse{

@@ -45,6 +45,10 @@ func nativeOpenAIResponsesProvider(model ModelCallConfig) bool {
 	return model.Official && model.APIType == APIOpenAI
 }
 
+func nativeAnthropicProvider(model ModelCallConfig) bool {
+	return model.Official && model.APIType == APIAnthropic
+}
+
 func newOpenAIClient(model ModelCallConfig, config callConfig) openai.Client {
 	options := []openaioption.RequestOption{openaioption.WithAPIKey(model.APIKey)}
 	if config.maxRetries != nil {

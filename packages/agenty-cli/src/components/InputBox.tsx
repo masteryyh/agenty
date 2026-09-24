@@ -1,6 +1,6 @@
 import { forwardRef } from "react";
 
-import type { PermissionMode, SkillDto } from "../api/types";
+import type { PermissionMode, SkillDto, ToolDialect } from "../api/types";
 import type { ComposerDocument } from "../composer/document";
 import { effortColor, theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
@@ -35,6 +35,7 @@ interface InputBoxProps {
     contextWindow: number;
     tokenConsumed: number;
     permissionMode: PermissionMode;
+    toolDialect: ToolDialect;
     thinkingLevel: string;
     reasoningActive: boolean;
     abort: () => void;
@@ -57,6 +58,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     contextWindow,
     tokenConsumed,
     permissionMode,
+    toolDialect,
     thinkingLevel,
     reasoningActive,
     abort,
@@ -157,6 +159,12 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                         <>
                             <Text> </Text>
                             <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>{`${permissionMode} mode`}</Text>
+                        </>
+                    ) : null}
+                    {toolDialect === "codex" ? (
+                        <>
+                            <Text> </Text>
+                            <Text color={theme.accent}>codex mode</Text>
                         </>
                     ) : null}
                 </Box>

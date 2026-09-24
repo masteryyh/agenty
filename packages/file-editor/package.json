@@ -1,5 +1,5 @@
 {
-    "name": "patch-applier",
+    "name": "file-editor",
     "private": true,
     "scripts": {
         "build": "cargo build --release",

@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
@@ -200,10 +202,16 @@ func (fixture *executionFixture) newEngineWithHandlers(
 	t.Helper()
 
 	middlewareManager := inframiddleware.NewManager()
+	if err := middlewareManager.Register(codexmode.NewMiddleware(codexmode.Config{})); err != nil {
+		t.Fatal(err)
+	}
 	if err := middlewareManager.Register(metadata.NewMiddleware()); err != nil {
 		t.Fatal(err)
 	}
 	if err := middlewareManager.Register(infracompaction.NewMiddleware()); err != nil {
+		t.Fatal(err)
+	}
+	if err := middlewareManager.Register(infratools.NewValidationMiddleware()); err != nil {
 		t.Fatal(err)
 	}
 	if err := middlewareManager.Register(infrastorage.NewSessionMiddleware(fixture.sessions)); err != nil {
@@ -454,6 +462,82 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	}
 }
 
+func TestEngineReturnsMalformedToolInputToModelWithoutExecution(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 100_000)
+	var executions atomic.Int32
+	if err := fixture.registry.Register(&executionTestTool{
+		definition: modelcall.ToolDefinition{
+			Type:        modelcall.ToolTypeFunction,
+			Name:        "lookup",
+			InputSchema: modelcall.JSONSchema{Type: modelcall.JSONSchemaTypeObject},
+		},
+		execute: func(context.Context, agentloop.CallContext, []byte) (conversation.Content, error) {
+			executions.Add(1)
+			return conversation.Text("unexpected"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
+		{
+			Content: conversation.Content{
+				conversation.ToolUseBlock{ID: "call-1", Name: "lookup", Input: []byte(`{"query"}`)},
+			},
+			StopReason: modelcall.ModelCallStopReasonToolUse,
+		},
+		{Content: conversation.Text("recovered"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+	}}
+	engine := fixture.newEngine(t, caller.Call)
+	session := fixture.createSession(t)
+
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("lookup")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	if executions.Load() != 0 {
+		t.Fatalf("tool executions = %d, want 0", executions.Load())
+	}
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(requests))
+	}
+	var result *conversation.ToolResultBlock
+	for _, message := range requests[1].Messages {
+		for _, block := range message.Content {
+			if toolResult, ok := block.(conversation.ToolResultBlock); ok {
+				copy := toolResult
+				result = &copy
+			}
+		}
+	}
+	if result == nil || !result.IsError || result.ToolUseID != "call-1" {
+		t.Fatalf("continuation result = %#v", result)
+	}
+	message := result.Content[0].(conversation.TextBlock).Text
+	if !strings.Contains(message, "Invalid tool arguments: expected a complete JSON object.") {
+		t.Fatalf("continuation result message = %q", message)
+	}
+
+	loaded, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Rounds[0].Status != conversation.RoundCompleted {
+		t.Fatalf("round status = %q", loaded.Rounds[0].Status)
+	}
+	for _, persistedMessage := range loaded.Rounds[0].Messages {
+		for _, block := range persistedMessage.Content {
+			if call, ok := block.(conversation.ToolUseBlock); ok && string(call.Input) != `{}` {
+				t.Fatalf("persisted tool input = %q", call.Input)
+			}
+		}
+	}
+}
+
 func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	t.Parallel()
 
@@ -476,37 +560,29 @@ func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	}
 }
 
-func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
+func TestEngineProjectsFileToolsBySessionDialect(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name            string
-		freeFormTool    bool
-		wantApplyPatch  bool
-		wantShellPrompt bool
+		name  string
+		codex bool
+		want  []string
 	}{
-		{name: "free-form provider", freeFormTool: true, wantApplyPatch: true},
-		{name: "shell fallback", wantShellPrompt: true},
+		{name: "default", want: []string{"str_replace_based_edit_tool"}},
+		{name: "codex", codex: true, want: []string{"apply_patch", "read_file"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			fixture := newExecutionFixture(t, 8_192)
-			provider, err := fixture.catalog.Get(t.Context(), "openai")
-			if err != nil {
-				t.Fatal(err)
-			}
-			provider.FreeFormTool = test.freeFormTool
-			if err := fixture.catalog.Save(t.Context(), provider); err != nil {
-				t.Fatal(err)
-			}
-			if err := fixture.registry.Register(&executionTestTool{
-				definition: modelcall.ToolDefinition{
-					Type: modelcall.ToolTypeApplyPatch,
-					Name: "apply_patch",
-				},
-			}); err != nil {
-				t.Fatal(err)
+			for _, definition := range []modelcall.ToolDefinition{
+				{Type: modelcall.ToolTypeApplyPatch, Name: "apply_patch"},
+				{Type: modelcall.ToolTypeFunction, Name: "read_file"},
+				{Type: modelcall.ToolTypeTextEditor, Name: "str_replace_based_edit_tool"},
+			} {
+				if err := fixture.registry.Register(&executionTestTool{definition: definition}); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{{
@@ -515,6 +591,14 @@ func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
 			}}}
 			engine := fixture.newEngine(t, caller.Call)
 			session := fixture.createSession(t)
+			if test.codex {
+				if !session.EnableCodexMode() {
+					t.Fatal("EnableCodexMode() = false, want true")
+				}
+				if err := fixture.sessions.Save(t.Context(), session); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("edit")); err != nil {
 				t.Fatal(err)
 			}
@@ -524,15 +608,46 @@ func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
 			if len(requests) != 1 {
 				t.Fatalf("requests = %d, want 1", len(requests))
 			}
-			gotApplyPatch := len(requests[0].Tools) == 1 && requests[0].Tools[0].Name == "apply_patch"
-			if gotApplyPatch != test.wantApplyPatch {
-				t.Errorf("apply_patch registered = %v, want %v", gotApplyPatch, test.wantApplyPatch)
+			got := make([]string, 0, len(requests[0].Tools))
+			for _, definition := range requests[0].Tools {
+				got = append(got, definition.Name)
 			}
-			gotShellPrompt := strings.Contains(requests[0].SystemPrompt, "shell tool with one complete apply_patch command")
-			if gotShellPrompt != test.wantShellPrompt {
-				t.Errorf("shell fallback prompt present = %v, want %v", gotShellPrompt, test.wantShellPrompt)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("tools = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestEngineEnablesCodexModeAndRejectsOtherProviderTypes(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	caller := &scriptedCaller{}
+	engine := fixture.newEngine(t, caller.Call)
+	session := fixture.createSession(t)
+
+	enabled, err := engine.EnableCodexMode(t.Context(), session.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled.CurrentToolDialect() != conversation.ToolDialectCodex {
+		t.Fatalf("tool dialect = %q, want codex", enabled.CurrentToolDialect())
+	}
+
+	provider, err := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.APIKey = "test-key"
+	provider.AddModel(catalog.Model{
+		Code: "claude", Name: "Claude", ContextWindow: 128_000, MaxOutputTokens: 8_192,
+	})
+	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.SetModel(t.Context(), session.ID.String(), "anthropic", "claude"); err == nil || !strings.Contains(err.Error(), "Codex Mode") {
+		t.Fatalf("SetModel() error = %v, want Codex Mode validation", err)
 	}
 }
 
@@ -795,10 +910,9 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetProvider.APIKey = "test-key"
-	targetProvider.FreeFormTool = true
 	targetProvider.AddModel(catalog.Model{
-		Code:            "free-form-model",
-		Name:            "Free Form Model",
+		Code:            "alternate-model",
+		Name:            "Alternate Model",
 		ContextWindow:   128_000,
 		MaxOutputTokens: 8_192,
 	})
@@ -817,7 +931,7 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 	}
 	waitForExecution(t, engine, session.ID)
 
-	if _, err := engine.SetModel(t.Context(), session.ID.String(), "alternate", "free-form-model"); err != nil {
+	if _, err := engine.SetModel(t.Context(), session.ID.String(), "alternate", "alternate-model"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("second input")); err != nil {
@@ -829,12 +943,12 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(requests))
 	}
-	const shellPrompt = "shell tool with one complete apply_patch command"
-	if !strings.Contains(requests[0].SystemPrompt, shellPrompt) {
-		t.Fatalf("initial provider prompt lost shell instructions: %q", requests[0].SystemPrompt)
+	const editorPrompt = "Use str_replace_based_edit_tool"
+	if !strings.Contains(requests[0].SystemPrompt, editorPrompt) {
+		t.Fatalf("initial provider prompt lost editor instructions: %q", requests[0].SystemPrompt)
 	}
-	if strings.Contains(requests[1].SystemPrompt, shellPrompt) {
-		t.Fatalf("switched provider retained stale shell instructions: %q", requests[1].SystemPrompt)
+	if !strings.Contains(requests[1].SystemPrompt, editorPrompt) {
+		t.Fatalf("switched provider lost editor instructions: %q", requests[1].SystemPrompt)
 	}
 }
 

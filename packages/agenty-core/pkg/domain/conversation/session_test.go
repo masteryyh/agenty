@@ -73,6 +73,32 @@ func TestSessionPermissionModeChangeIsPersistedAndReplayed(t *testing.T) {
 	}
 }
 
+func TestSessionCodexModeIsOneWayAndReplayed(t *testing.T) {
+	session := StartSession(
+		shared.NewModelRef("openai", "gpt-5.6"),
+		200_000,
+		shared.ReasoningOff,
+		nil,
+	)
+	if got := session.CurrentToolDialect(); got != ToolDialectDefault {
+		t.Fatalf("default tool dialect = %q, want default", got)
+	}
+	if !session.EnableCodexMode() {
+		t.Fatal("EnableCodexMode() = false, want true")
+	}
+	if session.EnableCodexMode() {
+		t.Fatal("second EnableCodexMode() = true, want false")
+	}
+	if got := session.CurrentToolDialect(); got != ToolDialectCodex {
+		t.Fatalf("tool dialect = %q, want codex", got)
+	}
+
+	replayed := ReplaySession(session.PendingEvents())
+	if got := replayed.CurrentToolDialect(); got != ToolDialectCodex {
+		t.Fatalf("replayed tool dialect = %q, want codex", got)
+	}
+}
+
 func TestSessionConfigurationAndRoundSnapshots(t *testing.T) {
 	t.Parallel()
 

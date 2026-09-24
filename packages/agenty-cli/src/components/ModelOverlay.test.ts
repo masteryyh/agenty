@@ -124,4 +124,12 @@ describe("model overlay behavior", () => {
         ]);
     });
 
+    test("limits Codex Mode to Responses providers", () => {
+        const responses = { ...provider("responses"), type: "openai" as const };
+        const legacy = provider("legacy");
+
+        expect(configuredProviders([legacy, responses], "codex").map((candidate) => candidate.code))
+            .toEqual(["responses"]);
+    });
+
 });

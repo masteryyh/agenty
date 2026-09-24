@@ -7,7 +7,7 @@ The active product path has four workspaces:
 
 - `packages/agenty-core`: Go 1.26 core process and stdio JSON-RPC 2.0 server.
 - `packages/agenty-cli`: Bun/TypeScript/React OpenTUI client.
-- `packages/patch-applier`: Rust V4A parser and transactional filesystem patch helper.
+- `packages/file-editor`: Rust transactional filesystem helper for V4A patches and text-editor operations.
 - `packages/agenty-bootstrap`: Rust self-extracting launcher.
 
 The optional `packages/agenty-inspector` workspace is a read-only local web debugger.
@@ -101,7 +101,7 @@ and breaks terminal capability handshakes.
 
 The bootstrap artifact layout is:
 
-`[bootstrap stub][xz CLI][xz core][xz apply_patch][156-byte footer]`
+`[bootstrap stub][xz CLI][xz core][xz fileedit][156-byte footer]`
 
 The footer stores offsets, lengths, and SHA3-256 digests of the three decompressed payloads.
 `src/lib.rs` and `scripts/footer.ts` are one wire contract; changing the layout requires

@@ -25,6 +25,7 @@ func RegisterSessionHandlers(
 	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
 	d.Register("session.setCwd", sessionSetCwd(svc))
 	d.Register("session.setPermissionMode", sessionSetPermissionMode(execution))
+	d.Register("session.enableCodexMode", sessionEnableCodexMode(execution))
 	d.Register("session.start", sessionStart(execution))
 	d.Register("session.compact", sessionCompact(execution))
 	d.Register("session.stop", sessionStop(execution))
@@ -158,6 +159,16 @@ func sessionSetPermissionMode(execution *infrasession.Engine) rpc.Handler {
 			return nil, rpc.InvalidParams("invalid params: " + err.Error())
 		}
 		return wrap(execution.SetPermissionMode(ctx, p.ID, p.PermissionMode))
+	}
+}
+
+func sessionEnableCodexMode(execution *infrasession.Engine) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		var p idParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpc.InvalidParams("invalid params: " + err.Error())
+		}
+		return wrap(execution.EnableCodexMode(ctx, p.ID))
 	}
 }
 

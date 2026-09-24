@@ -14,6 +14,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
+	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 )
 
 func TestEngineHITLLifecycle(t *testing.T) {
@@ -39,6 +40,7 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			middlewares := middleware.NewManager()
 			events := make(chan rpc.SessionEvent, 64)
 			for _, mw := range []middleware.Middleware{
+				infratools.NewValidationMiddleware(),
 				storage.NewSessionMiddleware(fixture.sessions),
 				rpc.NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
 					events <- payload.(rpc.SessionEvent)

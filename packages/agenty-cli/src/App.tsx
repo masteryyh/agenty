@@ -336,6 +336,9 @@ function ChatView() {
                         }
                         return;
                     }
+                    case "/codex-mode":
+                        void app.enableCodexMode();
+                        return;
                     default:
                         app.notify(`unknown command: ${cmd}`, true);
                 }
@@ -406,6 +409,7 @@ function ChatView() {
                     contextWindow={app.session?.contextWindow ?? 0}
                     tokenConsumed={chat.tokenConsumed}
                     permissionMode={app.session?.permissionMode ?? "ask"}
+                    toolDialect={app.session?.toolDialect ?? "default"}
                     thinkingLevel={thinkingLevel}
                     reasoningActive={reasoningActive}
                     abort={chat.abort}

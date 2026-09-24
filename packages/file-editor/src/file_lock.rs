@@ -92,12 +92,12 @@ pub(super) fn lock_directory() -> Result<PathBuf, PatchError> {
     let data_directory = std::env::var_os("AGENTY_DATA_DIR")
         .filter(|directory| !directory.is_empty())
         .ok_or_else(|| {
-            PatchError::Invalid("AGENTY_DATA_DIR is required for apply_patch locks".to_string())
+            PatchError::Invalid("AGENTY_DATA_DIR is required for fileedit locks".to_string())
         })?;
     let data_directory = PathBuf::from(data_directory);
     if !data_directory.is_absolute() {
         return Err(PatchError::Invalid(
-            "AGENTY_DATA_DIR must be an absolute path for apply_patch locks".to_string(),
+            "AGENTY_DATA_DIR must be an absolute path for fileedit locks".to_string(),
         ));
     }
     Ok(data_directory.join("locks"))

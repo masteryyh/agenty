@@ -138,6 +138,7 @@ func buildMetadata(
 		Cwd:             cwd,
 		ReasoningEffort: string(session.CurrentReasoningEffort),
 		PermissionMode:  session.CurrentPermissionMode(),
+		ToolDialect:     session.CurrentToolDialect(),
 		Timezone:        timezoneName(),
 	}
 	if session.CurrentModel != nil {

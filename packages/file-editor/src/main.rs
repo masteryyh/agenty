@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
-use patch_applier::{apply_patch, FileResult, PatchResult};
+use file_editor::{apply_patch, text_editor, FileResult, PatchResult, TextEditorInput};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -21,7 +21,7 @@ fn exit_code() -> i32 {
     match result {
         Ok(output) => {
             if let Err(error) = write_json(&output) {
-                eprintln!("apply_patch: write result: {error}");
+                eprintln!("fileedit: write result: {error}");
                 return 1;
             }
             0
@@ -36,9 +36,9 @@ fn exit_code() -> i32 {
                 error: error.to_string(),
             };
             if let Err(write_error) = write_json(&output) {
-                eprintln!("apply_patch: write error result: {write_error}");
+                eprintln!("fileedit: write error result: {write_error}");
             }
-            eprintln!("apply_patch: {error}");
+            eprintln!("fileedit: {error}");
             1
         }
     }
@@ -54,8 +54,18 @@ fn write_json<T: Serialize>(value: &T) -> Result<(), Box<dyn std::error::Error>>
 }
 
 fn run() -> Result<PatchResult, Box<dyn std::error::Error>> {
-    let mut patch = String::new();
-    io::stdin().read_to_string(&mut patch)?;
+    let mode = std::env::args()
+        .nth(1)
+        .ok_or("usage: fileedit <apply_patch|text_editor>")?;
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
     let cwd: PathBuf = std::env::current_dir()?;
-    Ok(apply_patch(&cwd, &patch)?)
+    match mode.as_str() {
+        "apply_patch" => Ok(apply_patch(&cwd, &input)?),
+        "text_editor" => {
+            let request = serde_json::from_str::<TextEditorInput>(&input)?;
+            Ok(text_editor(&cwd, request)?)
+        }
+        _ => Err(format!("unknown fileedit mode: {mode}").into()),
+    }
 }

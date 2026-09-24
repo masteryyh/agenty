@@ -74,6 +74,26 @@ func TestContentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestToolUseInputErrorIsTransient(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(Content{ToolUseBlock{
+		ID: "call_1", Name: "read_file", Input: shared.RawJSON(`{}`), InputError: "invalid input",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded Content
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	call := decoded[0].(ToolUseBlock)
+	if call.InputError != "" || string(call.Input) != `{}` {
+		t.Fatalf("decoded call = %#v", call)
+	}
+}
+
 func TestContentUnmarshalUnknownType(t *testing.T) {
 	var c Content
 	err := json.Unmarshal([]byte(`[{"type":"video","url":"x"}]`), &c)

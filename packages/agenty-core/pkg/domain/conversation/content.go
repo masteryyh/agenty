@@ -77,6 +77,9 @@ type ToolUseBlock struct {
 	ID    string         `json:"id"`
 	Name  string         `json:"name"`
 	Input shared.RawJSON `json:"input"`
+	// InputError is transient runtime state used to return malformed provider
+	// arguments to the model without persisting invalid JSON.
+	InputError string `json:"-"`
 }
 
 func (ToolUseBlock) BlockType() BlockType {

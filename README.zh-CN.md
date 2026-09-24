@@ -3,7 +3,7 @@
 [English](./README.md)
 
 Agenty 是一个本地优先的 AI agent 应用。当前产品链路由 `agenty-cli`、
-`agenty-core`、Rust `patch-applier` helper 和自解压 launcher `agenty-bootstrap` 组成。
+`agenty-core`、Rust `file-editor` helper 和自解压 launcher `agenty-bootstrap` 组成。
 CLI 仅通过子进程
 stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
 
@@ -23,7 +23,7 @@ agenty
 ```
 
 首次运行时，launcher 会校验并释放内置的 CLI 和 core 到
-`~/.agenty/bin/{cli,core,apply_patch}`。CLI 启动 core 子进程并打开初始化向导；向导通过
+`~/.agenty/bin/{cli,core,fileedit}`。CLI 启动 core 子进程并打开初始化向导；向导通过
 已有的 `provider.*` IPC methods 创建一个 provider 和一个聊天 model，最后调用
 `initialize.complete` 保存全局默认会话模型。
 
@@ -37,14 +37,14 @@ launcher 内含三个 XZ 压缩 payload 及其解压内容的 SHA3-256 摘要。
 3. launcher 释放的 `~/.agenty/bin/core`
 
 CLI 启动 core 前会把 core 所在目录放到 `PATH` 首位，使 core 和 shell 工具调用可以找到
-同目录中的 `apply_patch`。
+同目录中的 `fileedit`。
 
 core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notification 写到 stdout。
 调用 `session.start` 后，core 会持续发送有序的 `session.event` 通知，覆盖 round 生命周期、
 已持久化消息、模型流式增量、工具调用和 round 终态。通知可能早于 `session.start` response
 到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
 
-TUI 当前开放 `/provider`、`/model`、`/mcp`、`/cwd`、`/effort`、`/status`、
+TUI 当前开放 `/provider`、`/model`、`/mcp`、`/cwd`、`/effort`、`/status`、`/codex-mode`、
 `/new`、`/resume`、`/help` 和 `/exit`。在输入框中输入 `$` 可以搜索并插入已安装的
 Skill 结构化引用。core 会依次扫描数据目录下的 `skills/`、`~/.agents/skills` 和
 `~/.claude/skills`；可以通过 `AGENTY_DATA_DIR` 更改第一个目录。
@@ -103,7 +103,7 @@ pnpm deepclean
 
 构建版本优先来自进程环境中的 `AGENTY_VERSION`，其次读取被忽略的根目录 `.env`，两者都
 没有时默认为 `dev`。如需固定本地版本，可把 `.env.example` 复制为 `.env`，直接运行
-`pnpm build` 即可构建完整 launcher。默认构建 patch-applier、core、CLI 和 bootstrap；
+`pnpm build` 即可构建完整 launcher。默认构建 file-editor、core、CLI 和 bootstrap；
 Inspector 通过 `pnpm inspector:build` 单独构建。
 
 `pnpm run update` 会更新 pnpm、Go 和 Cargo 模块的依赖；`pnpm tidyup` 会在所有 Go 模块中依次

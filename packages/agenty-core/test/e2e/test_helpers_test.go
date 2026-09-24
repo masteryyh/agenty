@@ -54,12 +54,11 @@ func createExecutionResources(
 	modelCode := prefix + "-model"
 
 	if _, err := client.CreateProvider(ctx, ProviderCreateInput{
-		Code:         providerCode,
-		Name:         "E2E Provider",
-		Type:         apiType,
-		BaseURL:      fixture.BaseURL(apiType),
-		APIKey:       "test-key",
-		FreeFormTool: apiType == "openai",
+		Code:    providerCode,
+		Name:    "E2E Provider",
+		Type:    apiType,
+		BaseURL: fixture.BaseURL(apiType),
+		APIKey:  "test-key",
 	}); err != nil {
 		return Session{}, fmt.Errorf("create provider: %w", err)
 	}

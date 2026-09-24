@@ -18,8 +18,8 @@ test("uses host defaults for a macOS core build", () => {
         "-ldflags",
         "-X github.com/masteryyh/agenty-core/pkg/buildinfo.Version=dev",
     ]);
-    assert.equal(plan.helperSource, join(repositoryRoot, "packages/patch-applier/target/release/apply_patch"));
-    assert.equal(plan.helperDestination, join(packageRoot, "bin/apply_patch"));
+    assert.equal(plan.helperSource, join(repositoryRoot, "packages/file-editor/target/release/fileedit"));
+    assert.equal(plan.helperDestination, join(packageRoot, "bin/fileedit"));
 });
 
 test("uses the GOOS target and Windows extensions", () => {
@@ -32,8 +32,8 @@ test("uses the GOOS target and Windows extensions", () => {
     assert.deepEqual(plan.target, { artifactOS: "windows", extension: ".exe", goOS: "windows" });
     assert.equal(plan.version, "dev");
     assert.equal(plan.corePath, join(packageRoot, "bin/windows_amd64/core.exe"));
-    assert.equal(plan.helperSource, join(repositoryRoot, "packages/patch-applier/target/release/apply_patch.exe"));
-    assert.equal(plan.helperDestination, join(packageRoot, "bin/windows_amd64/apply_patch.exe"));
+    assert.equal(plan.helperSource, join(repositoryRoot, "packages/file-editor/target/release/fileedit.exe"));
+    assert.equal(plan.helperDestination, join(packageRoot, "bin/windows_amd64/fileedit.exe"));
 });
 
 test("detects a Windows host when GOOS is not set", () => {

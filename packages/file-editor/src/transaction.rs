@@ -92,6 +92,103 @@ impl Transaction {
         Ok(())
     }
 
+    pub(super) fn create_text(&mut self, path: &Path, text: String) -> Result<(), PatchError> {
+        self.touch(path)?;
+        let current = self.current(path)?.clone();
+        if current.kind != EntryKind::Missing || self.deleted_paths.contains(path) {
+            return Err(PatchError::Conflict(format!(
+                "create requires a missing path: {}",
+                path.display()
+            )));
+        }
+        self.state.insert(
+            path.to_path_buf(),
+            VirtualFile::regular(text.into_bytes(), 0o644),
+        );
+        Ok(())
+    }
+
+    pub(super) fn replace_text(
+        &mut self,
+        path: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), PatchError> {
+        self.touch(path)?;
+        let current = self.current(path)?.clone();
+        if current.kind != EntryKind::Regular {
+            return Err(PatchError::Conflict(format!(
+                "str_replace requires a regular file: {}",
+                path.display()
+            )));
+        }
+        if is_binary_data(&current.data) {
+            return Err(PatchError::Invalid(format!(
+                "str_replace does not support binary files: {}",
+                path.display()
+            )));
+        }
+        let text = String::from_utf8(current.data).map_err(|_| {
+            PatchError::Invalid(format!(
+                "str_replace requires UTF-8 text: {}",
+                path.display()
+            ))
+        })?;
+        let matches = text.match_indices(old).count();
+        if matches == 0 {
+            return Err(PatchError::Conflict(
+                "no match found for replacement text".to_string(),
+            ));
+        }
+        if matches != 1 {
+            return Err(PatchError::Conflict(format!(
+                "found {matches} matches for replacement text; provide more context"
+            )));
+        }
+        self.state.insert(
+            path.to_path_buf(),
+            VirtualFile::regular(text.replacen(old, new, 1).into_bytes(), current.mode),
+        );
+        Ok(())
+    }
+
+    pub(super) fn insert_text(
+        &mut self,
+        path: &Path,
+        line: usize,
+        inserted: &str,
+    ) -> Result<(), PatchError> {
+        self.touch(path)?;
+        let current = self.current(path)?.clone();
+        if current.kind != EntryKind::Regular {
+            return Err(PatchError::Conflict(format!(
+                "insert requires a regular file: {}",
+                path.display()
+            )));
+        }
+        if is_binary_data(&current.data) {
+            return Err(PatchError::Invalid(format!(
+                "insert does not support binary files: {}",
+                path.display()
+            )));
+        }
+        let text = String::from_utf8(current.data).map_err(|_| {
+            PatchError::Invalid(format!("insert requires UTF-8 text: {}", path.display()))
+        })?;
+        let offset = insertion_offset(&text, line).ok_or_else(|| {
+            PatchError::Conflict(format!("insert line {line} is outside the file"))
+        })?;
+        let mut updated = String::with_capacity(text.len() + inserted.len());
+        updated.push_str(&text[..offset]);
+        updated.push_str(inserted);
+        updated.push_str(&text[offset..]);
+        self.state.insert(
+            path.to_path_buf(),
+            VirtualFile::regular(updated.into_bytes(), current.mode),
+        );
+        Ok(())
+    }
+
     fn touch(&mut self, path: &Path) -> Result<(), PatchError> {
         if self.original.contains_key(path) {
             return Ok(());
@@ -400,6 +497,26 @@ impl Transaction {
         }
         Ok(changes)
     }
+}
+
+fn insertion_offset(text: &str, line: usize) -> Option<usize> {
+    if line == 0 {
+        return Some(0);
+    }
+    let mut seen = 0;
+    for (index, byte) in text.bytes().enumerate() {
+        if byte != b'\n' {
+            continue;
+        }
+        seen += 1;
+        if seen == line {
+            return Some(index + 1);
+        }
+    }
+    if seen + 1 == line {
+        return Some(text.len());
+    }
+    None
 }
 
 struct Change {

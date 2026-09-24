@@ -1,7 +1,7 @@
 /**
  * Packs the final self-extracting `agenty-<os>-<arch>` binary:
  *
- *   [ bootstrap stub ][ compressed CLI ][ compressed core ][ compressed apply_patch ][ footer ]
+ *   [ bootstrap stub ][ compressed CLI ][ compressed core ][ compressed fileedit ][ footer ]
  *
  * Both payloads are compressed in memory with xz and appended directly, so no
  * intermediate archives are written to disk. The footer records each payload's
@@ -28,7 +28,7 @@ const PKG = resolve(import.meta.dir, "..");
 const REPO = resolve(PKG, "../..");
 const CORE_BIN_DIR = join(REPO, "packages/agenty-core/bin");
 const CLI_DIST_DIR = join(REPO, "packages/agenty-cli/bin");
-const PATCH_APPLIER_TARGET_DIR = join(REPO, "packages/patch-applier/target/release");
+const FILE_EDITOR_TARGET_DIR = join(REPO, "packages/file-editor/target/release");
 const DIST = join(PKG, "bin");
 
 function findAgentyBinary(dir: string): string | null {
@@ -97,25 +97,25 @@ if (!existsSync(stubPath)) {
 }
 const cliPath = resolveCliBinary(os, arch, ext);
 const corePath = resolveCoreBinary(os, arch);
-const patchApplierPath = join(PATCH_APPLIER_TARGET_DIR, `apply_patch${ext}`);
-if (!existsSync(patchApplierPath)) {
-    throw new Error(`patch-applier binary not found at ${patchApplierPath}; run its build first`);
+const fileEditorPath = join(FILE_EDITOR_TARGET_DIR, `fileedit${ext}`);
+if (!existsSync(fileEditorPath)) {
+    throw new Error(`fileedit binary not found at ${fileEditorPath}; run its build first`);
 }
 
 const stub = readFileSync(stubPath);
 const cli = readFileSync(cliPath);
 const core = readFileSync(corePath);
-const patchApplier = readFileSync(patchApplierPath);
-if (stub.length === 0 || cli.length === 0 || core.length === 0 || patchApplier.length === 0) {
-    throw new Error("stub, CLI, core or patch-applier binary is empty");
+const fileEditor = readFileSync(fileEditorPath);
+if (stub.length === 0 || cli.length === 0 || core.length === 0 || fileEditor.length === 0) {
+    throw new Error("stub, CLI, core or fileedit binary is empty");
 }
 
 const cliSha3 = sha3_256(cli);
 const coreSha3 = sha3_256(core);
-const patchApplierSha3 = sha3_256(patchApplier);
+const fileEditorSha3 = sha3_256(fileEditor);
 const cliPayload = await compress(cli);
 const corePayload = await compress(core);
-const patchApplierPayload = await compress(patchApplier);
+const fileEditorPayload = await compress(fileEditor);
 
 const footer = encodeFooter(
     {
@@ -130,14 +130,14 @@ const footer = encodeFooter(
     },
     {
         offset: BigInt(stub.length + cliPayload.length + corePayload.length),
-        len: BigInt(patchApplierPayload.length),
-        sha3_256: patchApplierSha3,
+        len: BigInt(fileEditorPayload.length),
+        sha3_256: fileEditorSha3,
     },
 );
 
 mkdirSync(DIST, { recursive: true });
 const out = join(DIST, `agenty-${os}-${arch}${ext}`);
-writeFileSync(out, Buffer.concat([stub, cliPayload, corePayload, patchApplierPayload, footer]));
+writeFileSync(out, Buffer.concat([stub, cliPayload, corePayload, fileEditorPayload, footer]));
 if (os !== "windows") {
     chmodSync(out, 0o755);
 }
@@ -147,6 +147,6 @@ console.log(
         `  stub    ${stub.length} bytes (${stubPath})\n` +
         `  cli     ${cli.length} -> ${cliPayload.length} bytes (${cliPath})\n` +
         `  core    ${core.length} -> ${corePayload.length} bytes (${corePath})\n` +
-        `  patch   ${patchApplier.length} -> ${patchApplierPayload.length} bytes (${patchApplierPath})\n` +
-        `  total   ${stub.length + cliPayload.length + corePayload.length + patchApplierPayload.length + footer.length} bytes`,
+        `  fileedit ${fileEditor.length} -> ${fileEditorPayload.length} bytes (${fileEditorPath})\n` +
+        `  total   ${stub.length + cliPayload.length + corePayload.length + fileEditorPayload.length + footer.length} bytes`,
 );

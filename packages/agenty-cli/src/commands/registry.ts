@@ -66,6 +66,11 @@ export const commands: Command[] = [
         description: "Set or show the session working directory",
         usage: "/cwd [<path>|clear]",
     },
+    {
+        name: "/codex-mode",
+        description: "Enable one-way Codex file tools for this session",
+        usage: "/codex-mode",
+    },
 ];
 
 export function findCommand(name: string): Command | undefined {

@@ -104,15 +104,6 @@ function providerFields(draft: ProviderDraft): FormField[] {
             readOnly: draft.source === "builtin",
         },
         {
-            key: "freeFormTool",
-            label: "Free-form apply_patch",
-            kind: "boolean",
-            value: String(draft.freeFormTool),
-            readOnly: draft.source === "builtin" || draft.type !== "openai",
-            focusable: draft.source !== "builtin" && draft.type === "openai",
-            visible: draft.type === "openai",
-        },
-        {
             key: "apiKey",
             label: "API key",
             kind: "text",
@@ -317,7 +308,6 @@ function WizardContent() {
             type,
             baseUrl: formString(values, "baseUrl").trim(),
             apiKey: formString(values, "apiKey").trim(),
-            freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
         };
         const duplicate = drafts.some(
             (draft) => draft.id !== next.id && draft.code.trim() !== "" && draft.code === next.code,

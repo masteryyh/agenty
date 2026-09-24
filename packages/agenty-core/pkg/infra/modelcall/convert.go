@@ -155,6 +155,15 @@ func rawObject(raw shared.RawJSON, field string) (map[string]any, error) {
 	return value, nil
 }
 
+func structuredToolUseBlock(id, name string, input shared.RawJSON) conversation.ToolUseBlock {
+	call := conversation.ToolUseBlock{ID: id, Name: name, Input: input}
+	if _, err := rawObject(input, "tool input"); err != nil {
+		call.Input = shared.RawJSON("{}")
+		call.InputError = err.Error()
+	}
+	return call
+}
+
 func imageURL(block conversation.ImageBlock) (string, error) {
 	if block.Data != "" && block.URI != "" {
 		return "", invalidRequest("image must contain either data or URI, not both")

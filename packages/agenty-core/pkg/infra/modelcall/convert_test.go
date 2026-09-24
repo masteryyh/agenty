@@ -330,7 +330,11 @@ func TestApplyPatchToolRegistrations(t *testing.T) {
 		testApplyPatchTool(),
 	}
 
-	filesystem, err := openAIResponsesTools(definitions, true, false)
+	if _, err := openAIResponsesTools(definitions, true, false); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("default Responses apply_patch error = %v, want invalid request", err)
+	}
+
+	filesystem, err := openAIResponsesTools([]ToolDefinition{definitions[0]}, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,6 +373,38 @@ func TestApplyPatchToolRegistrations(t *testing.T) {
 	}
 	if len(googleDefinitions) != 1 {
 		t.Errorf("Google tools = %#v, want read_file only", googleDefinitions)
+	}
+}
+
+func TestAnthropicTextEditorToolRegistrations(t *testing.T) {
+	t.Parallel()
+
+	definition := testTextEditorTool()
+	native, err := anthropicTools([]ToolDefinition{definition}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(native) != 1 || native[0].OfTextEditor20250728 == nil {
+		t.Fatalf("native Anthropic tools = %#v, want text_editor_20250728", native)
+	}
+	encoded, err := json.Marshal(native[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["type"] != "text_editor_20250728" || payload["name"] != "str_replace_based_edit_tool" || payload["max_characters"] != float64(10_000) {
+		t.Errorf("native Anthropic text editor = %s", encoded)
+	}
+
+	compatible, err := anthropicTools([]ToolDefinition{definition}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compatible) != 1 || compatible[0].OfTool == nil || compatible[0].OfTool.Name != "str_replace_based_edit_tool" {
+		t.Fatalf("compatible Anthropic tools = %#v, want function tool", compatible)
 	}
 }
 
@@ -492,6 +528,26 @@ func TestProviderResponseConversions(t *testing.T) {
 		}
 	})
 
+	t.Run("OpenAI Responses malformed tool arguments", func(t *testing.T) {
+		t.Parallel()
+
+		var sdkResponse responses.Response
+		mustUnmarshal(t, `{
+			"id":"resp_1","model":"gpt-test","status":"completed",
+			"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"shell","arguments":"{\"commands\"}","status":"completed"}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}
+		}`, &sdkResponse)
+
+		response, err := openAIResponsesResponse(&sdkResponse)
+		if err != nil {
+			t.Fatalf("convert response: %v", err)
+		}
+		tool := response.Content[0].(conversation.ToolUseBlock)
+		if string(tool.Input) != `{}` || tool.InputError == "" {
+			t.Fatalf("tool input = %q, error = %q", tool.Input, tool.InputError)
+		}
+	})
+
 	t.Run("OpenAI Responses shell call", func(t *testing.T) {
 		t.Parallel()
 
@@ -581,6 +637,26 @@ func TestProviderResponseConversions(t *testing.T) {
 			t.Fatalf("convert response: %v", err)
 		}
 		assertResponse(t, response, ModelCallStopReasonToolUse, 1, 12)
+	})
+
+	t.Run("OpenAI Chat malformed tool arguments", func(t *testing.T) {
+		t.Parallel()
+
+		var sdkResponse openai.ChatCompletion
+		mustUnmarshal(t, `{
+			"id":"chat_1","model":"gpt-test",
+			"choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"shell","arguments":"{\"commands\"}"}}]}}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`, &sdkResponse)
+
+		response, err := openAIChatResponse(&sdkResponse)
+		if err != nil {
+			t.Fatalf("convert response: %v", err)
+		}
+		tool := response.Content[0].(conversation.ToolUseBlock)
+		if string(tool.Input) != `{}` || tool.InputError == "" {
+			t.Fatalf("tool input = %q, error = %q", tool.Input, tool.InputError)
+		}
 	})
 
 	t.Run("Anthropic Messages", func(t *testing.T) {
@@ -1157,17 +1233,16 @@ func TestCallConfigurationControlsOpenAIResponsesToolMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		model        ModelCallConfig
-		wantNative   bool
-		wantFreeForm bool
+		name       string
+		model      ModelCallConfig
+		wantNative bool
 	}{
 		{
 			name: "built-in OpenAI with SDK default URL",
 			model: ModelCallConfig{
-				APIType: APIOpenAI, APIKey: "test-key", ModelCode: "test-model", Official: true, FreeFormTool: true,
+				APIType: APIOpenAI, APIKey: "test-key", ModelCode: "test-model", Official: true,
 			},
-			wantNative: true, wantFreeForm: true,
+			wantNative: true,
 		},
 		{
 			name: "built-in OpenAI with official URL",
@@ -1213,9 +1288,6 @@ func TestCallConfigurationControlsOpenAIResponsesToolMode(t *testing.T) {
 			}
 			if nativeOpenAIResponsesProvider(responsesCaller.model) != tt.wantNative {
 				t.Errorf("nativeOpenAI = %v, want %v", nativeOpenAIResponsesProvider(responsesCaller.model), tt.wantNative)
-			}
-			if responsesCaller.model.FreeFormTool != tt.wantFreeForm {
-				t.Errorf("freeFormTool = %v, want %v", responsesCaller.model.FreeFormTool, tt.wantFreeForm)
 			}
 		})
 	}
@@ -1282,6 +1354,22 @@ func testApplyPatchTool() ToolDefinition {
 	tool := testNamedTool("apply_patch")
 	tool.Type = ToolTypeApplyPatch
 	return tool
+}
+
+func testTextEditorTool() ToolDefinition {
+	return ToolDefinition{
+		Type: ToolTypeTextEditor,
+		Name: "str_replace_based_edit_tool",
+		InputSchema: JSONSchema{
+			Type: JSONSchemaTypeObject,
+			Properties: map[string]JSONSchema{
+				"command": {Type: JSONSchemaTypeString},
+				"path":    {Type: JSONSchemaTypeString},
+			},
+			Required:             []string{"command", "path"},
+			AdditionalProperties: AllowAdditionalProperties(false),
+		},
+	}
 }
 
 func testNamedTool(name string) ToolDefinition {

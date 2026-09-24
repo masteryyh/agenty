@@ -1,8 +1,11 @@
-# patch-applier
+# file-editor
 
-`patch-applier` builds the `apply_patch` executable bundled with Agenty. It reads one
-complete V4A patch envelope from stdin and resolves relative paths from its working
-directory.
+`file-editor` builds the `fileedit` executable bundled with Agenty. It resolves relative
+paths from its working directory and accepts one of two stdin protocols:
+
+- `fileedit apply_patch` reads a complete V4A patch envelope.
+- `fileedit text_editor` reads the JSON request used by `str_replace_based_edit_tool` for
+  `str_replace`, `create`, or `insert`. File and directory reads stay in core.
 
 Before writing, it parses every operation, groups operations by logical file in first
 appearance order, applies each group's operations in source order to an in-memory
@@ -10,7 +13,7 @@ snapshot, and rejects incompatible state transitions or path ownership conflicts
 commit phase stages all new contents before replacing or deleting targets and rolls back
 completed replacements if a later filesystem operation fails.
 
-Filesystem coordination uses persistent lock files under `AGENTY_DATA_DIR/locks`. Each patch
+Filesystem coordination uses persistent lock files under `AGENTY_DATA_DIR/locks`. Each operation
 holds shared advisory locks while reading and preparing its snapshot, then acquires exclusive
 locks for the paths it will change before revalidating and committing. Lock files are coordination
 artifacts and are intentionally retained after the process exits. Paths are acquired in sorted

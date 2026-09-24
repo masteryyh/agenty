@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -68,6 +69,62 @@ func TestSessionNotificationMiddlewareProjectsEventsWithRoundSequences(t *testin
 	}
 }
 
+func TestSessionNotificationMiddlewareSanitizesUntrustedStreamJSON(t *testing.T) {
+	sessionID := uuid.Must(uuid.NewV7())
+	roundID := uuid.Must(uuid.NewV7())
+	var sent []SessionEvent
+	notifier := NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
+		if _, err := json.Marshal(payload); err != nil {
+			return err
+		}
+		sent = append(sent, payload.(SessionEvent))
+		return nil
+	})
+
+	invalidResponse := &modelcall.ModelCallResponse{Content: conversation.Content{
+		conversation.ToolUseBlock{ID: "call-1", Name: "shell", Input: []byte(`{"commands"}`)},
+	}}
+	for _, event := range []agentloop.Event{
+		{
+			Type: agentloop.EventModelStream, SessionID: sessionID, RoundID: roundID,
+			Stream: &modelcall.ModelCallStreamEvent{
+				Type:      modelcall.ModelCallStreamEventToolUseDone,
+				ToolInput: []byte(`{"commands"}`),
+			},
+		},
+		{
+			Type: agentloop.EventModelStream, SessionID: sessionID, RoundID: roundID,
+			Stream: &modelcall.ModelCallStreamEvent{
+				Type:     modelcall.ModelCallStreamEventCompleted,
+				Response: invalidResponse,
+			},
+		},
+		{Type: agentloop.EventRoundEnded, SessionID: sessionID, RoundID: roundID, Status: conversation.RoundCompleted},
+	} {
+		event := event
+		if err := notifier.OnEvent(t.Context(), &middleware.EventContext{Event: &event}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(sent) != 3 {
+		t.Fatalf("notifications = %d, want 3", len(sent))
+	}
+	if sent[0].Sequence != 1 || sent[0].Stream == nil || sent[0].Stream.ToolInput != nil {
+		t.Fatalf("tool completion event = %#v", sent[0])
+	}
+	if sent[1].Sequence != 2 || sent[1].Stream == nil || sent[1].Stream.Response == nil {
+		t.Fatalf("model completion event = %#v", sent[1])
+	}
+	completedCall := sent[1].Stream.Response.Content[0].(conversation.ToolUseBlock)
+	if string(completedCall.Input) != `{}` {
+		t.Fatalf("completed tool input = %q", completedCall.Input)
+	}
+	if sent[2].Sequence != 3 {
+		t.Fatalf("round completion event = %#v", sent[2])
+	}
+}
+
 func TestSessionNotificationMiddlewareProjectsToolReviewEvents(t *testing.T) {
 	sessionID := uuid.Must(uuid.NewV7())
 	roundID := uuid.Must(uuid.NewV7())
@@ -114,6 +171,28 @@ func TestApprovalMessageSurvivesNotificationProjection(t *testing.T) {
 		return nil
 	})
 	event := agentloop.Event{Type: permission.EventRequested, SessionID: uuid.New(), RoundID: uuid.New(), Payload: request}
+	if err := notifier.OnEvent(t.Context(), &middleware.EventContext{Event: &event}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionNotificationMiddlewareProjectsCodexMode(t *testing.T) {
+	sessionID := uuid.Must(uuid.NewV7())
+	notifier := NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
+		event, ok := payload.(SessionEvent)
+		if !ok {
+			t.Fatalf("payload = %T, want SessionEvent", payload)
+		}
+		if event.Type != SessionEventToolDialectChanged || event.ToolDialect != conversation.ToolDialectCodex {
+			t.Fatalf("event = %#v", event)
+		}
+		return nil
+	})
+	event := agentloop.Event{
+		Type:      agentloop.EventToolDialectChanged,
+		SessionID: sessionID,
+		Payload:   conversation.SessionCodexModeEnabled{SessionID: sessionID},
+	}
 	if err := notifier.OnEvent(t.Context(), &middleware.EventContext{Event: &event}); err != nil {
 		t.Fatal(err)
 	}

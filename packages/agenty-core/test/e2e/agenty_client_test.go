@@ -197,6 +197,15 @@ func (c *agentyClient) SetSessionCwd(ctx context.Context, id string, cwd *string
 	)
 }
 
+func (c *agentyClient) EnableCodexMode(ctx context.Context, id string) (Session, error) {
+	return callResult[Session](
+		ctx,
+		c.rpc,
+		"session.enableCodexMode",
+		map[string]any{"id": id},
+	)
+}
+
 func (c *agentyClient) StartSession(
 	ctx context.Context,
 	id string,

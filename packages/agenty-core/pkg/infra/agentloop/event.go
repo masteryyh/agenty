@@ -22,6 +22,7 @@ const (
 	EventToolResults           EventType = "tool_results"
 	EventSessionChanged        EventType = "session_changed"
 	EventPermissionModeChanged EventType = "permission_mode_changed"
+	EventToolDialectChanged    EventType = "tool_dialect_changed"
 	EventCompactionStarted     EventType = "compaction_started"
 	EventCompactionDone        EventType = "compaction_completed"
 	EventCompactionFailed      EventType = "compaction_failed"

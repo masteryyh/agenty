@@ -143,9 +143,9 @@ importers:
       agenty-core:
         specifier: workspace:*
         version: link:../agenty-core
-      patch-applier:
+      file-editor:
         specifier: workspace:*
-        version: link:../patch-applier
+        version: link:../file-editor
 
   packages/agenty-cli:
     dependencies:
@@ -183,9 +183,9 @@ importers:
 
   packages/agenty-core:
     devDependencies:
-      patch-applier:
+      file-editor:
         specifier: workspace:*
-        version: link:../patch-applier
+        version: link:../file-editor
 
   packages/agenty-inspector:
     dependencies:
@@ -218,7 +218,7 @@ importers:
         specifier: ^8.3.0
         version: 8.3.0(@types/node@22.20.2)
 
-  packages/patch-applier: {}
+  packages/file-editor: {}
 
 packages:
 

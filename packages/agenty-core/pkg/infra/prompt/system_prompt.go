@@ -24,32 +24,11 @@ Sometimes there will be a piece of XML data that follows user's message, which c
 ` + "```" + `
 
 You will receive this at the very beginning of the session, and maybe more after if something has changed by user or harness. The permission-mode value is the current tool execution policy: ask means tool calls require user approval; auto lets the harness directly allow low-risk workspace reads and changes, then uses a separate reviewer for other calls; yolo means tool calls may execute without approval. You must follow these messages and treat them as truth.
-</basic>
-
-{{ if .UseApplyPatchShell }}<file-editing>
-The current provider does not support the free-form apply_patch tool. For every file modification, call the shell tool with one complete apply_patch command and a complete V4A patch envelope.
-
-On macOS/Linux, pass the patch through a POSIX heredoc:
-apply_patch <<'PATCH'
-*** Begin Patch
-...
-*** End Patch
-PATCH
-
-On PowerShell, pass it through a literal here-string:
-@'
-*** Begin Patch
-...
-*** End Patch
-'@ | apply_patch
-
-If Windows falls back to cmd.exe, call the shell tool with the single command "apply_patch" and pass the complete patch in its stdin field. Do not use cat, sed, printf, echo, or ad hoc scripts to edit files. The shell tool runs commands in parallel, so never put dependent edits, the same kind of operation, or edits to the same file in parallel commands.
-</file-editing>{{ end }}`
+</basic>`
 
 var baseSystemPromptTemplate = template.Must(template.New("system_prompt").Parse(baseSystemPrompt))
 
 type SystemPromptOptions struct {
-	UseApplyPatchShell bool
 }
 
 func ResolveSystemPrompt(options SystemPromptOptions) (string, error) {

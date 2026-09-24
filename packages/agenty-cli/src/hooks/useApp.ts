@@ -31,6 +31,7 @@ export interface AppSlice {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
+    enableCodexMode: () => Promise<void>;
     recordInput: (text: string) => Promise<boolean>;
 }
 
@@ -59,6 +60,7 @@ export function useApp(): AppSlice {
             setCwd: s.setCwd,
             setPermissionMode: s.setPermissionMode,
             togglePermissionMode: s.togglePermissionMode,
+            enableCodexMode: s.enableCodexMode,
             recordInput: s.recordInput,
         })),
     );

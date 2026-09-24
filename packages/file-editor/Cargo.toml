@@ -1,5 +1,5 @@
 [package]
-name = "patch-applier"
+name = "file-editor"
 version = "0.0.0"
 edition = "2021"
 rust-version = "1.89"
@@ -7,7 +7,7 @@ license = "Apache-2.0"
 description = "Atomic V4A patch applier for Agenty"
 
 [[bin]]
-name = "apply_patch"
+name = "fileedit"
 path = "src/main.rs"
 
 [dependencies]
