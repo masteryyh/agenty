@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentyClient } from "../api/client";
 import type {
     ChatSessionDto,
+    PermissionMode,
     SessionEvent,
     ToolApprovalRequest,
     ToolApprovalResolution,
@@ -81,6 +82,68 @@ function harness(options: { sessionPermissionBeforeRound?: boolean } = {}) {
 }
 
 describe("tool approval lifecycle", () => {
+    test("cancels unfinished tools in the ended round, including partial streamed calls", async () => {
+        const h = harness();
+        useAppStore.setState({ history: [{
+            id: "older", roundId: "older-round", role: "assistant", content: "",
+            toolCalls: [{ id: "older-call", name: "lookup", arguments: "{}" }],
+        }] });
+        const run = useAppStore.getState().sendMessage("run tools");
+        await h.started.promise;
+        h.emit({
+            type: "message_appended", iteration: 1,
+            message: {
+                id: "tools", roundId: "round-1", role: "assistant", createdAt: "2026-09-24T00:00:00Z",
+                content: ["done", "unfinished"].map((id) => ({ type: "tool_use", id, name: "lookup", input: {} })),
+            },
+        });
+        h.emit({
+            type: "message_appended", iteration: 1,
+            message: {
+                id: "result", roundId: "round-1", role: "user", createdAt: "2026-09-24T00:00:00Z",
+                content: [{ type: "tool_result", toolUseId: "done", isError: false, content: [{ type: "text", text: "found" }] }],
+            },
+        });
+        h.emit({
+            type: "model_stream", iteration: 2,
+            stream: { type: "tool_use_start", index: 0, toolUseId: "partial", toolName: "shell" },
+        });
+        h.emit({ type: "tool_review_started", review: { toolUseId: "partial" } });
+        h.emit({ type: "round_ended", status: "cancelled" });
+        const current = useAppStore.getState().current?.toolCalls?.[0];
+        expect(current).toMatchObject({ id: "partial", cancelled: true });
+        expect(current?.reviewing).toBeUndefined();
+        await run;
+        const calls = useAppStore.getState().history.flatMap((message) => message.toolCalls ?? []);
+        expect(calls.find((call) => call.id === "unfinished")?.cancelled).toBe(true);
+        expect(calls.find((call) => call.id === "done")?.result?.content).toBe("found");
+        expect(calls.find((call) => call.id === "done")?.cancelled).toBeUndefined();
+        expect(calls.find((call) => call.id === "older-call")?.cancelled).toBeUndefined();
+    });
+
+    test("rebuilds cancelled tools when reopening a persisted session", async () => {
+        const persisted: ChatSessionDto = { ...session, rounds: [{
+            id: "cancelled-round", sessionId: session.id, sequence: 1, status: "cancelled",
+            model: { providerCode: "test", modelCode: "test" }, contextWindow: 32000,
+            startedAt: "2026-09-24T00:00:00Z", usage: { input: 0, output: 0, total: 0 },
+            messages: [{
+                id: "assistant", roundId: "cancelled-round", role: "assistant", createdAt: "2026-09-24T00:00:00Z",
+                content: ["complete", "missing"].map((id) => ({ type: "tool_use", id, name: "lookup", input: {} })),
+            }, {
+                id: "result", roundId: "cancelled-round", role: "user", createdAt: "2026-09-24T00:00:00Z",
+                content: [{ type: "tool_result", toolUseId: "complete", isError: true, content: [{ type: "text", text: "denied" }] }],
+            }],
+        }] };
+        const client = { async getSession() {
+            return persisted;
+        } } as unknown as AgentyClient;
+        useAppStore.setState({ ...useAppStore.getInitialState(), client, session });
+        await useAppStore.getState().resumeSession(session);
+        const calls = useAppStore.getState().history[0].toolCalls!;
+        expect(calls[0].result?.isError).toBe(true);
+        expect(calls[0].cancelled).toBeUndefined();
+        expect(calls[1].cancelled).toBe(true);
+    });
     test("accepts approval before start response and preserves the next approval across a late decision response", async () => {
         const h = harness();
         const run = useAppStore.getState().sendMessage("read notes");
@@ -217,5 +280,53 @@ describe("tool approval lifecycle", () => {
             .flatMap((message) => message.toolCalls ?? [])
             .find((call) => call.id === "call-review");
         expect(reviewed?.reviewing).toBeUndefined();
+    });
+});
+
+describe("pending permission selection", () => {
+    test("cycles immediately and serializes RPCs without accepting stale responses", async () => {
+        const firstStarted = Promise.withResolvers<void>();
+        const releaseFirst = Promise.withResolvers<void>();
+        const requests: PermissionMode[] = [];
+        const client = {
+            async setSessionPermissionMode(_id: string, mode: PermissionMode) {
+                requests.push(mode);
+                if (requests.length === 1) {
+                    firstStarted.resolve();
+                    await releaseFirst.promise;
+                }
+                return { ...session, permissionMode: "ask", pendingPermissionMode: mode === "ask" ? undefined : mode };
+            },
+        } as unknown as AgentyClient;
+        useAppStore.setState({ ...useAppStore.getInitialState(), client, session: { ...session, permissionMode: "ask" } });
+        const first = useAppStore.getState().togglePermissionMode();
+        await firstStarted.promise;
+        expect(useAppStore.getState().session?.pendingPermissionMode).toBe("auto");
+        const second = useAppStore.getState().togglePermissionMode();
+        expect(useAppStore.getState().session?.pendingPermissionMode).toBe("yolo");
+        const third = useAppStore.getState().togglePermissionMode();
+        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+        releaseFirst.resolve();
+        await Promise.all([first, second, third]);
+        expect(requests).toEqual(["auto", "ask"]);
+        expect(useAppStore.getState().session?.permissionMode).toBe("ask");
+        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+    });
+
+    test("does not restore pending mode when the effective event precedes its RPC response", async () => {
+        const h = harness();
+        const run = useAppStore.getState().sendMessage("read");
+        await h.started.promise;
+        const client = useAppStore.getState().client!;
+        client.setSessionPermissionMode = async () => {
+            h.emit({ type: "permission_mode_changed", permissionMode: "yolo" });
+            return { ...session, permissionMode: "ask", pendingPermissionMode: "yolo" };
+        };
+        await useAppStore.getState().setPermissionMode("yolo");
+        expect(useAppStore.getState().session?.permissionMode).toBe("yolo");
+        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+        expect(useAppStore.getState().toast?.text).toBe("permissions: yolo");
+        h.emit({ type: "round_ended", status: "completed" });
+        await run;
     });
 });

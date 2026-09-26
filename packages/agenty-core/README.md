@@ -312,7 +312,12 @@ parallel. In `auto` mode every MCP call is sent to the automatic reviewer; built
 that pass deterministic safety checks can proceed directly, and other calls fall back to
 the reviewer or a manual approval. In `yolo` mode all calls proceed without approval. Call
 `session.setPermissionMode` with `{id, permissionMode: "ask" | "auto" | "yolo"}` to switch a session;
-the change is persisted as a session event and takes effect for subsequent tool calls.
+only the latest requested change is kept in memory. It is persisted and takes effect
+immediately before the next agent-loop `BeforeModelCall`, including the first call of a
+later round. Switching back to the effective mode clears the pending change. Current
+approvals still require a decision; switching modes does not release them. Session
+responses expose `pendingPermissionMode` while a change is queued. Pending changes
+survive round completion or cancellation in the same core process, but not a restart.
 A denial produces an error `tool_result` with the original `toolUseId` and text
 `The user denied this tool call. The tool was not executed.` The result is persisted
 and sent to the next model invocation; denial does not fail the round. Pending approvals
@@ -320,7 +325,9 @@ are in memory, consume at most one decision, and expire on cancellation or shutd
 Duplicate, mismatched or expired decisions are rejected. Approvals are not restored
 after restarting core.
 
-The TUI displays the current permission mode in the input status line and the status overlay.
+The TUI displays the current permission mode and marks queued changes as pending in the
+input status line. Unfinished tools in a cancelled round display `Cancelled`, including
+when the session is reopened; completed tool results retain their status.
 Use Shift+Tab to cycle `ask`, `auto`, and `yolo`. In `ask` mode, the TUI opens a tool approval overlay automatically. It shows built-in tool-specific
 content or generic tool arguments in a scrollable preview. Use arrows/Tab to choose,
 Enter to confirm, Y to allow once, or N/Esc to deny. Deny is selected initially;

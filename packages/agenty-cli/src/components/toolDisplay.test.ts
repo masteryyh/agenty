@@ -19,6 +19,13 @@ function toolCall(name: string, input: unknown, content?: string, isError = fals
 }
 
 describe("tool display", () => {
+    test("cancelled calls preserve paths and completed results", () => {
+        const cancelled = buildToolDisplay({ ...toolCall("ls", { path: "waiting" }), cancelled: true });
+        expect(cancelled.status).toBe("cancelled");
+        expect(cancelled.summaryLines[0]).toContain("waiting · Cancelled");
+        const completed = buildToolDisplay({ ...toolCall("lookup", {}, "done"), cancelled: true });
+        expect(completed.status).toBe("success");
+    });
     test("summarizes read_file without rendering its JSON envelope", () => {
         const display = buildToolDisplay(toolCall(
             "read_file",

@@ -31,7 +31,10 @@ function renderMessageContent(content: string, skills: SkillDto[]): React.ReactN
         ));
 }
 
-function statusGlyph(status: "pending" | "success" | "error", blinkOn: boolean): string {
+function statusGlyph(status: ToolDisplay["status"], blinkOn: boolean): string {
+    if (status === "cancelled") {
+        return "⊘";
+    }
     if (status === "success") {
         return "✓";
     }
@@ -160,9 +163,10 @@ function ToolCallLine({
                 </Text>
                 <Text> </Text>
                 <Text bold>{display.label}</Text>
+                {display.status === "cancelled" ? <Text dimColor> Cancelled</Text> : null}
                 {hasDetails ? <Text dimColor>{expanded ? " ▾" : " ▸"}</Text> : null}
             </Text>
-            {tc.reviewing ? (
+            {tc.reviewing && display.status === "pending" ? (
                 <Box marginLeft={2}>
                     <Text color={theme.warning}>
                         {blinkOn ? "◐" : "◑"} Reviewing...
@@ -202,14 +206,16 @@ function ToolMessageItem({
         () => buildToolDisplay(item.toolCall, item.expanded),
         [item.toolCall, item.expanded],
     );
-    const done = !!item.toolCall.result;
+    const done = display.status !== "pending";
     return (
         <Rail
             color={display.status === "error"
                 ? theme.danger
-                : done || item.blinkOn
-                    ? theme.accent
-                    : theme.textMuted}
+                : display.status === "cancelled"
+                    ? theme.textMuted
+                    : done || item.blinkOn
+                        ? theme.accent
+                        : theme.textMuted}
         >
             <ToolCallLine
                 tc={item.toolCall}

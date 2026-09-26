@@ -67,35 +67,33 @@ type StopResult struct {
 }
 
 type activeExecution struct {
-	roundID      uuid.UUID
-	session      *conversation.Session
-	provider     catalog.Provider
-	cancel       context.CancelFunc
-	sessionReady chan struct{}
-	readyOnce    sync.Once
+	roundID uuid.UUID
+	session *conversation.Session
+	cancel  context.CancelFunc
 }
 
 type Engine struct {
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	sessions              ExecutionSessionRepository
-	catalog               ExecutionCatalogRepository
-	tools                 agentloop.ToolRuntime
-	invokeModel           modelcall.InvokeFunc
-	loopHooks             agentloop.LoopHooks
-	lifecycle             inframiddleware.LifecycleHooks
-	permissionModeChanged func(context.Context, uuid.UUID, conversation.PermissionMode) error
-	logger                *slog.Logger
-	mu                    sync.Mutex
-	sessionLocksMu        sync.Mutex
-	sessionLocks          map[uuid.UUID]*sync.Mutex
-	active                map[uuid.UUID]*activeExecution
-	started               map[uuid.UUID]struct{}
-	resources             map[uuid.UUID]executionResources
-	waitGroup             sync.WaitGroup
-	shutdown              bool
-	stopOnce              sync.Once
-	stopped               chan struct{}
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	sessions               ExecutionSessionRepository
+	catalog                ExecutionCatalogRepository
+	tools                  agentloop.ToolRuntime
+	invokeModel            modelcall.InvokeFunc
+	loopHooks              agentloop.LoopHooks
+	lifecycle              inframiddleware.LifecycleHooks
+	permissionModeChanged  func(context.Context, uuid.UUID, conversation.PermissionMode) error
+	logger                 *slog.Logger
+	mu                     sync.Mutex
+	sessionLocksMu         sync.Mutex
+	sessionLocks           map[uuid.UUID]*sync.Mutex
+	active                 map[uuid.UUID]*activeExecution
+	pendingPermissionModes map[uuid.UUID]conversation.PermissionMode
+	started                map[uuid.UUID]struct{}
+	resources              map[uuid.UUID]executionResources
+	waitGroup              sync.WaitGroup
+	shutdown               bool
+	stopOnce               sync.Once
+	stopped                chan struct{}
 }
 
 func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, error) {
@@ -117,21 +115,22 @@ func NewEngine(parentCtx context.Context, dependencies Dependencies) (*Engine, e
 
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Engine{
-		ctx:                   ctx,
-		cancel:                cancel,
-		sessions:              dependencies.Sessions,
-		catalog:               dependencies.Catalog,
-		tools:                 dependencies.Tools,
-		invokeModel:           dependencies.InvokeModel,
-		loopHooks:             dependencies.LoopHooks,
-		lifecycle:             dependencies.Lifecycle,
-		permissionModeChanged: dependencies.PermissionModeChanged,
-		logger:                slog.Default(),
-		active:                make(map[uuid.UUID]*activeExecution),
-		started:               make(map[uuid.UUID]struct{}),
-		resources:             make(map[uuid.UUID]executionResources),
-		sessionLocks:          make(map[uuid.UUID]*sync.Mutex),
-		stopped:               make(chan struct{}),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		sessions:               dependencies.Sessions,
+		catalog:                dependencies.Catalog,
+		tools:                  dependencies.Tools,
+		invokeModel:            dependencies.InvokeModel,
+		loopHooks:              dependencies.LoopHooks,
+		lifecycle:              dependencies.Lifecycle,
+		permissionModeChanged:  dependencies.PermissionModeChanged,
+		logger:                 slog.Default(),
+		active:                 make(map[uuid.UUID]*activeExecution),
+		pendingPermissionModes: make(map[uuid.UUID]conversation.PermissionMode),
+		started:                make(map[uuid.UUID]struct{}),
+		resources:              make(map[uuid.UUID]executionResources),
+		sessionLocks:           make(map[uuid.UUID]*sync.Mutex),
+		stopped:                make(chan struct{}),
 	}, nil
 }
 
@@ -166,7 +165,6 @@ func (engine *Engine) Start(
 
 	engine.mu.Lock()
 	execution.roundID = prepared.roundID
-	execution.provider = prepared.provider
 	engine.mu.Unlock()
 
 	launched = true
@@ -391,6 +389,8 @@ func (engine *Engine) IsRunning(sessionID uuid.UUID) bool {
 	return ok
 }
 
+// SetPermissionMode keeps only the latest requested mode. The running tool batch
+// continues under its current mode until the next model-call boundary.
 func (engine *Engine) SetPermissionMode(
 	ctx context.Context,
 	sessionID string,
@@ -407,58 +407,16 @@ func (engine *Engine) SetPermissionMode(
 		return nil, err
 	}
 
-	active, running, session := engine.waitForActiveSession(ctx, id)
-	var roundID uuid.UUID
-	var provider catalog.Provider
+	lock := engine.sessionLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 
-	sessionLock := engine.sessionLock(id)
-	sessionLock.Lock()
-	defer sessionLock.Unlock()
-	if running {
-		// prepare binds the session before it allocates the round. Refresh the
-		// execution snapshot after taking the session lock so a permission
-		// change cannot retain the pre-prepare zero round ID.
-		engine.mu.Lock()
-		current, stillRunning := engine.active[id]
-		if stillRunning && current == active {
-			active = current
-			session = current.session
-			roundID = current.roundID
-			provider = current.provider
-		} else if stillRunning && current != nil {
-			active = current
-			if current.session == nil {
-				// A newer Start has reserved the session but has not loaded it
-				// yet. Keep the mode change session-scoped; that Start will
-				// load the event after this lock is released.
-				running = false
-				session = nil
-			} else {
-				session = current.session
-				roundID = current.roundID
-				provider = current.provider
-			}
-		} else if !stillRunning {
-			running = false
-		}
-		engine.mu.Unlock()
+	engine.mu.Lock()
+	var session *conversation.Session
+	if active := engine.active[id]; active != nil {
+		session = active.session
 	}
-	if running {
-		if roundID == uuid.Nil && session != nil {
-			for index := len(session.Rounds) - 1; index >= 0; index-- {
-				if session.Rounds[index].Status == conversation.RoundRunning {
-					roundID = session.Rounds[index].ID
-					break
-				}
-			}
-		}
-		round := currentRound(session, roundID)
-		if roundID == uuid.Nil || round == nil || round.Status != conversation.RoundRunning {
-			running = false
-			roundID = uuid.Nil
-		}
-	}
-
+	engine.mu.Unlock()
 	if session == nil {
 		session, err = engine.sessions.Load(ctx, id)
 		if err != nil {
@@ -468,57 +426,82 @@ func (engine *Engine) SetPermissionMode(
 			return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 		}
 	}
-	if !session.SetPermissionMode(mode, roundID) {
-		return session.VisibleCopy(), nil
+
+	engine.mu.Lock()
+	if session.CurrentPermissionMode() == mode {
+		delete(engine.pendingPermissionModes, id)
+	} else {
+		engine.pendingPermissionModes[id] = mode
 	}
-	if running && roundID != uuid.Nil {
-		permissionMode := string(mode)
-		text, encodeErr := (conversation.MetadataUpdate{PermissionMode: &permissionMode}).XML()
-		if encodeErr != nil {
-			return nil, apperrors.WrapError(apperrors.CodeInternal, "encode permission metadata", encodeErr)
-		}
-		role := conversation.RoleUser
-		if provider.SupportsDeveloperMessages() {
-			role = conversation.RoleDeveloper
-		}
-		if _, appendErr := session.AppendHiddenMessage(
-			roundID,
-			role,
-			conversation.Text(text),
-			map[string]any{"kind": "metadata", "scope": "round"},
-		); appendErr != nil {
-			return nil, apperrors.WrapError(apperrors.CodeInternal, "append permission metadata", appendErr)
-		}
+	engine.mu.Unlock()
+	return session.VisibleCopy(), nil
+}
+
+// PendingPermissionMode is transient UI state; it is never written to a session
+// event or used by tool approval before the next model call.
+func (engine *Engine) PendingPermissionMode(sessionID uuid.UUID) conversation.PermissionMode {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	return engine.pendingPermissionModes[sessionID]
+}
+
+func (engine *Engine) ClearPendingPermissionMode(sessionID uuid.UUID) {
+	engine.mu.Lock()
+	delete(engine.pendingPermissionModes, sessionID)
+	engine.mu.Unlock()
+}
+
+// applyPendingPermissionMode runs with the session lock held, before building
+// the request supplied to BeforeModelCall.
+func (engine *Engine) applyPendingPermissionMode(ctx context.Context, prepared *preparedExecution) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	session := prepared.session
+	mode := engine.PendingPermissionMode(session.ID)
+	if mode == "" {
+		return nil
+	}
+	previous := session.CurrentPermissionMode()
+	if !session.SetPermissionMode(mode, prepared.roundID) {
+		engine.ClearPendingPermissionMode(session.ID)
+		return nil
+	}
+	change := conversation.SessionPermissionModeChanged{
+		SessionID: session.ID, RoundID: prepared.roundID,
+		PreviousMode: previous, PermissionMode: mode, At: session.UpdatedAt,
 	}
 
-	change := conversation.SessionPermissionModeChanged{
-		SessionID:      session.ID,
-		RoundID:        roundID,
-		PreviousMode:   session.CurrentPermissionMode(),
-		PermissionMode: mode,
+	permissionMode := string(mode)
+	text, err := (conversation.MetadataUpdate{PermissionMode: &permissionMode}).XML()
+	if err != nil {
+		return fmt.Errorf("encode permission metadata: %w", err)
 	}
-	// SetPermissionMode has already recorded the event. Read it back so the
-	// emitted payload includes the exact previous mode from the event.
-	if pending := session.PendingEvents(); len(pending) > 0 {
-		for _, p := range slices.Backward(pending) {
-			if recorded, ok := p.(conversation.SessionPermissionModeChanged); ok {
-				change = recorded
-				break
-			}
-		}
+	role := conversation.RoleUser
+	if prepared.provider.SupportsDeveloperMessages() {
+		role = conversation.RoleDeveloper
 	}
-	if err := engine.emitForSession(ctx, session, roundID, nil, nil, agentloop.Event{
+	if _, err := session.AppendHiddenMessage(
+		prepared.roundID,
+		role,
+		conversation.Text(text),
+		map[string]any{"kind": "metadata", "scope": "round"},
+	); err != nil {
+		return fmt.Errorf("append permission metadata: %w", err)
+	}
+	if err := engine.emitEvent(ctx, prepared, agentloop.Event{
 		Type:    agentloop.EventPermissionModeChanged,
 		Payload: change,
 	}); err != nil {
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist permission mode", err)
+		return fmt.Errorf("persist permission mode: %w", err)
 	}
+	engine.ClearPendingPermissionMode(session.ID)
 	if engine.permissionModeChanged != nil {
 		if err := engine.permissionModeChanged(ctx, session.ID, mode); err != nil {
-			return nil, apperrors.WrapError(apperrors.CodeInternal, "apply permission mode", err)
+			return fmt.Errorf("apply permission mode: %w", err)
 		}
 	}
-	return session.VisibleCopy(), nil
+	return nil
 }
 
 func (engine *Engine) EnableCodexMode(ctx context.Context, sessionID string) (*conversation.Session, error) {
@@ -629,7 +612,7 @@ func (engine *Engine) reserve(
 	}
 
 	runCtx, cancel := context.WithCancel(engine.ctx)
-	execution := &activeExecution{cancel: cancel, sessionReady: make(chan struct{})}
+	execution := &activeExecution{cancel: cancel}
 	engine.active[sessionID] = execution
 	engine.waitGroup.Add(1)
 
@@ -658,35 +641,6 @@ func (engine *Engine) bindExecutionSession(
 		execution.session = session
 	}
 	engine.mu.Unlock()
-	if execution != nil {
-		execution.readyOnce.Do(func() { close(execution.sessionReady) })
-	}
-}
-
-func (engine *Engine) waitForActiveSession(
-	ctx context.Context,
-	sessionID uuid.UUID,
-) (*activeExecution, bool, *conversation.Session) {
-	for {
-		engine.mu.Lock()
-		active, running := engine.active[sessionID]
-		var session *conversation.Session
-		var ready <-chan struct{}
-		if running && active != nil {
-			session = active.session
-			ready = active.sessionReady
-		}
-		engine.mu.Unlock()
-		if !running || session != nil {
-			return active, running, session
-		}
-
-		select {
-		case <-ready:
-		case <-ctx.Done():
-			return active, running, nil
-		}
-	}
 }
 
 type preparedExecution struct {
@@ -902,7 +856,6 @@ func (engine *Engine) prepare(
 	engine.mu.Lock()
 	if engine.active[sessionID] == execution {
 		execution.roundID = roundID
-		execution.provider = prepared.provider
 	}
 	engine.mu.Unlock()
 	if err := engine.emitEvent(runCtx, prepared, agentloop.Event{Type: agentloop.EventSessionChanged}); err != nil {
@@ -1334,7 +1287,13 @@ func (engine *Engine) executeLoop(
 			return prepared.session.Snapshot()
 		},
 		BuildRequest: func(ctx context.Context, iteration int) (modelcall.ModelCallRequest, conversation.TokenUsage, error) {
-			request := engine.sessionRequest(prepared)
+			lock := engine.sessionLock(prepared.session.ID)
+			lock.Lock()
+			defer lock.Unlock()
+			if err := engine.applyPendingPermissionMode(ctx, prepared); err != nil {
+				return modelcall.ModelCallRequest{}, conversation.TokenUsage{}, err
+			}
+			request := engine.sessionRequestForWindow(prepared, modelContextWindow(prepared), prepared.maxOutputTokens)
 			return request, conversation.TokenUsage{}, nil
 		},
 		ToolRuntime: toolRuntime,
@@ -1509,7 +1468,6 @@ func (engine *Engine) release(
 	execution *activeExecution,
 ) {
 	execution.cancel()
-	execution.readyOnce.Do(func() { close(execution.sessionReady) })
 
 	engine.mu.Lock()
 	if engine.active[sessionID] == execution {

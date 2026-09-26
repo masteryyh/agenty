@@ -457,6 +457,10 @@ function normalizeSession(session: ChatSessionDto): ChatSessionDto {
         permissionMode: session.permissionMode === "yolo" || session.permissionMode === "auto"
             ? session.permissionMode
             : "ask",
+        pendingPermissionMode: session.pendingPermissionMode === "ask" ||
+            session.pendingPermissionMode === "auto" || session.pendingPermissionMode === "yolo"
+            ? session.pendingPermissionMode
+            : undefined,
         toolDialect: session.toolDialect === "codex" ? "codex" : "default",
         rounds: rounds.map((round) => ({
             ...round,

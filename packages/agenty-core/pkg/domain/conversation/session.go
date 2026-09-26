@@ -390,12 +390,6 @@ func (s *Session) Snapshot() *Session {
 	return &copy
 }
 
-func (s *Session) ContextMessages() []Message {
-	messages := make([]Message, len(s.context))
-	copy(messages, s.context)
-	return messages
-}
-
 func ReplaySession(events []shared.Event) *Session {
 	s := &Session{Rounds: make([]Round, 0), permissionMu: &sync.RWMutex{}}
 	for _, e := range events {

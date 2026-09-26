@@ -35,6 +35,7 @@ interface InputBoxProps {
     contextWindow: number;
     tokenConsumed: number;
     permissionMode: PermissionMode;
+    pendingPermissionMode?: PermissionMode;
     toolDialect: ToolDialect;
     thinkingLevel: string;
     reasoningActive: boolean;
@@ -58,6 +59,7 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     contextWindow,
     tokenConsumed,
     permissionMode,
+    pendingPermissionMode,
     toolDialect,
     thinkingLevel,
     reasoningActive,
@@ -155,10 +157,12 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     <Text color={theme.textFaint} wrap="truncate-start">
                         {abbreviateCwd(cwd)}
                     </Text>
-                    {permissionMode !== "ask" ? (
+                    {permissionMode !== "ask" || pendingPermissionMode ? (
                         <>
                             <Text> </Text>
-                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>{`${permissionMode} mode`}</Text>
+                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>
+                                {`${permissionMode} mode${pendingPermissionMode ? ` → ${pendingPermissionMode} (pending)` : ""}`}
+                            </Text>
                         </>
                     ) : null}
                     {toolDialect === "codex" ? (

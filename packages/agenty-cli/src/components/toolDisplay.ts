@@ -6,7 +6,7 @@ const MAX_VALUE_LENGTH = 96;
 
 type JsonRecord = Record<string, unknown>;
 
-export type ToolDisplayStatus = "pending" | "success" | "error";
+export type ToolDisplayStatus = "pending" | "success" | "error" | "cancelled";
 
 export type ShellOutputStream = "stdout" | "stderr" | "empty" | "pending" | "newline";
 
@@ -537,6 +537,20 @@ export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDis
     const errorLine = toolCall.result?.isError
         ? [`Error: ${truncate(toolCall.result.content, MAX_VALUE_LENGTH)}`]
         : [];
+    if (toolCall.cancelled && !toolCall.result) {
+        return {
+            ...display,
+            status: "cancelled",
+            shellCommands: display.shellCommands?.map((command) => ({
+                ...command,
+                status: "cancelled",
+                outputLines: [{ text: "Cancelled", stream: "empty" }],
+            })),
+            summaryLines: display.summaryLines.map((line) => line === "waiting for result"
+                ? "Cancelled"
+                : line.replace(/ · waiting$/, " · Cancelled")),
+        };
+    }
     return {
         ...display,
         summaryLines: [...display.summaryLines, ...errorLine],

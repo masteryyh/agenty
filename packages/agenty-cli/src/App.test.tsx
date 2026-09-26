@@ -78,6 +78,25 @@ afterEach(() => {
 });
 
 describe("chat input interactions", () => {
+    test("distinguishes the effective permission mode from the pending selection", async () => {
+        useAppStore.setState({ session: { ...session, permissionMode: "auto", pendingPermissionMode: "yolo" } });
+        const setup = await testRender(<TestApp />, { width: 100, height: 24 });
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("auto mode → yolo (pending)");
+            await act(async () => {
+                useAppStore.setState({ session: { ...session, permissionMode: "yolo" } });
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("yolo mode");
+            expect(setup.captureCharFrame()).not.toContain("(pending)");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
     test("opens the shared help panel when question mark is typed into an empty input", async () => {
         const setup = await testRender(<TestApp />, { width: 80, height: 24 });
 

@@ -69,7 +69,7 @@ export function MessageList({
         (msg) => msg.reasoning && msg.reasoningStartedAt && !msg.reasoningEndedAt,
     );
     const hasPendingTool = messages.some((msg) =>
-        msg.toolCalls?.some((tc) => !tc.result),
+        msg.toolCalls?.some((tc) => !tc.result && !tc.cancelled),
     );
 
     useEffect(() => {

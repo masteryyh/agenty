@@ -43,10 +43,12 @@ export interface UIToolCall {
     arguments: string;
     result?: ToolResult;
     reviewing?: boolean;
+    cancelled?: boolean;
 }
 
 export interface UIMessage {
     id: string;
+    roundId?: string;
     role: "user" | "assistant" | "system" | "developer";
     content: string;
     reasoning?: string;
@@ -121,8 +123,8 @@ function nextId(): string {
     return `msg-${idCounter}`;
 }
 
-function newAssistantMessage(): UIMessage {
-    return { id: nextId(), role: "assistant", content: "", reasoning: "", toolCalls: [] };
+function newAssistantMessage(roundId?: string): UIMessage {
+    return { id: nextId(), roundId, role: "assistant", content: "", reasoning: "", toolCalls: [] };
 }
 
 function hasContent(message: UIMessage): boolean {
@@ -185,6 +187,7 @@ function messageToUI(message: ChatMessageDto): UIMessage {
     const content = message.content ?? [];
     return {
         id: message.id || nextId(),
+        roundId: message.roundId,
         role: message.role,
         content: textFromBlocks(content, "text"),
         reasoning: textFromBlocks(content, "reasoning"),
@@ -243,8 +246,8 @@ function setToolReviewing(message: UIMessage, toolUseId: string, reviewing: bool
     return { ...message, toolCalls: updatedCalls };
 }
 
-function clearToolReviews(message: UIMessage): UIMessage {
-    if (!message.toolCalls?.some((call) => call.reviewing)) {
+function finalizeToolCalls(message: UIMessage, cancelled = false): UIMessage {
+    if (!message.toolCalls?.some((call) => call.reviewing || (cancelled && !call.result))) {
         return message;
     }
 
@@ -253,21 +256,26 @@ function clearToolReviews(message: UIMessage): UIMessage {
         toolCalls: message.toolCalls.map((call) => {
             const updatedCall = { ...call };
             delete updatedCall.reviewing;
+            if (cancelled && !call.result) {
+                updatedCall.cancelled = true;
+            }
             return updatedCall;
         }),
     };
 }
 
 function buildHistory(session: ChatSessionDto): UIMessage[] {
-    let history: UIMessage[] = [];
+    const history: UIMessage[] = [];
     for (const round of session.rounds ?? []) {
+        let messages: UIMessage[] = [];
         for (const message of round.messages ?? []) {
             if ((message.content ?? []).some((block) => block.type === "tool_result")) {
-                history = attachToolResults(history, message);
+                messages = attachToolResults(messages, message);
                 continue;
             }
-            history.push(messageToUI(message));
+            messages.push(messageToUI(message));
         }
+        history.push(...messages.map((message) => finalizeToolCalls(message, round.status === "cancelled")));
     }
     return history;
 }
@@ -393,6 +401,8 @@ function mergeToolCalls(
 }
 
 export const useAppStore = create<AppState>((set, get) => {
+    let permissionChangeQueue: Promise<void> = Promise.resolve();
+    let latestPermissionChange: { sessionId: string; mode: PermissionMode } | null = null;
     const flushCurrent = () => {
         const current = get().current;
         if (current && hasContent(current)) {
@@ -428,9 +438,19 @@ export const useAppStore = create<AppState>((set, get) => {
     const handleEvent = (event: SessionEvent) => {
         if (event.type === "permission_mode_changed") {
             const permissionMode = event.permissionMode ?? "ask";
-            set((state) => state.session?.id === event.sessionId
-                ? { session: { ...state.session, permissionMode } }
-                : {});
+            set((state) => {
+                if (state.session?.id !== event.sessionId) {
+                    return {};
+                }
+                const requested = latestPermissionChange?.sessionId === event.sessionId
+                    ? latestPermissionChange.mode
+                    : state.session.pendingPermissionMode;
+                return { session: {
+                    ...state.session,
+                    permissionMode,
+                    pendingPermissionMode: requested === permissionMode ? undefined : requested,
+                } };
+            });
             return;
         }
         if (event.type === "tool_dialect_changed") {
@@ -467,21 +487,24 @@ export const useAppStore = create<AppState>((set, get) => {
             return;
         }
         if (event.type === "round_ended") {
+            const finalize = (message: UIMessage) => message.roundId === event.roundId
+                ? finalizeToolCalls(message, event.status === "cancelled")
+                : message;
             set((state) => ({
                 pendingApproval: null,
-                history: state.history.map(clearToolReviews),
-                current: state.current ? clearToolReviews(state.current) : null,
+                history: state.history.map(finalize),
+                current: state.current ? finalize(state.current) : null,
             }));
         }
         if (event.type === "model_stream" && event.stream) {
             const stream = event.stream;
             if (stream.type === "text_delta" && stream.delta) {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     return {
                         history,
@@ -490,11 +513,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "reasoning_delta" && stream.delta) {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     return { history, current: {
                         ...current,
@@ -504,11 +527,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_use_start") {
                 set((state) => {
-                    let current = finalizeReasoning(state.current ?? newAssistantMessage());
+                    let current = finalizeReasoning(state.current ?? newAssistantMessage(event.roundId));
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, current];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
@@ -525,7 +548,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_input_delta" && stream.delta) {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
@@ -535,7 +558,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_use_done") {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
@@ -555,17 +578,17 @@ export const useAppStore = create<AppState>((set, get) => {
         if (event.type === "message_appended" && event.message) {
             if ((event.message.content ?? []).some((block) => block.type === "tool_result")) {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const updated = attachToolResults([current], event.message!);
                     return { current: updated[0] };
                 });
             } else if (event.message.role === "assistant") {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     const contextSize = event.message?.usage
                         ? event.message.usage.input + event.message.usage.output
@@ -798,6 +821,7 @@ export const useAppStore = create<AppState>((set, get) => {
                         return;
                     }
                     activeRoundId = event.roundId;
+                    set((state) => ({ current: state.current ? { ...state.current, roundId: event.roundId } : null }));
                 } else if (activeRoundId === null &&
                     (event.type === "permission_mode_changed" || event.type === "tool_dialect_changed")) {
                     activeRoundId = event.roundId;
@@ -833,6 +857,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     session.id,
                     resolvedEffort.effort,
                 );
+                await permissionChangeQueue;
                 await client.startSession(session.id, trimmed);
                 const ended = await terminal;
                 if (ended.status === "failed" || ended.error) {
@@ -1037,21 +1062,53 @@ export const useAppStore = create<AppState>((set, get) => {
             if (!client || !session || (mode !== "ask" && mode !== "auto" && mode !== "yolo")) {
                 return;
             }
-            if ((session.permissionMode ?? "ask") === mode) {
-                setToast(`permissions: ${mode}`);
+            if ((session.pendingPermissionMode ?? session.permissionMode ?? "ask") === mode) {
                 return;
             }
-            try {
-                const updated = await client.setSessionPermissionMode(session.id, mode);
-                set({ session: updated });
-                setToast(`permissions: ${mode}`);
-            } catch (error) {
-                setToast(`permissions: ${(error as Error).message}`, true);
-            }
+            const change = { sessionId: session.id, mode };
+            latestPermissionChange = change;
+            set({ session: {
+                ...session,
+                pendingPermissionMode: mode === (session.permissionMode ?? "ask") ? undefined : mode,
+            } });
+            const send = async () => {
+                if (latestPermissionChange !== change) {
+                    return;
+                }
+                try {
+                    const updated = await client.setSessionPermissionMode(session.id, mode);
+                    if (latestPermissionChange !== change || get().session?.id !== session.id) {
+                        return;
+                    }
+                    set((state) => ({ session: state.session ? {
+                        ...state.session,
+                        pendingPermissionMode: mode === (state.session.permissionMode ?? "ask")
+                            ? undefined
+                            : updated.pendingPermissionMode,
+                    } : null }));
+                    latestPermissionChange = null;
+                    setToast(`permissions: ${mode}${get().session?.pendingPermissionMode ? " (pending)" : ""}`);
+                } catch (error) {
+                    if (latestPermissionChange === change && get().session?.id === session.id) {
+                        const updated = await client.getSession(session.id).catch(() => null);
+                        if (latestPermissionChange === change && get().session?.id === session.id) {
+                            set((state) => ({ session: state.session ? {
+                                ...state.session,
+                                pendingPermissionMode: updated?.pendingPermissionMode,
+                            } : null }));
+                            setToast(`permissions: ${(error as Error).message}`, true);
+                            latestPermissionChange = null;
+                        }
+                    }
+                }
+            };
+            permissionChangeQueue = permissionChangeQueue.then(send);
+            await permissionChangeQueue;
         },
 
         togglePermissionMode: async () => {
-            const current = get().session?.permissionMode ?? "ask";
+            const session = get().session;
+            const current = session?.pendingPermissionMode ?? session?.permissionMode ?? "ask";
             const mode = current === "ask" ? "auto" : current === "auto" ? "yolo" : "ask";
             await get().setPermissionMode(mode);
         },

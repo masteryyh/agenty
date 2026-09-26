@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/google/uuid"
+
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -17,18 +19,32 @@ func RegisterSessionHandlers(
 	execution *infrasession.Engine,
 ) {
 	d.Register("session.create", sessionCreate(svc))
-	d.Register("session.get", sessionGet(svc))
+	d.Register("session.get", withPendingPermissionMode(execution, sessionGet(svc)))
 	d.Register("session.list", sessionList(svc))
-	d.Register("session.delete", sessionDelete(svc))
-	d.Register("session.setTitle", sessionSetTitle(svc))
-	d.Register("session.setModel", sessionSetModel(execution))
-	d.Register("session.setReasoningEffort", sessionSetReasoningEffort(svc))
-	d.Register("session.setCwd", sessionSetCwd(svc))
-	d.Register("session.setPermissionMode", sessionSetPermissionMode(execution))
-	d.Register("session.enableCodexMode", sessionEnableCodexMode(execution))
+	d.Register("session.delete", sessionDelete(svc, execution))
+	d.Register("session.setTitle", withPendingPermissionMode(execution, sessionSetTitle(svc)))
+	d.Register("session.setModel", withPendingPermissionMode(execution, sessionSetModel(execution)))
+	d.Register("session.setReasoningEffort", withPendingPermissionMode(execution, sessionSetReasoningEffort(svc)))
+	d.Register("session.setCwd", withPendingPermissionMode(execution, sessionSetCwd(svc)))
+	d.Register("session.setPermissionMode", withPendingPermissionMode(execution, sessionSetPermissionMode(execution)))
+	d.Register("session.enableCodexMode", withPendingPermissionMode(execution, sessionEnableCodexMode(execution)))
 	d.Register("session.start", sessionStart(execution))
 	d.Register("session.compact", sessionCompact(execution))
 	d.Register("session.stop", sessionStop(execution))
+}
+
+func withPendingPermissionMode(execution *infrasession.Engine, handler rpc.Handler) rpc.Handler {
+	return func(ctx context.Context, params json.RawMessage) (any, error) {
+		result, err := handler(ctx, params)
+		session, ok := result.(*conversation.Session)
+		if err != nil || !ok || session == nil || execution == nil {
+			return result, err
+		}
+		return struct {
+			*conversation.Session
+			PendingPermissionMode conversation.PermissionMode `json:"pendingPermissionMode,omitempty"`
+		}{Session: session, PendingPermissionMode: execution.PendingPermissionMode(session.ID)}, nil
+	}
 }
 
 type idParams struct {
@@ -73,7 +89,7 @@ func sessionList(svc *application.SessionService) rpc.Handler {
 	}
 }
 
-func sessionDelete(svc *application.SessionService) rpc.Handler {
+func sessionDelete(svc *application.SessionService, execution *infrasession.Engine) rpc.Handler {
 	return func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p idParams
 		if err := decodeParams(params, &p); err != nil {
@@ -81,6 +97,9 @@ func sessionDelete(svc *application.SessionService) rpc.Handler {
 		}
 		if err := svc.Delete(ctx, p.ID); err != nil {
 			return nil, toRPCError(err)
+		}
+		if execution != nil {
+			execution.ClearPendingPermissionMode(uuid.MustParse(p.ID))
 		}
 		return map[string]any{"id": p.ID, "deleted": true}, nil
 	}

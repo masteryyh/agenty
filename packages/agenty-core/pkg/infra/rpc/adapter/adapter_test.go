@@ -322,6 +322,43 @@ func TestAdapterSessionCreateAndGet(t *testing.T) {
 	}
 }
 
+func TestAdapterPendingPermissionMode(t *testing.T) {
+	d := newDispatcher(t)
+	id := createExecutableSession(t, d)
+	for _, mode := range []string{"auto", "yolo", "ask", "yolo"} {
+		response := call(t, d, request(10, "session.setPermissionMode", map[string]any{"id": id, "permissionMode": mode}))
+		if errCode(response) != 0 {
+			t.Fatalf("set mode: %+v", response)
+		}
+		for _, result := range []map[string]any{
+			response["result"].(map[string]any),
+			call(t, d, request(11, "session.get", map[string]any{"id": id}))["result"].(map[string]any),
+		} {
+			if result["permissionMode"] != "ask" {
+				t.Fatalf("mode was applied before model call: %+v", result)
+			}
+			want := any(mode)
+			if mode == "ask" {
+				want = nil
+			}
+			if result["pendingPermissionMode"] != want {
+				t.Fatalf("pending mode = %v, want %v", result["pendingPermissionMode"], want)
+			}
+		}
+	}
+	started := call(t, d, request(12, "session.start", map[string]any{
+		"id": id, "content": []map[string]any{{"type": "text", "text": "hello"}},
+	}))
+	if errCode(started) != 0 {
+		t.Fatalf("start: %+v", started)
+	}
+	waitForAdapterRoundStatus(t, d, id, "completed")
+	result := call(t, d, request(13, "session.get", map[string]any{"id": id}))["result"].(map[string]any)
+	if result["permissionMode"] != "yolo" || result["pendingPermissionMode"] != nil {
+		t.Fatalf("applied mode: %+v", result)
+	}
+}
+
 func TestAdapterSessionList(t *testing.T) {
 	d := newDispatcher(t)
 	for range 3 {

@@ -1032,10 +1032,10 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 	session := fixture.createSession(t)
 	fixture.sessions.loadAttempted = make(chan struct{})
 	fixture.sessions.loadRelease = make(chan struct{})
-	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{{
-		Content:    conversation.Text("done"),
-		StopReason: modelcall.ModelCallStopReasonEndTurn,
-	}}}
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
+		{Content: conversation.Text("done"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+		{Content: conversation.Text("done"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+	}}
 	engine := fixture.newEngine(t, caller.Call)
 
 	startResult := make(chan struct {
@@ -1082,6 +1082,15 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 		t.Fatal(changed.err)
 	}
 	waitForExecution(t, engine, session.ID)
+	expectedRoundID := started.result.RoundID
+	if engine.PendingPermissionMode(session.ID) != "" {
+		next, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("continue"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedRoundID = next.RoundID
+		waitForExecution(t, engine, session.ID)
+	}
 
 	var modeEvent conversation.SessionPermissionModeChanged
 	found := false
@@ -1091,7 +1100,7 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || modeEvent.RoundID != started.result.RoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
+	if !found || modeEvent.RoundID != expectedRoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
 		t.Fatalf("permission event = %+v, start = %+v", modeEvent, started.result)
 	}
 }
