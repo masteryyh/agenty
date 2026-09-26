@@ -67,7 +67,7 @@ function resolveCoreBinary(os: TargetOS, arch: TargetArch): string {
     }
 
     const host = hostTarget();
-    const flat = join(CORE_BIN_DIR, "agenty-core");
+    const flat = join(CORE_BIN_DIR, `agenty-core${os === "windows" ? ".exe" : ""}`);
     if (os === host.os && arch === host.arch && existsSync(flat)) {
         return flat;
     }

@@ -1,13 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { resolveBuildVersion } from "./build-version.mjs";
+import { packageManagerCommand, spawnSyncCommand } from "./command.mjs";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
-
-function packageManagerCommand(hostPlatform = process.platform) {
-    return hostPlatform === "win32" ? "pnpm.cmd" : "pnpm";
-}
 
 export function resolveTurboPlan(
     task,
@@ -46,7 +42,7 @@ function run() {
     const task = process.argv[2]?.trim() || "test";
     const filter = process.argv[3]?.trim();
     const plan = resolveTurboPlan(task, filter);
-    const result = spawnSync(plan.packageManager, plan.args, {
+    const result = spawnSyncCommand(plan.packageManager, plan.args, {
         cwd: REPOSITORY_ROOT,
         env: plan.buildEnvironment,
         stdio: "inherit",

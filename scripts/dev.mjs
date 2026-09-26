@@ -3,14 +3,13 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { packageManagerCommand, spawnSyncCommand } from "./command.mjs";
 import { executableExtension, resolveArch, resolveOS } from "./platform.mjs";
 import { resolveTurboPlan } from "./turbo.mjs";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
-export function packageManagerCommand(hostPlatform = process.platform) {
-    return hostPlatform === "win32" ? "pnpm.cmd" : "pnpm";
-}
+export { packageManagerCommand };
 
 export function resolveDevPlan(
     args,
@@ -54,7 +53,7 @@ function exitCode(label, result) {
 
 function run() {
     const plan = resolveDevPlan(process.argv.slice(2));
-    const build = spawnSync(packageManagerCommand(), plan.buildArgs, {
+    const build = spawnSyncCommand(packageManagerCommand(), plan.buildArgs, {
         cwd: REPOSITORY_ROOT,
         env: plan.buildEnvironment,
         stdio: "inherit",
