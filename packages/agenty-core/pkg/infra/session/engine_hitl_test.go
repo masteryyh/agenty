@@ -15,7 +15,7 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
 	"github.com/masteryyh/agenty-core/pkg/infra/permission"
@@ -44,13 +44,13 @@ func TestEngineHITLLifecycle(t *testing.T) {
 				{Content: conversation.Text("done")},
 			}}
 			manager := permission.NewPermissionManager()
-			broker := httpapi.NewStreamBroker(nil)
+			broker := event.NewStreamBroker(nil)
 			middlewares := middleware.NewManager()
-			events := make(chan httpapi.SessionEvent, 64)
+			events := make(chan event.SessionEvent, 64)
 			for _, mw := range []middleware.Middleware{
 				infratools.NewValidationMiddleware(),
 				storage.NewSessionMiddleware(fixture.sessions),
-				httpapi.NewSessionEventMiddleware(broker),
+				event.NewSessionEventMiddleware(broker),
 				manager.Middleware(),
 			} {
 				if err := middlewares.Register(mw); err != nil {
@@ -85,7 +85,7 @@ func TestEngineHITLLifecycle(t *testing.T) {
 					if frame.Type != "event" {
 						continue
 					}
-					var event httpapi.SessionEvent
+					var event event.SessionEvent
 					if err := json.Unmarshal(frame.Event, &event); err != nil {
 						return
 					}
@@ -99,18 +99,18 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			var sequence uint64
-			next := func() httpapi.SessionEvent {
+			next := func() event.SessionEvent {
 				select {
-				case event := <-events:
+				case e := <-events:
 					sequence++
-					if event.Sequence != sequence || event.SessionID != session.ID ||
-						(event.RoundID != start.RoundID && event.Type != httpapi.SessionEventPermissionModeChanged) {
-						t.Fatalf("invalid event identity/sequence: %+v", event)
+					if e.Sequence != sequence || e.SessionID != session.ID ||
+						(e.RoundID != start.RoundID && e.Type != event.SessionEventPermissionModeChanged) {
+						t.Fatalf("invalid event identity/sequence: %+v", e)
 					}
-					return event
+					return e
 				case <-ctx.Done():
 					t.Fatal("timed out waiting for execution event")
-					return httpapi.SessionEvent{}
+					return event.SessionEvent{}
 				}
 			}
 			var request *permission.Request
@@ -144,8 +144,8 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var ended httpapi.SessionEvent
-			for ended.Type != httpapi.SessionEventRoundEnded {
+			var ended event.SessionEvent
+			for ended.Type != event.SessionEventRoundEnded {
 				ended = next()
 			}
 			if manager.Resolve(ctx, resolution) == nil {

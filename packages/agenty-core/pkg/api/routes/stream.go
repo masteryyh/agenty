@@ -9,7 +9,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 )
 
 const (
@@ -29,7 +29,7 @@ func (api *API) serveStream(c *gin.Context) {
 	serveStream(c, api.stream)
 }
 
-func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
+func serveStream(c *gin.Context, broker *event.StreamBroker) {
 	writer := c.Writer
 	flusher, ok := writer.(http.Flusher)
 	if !ok {
@@ -45,11 +45,11 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
-	commands := make(chan httpapi.StreamCommand, 8)
+	commands := make(chan event.StreamCommand, 8)
 	inputErr := make(chan error, 1)
 	go readStreamCommands(ctx, c.Request.Body, commands, inputErr)
-	output := make(chan httpapi.StreamFrame, streamOutputBuffer)
-	writeFrame := func(frame httpapi.StreamFrame) error {
+	output := make(chan event.StreamFrame, streamOutputBuffer)
+	writeFrame := func(frame event.StreamFrame) error {
 		data, err := json.Marshal(frame)
 		if err != nil {
 			return err
@@ -61,7 +61,7 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 		return nil
 	}
 
-	subscriptions := make(map[string]*httpapi.StreamSubscription)
+	subscriptions := make(map[string]*event.StreamSubscription)
 	defer func() {
 		for _, subscription := range subscriptions {
 			subscription.Close()
@@ -74,7 +74,7 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 			return
 		case err := <-inputErr:
 			if err != nil && !errors.Is(err, context.Canceled) {
-				_ = writeFrame(httpapi.StreamFrame{Type: "error", Code: "invalid_stream", Message: err.Error()})
+				_ = writeFrame(event.StreamFrame{Type: "error", Code: "invalid_stream", Message: err.Error()})
 			}
 			return
 		case command, open := <-commands:
@@ -89,7 +89,7 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 				continue
 			}
 			if command.Type != "subscribe" {
-				if err := writeFrame(httpapi.StreamFrame{Type: "error", Topic: command.Topic, Code: "invalid_command", Message: "type must be subscribe or unsubscribe"}); err != nil {
+				if err := writeFrame(event.StreamFrame{Type: "error", Topic: command.Topic, Code: "invalid_command", Message: "type must be subscribe or unsubscribe"}); err != nil {
 					return
 				}
 				continue
@@ -101,11 +101,11 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 			initial, subscription, err := broker.Subscribe(ctx, command.Topic, command.After)
 			if err != nil {
 				code := "resync_required"
-				var brokerErr *httpapi.BrokerError
+				var brokerErr *event.BrokerError
 				if errors.As(err, &brokerErr) {
 					code = brokerErr.Code
 				}
-				_ = writeFrame(httpapi.StreamFrame{Type: "error", Topic: command.Topic, Code: code, Message: err.Error()})
+				_ = writeFrame(event.StreamFrame{Type: "error", Topic: command.Topic, Code: code, Message: err.Error()})
 				continue
 			}
 			subscriptions[command.Topic] = subscription
@@ -123,13 +123,13 @@ func serveStream(c *gin.Context, broker *httpapi.StreamBroker) {
 	}
 }
 
-func readStreamCommands(ctx context.Context, body io.ReadCloser, commands chan<- httpapi.StreamCommand, failures chan<- error) {
+func readStreamCommands(ctx context.Context, body io.ReadCloser, commands chan<- event.StreamCommand, failures chan<- error) {
 	defer close(commands)
 	defer body.Close()
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), maxStreamCommandBytes)
 	for scanner.Scan() {
-		var command httpapi.StreamCommand
+		var command event.StreamCommand
 		if err := json.Unmarshal(scanner.Bytes(), &command); err != nil {
 			failures <- err
 			return
@@ -143,14 +143,14 @@ func readStreamCommands(ctx context.Context, body io.ReadCloser, commands chan<-
 	failures <- scanner.Err()
 }
 
-func forwardSubscription(ctx context.Context, topic string, subscription *httpapi.StreamSubscription, output chan<- httpapi.StreamFrame) {
+func forwardSubscription(ctx context.Context, topic string, subscription *event.StreamSubscription, output chan<- event.StreamFrame) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-subscription.Dropped:
 			select {
-			case output <- httpapi.StreamFrame{Type: "disconnect", Topic: topic, Code: "slow_consumer", Message: "event queue exceeded; reconnect with the last applied cursor"}:
+			case output <- event.StreamFrame{Type: "disconnect", Topic: topic, Code: "slow_consumer", Message: "event queue exceeded; reconnect with the last applied cursor"}:
 			case <-ctx.Done():
 			}
 			return

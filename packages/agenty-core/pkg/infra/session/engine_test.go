@@ -20,7 +20,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
@@ -183,13 +183,13 @@ func (fixture *executionFixture) newEngine(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
 ) *infrasession.Engine {
-	return fixture.newEngineWithBroker(t, invokeModel, httpapi.NewStreamBroker(nil))
+	return fixture.newEngineWithBroker(t, invokeModel, event.NewStreamBroker(nil))
 }
 
 func (fixture *executionFixture) newEngineWithBroker(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
-	broker *httpapi.StreamBroker,
+	broker *event.StreamBroker,
 ) *infrasession.Engine {
 	t.Helper()
 
@@ -209,7 +209,7 @@ func (fixture *executionFixture) newEngineWithBroker(
 	if err := middlewareManager.Register(infrastorage.NewSessionMiddleware(fixture.sessions)); err != nil {
 		t.Fatal(err)
 	}
-	if err := middlewareManager.Register(httpapi.NewSessionEventMiddleware(broker)); err != nil {
+	if err := middlewareManager.Register(event.NewSessionEventMiddleware(broker)); err != nil {
 		t.Fatal(err)
 	}
 	middlewareChain, err := middlewareManager.Compile()
@@ -247,7 +247,7 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 		Usage:      conversation.TokenUsage{Input: 2, Output: 3, Total: 5},
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
@@ -261,14 +261,14 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 	}
 	waitForExecution(t, engine, session.ID)
 
-	got := make([]httpapi.SessionEvent, 0, 6)
+	got := make([]event.SessionEvent, 0, 6)
 	for len(got) < 6 {
 		select {
 		case frame := <-subscription.Frames:
 			if frame.Type != "event" {
 				continue
 			}
-			var event httpapi.SessionEvent
+			var event event.SessionEvent
 			if err := json.Unmarshal(frame.Event, &event); err != nil {
 				t.Fatal(err)
 			}
@@ -277,13 +277,13 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 			t.Fatalf("received %d events, want 6", len(got))
 		}
 	}
-	wantTypes := []httpapi.SessionEventType{
-		httpapi.SessionEventRoundStarted,
-		httpapi.SessionEventMessageAppended,
-		httpapi.SessionEventModelStream,
-		httpapi.SessionEventModelStream,
-		httpapi.SessionEventMessageAppended,
-		httpapi.SessionEventRoundEnded,
+	wantTypes := []event.SessionEventType{
+		event.SessionEventRoundStarted,
+		event.SessionEventMessageAppended,
+		event.SessionEventModelStream,
+		event.SessionEventModelStream,
+		event.SessionEventMessageAppended,
+		event.SessionEventRoundEnded,
 	}
 	for i, event := range got {
 		if event.Type != wantTypes[i] {
@@ -315,7 +315,7 @@ func TestEngineContinuesAfterEventConsumerDisconnects(t *testing.T) {
 		Content:    conversation.Text("done"),
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
@@ -642,7 +642,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
 		{
 			Content: conversation.Text("Task goals: finish the task\nCompleted: initial work\nIncomplete: follow up"),
@@ -710,7 +710,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 			if frame.Type != "event" {
 				continue
 			}
-			var event httpapi.CompactionStreamEvent
+			var event event.CompactionStreamEvent
 			if err := json.Unmarshal(frame.Event, &event); err != nil {
 				t.Fatal(err)
 			}
