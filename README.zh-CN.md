@@ -3,9 +3,9 @@
 [English](./README.md)
 
 Agenty 是一个本地优先的 AI agent 应用。当前产品链路由 `agenty-cli`、
-`agenty-core`、Rust `patch-applier` helper 和自解压 launcher `agenty-bootstrap` 组成。
-CLI 仅通过子进程
-stdin/stdout 上的逐行 JSON-RPC 2.0 与 core 通信，不再启动 HTTP server。
+`agenty-core`、Rust `file-editor` helper 和自解压 launcher `agenty-bootstrap` 组成。
+Bootstrap 监督 core 和 CLI；CLI 通过本地 Unix domain socket 或 Windows 命名管道上的
+HTTP/2 与 core 通信。
 
 core 当前支持 provider/model 管理、持久化会话、模型流式输出、agent 工具循环、会话压缩、
 内置文件工具、本地 Skills 和 MCP client 连接。memory 和远程客户端模式要等 core 提供对等
@@ -22,37 +22,34 @@ sudo install -m 755 agenty /usr/local/bin/agenty
 agenty
 ```
 
-首次运行时，launcher 会校验并释放内置的 CLI 和 core 到
-`~/.agenty/bin/{cli,core,apply_patch}`。CLI 启动 core 子进程并打开初始化向导；向导通过
-已有的 `provider.*` IPC methods 创建一个 provider 和一个聊天 model，最后调用
-`initialize.complete` 保存全局默认会话模型。
+首次运行时，launcher 会校验并释放内置 CLI、core 和 patch helper 到
+`~/.agenty/bin` 下按版本区分的路径。Bootstrap 会为所选数据目录启动或附着 core，
+再把真实终端 stdin/stdout/stderr 交给 CLI。初始化向导通过版本化 HTTP API 创建 provider
+和聊天 model，并保存默认会话 model。
 
 ## 运行模型
 
-launcher 内含三个 XZ 压缩 payload 及其解压内容的 SHA3-256 摘要。已释放文件摘要一致时
-直接复用；缺失或不一致时会重新解压、校验并原子替换。CLI 按以下顺序查找 core：
+launcher 内含三个 XZ 压缩 payload 及其解压内容的 SHA3-256 摘要。摘要一致的文件会直接
+复用；缺失或不一致时会重新解压、校验并原子替换。释放路径由三个 payload 摘要共同确定，
+因此新版本不会覆盖仍在运行的 core。Bootstrap 准备 `fileedit` 的 PATH、解析规范化数据目录、
+获取该目录的 core 所有权或附着到兼容 core，完成 HTTP/2 握手后启动 CLI。一个规范化数据目录
+只能由一个 core 所有，不同数据目录可以并行运行；附着的 CLI 不负责关闭已有 core。
 
-1. `AGENTY_CORE_BIN`
-2. 仓库开发环境中的 `packages/agenty-core/bin/agenty-core`
-3. launcher 释放的 `~/.agenty/bin/core`
+Core 在 `/v1` 下提供初始化、provider/model、session/round、skills、MCP 和工具审批等普通
+JSON endpoint。`POST /v1/stream` 是双向 HTTP/2 流，客户端可持续发送订阅/取消订阅命令，同时
+接收事件。每个 topic 有单调递增序号和不透明 stream ID。客户端可用游标恢复；短期重放窗口过期
+时，core 会先发送一致快照，再继续发送实时事件。CLI 断开不会取消已接受的 round。
 
-CLI 启动 core 前会把 core 所在目录放到 `PATH` 首位，使 core 和 shell 工具调用可以找到
-同目录中的 `apply_patch`。
-
-core 从 stdin 逐行读取紧凑 JSON-RPC message，并把 response 和 notification 写到 stdout。
-调用 `session.start` 后，core 会持续发送有序的 `session.event` 通知，覆盖 round 生命周期、
-已持久化消息、模型流式增量、工具调用和 round 终态。通知可能早于 `session.start` response
-到达，因此 client 必须先订阅事件再发送请求。stdin EOF 时 core 退出。
-
-TUI 当前开放 `/provider`、`/model`、`/mcp`、`/cwd`、`/effort`、`/status`、
+TUI 当前开放 `/provider`、`/model`、`/mcp`、`/cwd`、`/effort`、`/status`、`/codex-mode`、
 `/new`、`/resume`、`/help` 和 `/exit`。在输入框中输入 `$` 可以搜索并插入已安装的
 Skill 结构化引用。core 会依次扫描数据目录下的 `skills/`、`~/.agents/skills` 和
 `~/.claude/skills`；可以通过 `AGENTY_DATA_DIR` 更改第一个目录。
 
 ## 配置与存储
 
-core 默认把数据保存在 `~/.agenty`。可向 CLI 传入 `--data-dir <path>`，或为 core 设置
-`AGENTY_DATA_DIR` 以切换数据根目录。主要文件如下：
+core 默认把数据保存在 `~/.agenty`。可向 bootstrap 传入 `--data-dir <path>`，或设置
+`AGENTY_DATA_DIR` 以切换数据根目录。Bootstrap 会把规范化目录和本地 IPC 地址传给子进程。
+主要文件如下：
 
 | 数据 | 路径 |
 | --- | --- |
@@ -103,8 +100,11 @@ pnpm deepclean
 
 构建版本优先来自进程环境中的 `AGENTY_VERSION`，其次读取被忽略的根目录 `.env`，两者都
 没有时默认为 `dev`。如需固定本地版本，可把 `.env.example` 复制为 `.env`，直接运行
-`pnpm build` 即可构建完整 launcher。默认构建 patch-applier、core、CLI 和 bootstrap；
+`pnpm build` 即可构建完整 launcher。默认构建 file-editor、core、CLI 和 bootstrap；
 Inspector 通过 `pnpm inspector:build` 单独构建。
+
+Core 使用 CGO 构建 SQLite。Windows 需要通过 `CC` 配置 MinGW-w64 或 LLVM-MinGW 等 GCC
+兼容编译器；MSVC `cl.exe` 不受支持。进程级配置示例见 [core 构建说明](./packages/agenty-core/README-CN.md)。
 
 `pnpm run update` 会更新 pnpm、Go 和 Cargo 模块的依赖；`pnpm tidyup` 会在所有 Go 模块中依次
 运行 `go fmt`、`go vet` 和 `go mod tidy`。`pnpm clean` 清理根目录及所有模块的构建产物；

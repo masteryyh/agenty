@@ -19,6 +19,13 @@ function toolCall(name: string, input: unknown, content?: string, isError = fals
 }
 
 describe("tool display", () => {
+    test("cancelled calls preserve paths and completed results", () => {
+        const cancelled = buildToolDisplay({ ...toolCall("ls", { path: "waiting" }), cancelled: true });
+        expect(cancelled.status).toBe("cancelled");
+        expect(cancelled.summaryLines[0]).toContain("waiting · Cancelled");
+        const completed = buildToolDisplay({ ...toolCall("lookup", {}, "done"), cancelled: true });
+        expect(completed.status).toBe("success");
+    });
     test("summarizes read_file without rendering its JSON envelope", () => {
         const display = buildToolDisplay(toolCall(
             "read_file",
@@ -38,6 +45,40 @@ describe("tool display", () => {
         expect(display.summaryLines[0]).toContain("lines 10–11");
         expect(display.detailLines[0]).toBe("10: const first = true;");
         expect(display.detailLines.join("\n")).not.toContain(JSON.stringify("content"));
+    });
+
+    test("labels each text editor command and summarizes its location", () => {
+        const cases = [
+            {
+                input: { command: "view", path: "src/main.go", view_range: [4, 8] },
+                label: "View file",
+                summary: "src/main.go · lines 4–8",
+            },
+            {
+                input: { command: "str_replace", path: "src/main.go", old_str: "old", new_str: "new" },
+                label: "Replace text",
+                summary: "src/main.go",
+            },
+            {
+                input: { command: "create", path: "src/new.go", file_text: "package main" },
+                label: "Create file",
+                summary: "src/new.go",
+            },
+            {
+                input: { command: "insert", path: "src/main.go", insert_line: 12, insert_text: "new" },
+                label: "Insert text",
+                summary: "src/main.go · after line 12",
+            },
+        ];
+
+        for (const testCase of cases) {
+            const display = buildToolDisplay(toolCall(
+                "str_replace_based_edit_tool",
+                testCase.input,
+            ));
+            expect(display.label).toBe(testCase.label);
+            expect(display.summaryLines).toEqual([testCase.summary]);
+        }
     });
 
     test("formats shell commands and shell_call_output results per command", () => {

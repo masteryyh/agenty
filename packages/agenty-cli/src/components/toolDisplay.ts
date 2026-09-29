@@ -6,7 +6,7 @@ const MAX_VALUE_LENGTH = 96;
 
 type JsonRecord = Record<string, unknown>;
 
-export type ToolDisplayStatus = "pending" | "success" | "error";
+export type ToolDisplayStatus = "pending" | "success" | "error" | "cancelled";
 
 export type ShellOutputStream = "stdout" | "stderr" | "empty" | "pending" | "newline";
 
@@ -35,6 +35,14 @@ const TOOL_LABELS: Record<string, string> = {
     ls: "List directory",
     shell: "Run shell",
     apply_patch: "Apply patch",
+    str_replace_based_edit_tool: "Edit file",
+};
+
+const TEXT_EDITOR_LABELS: Record<string, string> = {
+    view: "View file",
+    str_replace: "Replace text",
+    create: "Create file",
+    insert: "Insert text",
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -433,6 +441,34 @@ function applyPatchDisplay(input: JsonRecord | undefined, result: ToolResult | u
     };
 }
 
+function textEditorDisplay(input: JsonRecord | undefined, result: ToolResult | undefined): ToolDisplay {
+    const command = stringValue(input?.command) || "edit";
+    const path = formatPath(input?.path);
+    const label = Object.hasOwn(TEXT_EDITOR_LABELS, command)
+        ? TEXT_EDITOR_LABELS[command]
+        : undefined;
+    const viewRange = Array.isArray(input?.view_range) ? input.view_range : [];
+    const viewStart = numberValue(viewRange[0]);
+    const viewEnd = numberValue(viewRange[1]);
+    const insertLine = numberValue(input?.insert_line);
+    let summary = path;
+    if (command === "view" && viewStart !== undefined && viewEnd !== undefined) {
+        summary = viewEnd === -1
+            ? `${path} · from line ${viewStart}`
+            : `${path} · lines ${viewStart}–${viewEnd}`;
+    } else if (command === "insert" && insertLine !== undefined) {
+        summary = `${path} · after line ${insertLine}`;
+    } else if (!label) {
+        summary = `${command} ${path}`;
+    }
+    return {
+        label: label ?? TOOL_LABELS.str_replace_based_edit_tool,
+        status: toolStatus(result),
+        summaryLines: [summary],
+        detailLines: formatResultPreview(result),
+    };
+}
+
 function formatPatchOperation(operation: JsonRecord): string {
     const path = formatPath(operation.path);
     switch (operation.type) {
@@ -492,6 +528,8 @@ export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDis
                 return shellDisplay(input, toolCall.result, expanded);
             case "apply_patch":
                 return applyPatchDisplay(input, toolCall.result);
+            case "str_replace_based_edit_tool":
+                return textEditorDisplay(input, toolCall.result);
             default:
                 return unknownDisplay(toolCall.name, input, toolCall.arguments, toolCall.result);
         }
@@ -499,6 +537,20 @@ export function buildToolDisplay(toolCall: UIToolCall, expanded = true): ToolDis
     const errorLine = toolCall.result?.isError
         ? [`Error: ${truncate(toolCall.result.content, MAX_VALUE_LENGTH)}`]
         : [];
+    if (toolCall.cancelled && !toolCall.result) {
+        return {
+            ...display,
+            status: "cancelled",
+            shellCommands: display.shellCommands?.map((command) => ({
+                ...command,
+                status: "cancelled",
+                outputLines: [{ text: "Cancelled", stream: "empty" }],
+            })),
+            summaryLines: display.summaryLines.map((line) => line === "waiting for result"
+                ? "Cancelled"
+                : line.replace(/ · waiting$/, " · Cancelled")),
+        };
+    }
     return {
         ...display,
         summaryLines: [...display.summaryLines, ...errorLine],

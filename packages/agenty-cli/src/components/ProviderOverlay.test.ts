@@ -18,7 +18,6 @@ function builtinProvider(): ModelProviderDto {
         apiKey: "existing-key",
         builtin: true,
         official: true,
-        freeFormTool: true,
         models: [],
         createdAt: "",
         updatedAt: "",
@@ -45,16 +44,6 @@ describe("provider overlay builtin configuration", () => {
         expect(buildBuiltinProviderUpdate({ apiKey: "   " })).toBeNull();
     });
 
-    test("exposes the free-form setting for custom Responses providers", () => {
-        const fields = buildProviderFields({
-            ...builtinProvider(),
-            builtin: false,
-        }, "edit");
-        const freeFormField = fields.find((field) => field.key === "freeFormTool");
-
-        expect(freeFormField?.value).toBe("true");
-        expect(freeFormField?.readOnly).toBe(false);
-    });
 });
 
 describe("provider overlay model advanced options", () => {

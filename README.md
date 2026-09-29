@@ -3,10 +3,9 @@
 [简体中文](./README.zh-CN.md)
 
 Agenty is a local-first AI agent application. The current product path consists of
-`agenty-cli`, `agenty-core`, the Rust `patch-applier` helper, and the self-extracting
-`agenty-bootstrap` launcher.
-The CLI communicates with core exclusively through line-delimited JSON-RPC 2.0 over
-the child process's stdin/stdout; it does not start an HTTP server.
+`agenty-cli`, `agenty-core`, the Rust `file-editor` helper, and the self-extracting
+`agenty-bootstrap` launcher. Bootstrap supervises core and the CLI communicates with
+core through HTTP/2 over a local Unix-domain socket or Windows named pipe.
 
 The current core supports provider/model management, persistent sessions, streaming model
 output, agentic tool loops, session compaction, built-in filesystem tools, local skills, and
@@ -26,31 +25,30 @@ agenty
 ```
 
 On first run, the launcher verifies and extracts the bundled CLI, core, and patch helper into
-`~/.agenty/bin/{cli,core,apply_patch}`. The CLI starts core as a child process and opens a setup
-wizard. The wizard creates one provider and one chat model through the existing `provider.*`
-IPC methods, then calls `initialize.complete` to persist the global default session model.
+version-addressed paths under `~/.agenty/bin`. Bootstrap starts or attaches to the core for
+the selected data directory, then launches the CLI with the terminal's real stdin/stdout/stderr.
+The setup wizard creates a provider and chat model through the versioned HTTP API, then
+completes initialization with the selected default model.
 
 ## Runtime model
 
 The launcher contains three XZ-compressed payloads and their decompressed SHA3-256
 digests. Matching extracted files are reused; missing or mismatched files are verified
-and atomically replaced. The CLI resolves core in this order:
+and atomically replaced. The extracted paths are keyed by all three payload digests, so a
+new release does not replace a core executable that is still running. Bootstrap prepares
+`fileedit` on the child PATH, resolves the canonical data directory, acquires or attaches
+to that directory's core, verifies the live HTTP/2 handshake, and starts the CLI. Only one
+core owns a canonical data directory; different data directories may run concurrently.
+An attached CLI does not own or stop the already-running core.
 
-1. `AGENTY_CORE_BIN`
-2. `packages/agenty-core/bin/agenty-core` during repository development
-3. `~/.agenty/bin/core` from the launcher
+The core API uses ordinary JSON endpoints under `/v1` for initialization, providers and
+models, sessions and rounds, skills, MCP servers, and tool approvals. `POST /v1/stream` is
+a full-duplex HTTP/2 endpoint: clients send subscribe/unsubscribe commands while receiving
+events. Each topic has a monotonic sequence and opaque stream ID. Clients resume from a
+saved cursor; when its short-lived replay window has expired, core sends a consistent
+snapshot before live events. A CLI disconnect does not cancel an accepted round.
 
-Before starting core, the CLI prepends core's directory to `PATH`, making the bundled
-`apply_patch` command available to core and shell tool calls.
-
-Core reads one compact JSON-RPC message per stdin line and writes responses and
-notifications to stdout. After `session.start`, core sends ordered `session.event`
-notifications for round lifecycle, persisted messages, model stream deltas, tool calls,
-and the terminal round status. Notifications may arrive before the `session.start`
-response, so clients must subscribe before sending the request. Core exits when stdin
-reaches EOF.
-
-The TUI currently exposes `/provider`, `/model`, `/mcp`, `/cwd`, `/effort`, `/status`,
+The TUI currently exposes `/provider`, `/model`, `/mcp`, `/cwd`, `/effort`, `/status`, `/codex-mode`,
 `/new`, `/resume`, `/help`, and `/exit`. Type `$` in the composer to search for an installed
 skill and insert it as a structured reference. Core scans the data directory's `skills/`
 folder first, followed by `~/.agents/skills` and `~/.claude/skills`; set `AGENTY_DATA_DIR` to
@@ -58,8 +56,9 @@ change the first location.
 
 ## Configuration and storage
 
-Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to the CLI or set
-`AGENTY_DATA_DIR` for core to use another root. Important files are:
+Core stores data under `~/.agenty` by default. Pass `--data-dir <path>` to bootstrap or set
+`AGENTY_DATA_DIR` to select another root. Bootstrap passes the canonical data directory and
+local IPC address to its child processes. Important files are:
 
 | Data | Path |
 | --- | --- |
@@ -115,8 +114,12 @@ pnpm deepclean
 The build version comes from `AGENTY_VERSION` in the process environment, then from
 the ignored root `.env`; it defaults to `dev`. Copy `.env.example` to `.env` if you
 want a persistent local version, then run `pnpm build` for a complete launcher build.
-The default build includes patch-applier, core, CLI and bootstrap. Build Inspector
+The default build includes file-editor, core, CLI and bootstrap. Build Inspector
 separately with `pnpm inspector:build`.
+
+Core builds use CGO for SQLite. Windows builds need a GCC-compatible compiler such as
+MinGW-w64 or LLVM-MinGW configured through `CC`; MSVC `cl.exe` is unsupported. See the
+[core build notes](./packages/agenty-core/README.md) for process-scoped setup.
 
 `pnpm run update` updates dependencies for the pnpm, Go, and Cargo modules. `pnpm tidyup`
 runs `go fmt`, `go vet`, and `go mod tidy` in every Go module. `pnpm clean` removes

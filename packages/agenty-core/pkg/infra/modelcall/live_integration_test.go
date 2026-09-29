@@ -52,7 +52,7 @@ func TestLiveProviders(t *testing.T) {
 			if configured := os.Getenv(tt.modelEnv); configured != "" {
 				modelCode = configured
 			}
-			model := Config{
+			model := ModelCallConfig{
 				APIType:   tt.apiType,
 				APIKey:    apiKey,
 				BaseURL:   os.Getenv(tt.baseURLEnv),
@@ -62,8 +62,8 @@ func TestLiveProviders(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
-			request := Request{
-				Messages: []Message{{
+			request := ModelCallRequest{
+				Messages: []ModelCallMessage{{
 					Role:    conversation.RoleUser,
 					Content: conversation.Text("Reply with exactly OK."),
 				}},
@@ -82,8 +82,8 @@ func TestLiveProviders(t *testing.T) {
 
 			t.Run("stream", func(t *testing.T) {
 				completed := false
-				response, err := Call(ctx, model, request, WithStreamHandler(func(event StreamEvent) error {
-					if event.Type == StreamEventCompleted {
+				response, err := Call(ctx, model, request, WithStreamHandler(func(event ModelCallStreamEvent) error {
+					if event.Type == ModelCallStreamEventCompleted {
 						completed = true
 					}
 					return nil

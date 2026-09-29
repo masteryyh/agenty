@@ -125,8 +125,24 @@ function ChatView() {
     const approval = useAppStore((s) => s.pendingApproval);
     const resolveToolApproval = useAppStore((s) => s.resolveToolApproval);
     const togglePermissionMode = useAppStore((s) => s.togglePermissionMode);
+    const toggleCodexMode = useAppStore((s) => s.toggleCodexMode);
+    const streaming = chat.status === "streaming";
+    const busy = streaming || chat.status === "compacting";
 
     useInput((input, key, event) => {
+        if (
+            (key.shift || input === "M") &&
+            event.name.toLowerCase() === "m" &&
+            !approval &&
+            app.overlay === null &&
+            !busy &&
+            renderDocument(document).trim() === ""
+        ) {
+            event.preventDefault();
+            event.stopPropagation();
+            void toggleCodexMode();
+            return;
+        }
         if (key.shift && key.tab) {
             event.preventDefault();
             event.stopPropagation();
@@ -208,8 +224,6 @@ function ChatView() {
             .map(({ start, end }) => ({ start, end })),
     );
 
-    const streaming = chat.status === "streaming";
-    const busy = streaming || chat.status === "compacting";
     const reasoningActive = streaming && !!chat.current?.reasoning && !chat.current.content;
 
     const panelH = approval ? HITL_OVERLAY_HEIGHT : panelHeight(app.overlay);
@@ -278,7 +292,11 @@ function ChatView() {
                         }
                         return;
                     case "/new":
-                        void app.newSession();
+                        if (arg && arg.toLowerCase() !== "codex") {
+                            app.notify(`invalid /new argument: ${arg}; use /new [codex]`, true);
+                            return;
+                        }
+                        void app.newSession(arg ? "codex" : "default");
                         return;
                     case "/provider":
                         app.setOverlay("provider");
@@ -336,6 +354,9 @@ function ChatView() {
                         }
                         return;
                     }
+                    case "/codex-mode":
+                        void app.toggleCodexMode();
+                        return;
                     default:
                         app.notify(`unknown command: ${cmd}`, true);
                 }
@@ -406,6 +427,8 @@ function ChatView() {
                     contextWindow={app.session?.contextWindow ?? 0}
                     tokenConsumed={chat.tokenConsumed}
                     permissionMode={app.session?.permissionMode ?? "ask"}
+                    pendingPermissionMode={app.session?.pendingPermissionMode}
+                    toolDialect={app.session?.toolDialect ?? "default"}
                     thinkingLevel={thinkingLevel}
                     reasoningActive={reasoningActive}
                     abort={chat.abort}

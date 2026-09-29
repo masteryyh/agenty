@@ -15,10 +15,8 @@ import (
 )
 
 type openAIResponsesCaller struct {
-	client       *openai.Client
-	model        ModelCallConfig
-	nativeOpenAI bool
-	freeFormTool bool
+	client *openai.Client
+	model  ModelCallConfig
 }
 
 func (caller *openAIResponsesCaller) Invoke(ctx context.Context, request ModelCallRequest) (*ModelCallResponse, error) {
@@ -169,12 +167,12 @@ func (caller *openAIResponsesCaller) params(request ModelCallRequest) (responses
 		return responses.ResponseNewParams{}, err
 	}
 
-	input, err := openAIResponsesMessages(request.Messages, nativeOpenAIResponsesProvider(caller.model), caller.model.FreeFormTool)
+	input, err := openAIResponsesMessages(request.Messages, nativeOpenAIResponsesProvider(caller.model), caller.model.CodexMode)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 
-	tools, err := openAIResponsesTools(request.Tools, nativeOpenAIResponsesProvider(caller.model), caller.model.FreeFormTool)
+	tools, err := openAIResponsesTools(request.Tools, nativeOpenAIResponsesProvider(caller.model), caller.model.CodexMode)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -212,19 +210,15 @@ func (caller *openAIResponsesCaller) params(request ModelCallRequest) (responses
 func openAIResponsesTools(
 	definitions []ToolDefinition,
 	nativeOpenAI bool,
-	freeFormTool ...bool,
+	codexMode ...bool,
 ) ([]responses.ToolUnionParam, error) {
-	useFreeFormTool := !nativeOpenAI
-	if len(freeFormTool) > 0 {
-		useFreeFormTool = freeFormTool[0]
-	}
-
+	useCodexMode := len(codexMode) > 0 && codexMode[0]
 	tools := make([]responses.ToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
-		if definition.Type == ToolTypeApplyPatch && !useFreeFormTool {
-			continue
+		if definition.Type == ToolTypeApplyPatch && !useCodexMode {
+			return nil, invalidRequest("apply_patch is only available in Codex Mode")
 		}
-		tool, err := openAIResponsesToolDefinitionWithFreeForm(definition, nativeOpenAI, useFreeFormTool)
+		tool, err := openAIResponsesToolDefinitionWithCodexMode(definition, nativeOpenAI, useCodexMode)
 		if err != nil {
 			return nil, err
 		}
@@ -236,12 +230,9 @@ func openAIResponsesTools(
 func openAIResponsesMessages(
 	messages []ModelCallMessage,
 	nativeOpenAI bool,
-	freeFormTool ...bool,
+	codexMode ...bool,
 ) (responses.ResponseInputParam, error) {
-	useFreeFormTool := !nativeOpenAI
-	if len(freeFormTool) > 0 {
-		useFreeFormTool = freeFormTool[0]
-	}
+	useCustomApplyPatch := (len(codexMode) > 0 && codexMode[0]) || !nativeOpenAI
 	callSources := openAIResponsesCallSources(messages)
 	input := make(responses.ResponseInputParam, 0, len(messages))
 	for index, message := range messages {
@@ -251,7 +242,7 @@ func openAIResponsesMessages(
 		items, err := openAIResponsesMessageWithNativeCallIDs(
 			message,
 			nativeOpenAI,
-			useFreeFormTool,
+			useCustomApplyPatch,
 			callSources,
 		)
 		if err != nil {
@@ -289,13 +280,13 @@ func openAIResponsesCallSources(messages []ModelCallMessage) map[string]openAIRe
 }
 
 func openAIResponsesToolDefinition(tool ToolDefinition, nativeOpenAI bool) (responses.ToolUnionParam, error) {
-	return openAIResponsesToolDefinitionWithFreeForm(tool, nativeOpenAI, !nativeOpenAI)
+	return openAIResponsesToolDefinitionWithCodexMode(tool, nativeOpenAI, false)
 }
 
-func openAIResponsesToolDefinitionWithFreeForm(
+func openAIResponsesToolDefinitionWithCodexMode(
 	tool ToolDefinition,
 	nativeOpenAI bool,
-	freeFormTool bool,
+	codexMode bool,
 ) (responses.ToolUnionParam, error) {
 	toolType, err := providerToolType(tool)
 	if err != nil {
@@ -309,8 +300,8 @@ func openAIResponsesToolDefinitionWithFreeForm(
 		}}, nil
 	}
 	if toolType == ToolTypeApplyPatch {
-		if !freeFormTool {
-			return responses.ToolUnionParam{OfApplyPatch: &responses.ApplyPatchToolParam{}}, nil
+		if !codexMode {
+			return responses.ToolUnionParam{}, invalidRequest("apply_patch requires Codex Mode")
 		}
 		return responses.ToolUnionParam{OfCustom: &responses.CustomToolParam{
 			Name:        "apply_patch",
@@ -336,19 +327,19 @@ func openAIResponsesToolDefinitionWithFreeForm(
 func openAIResponsesMessage(
 	message ModelCallMessage,
 	nativeOpenAI bool,
-	freeFormTool ...bool,
+	customApplyPatch ...bool,
 ) (responses.ResponseInputParam, error) {
-	useFreeFormTool := !nativeOpenAI
-	if len(freeFormTool) > 0 {
-		useFreeFormTool = freeFormTool[0]
+	useCustomApplyPatch := !nativeOpenAI
+	if len(customApplyPatch) > 0 {
+		useCustomApplyPatch = customApplyPatch[0]
 	}
-	return openAIResponsesMessageWithNativeCallIDs(message, nativeOpenAI, useFreeFormTool, nil)
+	return openAIResponsesMessageWithNativeCallIDs(message, nativeOpenAI, useCustomApplyPatch, nil)
 }
 
 func openAIResponsesMessageWithNativeCallIDs(
 	message ModelCallMessage,
 	nativeOpenAI bool,
-	freeFormTool bool,
+	customApplyPatch bool,
 	callSources map[string]openAIResponsesCallSource,
 ) (responses.ResponseInputParam, error) {
 	role := responses.EasyInputMessageRole(message.Role)
@@ -432,7 +423,7 @@ func openAIResponsesMessageWithNativeCallIDs(
 				return nil, unsupportedContent("OpenAI Responses apply patch call requires assistant role")
 			}
 			flush()
-			item, err := openAIResponsesApplyPatchCall(value, nativeOpenAI && !freeFormTool)
+			item, err := openAIResponsesApplyPatchCall(value, nativeOpenAI && !customApplyPatch)
 			if err != nil {
 				return nil, err
 			}
@@ -444,7 +435,7 @@ func openAIResponsesMessageWithNativeCallIDs(
 				if err != nil {
 					return nil, err
 				}
-				if source == conversation.ApplyPatchSourceNative && nativeOpenAI && !freeFormTool {
+				if source == conversation.ApplyPatchSourceNative && nativeOpenAI && !customApplyPatch {
 					status := "completed"
 					if value.IsError {
 						status = "failed"
@@ -766,13 +757,11 @@ func openAIResponsesResponse(result *responses.Response) (*ModelCallResponse, er
 			}
 		case responses.ResponseFunctionToolCall:
 			hasToolUse = true
-			arguments := shared.RawJSON(item.Arguments)
-			if !json.Valid(arguments) {
-				return nil, fmt.Errorf("modelcall: OpenAI Responses returned invalid tool arguments for %q", item.Name)
-			}
-			content = append(content, conversation.ToolUseBlock{
-				ID: item.CallID, Name: item.Name, Input: arguments,
-			})
+			content = append(content, structuredToolUseBlock(
+				item.CallID,
+				item.Name,
+				shared.RawJSON(item.Arguments),
+			))
 		case responses.ResponseFunctionShellToolCall:
 			hasToolUse = true
 			content = append(content, conversation.ShellCallBlock{

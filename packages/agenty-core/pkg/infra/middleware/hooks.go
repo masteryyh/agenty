@@ -36,7 +36,6 @@ type SessionStartContext struct {
 	Provider     *catalog.Provider
 	Model        *catalog.Model
 	SystemPrompt *string
-	FreeFormTool *bool
 	Tools        *agentloop.ToolRuntime
 	// AppendHiddenMessage queues a hidden message until the first round is
 	// allocated. The role is chosen by the middleware according to the provider

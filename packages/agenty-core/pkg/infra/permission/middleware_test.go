@@ -192,6 +192,23 @@ func TestMiddlewareYoloSkipsApproval(t *testing.T) {
 	}
 }
 
+func TestMiddlewareSkipsCallsAlreadyRejectedByEarlierMiddleware(t *testing.T) {
+	manager := permission.NewPermissionManager()
+	result := &conversation.ToolResultBlock{
+		ToolUseID: "call",
+		IsError:   true,
+		Content:   conversation.Text("invalid tool arguments"),
+	}
+	state := &middleware.ToolCallContext{Result: result}
+
+	if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Result != result {
+		t.Fatalf("result changed = %#v", state.Result)
+	}
+}
+
 func TestMiddlewareAutoSkipsLowRiskToolCalls(t *testing.T) {
 	for _, test := range []struct {
 		name    string

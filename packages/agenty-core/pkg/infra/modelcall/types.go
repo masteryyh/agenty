@@ -35,7 +35,7 @@ type ModelCallConfig struct {
 	APIKey            string
 	ModelCode         string
 	Official          bool
-	FreeFormTool      bool
+	CodexMode         bool
 	SupportsReasoning bool
 	ReasoningEfforts  []shared.ReasoningEffort
 }
@@ -67,6 +67,7 @@ const (
 	ToolTypeFunction   ToolType = "function"
 	ToolTypeShell      ToolType = "shell"
 	ToolTypeApplyPatch ToolType = "apply_patch"
+	ToolTypeTextEditor ToolType = "text_editor"
 )
 
 type ToolDefinition struct {

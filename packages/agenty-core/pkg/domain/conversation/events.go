@@ -16,6 +16,8 @@ const (
 	EventSessionReasoningEffortSet    = "session_reasoning_effort_set"
 	EventSessionCwdSet                = "session_cwd_set"
 	EventSessionPermissionModeChanged = "session_permission_mode_changed"
+	EventSessionCodexModeEnabled      = "session_codex_mode_enabled"
+	EventSessionToolDialectChanged    = "session_tool_dialect_changed"
 	EventRoundStarted                 = "round_started"
 	EventMessageAppended              = "message_appended"
 	EventSessionCompacted             = "session_compacted"
@@ -32,6 +34,7 @@ type SessionStarted struct {
 	ContextWindow   int64                  `json:"contextWindow"`
 	ReasoningEffort shared.ReasoningEffort `json:"reasoningEffort,omitempty"`
 	PermissionMode  PermissionMode         `json:"permissionMode,omitempty"`
+	ToolDialect     ToolDialect            `json:"toolDialect,omitempty"`
 	Cwd             *string                `json:"cwd,omitempty"`
 	At              time.Time              `json:"occurredAt"`
 }
@@ -100,6 +103,34 @@ func (SessionPermissionModeChanged) EventType() string {
 }
 
 func (e SessionPermissionModeChanged) OccurredAt() time.Time {
+	return e.At
+}
+
+type SessionCodexModeEnabled struct {
+	SessionID uuid.UUID `json:"sessionId"`
+	At        time.Time `json:"occurredAt"`
+}
+
+func (SessionCodexModeEnabled) EventType() string {
+	return EventSessionCodexModeEnabled
+}
+
+func (e SessionCodexModeEnabled) OccurredAt() time.Time {
+	return e.At
+}
+
+type SessionToolDialectChanged struct {
+	SessionID       uuid.UUID   `json:"sessionId"`
+	PreviousDialect ToolDialect `json:"previousDialect"`
+	ToolDialect     ToolDialect `json:"toolDialect"`
+	At              time.Time   `json:"occurredAt"`
+}
+
+func (SessionToolDialectChanged) EventType() string {
+	return EventSessionToolDialectChanged
+}
+
+func (e SessionToolDialectChanged) OccurredAt() time.Time {
 	return e.At
 }
 
@@ -220,6 +251,10 @@ func DecodeEvent(env shared.Envelope) (shared.Event, error) {
 		return decodePayload[SessionCwdSet](env.Payload)
 	case EventSessionPermissionModeChanged:
 		return decodePayload[SessionPermissionModeChanged](env.Payload)
+	case EventSessionCodexModeEnabled:
+		return decodePayload[SessionCodexModeEnabled](env.Payload)
+	case EventSessionToolDialectChanged:
+		return decodePayload[SessionToolDialectChanged](env.Payload)
 	case EventRoundStarted:
 		return decodePayload[RoundStarted](env.Payload)
 	case EventMessageAppended:

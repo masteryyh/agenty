@@ -7,76 +7,6 @@ import (
 	"time"
 )
 
-const (
-	errParse             = -32700
-	errInvalidRequest    = -32600
-	errMethodMissing     = -32601
-	errInvalidParams     = -32602
-	errNotFound          = -32001
-	errAlreadyExists     = -32002
-	errMessageTooLarge   = -32003
-	errChunkPayloadLarge = -32004
-)
-
-var publicRPCMethods = []string{
-	"initialize.already",
-	"initialize.complete",
-	"skill.list",
-	"provider.create",
-	"provider.get",
-	"provider.list",
-	"provider.listModels",
-	"provider.update",
-	"provider.delete",
-	"provider.addModel",
-	"provider.removeModel",
-	"session.create",
-	"session.get",
-	"session.list",
-	"session.delete",
-	"session.setTitle",
-	"session.setModel",
-	"session.setReasoningEffort",
-	"session.setCwd",
-	"session.start",
-	"session.compact",
-	"session.stop",
-	"chunk.begin",
-	"chunk.part",
-	"chunk.commit",
-	"chunk.abort",
-}
-
-type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id,omitempty"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
-}
-
-type rpcNotification struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-
-type RPCError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitempty"`
-}
-
-func (e *RPCError) Error() string {
-	return e.Message
-}
-
 type ModelRef struct {
 	ProviderCode string `json:"providerCode"`
 	ModelCode    string `json:"modelCode"`
@@ -138,7 +68,6 @@ type Provider struct {
 	APIKey        string         `json:"apiKey"`
 	Builtin       bool           `json:"builtin"`
 	Official      bool           `json:"official"`
-	FreeFormTool  bool           `json:"freeFormTool"`
 	ModelsURL     string         `json:"modelsUrl"`
 	TokenCountURL string         `json:"tokenCountUrl"`
 	Models        []Model        `json:"models"`
@@ -152,6 +81,7 @@ type Session struct {
 	CurrentModel           *ModelRef `json:"currentModel"`
 	ContextWindow          int64     `json:"contextWindow"`
 	CurrentReasoningEffort string    `json:"currentReasoningEffort"`
+	ToolDialect            string    `json:"toolDialect"`
 	Rounds                 []Round   `json:"rounds"`
 	CreatedAt              time.Time `json:"createdAt"`
 	UpdatedAt              time.Time `json:"updatedAt"`
@@ -225,23 +155,21 @@ type DeleteResult struct {
 }
 
 type ProviderCreateInput struct {
-	Code         string         `json:"code"`
-	Name         string         `json:"name"`
-	Type         string         `json:"type"`
-	BaseURL      string         `json:"baseUrl,omitempty"`
-	APIKey       string         `json:"apiKey,omitempty"`
-	FreeFormTool bool           `json:"freeFormTool,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Code     string         `json:"code"`
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	BaseURL  string         `json:"baseUrl,omitempty"`
+	APIKey   string         `json:"apiKey,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ProviderUpdateInput struct {
-	Code         string         `json:"code"`
-	Name         *string        `json:"name,omitempty"`
-	Type         *string        `json:"type,omitempty"`
-	BaseURL      *string        `json:"baseUrl,omitempty"`
-	APIKey       *string        `json:"apiKey,omitempty"`
-	FreeFormTool *bool          `json:"freeFormTool,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Code     string         `json:"code"`
+	Name     *string        `json:"name,omitempty"`
+	Type     *string        `json:"type,omitempty"`
+	BaseURL  *string        `json:"baseUrl,omitempty"`
+	APIKey   *string        `json:"apiKey,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ModelInput struct {
@@ -261,6 +189,7 @@ type SessionCreateInput struct {
 	ModelCode       string  `json:"modelCode"`
 	ContextWindow   int64   `json:"contextWindow,omitempty"`
 	ReasoningEffort string  `json:"reasoningEffort,omitempty"`
+	ToolDialect     string  `json:"toolDialect,omitempty"`
 	Cwd             *string `json:"cwd,omitempty"`
 }
 

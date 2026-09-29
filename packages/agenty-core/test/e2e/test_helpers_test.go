@@ -21,26 +21,17 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
-func requireRPCCode(t *testing.T, err error, code int) *RPCError {
+func requireAPIError(t *testing.T, err error, code string) *APIError {
 	t.Helper()
 
-	var rpcErr *RPCError
-	if !errors.As(err, &rpcErr) {
-		t.Fatalf(
-			"error = %v, want RPC code %d",
-			err,
-			code,
-		)
+	var apiError *APIError
+	if !errors.As(err, &apiError) {
+		t.Fatalf("error = %v, want HTTP API error %q", err, code)
 	}
-	if rpcErr.Code != code {
-		t.Fatalf(
-			"RPC code = %d, want %d: %s",
-			rpcErr.Code,
-			code,
-			rpcErr.Message,
-		)
+	if apiError.Code != code {
+		t.Fatalf("API error code = %q, want %q: %s", apiError.Code, code, apiError.Message)
 	}
-	return rpcErr
+	return apiError
 }
 
 func createExecutionResources(
@@ -49,17 +40,17 @@ func createExecutionResources(
 	fixture *providerFixture,
 	apiType string,
 	prefix string,
+	toolDialect ...string,
 ) (Session, error) {
 	providerCode := prefix + "-provider"
 	modelCode := prefix + "-model"
 
 	if _, err := client.CreateProvider(ctx, ProviderCreateInput{
-		Code:         providerCode,
-		Name:         "E2E Provider",
-		Type:         apiType,
-		BaseURL:      fixture.BaseURL(apiType),
-		APIKey:       "test-key",
-		FreeFormTool: apiType == "openai",
+		Code:    providerCode,
+		Name:    "E2E Provider",
+		Type:    apiType,
+		BaseURL: fixture.BaseURL(apiType),
+		APIKey:  "test-key",
 	}); err != nil {
 		return Session{}, fmt.Errorf("create provider: %w", err)
 	}
@@ -73,23 +64,17 @@ func createExecutionResources(
 		return Session{}, fmt.Errorf("add model: %w", err)
 	}
 
-	session, err := client.CreateSession(ctx, SessionCreateInput{
+	input := SessionCreateInput{
 		ProviderCode:  providerCode,
 		ModelCode:     modelCode,
 		ContextWindow: 128_000,
-	})
+	}
+	if len(toolDialect) > 0 {
+		input.ToolDialect = toolDialect[0]
+	}
+	session, err := client.CreateSession(ctx, input)
 	if err != nil {
 		return Session{}, fmt.Errorf("create session: %w", err)
 	}
 	return session, nil
-}
-
-func mergeMethodCounts(clients ...*rpcClient) map[string]int {
-	merged := map[string]int{}
-	for _, client := range clients {
-		for method, count := range client.CalledMethods() {
-			merged[method] += count
-		}
-	}
-	return merged
 }

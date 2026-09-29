@@ -21,7 +21,6 @@ export interface ProviderDraft {
     type: APIType;
     baseUrl: string;
     apiKey: string;
-    freeFormTool: boolean;
     builtin: boolean;
 }
 
@@ -55,7 +54,6 @@ export function createBuiltinDraft(provider: ModelProviderDto, existing?: ModelP
         type: provider.type,
         baseUrl: provider.baseUrl,
         apiKey: source.apiKey ?? "",
-        freeFormTool: provider.freeFormTool === true,
         builtin: true,
     };
 }
@@ -70,7 +68,6 @@ export function createCustomDraft(id: string, existing?: ModelProviderDto): Prov
         type: existing?.type ?? "openai_completions",
         baseUrl: existing?.baseUrl ?? "",
         apiKey: existing?.apiKey ?? "",
-        freeFormTool: existing?.freeFormTool === true,
         builtin: false,
     };
 }

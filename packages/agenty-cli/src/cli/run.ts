@@ -47,11 +47,11 @@ export async function runCLICommand(argv: string[]): Promise<CommandResult> {
             throw new CliError(`unknown command: ${command}`);
         }
 
-        const { client, stop } = await connect();
+        const { client } = await connect();
         try {
             await handler(client, args);
         } finally {
-            await stop?.();
+            client.close();
         }
         return { handled: true, exitCode: 0 };
     } catch (error) {

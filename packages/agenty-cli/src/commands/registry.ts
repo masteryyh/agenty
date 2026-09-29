@@ -6,7 +6,7 @@ export interface Command {
     description: string;
     usage: string;
     argHint?: string;
-    completeArgs?: (client: AgentyClient) => Promise<string[]>;
+    completeArgs?: (client: Pick<AgentyClient, "listModels">) => Promise<string[]>;
 }
 
 export const commands: Command[] = [
@@ -23,8 +23,10 @@ export const commands: Command[] = [
     },
     {
         name: "/new",
-        description: "Start a new empty session",
-        usage: "/new",
+        description: "Start a new session, optionally in Codex Mode",
+        usage: "/new [codex]",
+        argHint: "codex",
+        completeArgs: async () => ["codex"],
     },
     {
         name: "/provider",
@@ -65,6 +67,11 @@ export const commands: Command[] = [
         name: "/cwd",
         description: "Set or show the session working directory",
         usage: "/cwd [<path>|clear]",
+    },
+    {
+        name: "/codex-mode",
+        description: "Toggle Codex Mode before conversation content exists",
+        usage: "/codex-mode",
     },
 ];
 

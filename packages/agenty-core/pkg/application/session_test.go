@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
@@ -127,6 +128,55 @@ func TestSessionCreateDefaultsReasoningOff(t *testing.T) {
 	}
 	if sess.CurrentReasoningEffort != shared.ReasoningOff {
 		t.Errorf("reasoning effort = %q, want off", sess.CurrentReasoningEffort)
+	}
+}
+
+func TestSessionCreatePersistsCodexToolDialect(t *testing.T) {
+	providerService, sessionService := newServices(t)
+	if _, err := providerService.Create(t.Context(), "openai", application.ProviderInput{
+		Name: "OpenAI",
+		Type: catalog.APIOpenAI,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := sessionService.Create(t.Context(), application.SessionCreateInput{
+		ProviderCode: "openai",
+		ModelCode:    "gpt-test",
+		ToolDialect:  conversation.ToolDialectCodex,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := session.CurrentToolDialect(); got != conversation.ToolDialectCodex {
+		t.Fatalf("tool dialect = %q, want codex", got)
+	}
+
+	replayed, err := sessionService.Get(t.Context(), session.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := replayed.CurrentToolDialect(); got != conversation.ToolDialectCodex {
+		t.Fatalf("replayed tool dialect = %q, want codex", got)
+	}
+}
+
+func TestSessionCreateRejectsCodexModeForNonResponsesProvider(t *testing.T) {
+	providerService, sessionService := newServices(t)
+	if _, err := providerService.Create(t.Context(), "anthropic", application.ProviderInput{
+		Name: "Anthropic",
+		Type: catalog.APIAnthropic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := sessionService.Create(t.Context(), application.SessionCreateInput{
+		ProviderCode: "anthropic",
+		ModelCode:    "claude-test",
+		ToolDialect:  conversation.ToolDialectCodex,
+	})
+	if code := appErrorCode(err); code != application.CodeValidation {
+		t.Fatalf("error code = %v, want validation", code)
 	}
 }
 

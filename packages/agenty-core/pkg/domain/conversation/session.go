@@ -17,6 +17,8 @@ var (
 	ErrRoundNotRunning    = errors.New("conversation: round is not running")
 	ErrInvalidRole        = errors.New("conversation: invalid message role")
 	ErrInvalidCompaction  = errors.New("conversation: invalid compaction")
+	ErrInvalidToolDialect = errors.New("conversation: invalid tool dialect")
+	ErrToolDialectLocked  = errors.New("conversation: tool dialect cannot change after conversation content exists")
 )
 
 type Session struct {
@@ -27,6 +29,7 @@ type Session struct {
 	ContextWindow          int64                  `json:"contextWindow"`
 	CurrentReasoningEffort shared.ReasoningEffort `json:"currentReasoningEffort,omitempty"`
 	PermissionMode         PermissionMode         `json:"permissionMode"`
+	ToolDialect            ToolDialect            `json:"toolDialect"`
 	Rounds                 []Round                `json:"rounds"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	UpdatedAt              time.Time              `json:"updatedAt"`
@@ -57,8 +60,22 @@ func StartSessionWithPermission(
 	cwd *string,
 	permissionMode PermissionMode,
 ) *Session {
+	return StartSessionWithModes(model, contextWindow, effort, cwd, permissionMode, ToolDialectDefault)
+}
+
+func StartSessionWithModes(
+	model shared.ModelRef,
+	contextWindow int64,
+	effort shared.ReasoningEffort,
+	cwd *string,
+	permissionMode PermissionMode,
+	toolDialect ToolDialect,
+) *Session {
 	if !permissionMode.Valid() {
 		permissionMode = PermissionAsk
+	}
+	if !toolDialect.Valid() {
+		toolDialect = ToolDialectDefault
 	}
 	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
@@ -67,6 +84,7 @@ func StartSessionWithPermission(
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
 		PermissionMode:  permissionMode,
+		ToolDialect:     toolDialect.Normalized(),
 		Cwd:             cloneString(cwd),
 		At:              now(),
 	})
@@ -82,6 +100,51 @@ func (s *Session) CurrentPermissionMode() PermissionMode {
 	defer mu.RUnlock()
 
 	return s.PermissionMode.Normalized()
+}
+
+func (s *Session) CurrentToolDialect() ToolDialect {
+	if s == nil {
+		return ToolDialectDefault
+	}
+	return s.ToolDialect.Normalized()
+}
+
+func (s *Session) EnableCodexMode() bool {
+	changed, err := s.SetToolDialect(ToolDialectCodex)
+	return changed && err == nil
+}
+
+func (s *Session) HasConversationContent() bool {
+	if s == nil {
+		return false
+	}
+	for _, round := range s.Rounds {
+		for _, message := range round.Messages {
+			if !message.IsHidden() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Session) SetToolDialect(dialect ToolDialect) (bool, error) {
+	if s == nil || !dialect.Valid() {
+		return false, ErrInvalidToolDialect
+	}
+	if s.CurrentToolDialect() == dialect {
+		return false, nil
+	}
+	if s.HasConversationContent() {
+		return false, ErrToolDialectLocked
+	}
+	s.record(SessionToolDialectChanged{
+		SessionID:       s.ID,
+		PreviousDialect: s.CurrentToolDialect(),
+		ToolDialect:     dialect.Normalized(),
+		At:              now(),
+	})
+	return true, nil
 }
 
 func (s *Session) SetPermissionMode(mode PermissionMode, roundID uuid.UUID) bool {
@@ -373,12 +436,6 @@ func (s *Session) Snapshot() *Session {
 	return &copy
 }
 
-func (s *Session) ContextMessages() []Message {
-	messages := make([]Message, len(s.context))
-	copy(messages, s.context)
-	return messages
-}
-
 func ReplaySession(events []shared.Event) *Session {
 	s := &Session{Rounds: make([]Round, 0), permissionMu: &sync.RWMutex{}}
 	for _, e := range events {
@@ -403,6 +460,7 @@ func (s *Session) apply(e shared.Event) {
 		mu.Lock()
 		s.PermissionMode = ev.PermissionMode.Normalized()
 		mu.Unlock()
+		s.ToolDialect = ev.ToolDialect.Normalized()
 		s.Cwd = cloneString(ev.Cwd)
 		s.Rounds = make([]Round, 0)
 		s.context = make([]Message, 0)
@@ -430,6 +488,16 @@ func (s *Session) apply(e shared.Event) {
 		s.PermissionMode = ev.PermissionMode.Normalized()
 		mu.Unlock()
 		s.updateMetadataPermissionMode(ev.PermissionMode)
+		s.refreshCompactionMetadata()
+		s.UpdatedAt = ev.At
+	case SessionCodexModeEnabled:
+		s.ToolDialect = ToolDialectCodex
+		s.updateMetadataToolDialect(s.ToolDialect)
+		s.refreshCompactionMetadata()
+		s.UpdatedAt = ev.At
+	case SessionToolDialectChanged:
+		s.ToolDialect = ev.ToolDialect.Normalized()
+		s.updateMetadataToolDialect(s.ToolDialect)
 		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At
 	case RoundStarted:

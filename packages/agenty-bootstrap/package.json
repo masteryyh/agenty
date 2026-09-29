@@ -18,6 +18,6 @@
     "devDependencies": {
         "agenty-cli": "workspace:*",
         "agenty-core": "workspace:*",
-        "patch-applier": "workspace:*"
+        "file-editor": "workspace:*"
     }
 }

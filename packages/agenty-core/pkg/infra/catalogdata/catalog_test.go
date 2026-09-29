@@ -40,10 +40,6 @@ func TestLoadProviders(t *testing.T) {
 	if openRouter.Models == nil || len(openRouter.Models) != 0 {
 		t.Errorf("OpenRouter embedded models = %#v, want empty", openRouter.Models)
 	}
-	openAI := providers[0]
-	if openAI.Code != "openai" || !openAI.FreeFormTool {
-		t.Errorf("OpenAI freeFormTool = %v, want true", openAI.FreeFormTool)
-	}
 	for _, provider := range providers {
 		for _, model := range provider.Models {
 			if model.ContextWindow <= 0 || model.MaxOutputTokens <= 0 {

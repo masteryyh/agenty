@@ -151,7 +151,7 @@ printf '%s\n' '{"success":true,"cwd":"/workspace","files":[]}'
 
 func installApplyPatchFixture(t *testing.T, directory, script string) {
 	t.Helper()
-	path := filepath.Join(directory, "apply_patch")
+	path := filepath.Join(directory, "fileedit")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

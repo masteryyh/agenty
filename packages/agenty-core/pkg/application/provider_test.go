@@ -18,11 +18,10 @@ func TestProviderCreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	p, err := providerSvc.Create(ctx, "anthropic", application.ProviderInput{
-		Name:         "Anthropic",
-		Type:         catalog.APIAnthropic,
-		BaseURL:      "https://api.anthropic.com",
-		APIKey:       "sk-ant-test",
-		FreeFormTool: true,
+		Name:    "Anthropic",
+		Type:    catalog.APIAnthropic,
+		BaseURL: "https://api.anthropic.com",
+		APIKey:  "sk-ant-test",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -40,35 +39,6 @@ func TestProviderCreateAndGet(t *testing.T) {
 	}
 	if got.Type != catalog.APIAnthropic {
 		t.Errorf("type = %s", got.Type)
-	}
-	if got.FreeFormTool {
-		t.Error("freeFormTool = true for Anthropic provider, want ignored")
-	}
-}
-
-func TestProviderCreateIgnoresFreeFormToolForNonOpenAI(t *testing.T) {
-	for _, test := range []struct {
-		code    string
-		name    string
-		apiType catalog.APIType
-	}{
-		{code: "anthropic", name: "Anthropic", apiType: catalog.APIAnthropic},
-		{code: "google", name: "Google", apiType: catalog.APIGemini},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			providerSvc, _ := newServices(t)
-			provider, err := providerSvc.Create(t.Context(), test.code, application.ProviderInput{
-				Name:         test.name,
-				Type:         test.apiType,
-				FreeFormTool: true,
-			})
-			if err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-			if provider.FreeFormTool {
-				t.Fatalf("freeFormTool = true for %s provider, want ignored", test.apiType)
-			}
-		})
 	}
 }
 
@@ -236,7 +206,7 @@ func TestProviderUpdate(t *testing.T) {
 	providerSvc, _ := newServices(t)
 	ctx := t.Context()
 	if _, err := providerSvc.Create(ctx, "openai", application.ProviderInput{
-		Name: "OpenAI", Type: catalog.APIOpenAI, BaseURL: "https://old.example", APIKey: "old-key", FreeFormTool: true,
+		Name: "OpenAI", Type: catalog.APIOpenAI, BaseURL: "https://old.example", APIKey: "old-key",
 		Metadata: shared.Metadata{"region": "us"},
 	}); err != nil {
 		t.Fatal(err)
@@ -255,9 +225,6 @@ func TestProviderUpdate(t *testing.T) {
 	if updated.APIKey != "old-key" || updated.Type != catalog.APIOpenAI || updated.Metadata["region"] != "us" {
 		t.Errorf("unset fields changed: %+v", updated)
 	}
-	if !updated.FreeFormTool {
-		t.Error("freeFormTool = false, want true")
-	}
 
 	invalid := catalog.APIType("invalid")
 	_, err = providerSvc.Update(ctx, "openai", application.ProviderUpdate{Type: &invalid})
@@ -268,9 +235,6 @@ func TestProviderUpdate(t *testing.T) {
 	updated, err = providerSvc.Update(ctx, "openai", application.ProviderUpdate{Type: &anthropic})
 	if err != nil {
 		t.Fatalf("change provider type: %v", err)
-	}
-	if updated.FreeFormTool {
-		t.Error("freeFormTool = true after changing to Anthropic, want ignored")
 	}
 }
 
@@ -300,9 +264,6 @@ func TestBuiltinProviderAllowsOnlyAPIKeyUpdate(t *testing.T) {
 
 	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{Name: new("Changed")}); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("metadata update error = %v, want validation", err)
-	}
-	if _, err := providerSvc.Update(ctx, "openai", application.ProviderUpdate{FreeFormTool: new(true)}); appErrorCode(err) != application.CodeValidation {
-		t.Fatalf("freeFormTool update error = %v, want validation", err)
 	}
 	if _, err := providerSvc.AddModel(ctx, "openai", "other", application.ModelInput{Name: "Other"}); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("builtin AddModel error = %v, want validation", err)

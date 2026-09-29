@@ -52,7 +52,7 @@ func (tool *shellTool) Definition() modelcall.ToolDefinition {
 			},
 			"stdin": {
 				Type:        modelcall.JSONSchemaTypeString,
-				Description: "Optional standard input for the single command that reads it, such as cmd.exe apply_patch.",
+				Description: "Optional standard input for the single command that reads it.",
 			},
 			"timeout_ms": {
 				Type:        modelcall.JSONSchemaTypeInteger,

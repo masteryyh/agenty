@@ -2,10 +2,10 @@ package compaction
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
+	json "github.com/bytedance/sonic"
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"

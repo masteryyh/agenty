@@ -2,7 +2,9 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,11 +18,12 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
+	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
-	infrarpc "github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	infrastorage "github.com/masteryyh/agenty-core/pkg/infra/storage"
 	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
@@ -180,61 +183,33 @@ func (fixture *executionFixture) newEngine(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
 ) *infrasession.Engine {
-	return fixture.newEngineWithEvents(t, invokeModel, nil)
+	return fixture.newEngineWithBroker(t, invokeModel, httpapi.NewStreamBroker(nil))
 }
 
-func (fixture *executionFixture) newEngineWithEvents(
+func (fixture *executionFixture) newEngineWithBroker(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
-	events func(context.Context, infrarpc.SessionEvent) error,
-) *infrasession.Engine {
-	return fixture.newEngineWithHandlers(t, invokeModel, events, nil)
-}
-
-func (fixture *executionFixture) newEngineWithHandlers(
-	t *testing.T,
-	invokeModel modelcall.InvokeFunc,
-	events func(context.Context, infrarpc.SessionEvent) error,
-	compactions func(context.Context, infracompaction.Event) error,
+	broker *httpapi.StreamBroker,
 ) *infrasession.Engine {
 	t.Helper()
 
 	middlewareManager := inframiddleware.NewManager()
+	if err := middlewareManager.Register(codexmode.NewMiddleware(codexmode.Config{})); err != nil {
+		t.Fatal(err)
+	}
 	if err := middlewareManager.Register(metadata.NewMiddleware()); err != nil {
 		t.Fatal(err)
 	}
 	if err := middlewareManager.Register(infracompaction.NewMiddleware()); err != nil {
 		t.Fatal(err)
 	}
+	if err := middlewareManager.Register(infratools.NewValidationMiddleware()); err != nil {
+		t.Fatal(err)
+	}
 	if err := middlewareManager.Register(infrastorage.NewSessionMiddleware(fixture.sessions)); err != nil {
 		t.Fatal(err)
 	}
-	if err := middlewareManager.Register(infrarpc.NewSessionNotificationMiddleware(
-		func(ctx context.Context, method string, payload any) error {
-			switch method {
-			case "session.event":
-				if events == nil {
-					return nil
-				}
-				event, ok := payload.(infrarpc.SessionEvent)
-				if !ok {
-					return errors.New("unexpected session event payload")
-				}
-				return events(ctx, event)
-			case "session.compaction":
-				if compactions == nil {
-					return nil
-				}
-				event, ok := payload.(infracompaction.Event)
-				if !ok {
-					return errors.New("unexpected compaction event payload")
-				}
-				return compactions(ctx, event)
-			default:
-				return errors.New("unexpected notification method")
-			}
-		},
-	)); err != nil {
+	if err := middlewareManager.Register(httpapi.NewSessionEventMiddleware(broker)); err != nil {
 		t.Fatal(err)
 	}
 	middlewareChain, err := middlewareManager.Compile()
@@ -272,38 +247,43 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 		Usage:      conversation.TokenUsage{Input: 2, Output: 3, Total: 5},
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	events := make(chan infrarpc.SessionEvent, 16)
-	engine := fixture.newEngineWithEvents(
-		t,
-		caller.Call,
-		func(_ context.Context, event infrarpc.SessionEvent) error {
-			events <- event
-			return nil
-		},
-	)
+	broker := httpapi.NewStreamBroker(nil)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
 	started, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitForExecution(t, engine, session.ID)
 
-	got := make([]infrarpc.SessionEvent, 0, 6)
+	got := make([]httpapi.SessionEvent, 0, 6)
 	for len(got) < 6 {
 		select {
-		case event := <-events:
+		case frame := <-subscription.Frames:
+			if frame.Type != "event" {
+				continue
+			}
+			var event httpapi.SessionEvent
+			if err := json.Unmarshal(frame.Event, &event); err != nil {
+				t.Fatal(err)
+			}
 			got = append(got, event)
 		case <-time.After(time.Second):
 			t.Fatalf("received %d events, want 6", len(got))
 		}
 	}
-	wantTypes := []infrarpc.SessionEventType{
-		infrarpc.SessionEventRoundStarted,
-		infrarpc.SessionEventMessageAppended,
-		infrarpc.SessionEventModelStream,
-		infrarpc.SessionEventModelStream,
-		infrarpc.SessionEventMessageAppended,
-		infrarpc.SessionEventRoundEnded,
+	wantTypes := []httpapi.SessionEventType{
+		httpapi.SessionEventRoundStarted,
+		httpapi.SessionEventMessageAppended,
+		httpapi.SessionEventModelStream,
+		httpapi.SessionEventModelStream,
+		httpapi.SessionEventMessageAppended,
+		httpapi.SessionEventRoundEnded,
 	}
 	for i, event := range got {
 		if event.Type != wantTypes[i] {
@@ -327,7 +307,7 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 	}
 }
 
-func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
+func TestEngineContinuesAfterEventConsumerDisconnects(t *testing.T) {
 	t.Parallel()
 
 	fixture := newExecutionFixture(t, 8_192)
@@ -335,17 +315,14 @@ func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
 		Content:    conversation.Text("done"),
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	engine := fixture.newEngineWithEvents(
-		t,
-		caller.Call,
-		func(_ context.Context, event infrarpc.SessionEvent) error {
-			if event.Type == infrarpc.SessionEventRoundStarted {
-				return errors.New("client disconnected")
-			}
-			return nil
-		},
-	)
+	broker := httpapi.NewStreamBroker(nil)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription.Close()
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello")); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -355,7 +332,7 @@ func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Rounds) != 1 || loaded.Rounds[0].Status != conversation.RoundFailed {
+	if len(loaded.Rounds) != 1 || loaded.Rounds[0].Status != conversation.RoundCompleted {
 		t.Fatalf("persisted rounds = %+v", loaded.Rounds)
 	}
 }
@@ -454,6 +431,82 @@ func TestEngineCompletesToolLoopAndPersistsRound(t *testing.T) {
 	}
 }
 
+func TestEngineReturnsMalformedToolInputToModelWithoutExecution(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 100_000)
+	var executions atomic.Int32
+	if err := fixture.registry.Register(&executionTestTool{
+		definition: modelcall.ToolDefinition{
+			Type:        modelcall.ToolTypeFunction,
+			Name:        "lookup",
+			InputSchema: modelcall.JSONSchema{Type: modelcall.JSONSchemaTypeObject},
+		},
+		execute: func(context.Context, agentloop.CallContext, []byte) (conversation.Content, error) {
+			executions.Add(1)
+			return conversation.Text("unexpected"), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
+		{
+			Content: conversation.Content{
+				conversation.ToolUseBlock{ID: "call-1", Name: "lookup", Input: []byte(`{"query"}`)},
+			},
+			StopReason: modelcall.ModelCallStopReasonToolUse,
+		},
+		{Content: conversation.Text("recovered"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+	}}
+	engine := fixture.newEngine(t, caller.Call)
+	session := fixture.createSession(t)
+
+	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("lookup")); err != nil {
+		t.Fatal(err)
+	}
+	waitForExecution(t, engine, session.ID)
+
+	if executions.Load() != 0 {
+		t.Fatalf("tool executions = %d, want 0", executions.Load())
+	}
+	requests := caller.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(requests))
+	}
+	var result *conversation.ToolResultBlock
+	for _, message := range requests[1].Messages {
+		for _, block := range message.Content {
+			if toolResult, ok := block.(conversation.ToolResultBlock); ok {
+				copy := toolResult
+				result = &copy
+			}
+		}
+	}
+	if result == nil || !result.IsError || result.ToolUseID != "call-1" {
+		t.Fatalf("continuation result = %#v", result)
+	}
+	message := result.Content[0].(conversation.TextBlock).Text
+	if !strings.Contains(message, "Invalid tool arguments: expected a complete JSON object.") {
+		t.Fatalf("continuation result message = %q", message)
+	}
+
+	loaded, err := fixture.sessions.Load(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Rounds[0].Status != conversation.RoundCompleted {
+		t.Fatalf("round status = %q", loaded.Rounds[0].Status)
+	}
+	for _, persistedMessage := range loaded.Rounds[0].Messages {
+		for _, block := range persistedMessage.Content {
+			if call, ok := block.(conversation.ToolUseBlock); ok && string(call.Input) != `{}` {
+				t.Fatalf("persisted tool input = %q", call.Input)
+			}
+		}
+	}
+}
+
 func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	t.Parallel()
 
@@ -476,37 +529,35 @@ func TestEngineUsesGlobalModelOutputLimit(t *testing.T) {
 	}
 }
 
-func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
+func TestEngineProjectsFileToolsBySessionDialect(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
-		name            string
-		freeFormTool    bool
-		wantApplyPatch  bool
-		wantShellPrompt bool
+		name  string
+		codex bool
+		want  []string
 	}{
-		{name: "free-form provider", freeFormTool: true, wantApplyPatch: true},
-		{name: "shell fallback", wantShellPrompt: true},
+		{name: "default", want: []string{"future_builtin", "glob", "grep", "ls", "mcp__server__lookup", "shell", "str_replace_based_edit_tool"}},
+		{name: "codex", codex: true, want: []string{"apply_patch", "glob", "grep", "ls", "mcp__server__lookup", "read_file", "shell"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			fixture := newExecutionFixture(t, 8_192)
-			provider, err := fixture.catalog.Get(t.Context(), "openai")
-			if err != nil {
-				t.Fatal(err)
-			}
-			provider.FreeFormTool = test.freeFormTool
-			if err := fixture.catalog.Save(t.Context(), provider); err != nil {
-				t.Fatal(err)
-			}
-			if err := fixture.registry.Register(&executionTestTool{
-				definition: modelcall.ToolDefinition{
-					Type: modelcall.ToolTypeApplyPatch,
-					Name: "apply_patch",
-				},
-			}); err != nil {
-				t.Fatal(err)
+			for _, definition := range []modelcall.ToolDefinition{
+				{Type: modelcall.ToolTypeApplyPatch, Name: "apply_patch"},
+				{Type: modelcall.ToolTypeFunction, Name: "read_file"},
+				{Type: modelcall.ToolTypeFunction, Name: "shell"},
+				{Type: modelcall.ToolTypeFunction, Name: "grep"},
+				{Type: modelcall.ToolTypeFunction, Name: "glob"},
+				{Type: modelcall.ToolTypeFunction, Name: "ls"},
+				{Type: modelcall.ToolTypeFunction, Name: "mcp__server__lookup"},
+				{Type: modelcall.ToolTypeFunction, Name: "future_builtin"},
+				{Type: modelcall.ToolTypeTextEditor, Name: "str_replace_based_edit_tool"},
+			} {
+				if err := fixture.registry.Register(&executionTestTool{definition: definition}); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{{
@@ -515,6 +566,14 @@ func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
 			}}}
 			engine := fixture.newEngine(t, caller.Call)
 			session := fixture.createSession(t)
+			if test.codex {
+				if !session.EnableCodexMode() {
+					t.Fatal("EnableCodexMode() = false, want true")
+				}
+				if err := fixture.sessions.Save(t.Context(), session); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("edit")); err != nil {
 				t.Fatal(err)
 			}
@@ -524,15 +583,46 @@ func TestEngineProjectsApplyPatchByProviderCapability(t *testing.T) {
 			if len(requests) != 1 {
 				t.Fatalf("requests = %d, want 1", len(requests))
 			}
-			gotApplyPatch := len(requests[0].Tools) == 1 && requests[0].Tools[0].Name == "apply_patch"
-			if gotApplyPatch != test.wantApplyPatch {
-				t.Errorf("apply_patch registered = %v, want %v", gotApplyPatch, test.wantApplyPatch)
+			got := make([]string, 0, len(requests[0].Tools))
+			for _, definition := range requests[0].Tools {
+				got = append(got, definition.Name)
 			}
-			gotShellPrompt := strings.Contains(requests[0].SystemPrompt, "shell tool with one complete apply_patch command")
-			if gotShellPrompt != test.wantShellPrompt {
-				t.Errorf("shell fallback prompt present = %v, want %v", gotShellPrompt, test.wantShellPrompt)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("tools = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestEngineEnablesCodexModeAndRejectsOtherProviderTypes(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	caller := &scriptedCaller{}
+	engine := fixture.newEngine(t, caller.Call)
+	session := fixture.createSession(t)
+
+	enabled, err := engine.EnableCodexMode(t.Context(), session.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled.CurrentToolDialect() != conversation.ToolDialectCodex {
+		t.Fatalf("tool dialect = %q, want codex", enabled.CurrentToolDialect())
+	}
+
+	provider, err := catalog.NewProvider("anthropic", "Anthropic", catalog.APIAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.APIKey = "test-key"
+	provider.AddModel(catalog.Model{
+		Code: "claude", Name: "Claude", ContextWindow: 128_000, MaxOutputTokens: 8_192,
+	})
+	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.SetModel(t.Context(), session.ID.String(), "anthropic", "claude"); err == nil || !strings.Contains(err.Error(), "Codex Mode") {
+		t.Fatalf("SetModel() error = %v, want Codex Mode validation", err)
 	}
 }
 
@@ -552,7 +642,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}
-	compactionEvents := make(chan infracompaction.Event, 2)
+	broker := httpapi.NewStreamBroker(nil)
 	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
 		{
 			Content: conversation.Text("Task goals: finish the task\nCompleted: initial work\nIncomplete: follow up"),
@@ -564,21 +654,18 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 			StopReason: modelcall.ModelCallStopReasonEndTurn,
 		},
 	}}
-	engine := fixture.newEngineWithHandlers(
-		t,
-		caller.Call,
-		nil,
-		func(_ context.Context, event infracompaction.Event) error {
-			compactionEvents <- event
-			return nil
-		},
-	)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	session.SetModel(*session.CurrentModel, 100)
 	if err := fixture.sessions.Save(t.Context(), session); err != nil {
 		t.Fatal(err)
 	}
 	session.ClearPending()
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
 
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("finish the task")); err != nil {
 		t.Fatal(err)
@@ -615,9 +702,32 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if len(requests[1].Messages) != 2 {
 		t.Fatalf("post-compaction message count = %d", len(requests[1].Messages))
 	}
-	started := <-compactionEvents
-	completed := <-compactionEvents
-	if started.Type != infracompaction.EventStarted || completed.Type != infracompaction.EventCompleted || started.CompactionID != completed.CompactionID {
+	var started, completed infracompaction.Event
+	deadline := time.After(time.Second)
+	for completed.Type == "" {
+		select {
+		case frame := <-subscription.Frames:
+			if frame.Type != "event" {
+				continue
+			}
+			var event httpapi.CompactionStreamEvent
+			if err := json.Unmarshal(frame.Event, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Kind != "compaction" {
+				continue
+			}
+			if event.Event.Type == infracompaction.EventStarted {
+				started = event.Event
+			}
+			if event.Event.Type == infracompaction.EventCompleted {
+				completed = event.Event
+			}
+		case <-deadline:
+			t.Fatalf("compaction stream events = %+v, %+v", started, completed)
+		}
+	}
+	if started.Type != infracompaction.EventStarted || started.CompactionID != completed.CompactionID {
 		t.Errorf("compaction events = %+v, %+v", started, completed)
 	}
 }
@@ -795,10 +905,9 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetProvider.APIKey = "test-key"
-	targetProvider.FreeFormTool = true
 	targetProvider.AddModel(catalog.Model{
-		Code:            "free-form-model",
-		Name:            "Free Form Model",
+		Code:            "alternate-model",
+		Name:            "Alternate Model",
 		ContextWindow:   128_000,
 		MaxOutputTokens: 8_192,
 	})
@@ -817,7 +926,7 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 	}
 	waitForExecution(t, engine, session.ID)
 
-	if _, err := engine.SetModel(t.Context(), session.ID.String(), "alternate", "free-form-model"); err != nil {
+	if _, err := engine.SetModel(t.Context(), session.ID.String(), "alternate", "alternate-model"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("second input")); err != nil {
@@ -829,12 +938,12 @@ func TestEngineRebuildsProviderPromptAfterModelSwitch(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("requests = %d, want 2", len(requests))
 	}
-	const shellPrompt = "shell tool with one complete apply_patch command"
-	if !strings.Contains(requests[0].SystemPrompt, shellPrompt) {
-		t.Fatalf("initial provider prompt lost shell instructions: %q", requests[0].SystemPrompt)
+	const editorPrompt = "Use str_replace_based_edit_tool"
+	if !strings.Contains(requests[0].SystemPrompt, editorPrompt) {
+		t.Fatalf("initial provider prompt lost editor instructions: %q", requests[0].SystemPrompt)
 	}
-	if strings.Contains(requests[1].SystemPrompt, shellPrompt) {
-		t.Fatalf("switched provider retained stale shell instructions: %q", requests[1].SystemPrompt)
+	if !strings.Contains(requests[1].SystemPrompt, editorPrompt) {
+		t.Fatalf("switched provider lost editor instructions: %q", requests[1].SystemPrompt)
 	}
 }
 
@@ -918,10 +1027,10 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 	session := fixture.createSession(t)
 	fixture.sessions.loadAttempted = make(chan struct{})
 	fixture.sessions.loadRelease = make(chan struct{})
-	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{{
-		Content:    conversation.Text("done"),
-		StopReason: modelcall.ModelCallStopReasonEndTurn,
-	}}}
+	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
+		{Content: conversation.Text("done"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+		{Content: conversation.Text("done"), StopReason: modelcall.ModelCallStopReasonEndTurn},
+	}}
 	engine := fixture.newEngine(t, caller.Call)
 
 	startResult := make(chan struct {
@@ -968,6 +1077,15 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 		t.Fatal(changed.err)
 	}
 	waitForExecution(t, engine, session.ID)
+	expectedRoundID := started.result.RoundID
+	if engine.PendingPermissionMode(session.ID) != "" {
+		next, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("continue"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedRoundID = next.RoundID
+		waitForExecution(t, engine, session.ID)
+	}
 
 	var modeEvent conversation.SessionPermissionModeChanged
 	found := false
@@ -977,7 +1095,7 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || modeEvent.RoundID != started.result.RoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
+	if !found || modeEvent.RoundID != expectedRoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
 		t.Fatalf("permission event = %+v, start = %+v", modeEvent, started.result)
 	}
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AgentyClient } from "../api/client";
 import type { SkillDto } from "../api/types";
 import type { Command } from "../commands/registry";
+import type { StoreClient } from "../state/store";
 import {
     findCommand,
     matchingCommands,
@@ -49,7 +49,7 @@ export interface PaletteResult {
 export function useCommandPalette(
     value: string,
     cursorOffset: number,
-    client: AgentyClient | null,
+    client: StoreClient | null,
     skills: SkillDto[],
     skillRanges: Array<{ start: number; end: number }> = [],
 ): PaletteResult {

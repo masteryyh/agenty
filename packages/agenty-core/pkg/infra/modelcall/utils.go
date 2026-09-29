@@ -16,7 +16,7 @@ func providerToolType(tool ToolDefinition) (ToolType, error) {
 		return ToolTypeFunction, nil
 	}
 	switch tool.Type {
-	case ToolTypeFunction, ToolTypeShell, ToolTypeApplyPatch:
+	case ToolTypeFunction, ToolTypeShell, ToolTypeApplyPatch, ToolTypeTextEditor:
 		return tool.Type, nil
 	default:
 		return "", invalidRequest("tool %q has unsupported type %q", tool.Name, tool.Type)

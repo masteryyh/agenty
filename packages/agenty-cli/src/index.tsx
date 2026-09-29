@@ -37,11 +37,10 @@ if (command.handled) {
         }
         shuttingDown = true;
         process.exitCode = exitCode;
-        const { abort, _localCoreStop } = useAppStore.getState();
+        const { client } = useAppStore.getState();
         try {
-            abort();
             root.unmount();
-            await _localCoreStop?.();
+            client?.close();
         } finally {
             renderer.destroy();
         }

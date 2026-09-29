@@ -30,14 +30,16 @@ func TestRegisterAll(t *testing.T) {
 		"ls",
 		"read_file",
 		"shell",
+		"str_replace_based_edit_tool",
 	}
 	wantDestructive := map[string]bool{
-		"apply_patch": true,
-		"glob":        false,
-		"grep":        false,
-		"ls":          false,
-		"read_file":   false,
-		"shell":       true,
+		"apply_patch":                 true,
+		"glob":                        false,
+		"grep":                        false,
+		"ls":                          false,
+		"read_file":                   false,
+		"shell":                       true,
+		"str_replace_based_edit_tool": true,
 	}
 	definitions := registry.Definitions()
 	if len(definitions) != len(wantNames) {

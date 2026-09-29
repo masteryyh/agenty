@@ -30,6 +30,27 @@ const shellItem: MessageRenderItem = {
 };
 
 describe("MessageItem tool output", () => {
+    test("renders cancellation without running or reviewing indicators", async () => {
+        const item: MessageRenderItem = {
+            ...shellItem,
+            toolCall: { ...shellItem.toolCall, result: undefined, cancelled: true, reviewing: true },
+        };
+        const setup = await testRender(<MessageItem item={item} />, { width: 72, height: 12 });
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+            const frame = setup.captureCharFrame();
+            expect(frame).toContain("⊘ Run shell Cancelled");
+            expect(frame).toContain("$ printf hello");
+            expect(frame).not.toContain("waiting");
+            expect(frame).not.toContain("Reviewing...");
+        } finally {
+            act(() => {
+                setup.renderer.destroy();
+            });
+        }
+    });
     for (const scenario of [
         { blinkOn: true, marker: "◐ Reviewing..." },
         { blinkOn: false, marker: "◑ Reviewing..." },

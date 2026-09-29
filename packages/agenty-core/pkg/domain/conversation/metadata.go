@@ -11,6 +11,7 @@ type SessionMetadata struct {
 	Timezone        string
 	ReasoningEffort string
 	PermissionMode  PermissionMode
+	ToolDialect     ToolDialect
 }
 
 type MetadataUpdate struct {
@@ -21,6 +22,7 @@ type MetadataUpdate struct {
 	Timezone        *string  `xml:"timezone,omitempty"`
 	ReasoningEffort *string  `xml:"reasoning-effort,omitempty"`
 	PermissionMode  *string  `xml:"permission-mode,omitempty"`
+	ToolDialect     *string  `xml:"tool-dialect,omitempty"`
 }
 
 func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
@@ -43,6 +45,9 @@ func (metadata SessionMetadata) Diff(previous *SessionMetadata) MetadataUpdate {
 	if metadata.PermissionMode != "" && (previous == nil || metadata.PermissionMode != previous.PermissionMode) {
 		update.PermissionMode = new(string(metadata.PermissionMode))
 	}
+	if metadata.ToolDialect != "" && (previous == nil || metadata.ToolDialect != previous.ToolDialect) {
+		update.ToolDialect = new(string(metadata.ToolDialect))
+	}
 
 	return update
 }
@@ -53,7 +58,8 @@ func (update MetadataUpdate) Empty() bool {
 		update.Provider == nil &&
 		update.Timezone == nil &&
 		update.ReasoningEffort == nil &&
-		update.PermissionMode == nil
+		update.PermissionMode == nil &&
+		update.ToolDialect == nil
 }
 
 func (update MetadataUpdate) XML() (string, error) {
@@ -69,6 +75,10 @@ func (metadata SessionMetadata) XML() (string, error) {
 	if metadata.PermissionMode != "" {
 		permissionMode = new(string(metadata.PermissionMode))
 	}
+	var toolDialect *string
+	if metadata.ToolDialect != "" {
+		toolDialect = new(string(metadata.ToolDialect))
+	}
 
 	return MetadataUpdate{
 		Cwd:             new(metadata.Cwd),
@@ -77,6 +87,7 @@ func (metadata SessionMetadata) XML() (string, error) {
 		Timezone:        new(metadata.Timezone),
 		ReasoningEffort: new(metadata.ReasoningEffort),
 		PermissionMode:  permissionMode,
+		ToolDialect:     toolDialect,
 	}.XML()
 }
 
@@ -115,6 +126,9 @@ func (s *Session) applyMessageMetadata(message Message) {
 	}
 	if update.PermissionMode != nil {
 		s.metadata.PermissionMode = PermissionMode(*update.PermissionMode).Normalized()
+	}
+	if update.ToolDialect != nil {
+		s.metadata.ToolDialect = ToolDialect(*update.ToolDialect).Normalized()
 	}
 }
 

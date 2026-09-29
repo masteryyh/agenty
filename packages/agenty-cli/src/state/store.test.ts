@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentyClient } from "../api/client";
-import type { ChatSessionDto, ModelDto, SessionEvent } from "../api/types";
+import type { ChatSessionDto, ModelDto, ReasoningEffort, SessionEvent } from "../api/types";
 import { resolveReasoningEffortForModel, useAppStore } from "./store";
+import { createStoreClient } from "./testClient";
 
 const session: ChatSessionDto = {
     id: "session-1",
@@ -12,6 +12,103 @@ const session: ChatSessionDto = {
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
 };
+
+describe("Codex Mode session selection", () => {
+    test("starts /new codex with Codex Mode already selected", async () => {
+        const model = {
+            code: "model",
+            providerCode: "provider",
+            providerName: "Provider",
+            name: "Model",
+            contextWindow: 32_000,
+            maxOutputTokens: 8_192,
+            multiModal: false,
+            light: false,
+            isDefault: true,
+        } satisfies ModelDto;
+        const created = { ...session, toolDialect: "codex" as const };
+        let requestedDialect: string | undefined;
+        const client = createStoreClient({
+            async createSession(_model, _effort, _permissionMode, _cwd, toolDialect) {
+                requestedDialect = toolDialect;
+                return created;
+            },
+        });
+        useAppStore.setState({ client, model, session });
+
+        await useAppStore.getState().newSession("codex");
+
+        expect(requestedDialect).toBe("codex");
+        expect(useAppStore.getState().session).toMatchObject({
+            id: session.id,
+            toolDialect: "codex",
+        });
+        expect(useAppStore.getState().toast?.text).toBe("New Codex Mode session created.");
+    });
+
+    test("toggles Codex Mode while the session has no conversation content", async () => {
+        const changes: string[] = [];
+        const client = createStoreClient({
+            async setToolDialect(_id, toolDialect) {
+                changes.push(toolDialect);
+                return { ...session, toolDialect };
+            },
+        });
+        useAppStore.setState({ client, session });
+
+        await useAppStore.getState().toggleCodexMode();
+        expect(useAppStore.getState().session?.toolDialect).toBe("codex");
+        expect(useAppStore.getState().toast?.text).toBe("Codex Mode enabled.");
+
+        await useAppStore.getState().toggleCodexMode();
+        expect(useAppStore.getState().session?.toolDialect).toBe("default");
+        expect(useAppStore.getState().toast?.text).toBe("Codex Mode disabled.");
+        expect(changes).toEqual(["codex", "default"]);
+    });
+
+    test("serializes rapid Codex Mode toggles", async () => {
+        const firstResponse = Promise.withResolvers<ChatSessionDto>();
+        const changes: string[] = [];
+        const client = createStoreClient({
+            async setToolDialect(_id, toolDialect) {
+                changes.push(toolDialect);
+                if (changes.length === 1) {
+                    return firstResponse.promise;
+                }
+                return { ...session, toolDialect };
+            },
+        });
+        useAppStore.setState({ client, session });
+
+        const enable = useAppStore.getState().toggleCodexMode();
+        const disable = useAppStore.getState().toggleCodexMode();
+        await Promise.resolve();
+        expect(changes).toEqual(["codex"]);
+
+        firstResponse.resolve({ ...session, toolDialect: "codex" });
+        await Promise.all([enable, disable]);
+
+        expect(changes).toEqual(["codex", "default"]);
+        expect(useAppStore.getState().session?.toolDialect).toBe("default");
+    });
+
+    test("does not change mode while a round is active", async () => {
+        let requests = 0;
+        const client = createStoreClient({
+            async setToolDialect() {
+                requests += 1;
+                return session;
+            },
+        });
+        useAppStore.setState({ client, session, activeSessionId: session.id });
+
+        await useAppStore.getState().toggleCodexMode();
+
+        expect(requests).toBe(0);
+        expect(useAppStore.getState().toast?.text).toContain("Stop the current round");
+        useAppStore.setState({ activeSessionId: null });
+    });
+});
 
 describe("reasoning effort fallback", () => {
     test("switches unsupported effort to high with a user-facing notice", () => {
@@ -50,15 +147,15 @@ describe("reasoning effort fallback", () => {
         } satisfies ModelDto;
         let persistedEffort = "";
         const current = { ...session, currentReasoningEffort: "max" as const };
-        const client = {
+        const client = createStoreClient({
             async setSessionModel() {
                 return current;
             },
-            async setSessionReasoningEffort(_id: string, effort: string) {
+            async setSessionReasoningEffort(_id: string, effort: ReasoningEffort) {
                 persistedEffort = effort;
                 return { ...current, currentReasoningEffort: effort };
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({ client, session: current, thinkingEnabled: true, thinkingLevel: "max" });
 
         await useAppStore.getState().switchModel(nextModel);
@@ -114,7 +211,7 @@ describe("reasoning effort fallback", () => {
             isDefault: false,
         } satisfies ModelDto;
         let updates = 0;
-        const client = {
+        const client = createStoreClient({
             async prepareSession() {
                 return { model, session: resumed };
             },
@@ -125,7 +222,7 @@ describe("reasoning effort fallback", () => {
             async listSkills() {
                 return { skills: [], diagnostics: [] };
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({
             client,
             opts: { newSession: false },
@@ -157,7 +254,7 @@ function makeEvent(sequence: number, event: Omit<SessionEvent, "sessionId" | "ro
 describe("chat tool event projection", () => {
     test("upserts duplicate starts and upgrades placeholder ids before attaching results", async () => {
         const listeners = new Set<(event: SessionEvent) => void>();
-        const client = {
+        const client = createStoreClient({
             onSessionEvent(listener: (event: SessionEvent) => void) {
                 listeners.add(listener);
                 return () => listeners.delete(listener);
@@ -289,7 +386,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return session;
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({
             client,
@@ -380,7 +477,7 @@ describe("chat tool event projection", () => {
                 endedAt: "2026-01-01T00:00:03Z",
             }],
         };
-        const client = {
+        const client = createStoreClient({
             async getSession() {
                 return persisted;
             },
@@ -397,7 +494,7 @@ describe("chat tool event projection", () => {
                     isDefault: true,
                 };
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({ client, session, history: [], current: null });
         await useAppStore.getState().resumeSession(session);
@@ -466,7 +563,7 @@ describe("chat tool event projection", () => {
                 endedAt: "2026-01-01T00:00:03Z",
             }],
         };
-        const client = {
+        const client = createStoreClient({
             async getSession() {
                 return persisted;
             },
@@ -483,7 +580,7 @@ describe("chat tool event projection", () => {
                     isDefault: true,
                 };
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({ client, session, history: [], current: null });
         await useAppStore.getState().resumeSession(session);

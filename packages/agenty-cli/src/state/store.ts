@@ -14,10 +14,12 @@ import type {
     SkillDto,
     ToolApprovalRequest,
     ToolApprovalResolution,
+    ToolDialect,
     ToolResult,
 } from "../api/types";
 import type { CliOptions } from "../config";
 import { loadOptions, parseThinking } from "../config";
+import { CoreHttp2Client, type StreamFrame } from "../core/http2";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
 import type { LoadedInputHistory } from "../history/inputHistory";
 import {
@@ -25,10 +27,57 @@ import {
     loadInputHistory,
     resolveInputHistoryPath,
 } from "../history/inputHistory";
-import { startLocalCore } from "../localCore";
 
 export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
 export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | "mcp" | null;
+
+export type StoreClient = Pick<AgentyClient,
+    | "compactSession"
+    | "close"
+    | "completeInitialization"
+    | "createModel"
+    | "createMcpServer"
+    | "createProvider"
+    | "createSession"
+    | "deleteModel"
+    | "deleteProvider"
+    | "eventCursor"
+    | "getModel"
+    | "getSession"
+    | "isInitialized"
+    | "listMcpServerLogs"
+    | "listMcpServers"
+    | "listModels"
+    | "listProviders"
+    | "listProviderModels"
+    | "listSessions"
+    | "listSessionSummaries"
+    | "listSkills"
+    | "loginMcpServer"
+    | "onMcpEvent"
+    | "onClose"
+    | "onCompactionEvent"
+    | "onSessionEvent"
+    | "onStreamFrame"
+    | "prepareSession"
+    | "removeMcpServer"
+    | "resolveToolApproval"
+    | "resolveModelInput"
+    | "setMcpEnabled"
+    | "setSessionCwd"
+    | "setSessionModel"
+    | "setSessionPermissionMode"
+    | "setSessionReasoningEffort"
+    | "setToolDialect"
+    | "updateModel"
+    | "updateMcpServer"
+    | "updateProvider"
+    | "startSession"
+    | "stopSession"
+    | "subscribeMcp"
+    | "subscribeSession"
+    | "subscribeSessionAndWait"
+>;
 export type SystemMessageVariant = "compacted";
 const TOAST_DURATION_MS = 3000;
 
@@ -43,10 +92,12 @@ export interface UIToolCall {
     arguments: string;
     result?: ToolResult;
     reviewing?: boolean;
+    cancelled?: boolean;
 }
 
 export interface UIMessage {
     id: string;
+    roundId?: string;
     role: "user" | "assistant" | "system" | "developer";
     content: string;
     reasoning?: string;
@@ -71,7 +122,7 @@ interface AppState {
     phase: Phase;
     initError: string | null;
     opts: CliOptions;
-    client: AgentyClient | null;
+    client: StoreClient | null;
     model: ModelDto | null;
     session: ChatSessionDto | null;
     skills: SkillDto[];
@@ -90,9 +141,9 @@ interface AppState {
     inputHistoryPath: string | null;
     inputHistoryWarning: string | null;
     activeSessionId: string | null;
+    activeRoundId: string | null;
     pendingApproval: PendingToolApproval | null;
     resolveToolApproval: (decision: ToolApprovalResolution["decision"]) => Promise<void>;
-    _localCoreStop: (() => Promise<void>) | null;
     init: () => Promise<void>;
     finishWizard: () => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
@@ -100,7 +151,7 @@ interface AppState {
     recordInput: (text: string) => Promise<boolean>;
     abort: () => void;
     reset: () => void;
-    newSession: () => Promise<void>;
+    newSession: (toolDialect?: ToolDialect) => Promise<void>;
     switchModel: (model: ModelDto) => Promise<void>;
     resumeSession: (session: ChatSessionDto) => Promise<void>;
     setOverlay: (overlay: OverlayKind) => void;
@@ -110,6 +161,7 @@ interface AppState {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
+    toggleCodexMode: () => Promise<void>;
 }
 
 let idCounter = 0;
@@ -120,8 +172,8 @@ function nextId(): string {
     return `msg-${idCounter}`;
 }
 
-function newAssistantMessage(): UIMessage {
-    return { id: nextId(), role: "assistant", content: "", reasoning: "", toolCalls: [] };
+function newAssistantMessage(roundId?: string): UIMessage {
+    return { id: nextId(), roundId, role: "assistant", content: "", reasoning: "", toolCalls: [] };
 }
 
 function hasContent(message: UIMessage): boolean {
@@ -184,6 +236,7 @@ function messageToUI(message: ChatMessageDto): UIMessage {
     const content = message.content ?? [];
     return {
         id: message.id || nextId(),
+        roundId: message.roundId,
         role: message.role,
         content: textFromBlocks(content, "text"),
         reasoning: textFromBlocks(content, "reasoning"),
@@ -242,8 +295,8 @@ function setToolReviewing(message: UIMessage, toolUseId: string, reviewing: bool
     return { ...message, toolCalls: updatedCalls };
 }
 
-function clearToolReviews(message: UIMessage): UIMessage {
-    if (!message.toolCalls?.some((call) => call.reviewing)) {
+function finalizeToolCalls(message: UIMessage, cancelled = false): UIMessage {
+    if (!message.toolCalls?.some((call) => call.reviewing || (cancelled && !call.result))) {
         return message;
     }
 
@@ -252,21 +305,26 @@ function clearToolReviews(message: UIMessage): UIMessage {
         toolCalls: message.toolCalls.map((call) => {
             const updatedCall = { ...call };
             delete updatedCall.reviewing;
+            if (cancelled && !call.result) {
+                updatedCall.cancelled = true;
+            }
             return updatedCall;
         }),
     };
 }
 
 function buildHistory(session: ChatSessionDto): UIMessage[] {
-    let history: UIMessage[] = [];
+    const history: UIMessage[] = [];
     for (const round of session.rounds ?? []) {
+        let messages: UIMessage[] = [];
         for (const message of round.messages ?? []) {
             if ((message.content ?? []).some((block) => block.type === "tool_result")) {
-                history = attachToolResults(history, message);
+                messages = attachToolResults(messages, message);
                 continue;
             }
-            history.push(messageToUI(message));
+            messages.push(messageToUI(message));
         }
+        history.push(...messages.map((message) => finalizeToolCalls(message, round.status === "cancelled")));
     }
     return history;
 }
@@ -392,6 +450,10 @@ function mergeToolCalls(
 }
 
 export const useAppStore = create<AppState>((set, get) => {
+    let permissionChangeQueue: Promise<void> = Promise.resolve();
+    let latestPermissionChange: { sessionId: string; mode: PermissionMode } | null = null;
+    let toolDialectChangeQueue: Promise<void> = Promise.resolve();
+    const observedClients = new WeakSet<StoreClient>();
     const flushCurrent = () => {
         const current = get().current;
         if (current && hasContent(current)) {
@@ -425,10 +487,45 @@ export const useAppStore = create<AppState>((set, get) => {
     };
 
     const handleEvent = (event: SessionEvent) => {
+        if (get().session?.id !== event.sessionId) {
+            return;
+        }
+        if (event.type === "round_started") {
+            set((state) => state.session?.id === event.sessionId ? {
+                activeSessionId: event.sessionId,
+                activeRoundId: event.roundId,
+                status: state.status === "idle" || state.status === "error" ? "streaming" : state.status,
+                phrase: state.phrase ?? pickStreamingPhrase(),
+                current: state.current
+                    ? { ...state.current, roundId: event.roundId }
+                    : newAssistantMessage(event.roundId),
+            } : {});
+            return;
+        }
+        if (event.type !== "permission_mode_changed" && event.type !== "tool_dialect_changed" &&
+            (!get().activeRoundId || get().activeRoundId !== event.roundId)) {
+            return;
+        }
         if (event.type === "permission_mode_changed") {
             const permissionMode = event.permissionMode ?? "ask";
+            set((state) => {
+                if (state.session?.id !== event.sessionId) {
+                    return {};
+                }
+                const requested = latestPermissionChange?.sessionId === event.sessionId
+                    ? latestPermissionChange.mode
+                    : state.session.pendingPermissionMode;
+                return { session: {
+                    ...state.session,
+                    permissionMode,
+                    pendingPermissionMode: requested === permissionMode ? undefined : requested,
+                } };
+            });
+            return;
+        }
+        if (event.type === "tool_dialect_changed") {
             set((state) => state.session?.id === event.sessionId
-                ? { session: { ...state.session, permissionMode } }
+                ? { session: { ...state.session, toolDialect: event.toolDialect ?? "codex" } }
                 : {});
             return;
         }
@@ -460,21 +557,28 @@ export const useAppStore = create<AppState>((set, get) => {
             return;
         }
         if (event.type === "round_ended") {
+            const finalize = (message: UIMessage) => message.roundId === event.roundId
+                ? finalizeToolCalls(message, event.status === "cancelled")
+                : message;
             set((state) => ({
                 pendingApproval: null,
-                history: state.history.map(clearToolReviews),
-                current: state.current ? clearToolReviews(state.current) : null,
+                activeRoundId: state.activeRoundId === event.roundId ? null : state.activeRoundId,
+                activeSessionId: state.activeRoundId === event.roundId ? null : state.activeSessionId,
+                status: state.activeRoundId === event.roundId ? "idle" : state.status,
+                phrase: state.activeRoundId === event.roundId ? null : state.phrase,
+                history: state.history.map(finalize),
+                current: state.current ? finalize(state.current) : null,
             }));
         }
         if (event.type === "model_stream" && event.stream) {
             const stream = event.stream;
             if (stream.type === "text_delta" && stream.delta) {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     return {
                         history,
@@ -483,11 +587,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "reasoning_delta" && stream.delta) {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     return { history, current: {
                         ...current,
@@ -497,11 +601,11 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_use_start") {
                 set((state) => {
-                    let current = finalizeReasoning(state.current ?? newAssistantMessage());
+                    let current = finalizeReasoning(state.current ?? newAssistantMessage(event.roundId));
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, current];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
@@ -518,7 +622,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_input_delta" && stream.delta) {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
@@ -528,7 +632,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
             } else if (stream.type === "tool_use_done") {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const calls = [...(current.toolCalls ?? [])];
                     const index = findToolCallIndex(calls, event, stream.toolUseId);
                     if (index >= 0) {
@@ -548,17 +652,28 @@ export const useAppStore = create<AppState>((set, get) => {
         if (event.type === "message_appended" && event.message) {
             if ((event.message.content ?? []).some((block) => block.type === "tool_result")) {
                 set((state) => {
-                    const current = state.current ?? newAssistantMessage();
+                    const current = state.current ?? newAssistantMessage(event.roundId);
                     const updated = attachToolResults([current], event.message!);
                     return { current: updated[0] };
                 });
+            } else if (event.message.role === "user") {
+                set((state) => {
+                    const text = textFromBlocks(event.message!.content ?? [], "text");
+                    const last = state.history.at(-1);
+                    if (last?.role === "user" && last.content === text && (!last.roundId || last.roundId === event.roundId)) {
+                        const history = [...state.history];
+                        history[history.length - 1] = { ...last, roundId: event.roundId };
+                        return { history };
+                    }
+                    return { history: [...state.history, messageToUI(event.message!)] };
+                });
             } else if (event.message.role === "assistant") {
                 set((state) => {
-                    let current = state.current ?? newAssistantMessage();
+                    let current = state.current ?? newAssistantMessage(event.roundId);
                     let history = state.history;
                     if (current.toolCalls?.some((call) => call.result)) {
                         history = [...history, finalizeReasoning(current)];
-                        current = newAssistantMessage();
+                        current = newAssistantMessage(event.roundId);
                     }
                     const contextSize = event.message?.usage
                         ? event.message.usage.input + event.message.usage.output
@@ -606,7 +721,24 @@ export const useAppStore = create<AppState>((set, get) => {
         }
     };
 
-    const prepareAndReady = async (client: AgentyClient, options: CliOptions) => {
+    const observeClient = (client: StoreClient) => {
+        if (observedClients.has(client)) {
+            return;
+        }
+        observedClients.add(client);
+        client.onSessionEvent((event) => {
+            if (get().client === client) {
+                handleEvent(event);
+            }
+        });
+        client.onCompactionEvent((event) => {
+            if (get().client === client) {
+                handleCompactionEvent(event);
+            }
+        });
+    };
+
+    const prepareAndReady = async (client: StoreClient, options: CliOptions) => {
         const requestedEffort = requestedReasoningEffort(options.thinking);
         const prepared = await client.prepareSession({
             modelInput: options.modelInput,
@@ -633,6 +765,11 @@ export const useAppStore = create<AppState>((set, get) => {
             thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
             initError: null,
         });
+        const summaries = await client.listSessionSummaries();
+        for (const summary of summaries) {
+            client.subscribeSession(summary.id, client.eventCursor(`session:${summary.id}`));
+        }
+        client.subscribeSession(session.id, client.eventCursor(`session:${session.id}`));
         const inputHistoryWarning = get().inputHistoryWarning;
         if (inputHistoryWarning) {
             setToast(inputHistoryWarning, true);
@@ -676,8 +813,8 @@ export const useAppStore = create<AppState>((set, get) => {
         inputHistoryPath: null,
         inputHistoryWarning: null,
         activeSessionId: null,
+        activeRoundId: null,
         pendingApproval: null,
-        _localCoreStop: null,
 
         init: async () => {
             try {
@@ -697,10 +834,54 @@ export const useAppStore = create<AppState>((set, get) => {
                         ? `${loadedInputHistory.invalidLines} invalid input history line(s) were skipped.`
                         : null),
                 });
-                const local = await startLocalCore({ dataDir: options.dataDir });
-                const client = new AgentyClient(local.rpc);
-                set({ client, _localCoreStop: local.stop });
-                client.onCompactionEvent(handleCompactionEvent);
+                const transport = await CoreHttp2Client.connectFromEnvironment();
+                const client = new AgentyClient(transport);
+                set({ client });
+                observeClient(client);
+                client.onStreamFrame(async (frame: StreamFrame) => {
+                    if (frame.type !== "snapshot" || !frame.topic.startsWith("session:")) {
+                        return;
+                    }
+                    const id = frame.topic.slice("session:".length);
+                    const snapshot = frame.snapshot?.state as {
+                        session?: ChatSessionDto;
+                        isRunning?: boolean;
+                        roundId?: string;
+                        pendingApprovals?: ToolApprovalRequest[];
+                    } | undefined;
+                    if (get().session?.id !== id || !snapshot?.session) {
+                        return;
+                    }
+                    set({
+                        session: snapshot.session,
+                        history: buildHistory(snapshot.session),
+                        current: null,
+                        tokenConsumed: actualContextSize(snapshot.session),
+                        activeSessionId: snapshot.isRunning ? id : null,
+                        activeRoundId: snapshot.isRunning ? snapshot.roundId ?? null : null,
+                        status: snapshot.isRunning ? "streaming" : "idle",
+                        phrase: snapshot.isRunning ? pickStreamingPhrase() : null,
+                        pendingApproval: snapshot.pendingApprovals?.[0] && snapshot.roundId
+                            ? {
+                                ...snapshot.pendingApprovals[0],
+                                sessionId: id,
+                                roundId: snapshot.roundId,
+                                submitting: false,
+                                error: null,
+                            }
+                            : null,
+                    });
+                    for (const recent of frame.snapshot?.recentEvents ?? []) {
+                        if (recent.type !== "event" || recent.topic !== frame.topic || !recent.event) {
+                            continue;
+                        }
+                        const event = recent.event as SessionEvent & { kind?: string };
+                        if (event.kind === "session" && (!snapshot.roundId || event.roundId === snapshot.roundId)) {
+                            handleEvent(event);
+                        }
+                    }
+                });
+                client.subscribeMcp(client.eventCursor("mcp"));
                 if (!(await client.isInitialized())) {
                     set({ phase: "wizard", initError: null });
                     return;
@@ -749,6 +930,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 return;
             }
             const { client, model, session } = state;
+            observeClient(client);
             set((currentState) => ({
                 history: [...currentState.history, { id: nextId(), role: "user", content: trimmed }],
                 current: newAssistantMessage(),
@@ -756,6 +938,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 chatError: null,
                 phrase: pickStreamingPhrase(),
                 activeSessionId: session.id,
+                activeRoundId: null,
                 pendingApproval: null,
             }));
 
@@ -771,42 +954,18 @@ export const useAppStore = create<AppState>((set, get) => {
                 set({ pendingApproval: null });
                 rejectTerminal(error);
             });
-            let lastSequence = 0;
-            let activeRoundId: string | null = null;
+            let expectedRoundId: string | null = null;
             const unsubscribe = client.onSessionEvent((event) => {
-                if (event.sessionId !== session.id || get().activeSessionId !== session.id) {
+                if (get().client !== client || event.sessionId !== session.id) {
                     return;
                 }
-
-                const sessionLevelPermissionChange = event.type === "permission_mode_changed" &&
-                    (!event.roundId || event.roundId === "00000000-0000-0000-0000-000000000000");
-                if (sessionLevelPermissionChange) {
-                    handleEvent(event);
-                    return;
-                }
-
                 if (event.type === "round_started") {
-                    if (activeRoundId !== null && activeRoundId !== event.roundId) {
+                    if (expectedRoundId !== null && expectedRoundId !== event.roundId) {
                         return;
                     }
-                    activeRoundId = event.roundId;
-                } else if (activeRoundId === null && event.type === "permission_mode_changed") {
-                    activeRoundId = event.roundId;
-                } else if (activeRoundId === null) {
-                    return;
+                    expectedRoundId = event.roundId;
                 }
-                if (activeRoundId !== null && activeRoundId !== event.roundId) {
-                    return;
-                }
-                if (event.sequence <= lastSequence) {
-                    return;
-                }
-                if (event.sequence !== lastSequence + 1) {
-                    pushSystem(`session event sequence gap: received ${event.sequence} after ${lastSequence}`, true);
-                }
-                lastSequence = event.sequence;
-                handleEvent(event);
-                if (event.type === "round_ended") {
+                if (event.type === "round_ended" && (!expectedRoundId || event.roundId === expectedRoundId)) {
                     resolveTerminal(event);
                 }
             });
@@ -820,11 +979,19 @@ export const useAppStore = create<AppState>((set, get) => {
                     set({ thinkingEnabled: resolvedEffort.effort !== "off", thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort });
                     setToast(resolvedEffort.notice);
                 }
+                await client.subscribeSessionAndWait(
+                    session.id,
+                    client.eventCursor(`session:${session.id}`),
+                );
                 await client.setSessionReasoningEffort(
                     session.id,
                     resolvedEffort.effort,
                 );
-                await client.startSession(session.id, trimmed);
+                await toolDialectChangeQueue;
+                await permissionChangeQueue;
+                const started = await client.startSession(session.id, trimmed);
+                expectedRoundId = started.roundId;
+                set({ activeRoundId: started.roundId });
                 const ended = await terminal;
                 if (ended.status === "failed" || ended.error) {
                     const message = ended.error ?? "agent round failed";
@@ -849,7 +1016,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 unsubscribe();
                 unsubscribeClose();
                 flushCurrent();
-                set({ status: "idle", phrase: null, activeSessionId: null, pendingApproval: null });
+                set({ status: "idle", phrase: null, activeSessionId: null, activeRoundId: null, pendingApproval: null });
             }
         },
 
@@ -894,9 +1061,9 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         abort: () => {
-            const { client, activeSessionId } = get();
-            if (client && activeSessionId) {
-                void client.stopSession(activeSessionId).catch((error: unknown) =>
+            const { client, activeSessionId, activeRoundId } = get();
+            if (client && activeSessionId && activeRoundId) {
+                void client.stopSession(activeSessionId, activeRoundId).catch((error: unknown) =>
                     pushSystem(error instanceof Error ? error.message : String(error), true));
             }
         },
@@ -913,12 +1080,13 @@ export const useAppStore = create<AppState>((set, get) => {
                 tokenConsumed: 0,
                 phrase: null,
                 activeSessionId: null,
+                activeRoundId: null,
                 overlay: null,
                 pendingApproval: null,
             });
         },
 
-        newSession: async () => {
+        newSession: async (toolDialect = "default") => {
             if (get().activeSessionId) {
                 setToast("Stop the current round before starting another session.");
                 return;
@@ -930,9 +1098,18 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const requestedEffort = reasoningEffort(thinkingEnabled, thinkingLevel);
                 const resolvedEffort = resolveReasoningEffortForModel(model, requestedEffort);
-                const session = await client.createSession(model, resolvedEffort.effort);
-                set({ session, history: [], current: null, tokenConsumed: 0, overlay: null });
-                setToast(resolvedEffort.notice ?? "New session created.");
+                const session = await client.createSession(
+                    model,
+                    resolvedEffort.effort,
+                    "ask",
+                    process.cwd(),
+                    toolDialect,
+                );
+                client.subscribeSession(session.id, client.eventCursor(`session:${session.id}`));
+                set({ session, history: [], current: null, tokenConsumed: 0, overlay: null, activeRoundId: null });
+                setToast(resolvedEffort.notice ?? (toolDialect === "codex"
+                    ? "New Codex Mode session created."
+                    : "New session created."));
             } catch (error) {
                 pushSystem(`new session failed: ${(error as Error).message}`, true);
             }
@@ -983,10 +1160,11 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const full = await client.getSession(session.id);
+                client.subscribeSession(full.id, client.eventCursor(`session:${full.id}`));
                 const model = full.currentModel
                     ? await client.getModel(full.currentModel)
                     : get().model;
-                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
+                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null, activeRoundId: null });
             } catch (error) {
                 pushSystem(`resume failed: ${(error as Error).message}`, true);
             }
@@ -1028,23 +1206,91 @@ export const useAppStore = create<AppState>((set, get) => {
             if (!client || !session || (mode !== "ask" && mode !== "auto" && mode !== "yolo")) {
                 return;
             }
-            if ((session.permissionMode ?? "ask") === mode) {
-                setToast(`permissions: ${mode}`);
+            if ((session.pendingPermissionMode ?? session.permissionMode ?? "ask") === mode) {
                 return;
             }
-            try {
-                const updated = await client.setSessionPermissionMode(session.id, mode);
-                set({ session: updated });
-                setToast(`permissions: ${mode}`);
-            } catch (error) {
-                setToast(`permissions: ${(error as Error).message}`, true);
-            }
+            const change = { sessionId: session.id, mode };
+            latestPermissionChange = change;
+            set({ session: {
+                ...session,
+                pendingPermissionMode: mode === (session.permissionMode ?? "ask") ? undefined : mode,
+            } });
+            const send = async () => {
+                if (latestPermissionChange !== change) {
+                    return;
+                }
+                try {
+                    const updated = await client.setSessionPermissionMode(session.id, mode);
+                    if (latestPermissionChange !== change || get().session?.id !== session.id) {
+                        return;
+                    }
+                    set((state) => ({ session: state.session ? {
+                        ...state.session,
+                        pendingPermissionMode: mode === (state.session.permissionMode ?? "ask")
+                            ? undefined
+                            : updated.pendingPermissionMode,
+                    } : null }));
+                    latestPermissionChange = null;
+                    setToast(`permissions: ${mode}${get().session?.pendingPermissionMode ? " (pending)" : ""}`);
+                } catch (error) {
+                    if (latestPermissionChange === change && get().session?.id === session.id) {
+                        const updated = await client.getSession(session.id).catch(() => null);
+                        if (latestPermissionChange === change && get().session?.id === session.id) {
+                            set((state) => ({ session: state.session ? {
+                                ...state.session,
+                                pendingPermissionMode: updated?.pendingPermissionMode,
+                            } : null }));
+                            setToast(`permissions: ${(error as Error).message}`, true);
+                            latestPermissionChange = null;
+                        }
+                    }
+                }
+            };
+            permissionChangeQueue = permissionChangeQueue.then(send);
+            await permissionChangeQueue;
         },
 
         togglePermissionMode: async () => {
-            const current = get().session?.permissionMode ?? "ask";
+            const session = get().session;
+            const current = session?.pendingPermissionMode ?? session?.permissionMode ?? "ask";
             const mode = current === "ask" ? "auto" : current === "auto" ? "yolo" : "ask";
             await get().setPermissionMode(mode);
+        },
+
+        toggleCodexMode: async () => {
+            const { activeSessionId, client, session } = get();
+            if (activeSessionId) {
+                setToast("Stop the current round before changing Codex Mode.");
+                return;
+            }
+            if (!client || !session) {
+                return;
+            }
+            const send = async () => {
+                const state = get();
+                if (state.client !== client || state.session?.id !== session.id) {
+                    return;
+                }
+                if (state.activeSessionId) {
+                    setToast("Stop the current round before changing Codex Mode.");
+                    return;
+                }
+                const toolDialect = state.session.toolDialect === "codex" ? "default" : "codex";
+                try {
+                    const updated = await client.setToolDialect(session.id, toolDialect);
+                    if (get().client !== client || get().session?.id !== session.id) {
+                        return;
+                    }
+                    set({ session: updated });
+                    setToast(toolDialect === "codex" ? "Codex Mode enabled." : "Codex Mode disabled.");
+                } catch (error) {
+                    if (get().client === client && get().session?.id === session.id) {
+                        setToast(`Codex Mode: ${(error as Error).message}`, true);
+                    }
+                }
+            };
+            toolDialectChangeQueue = toolDialectChangeQueue.then(send);
+            await toolDialectChangeQueue;
         },
     };
 });

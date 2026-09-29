@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { spawnSyncCommand } from "./command.mjs";
 import { resolveTurboPlan } from "./turbo.mjs";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
@@ -52,7 +52,7 @@ function copyBootstrapArtifacts() {
 function run() {
     const filter = process.argv[2]?.trim() || "agenty-bootstrap";
     const plan = resolveBuildPlan(filter);
-    const build = spawnSync(plan.packageManager, plan.buildArgs, {
+    const build = spawnSyncCommand(plan.packageManager, plan.buildArgs, {
         cwd: REPOSITORY_ROOT,
         env: plan.buildEnvironment,
         stdio: "inherit",

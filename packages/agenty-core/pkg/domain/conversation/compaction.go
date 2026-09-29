@@ -190,6 +190,13 @@ func (s *Session) updateMetadataPermissionMode(mode PermissionMode) {
 	s.metadata.PermissionMode = mode.Normalized()
 }
 
+func (s *Session) updateMetadataToolDialect(dialect ToolDialect) {
+	if s.metadata == nil || !s.hasCompactionSummary() {
+		return
+	}
+	s.metadata.ToolDialect = dialect.Normalized()
+}
+
 func (s *Session) hasCompactionSummary() bool {
 	for _, message := range s.context {
 		if kind, _ := message.Metadata["compactionKind"].(string); kind == compactionKindSummary {

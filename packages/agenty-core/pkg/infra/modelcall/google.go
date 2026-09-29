@@ -347,9 +347,11 @@ func googleResponse(result *genai.GenerateContentResponse) (*ModelCallResponse, 
 			if err != nil {
 				return nil, err
 			}
-			content = append(content, conversation.ToolUseBlock{
-				ID: part.FunctionCall.ID, Name: part.FunctionCall.Name, Input: input,
-			})
+			content = append(content, structuredToolUseBlock(
+				part.FunctionCall.ID,
+				part.FunctionCall.Name,
+				input,
+			))
 		case part.InlineData != nil:
 			content = append(content, conversation.ImageBlock{
 				MimeType: part.InlineData.MIMEType,

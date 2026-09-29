@@ -3,7 +3,7 @@ packages:
   - "packages/agenty-inspector"
   - "packages/agenty-cli"
   - "packages/agenty-bootstrap"
-  - "packages/patch-applier"
+  - "packages/file-editor"
 
 peerDependencyRules:
   allowedVersions:

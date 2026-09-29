@@ -46,13 +46,6 @@ function buildCreateProviderFields(formType: string): FormField[] {
         { key: "name", label: "Name", kind: "text", value: "", placeholder: "my-provider" },
         { key: "type", label: "Type", kind: "select", value: formType, options: PROVIDER_TYPE_OPTIONS },
         { key: "baseUrl", label: "Base URL", kind: "text", value: baseUrl },
-        {
-            key: "freeFormTool",
-            label: "Free-form apply_patch",
-            kind: "boolean",
-            value: "false",
-            visible: formType === "openai",
-        },
         { key: "apiKey", label: "API Key", kind: "text", value: "", placeholder: "sk-...", secret: true },
     ];
 }
@@ -105,15 +98,6 @@ export function buildProviderFields(
             value: "",
             placeholder: "leave blank to keep",
             secret: true,
-        },
-        {
-            key: "freeFormTool",
-            label: "Free-form apply_patch",
-            kind: "boolean",
-            value: String(target.freeFormTool === true),
-            readOnly: configuringBuiltin || target.type !== "openai",
-            focusable: !configuringBuiltin && target.type === "openai",
-            visible: target.type === "openai",
         },
     ];
 }
@@ -360,7 +344,6 @@ export function ProviderOverlay() {
                 type,
                 baseUrl: formString(values, "baseUrl").trim(),
                 apiKey: formString(values, "apiKey").trim(),
-                freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
             });
             setToast(`Provider created: ${name}`);
             await reload();
@@ -384,7 +367,6 @@ export function ProviderOverlay() {
                 name,
                 type,
                 baseUrl,
-                freeFormTool: type === "openai" && formString(values, "freeFormTool") === "true",
             };
             if (apiKey) {
                 update.apiKey = apiKey;

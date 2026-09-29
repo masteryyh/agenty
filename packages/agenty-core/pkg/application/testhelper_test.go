@@ -195,8 +195,9 @@ func (r *sessionRepositoryFake) Delete(_ context.Context, id uuid.UUID) error {
 
 func newServices(t *testing.T) (*application.ProviderService, *application.SessionService) {
 	t.Helper()
-	return application.NewProviderService(newProviderRepositoryFake()),
-		application.NewSessionService(newSessionRepositoryFake())
+	providers := newProviderRepositoryFake()
+	return application.NewProviderService(providers),
+		application.NewSessionService(newSessionRepositoryFake(), application.WithSessionCatalog(providers))
 }
 
 func appErrorCode(err error) application.Code {

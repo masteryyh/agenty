@@ -6,7 +6,7 @@
             "dependsOn": ["^build"],
             "outputs": ["bin/**", "dist/**"],
             "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
-            "passThroughEnv": ["GOCACHE"]
+            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         },
         "agenty-cli#build": {
             "dependsOn": ["^build"],
@@ -52,14 +52,15 @@
                 "pkg/**/*.go",
                 "!pkg/**/*_test.go",
                 "scripts/build.mjs",
+                "$TURBO_ROOT$/scripts/core-build-env.mjs",
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
             "outputs": ["bin/**"],
             "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
-            "passThroughEnv": ["GOCACHE"]
+            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         },
-        "patch-applier#build": {
+        "file-editor#build": {
             "inputs": [
                 "Cargo.toml",
                 "Cargo.lock",
@@ -70,17 +71,18 @@
             ],
             "env": ["OS", "ARCH"],
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-            "outputs": ["target/release/apply_patch", "target/release/apply_patch.exe"]
+            "outputs": ["target/release/fileedit", "target/release/fileedit.exe"]
         },
         "agenty-bootstrap#test": {
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
         },
-        "patch-applier#test": {
+        "file-editor#test": {
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
         },
         "test": {
             "dependsOn": ["^build"],
-            "passThroughEnv": ["GOCACHE"]
+            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
+            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         },
         "lint": {},
         "clean": {
@@ -106,7 +108,7 @@
                 "CC",
                 "CXX"
             ],
-            "passThroughEnv": ["GOCACHE"]
+            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         },
         "agenty-inspector#test": {
             "dependsOn": [],
@@ -116,7 +118,8 @@
                 "$TURBO_ROOT$/packages/agenty-core/go.mod",
                 "$TURBO_ROOT$/packages/agenty-core/go.sum"
             ],
-            "passThroughEnv": ["GOCACHE"]
+            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
+            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         }
     }
 }

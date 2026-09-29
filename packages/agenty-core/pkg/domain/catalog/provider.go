@@ -20,7 +20,6 @@ type Provider struct {
 	APIKey        string          `json:"apiKey"`
 	Builtin       bool            `json:"builtin"`
 	Official      bool            `json:"official"`
-	FreeFormTool  bool            `json:"freeFormTool"`
 	ModelsURL     string          `json:"modelsUrl,omitempty"`
 	TokenCountURL string          `json:"tokenCountUrl,omitempty"`
 	Models        []Model         `json:"models"`

@@ -71,7 +71,7 @@ func (tool *applyPatchTool) Execute(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	command := exec.Command("apply_patch")
+	command := exec.Command("fileedit", "apply_patch")
 	if strings.TrimSpace(callContext.Cwd) != "" {
 		command.Dir = callContext.Cwd
 	}

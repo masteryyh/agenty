@@ -141,6 +141,7 @@ type ReviewEvent struct {
 type pendingRequest struct {
 	sessionID      uuid.UUID
 	roundID        uuid.UUID
+	request        Request
 	ctx            context.Context
 	decision       chan Decision
 	rechecking     bool
@@ -203,6 +204,9 @@ func (manager *PermissionManager) PermissionModeChanged(
 func (manager *PermissionManager) beforeToolCall(ctx context.Context, state *middleware.ToolCallContext) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if state != nil && state.Result != nil {
+		return nil
 	}
 	if state == nil || state.Session == nil || state.Round == nil || state.Call == nil || state.Emit == nil {
 		return fmt.Errorf("HITL requires a session, round, tool call and event emitter")
@@ -332,6 +336,7 @@ func (manager *PermissionManager) awaitManualDecision(
 	pending := &pendingRequest{
 		sessionID: state.Session.ID,
 		roundID:   state.Round.ID,
+		request:   request,
 		ctx:       ctx,
 		decision:  make(chan Decision, 1),
 	}
@@ -427,6 +432,21 @@ func (manager *PermissionManager) awaitManualDecision(
 			},
 		})
 	}
+}
+
+func (manager *PermissionManager) PendingForSession(sessionID uuid.UUID) []Request {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	requests := make([]Request, 0)
+	for _, pending := range manager.pending {
+		if pending.sessionID == sessionID && pending.ctx.Err() == nil {
+			requests = append(requests, pending.request)
+		}
+	}
+	slices.SortFunc(requests, func(left, right Request) int {
+		return strings.Compare(left.ApprovalID.String(), right.ApprovalID.String())
+	})
+	return requests
 }
 
 func approvalPreview(

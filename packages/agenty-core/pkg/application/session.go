@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
@@ -13,6 +14,7 @@ import (
 
 type SessionService struct {
 	repo           sessionRepository
+	catalog        sessionCatalogRepository
 	executionState sessionExecutionState
 }
 
@@ -28,11 +30,21 @@ func WithSessionExecutionState(state sessionExecutionState) SessionServiceOption
 	}
 }
 
+func WithSessionCatalog(repository sessionCatalogRepository) SessionServiceOption {
+	return func(service *SessionService) {
+		service.catalog = repository
+	}
+}
+
 type sessionRepository interface {
 	Load(ctx context.Context, id uuid.UUID) (*conversation.Session, error)
 	Save(ctx context.Context, session *conversation.Session) error
 	List(ctx context.Context, query conversation.ListQuery) ([]conversation.SessionSummary, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type sessionCatalogRepository interface {
+	Get(ctx context.Context, code shared.Code) (*catalog.Provider, error)
 }
 
 func NewSessionService(repo sessionRepository, options ...SessionServiceOption) *SessionService {
@@ -50,6 +62,7 @@ type SessionCreateInput struct {
 	ContextWindow   int64                       `json:"contextWindow,omitempty"`
 	ReasoningEffort shared.ReasoningEffort      `json:"reasoningEffort,omitempty"`
 	PermissionMode  conversation.PermissionMode `json:"permissionMode,omitempty"`
+	ToolDialect     conversation.ToolDialect    `json:"toolDialect,omitempty"`
 	Cwd             *string                     `json:"cwd,omitempty"`
 }
 
@@ -77,13 +90,36 @@ func (s *SessionService) Create(ctx context.Context, in SessionCreateInput) (*co
 	if !permissionMode.Valid() {
 		return nil, Validation("invalid permission mode: " + string(permissionMode))
 	}
+	toolDialect := in.ToolDialect
+	if toolDialect == "" {
+		toolDialect = conversation.ToolDialectDefault
+	}
+	if !toolDialect.Valid() {
+		return nil, Validation("invalid tool dialect: " + string(toolDialect))
+	}
+	if toolDialect == conversation.ToolDialectCodex {
+		if s.catalog == nil {
+			return nil, Internal("catalog repository is required to create a Codex Mode session")
+		}
+		provider, err := s.catalog.Get(ctx, providerCode)
+		if errors.Is(err, storage.ErrProviderNotFound) {
+			return nil, Validation("Codex Mode requires a Responses API provider")
+		}
+		if err != nil {
+			return nil, Internal("failed to validate Codex Mode provider: " + err.Error())
+		}
+		if provider == nil || provider.Type != catalog.APIOpenAI {
+			return nil, Validation("Codex Mode requires a Responses API provider")
+		}
+	}
 
-	session := conversation.StartSessionWithPermission(
+	session := conversation.StartSessionWithModes(
 		shared.NewModelRef(providerCode, modelCode),
 		in.ContextWindow,
 		effort,
 		in.Cwd,
 		permissionMode,
+		toolDialect,
 	)
 	if err := s.repo.Save(ctx, session); err != nil {
 		return nil, Internal("failed to save session: " + err.Error())

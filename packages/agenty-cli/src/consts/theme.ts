@@ -59,11 +59,14 @@ export const theme = {
 
 export type ThemeToken = keyof typeof theme;
 
-export type ToolStatus = "pending" | "success" | "error";
+export type ToolStatus = "pending" | "success" | "error" | "cancelled";
 
 export type ShellStream = "stdout" | "stderr" | "empty" | "pending" | "newline";
 
 export function statusColor(status: ToolStatus): string {
+    if (status === "cancelled") {
+        return theme.textMuted;
+    }
     if (status === "success") {
         return theme.success;
     }

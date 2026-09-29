@@ -8,14 +8,15 @@ import (
 	"testing"
 )
 
-func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
+func TestClientJourneyCoversPublicHTTPSurfaceAcrossRestart(t *testing.T) {
 	t.Parallel()
 
 	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
 		if request.Method == http.MethodGet {
 			return providerReply{Body: `{"object":"list","data":[{"id":"fixture-model"}]}`}
 		}
-		if request.Call == 3 {
+		messages := providerMessages(request)
+		if len(messages) > 0 && providerMessageContent(messages[len(messages)-1]) == "wait" {
 			return providerReply{WaitForCancel: true}
 		}
 		return providerSuccess("openai_completions", "reply from turn", request.Call)
@@ -62,14 +63,15 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		Name:     "Local OpenAI",
 		Type:     "openai_completions",
 		BaseURL:  fixture.BaseURL("openai_completions"),
-		APIKey:   "test-key",
 		Metadata: map[string]any{"environment": "e2e"},
 	})
 	requireNoError(t, err)
 	providerName := "Local OpenAI Compatible"
+	providerAPIKey := "test-key"
 	provider, err = first.UpdateProvider(ctx, ProviderUpdateInput{
-		Code: "local-openai",
-		Name: &providerName,
+		Code:   "local-openai",
+		Name:   &providerName,
+		APIKey: &providerAPIKey,
 	})
 	requireNoError(t, err)
 	if provider.Name != providerName {
@@ -106,7 +108,14 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		IsDefault:       true,
 	})
 	requireNoError(t, err)
-	if len(provider.Models) != 1 || provider.Models[0].MaxOutputTokens != 100_000 {
+	var primaryModel *Model
+	for index := range provider.Models {
+		if provider.Models[index].Code == "primary-model" {
+			primaryModel = &provider.Models[index]
+			break
+		}
+	}
+	if primaryModel == nil || primaryModel.MaxOutputTokens != 100_000 {
 		t.Fatalf("provider models = %+v", provider.Models)
 	}
 	_, err = first.AddModel(ctx, ModelInput{
@@ -117,7 +126,6 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		MaxOutputTokens: 8_192,
 	})
 	requireNoError(t, err)
-
 	primary, err := first.CreateSession(ctx, SessionCreateInput{
 		ProviderCode:  "local-openai",
 		ModelCode:     "primary-model",
@@ -211,13 +219,13 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		t,
 		ctx,
 		fixture.requests,
-		1,
+		2,
 	)
 	secondProviderRequest := waitForProviderCall(
 		t,
 		ctx,
 		fixture.requests,
-		2,
+		3,
 	)
 	if firstProviderRequest.Body["max_completion_tokens"] != float64(100_000) {
 		t.Fatalf("max completion tokens = %v, want 100000", firstProviderRequest.Body["max_completion_tokens"])
@@ -246,29 +254,29 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		t,
 		ctx,
 		fixture.requests,
-		3,
+		4,
 	)
 	models, err := second.ListProviderModels(ctx, "local-openai")
 	requireNoError(t, err)
-	var fixtureModel *AvailableModel
+	var availablePrimary *AvailableModel
 	for index := range models {
-		if models[index].Code == "fixture-model" {
-			fixtureModel = &models[index]
+		if models[index].Code == "primary-model" {
+			availablePrimary = &models[index]
 			break
 		}
 	}
-	if fixtureModel == nil || fixtureModel.ContextWindow != 256_000 || fixtureModel.MaxOutputTokens != 65_536 || len(fixtureModel.ReasoningEfforts) != 0 {
-		t.Fatalf("discovered models = %+v", models)
+	if availablePrimary == nil || availablePrimary.ContextWindow != 128_000 || availablePrimary.MaxOutputTokens != 100_000 {
+		t.Fatalf("provider models = %+v", models)
 	}
 	_, err = second.StartSession(
 		ctx,
 		cancelSession.ID,
 		[]ContentInput{{Type: "text", Text: "duplicate"}},
 	)
-	requireRPCCode(t, err, errAlreadyExists)
+	requireAPIError(t, err, "already_exists")
 	_, err = second.DeleteSession(ctx, cancelSession.ID)
-	requireRPCCode(t, err, errAlreadyExists)
-	stop, err := second.StopSession(ctx, cancelSession.ID)
+	requireAPIError(t, err, "already_exists")
+	stop, err := second.StopSession(ctx, cancelSession.ID, cancelRound.RoundID)
 	requireNoError(t, err)
 	if !stop.StopRequested || stop.RoundID != cancelRound.RoundID {
 		t.Fatalf("stop result = %+v", stop)
@@ -282,15 +290,14 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	requireNoError(t, err)
 	_, err = second.CompactSession(ctx, primary.ID)
 	requireNoError(t, err)
-
-	requireNoError(t, second.rpc.AbortChunk(ctx, "aborted-upload", "provider.list"))
-	err = second.rpc.Call(
-		ctx,
-		"chunk.commit",
-		map[string]any{"requestId": "aborted-upload"},
-		nil,
-	)
-	requireRPCCode(t, err, errNotFound)
+	if _, err = second.EnableCodexMode(ctx, primary.ID); err == nil {
+		t.Fatal("Codex Mode accepted an OpenAI Chat Completions session")
+	}
+	var skills struct {
+		Skills      []map[string]any
+		Diagnostics []map[string]any
+	}
+	requireNoError(t, second.process.Request(ctx, http.MethodGet, "/v1/skills", nil, &skills))
 
 	_, err = second.DeleteSession(ctx, cancelSession.ID)
 	requireNoError(t, err)
@@ -303,12 +310,6 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	_, err = second.DeleteProvider(ctx, "local-openai")
 	requireNoError(t, err)
 
-	called := mergeMethodCounts(first.rpc, second.rpc)
-	for _, method := range publicRPCMethods {
-		if called[method] == 0 {
-			t.Errorf("public RPC method %q was not exercised", method)
-		}
-	}
 }
 
 func assertCompletedRound(t *testing.T, session Session, roundID, text string) {

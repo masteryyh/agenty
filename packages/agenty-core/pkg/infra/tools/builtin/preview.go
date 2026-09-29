@@ -118,3 +118,35 @@ func (tool *applyPatchTool) ApprovalPreview(_ agentloop.CallContext, input []byt
 	}
 	return &tools.CallPreview{Title: "Agenty wants to apply these changes:", Detail: detail}
 }
+
+func (tool *textEditorTool) ApprovalPreview(ctx agentloop.CallContext, input []byte) *tools.CallPreview {
+	var args textEditorArguments
+	if decodeArguments(input, &args) != nil {
+		return nil
+	}
+	path, err := resolvePath(args.Path, ctx.Cwd, false)
+	if err != nil {
+		return nil
+	}
+	switch args.Command {
+	case "view":
+		return &tools.CallPreview{Title: "Agenty wants to view: " + path, Detail: "Read a file or list a directory."}
+	case "str_replace":
+		if args.OldStr == nil || args.NewStr == nil {
+			return nil
+		}
+		return &tools.CallPreview{Title: "Agenty wants to replace text in: " + path, Detail: "Old text:\n" + *args.OldStr + "\n\nNew text:\n" + *args.NewStr}
+	case "create":
+		if args.FileText == nil {
+			return nil
+		}
+		return &tools.CallPreview{Title: "Agenty wants to create: " + path, Detail: *args.FileText}
+	case "insert":
+		if args.InsertLine == nil || args.InsertText == nil {
+			return nil
+		}
+		return &tools.CallPreview{Title: "Agenty wants to insert text in: " + path, Detail: fmt.Sprintf("After line: %d\n\n%s", *args.InsertLine, *args.InsertText)}
+	default:
+		return nil
+	}
+}

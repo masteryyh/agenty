@@ -1,6 +1,6 @@
 import { forwardRef } from "react";
 
-import type { PermissionMode, SkillDto } from "../api/types";
+import type { PermissionMode, SkillDto, ToolDialect } from "../api/types";
 import type { ComposerDocument } from "../composer/document";
 import { effortColor, theme } from "../consts/theme";
 import { useInput } from "../hooks/useInput";
@@ -35,6 +35,8 @@ interface InputBoxProps {
     contextWindow: number;
     tokenConsumed: number;
     permissionMode: PermissionMode;
+    pendingPermissionMode?: PermissionMode;
+    toolDialect: ToolDialect;
     thinkingLevel: string;
     reasoningActive: boolean;
     abort: () => void;
@@ -57,6 +59,8 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
     contextWindow,
     tokenConsumed,
     permissionMode,
+    pendingPermissionMode,
+    toolDialect,
     thinkingLevel,
     reasoningActive,
     abort,
@@ -65,10 +69,10 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
 }: InputBoxProps, ref) => {
     const { columns } = useWindowSize();
     const shortcuts = columns >= 100
-        ? "? Help · Shift+Tab Permissions · ↑↓ History · Tab Complete · PgUp/PgDn Scroll"
+        ? "? Help · Shift+M Codex Mode · Shift+Tab Permissions · ↑↓ History · Tab Complete · PgUp/PgDn Scroll"
         : columns >= 60
-            ? "? Help · Shift+Tab Mode · ↑↓ History · PgUp/PgDn Scroll"
-            : "? Help · Shift+Tab · ↑↓ History";
+            ? "? Help · Shift+M Codex Mode · Shift+Tab Mode · ↑↓ History · PgUp/PgDn Scroll"
+            : "? Help · Shift+M · Shift+Tab · ↑↓ History";
 
     useInput(
         (_input, key, event) => {
@@ -153,10 +157,18 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
                     <Text color={theme.textFaint} wrap="truncate-start">
                         {abbreviateCwd(cwd)}
                     </Text>
-                    {permissionMode !== "ask" ? (
+                    {permissionMode !== "ask" || pendingPermissionMode ? (
                         <>
                             <Text> </Text>
-                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>{`${permissionMode} mode`}</Text>
+                            <Text color={permissionMode === "yolo" ? theme.danger : theme.accent}>
+                                {`${permissionMode} mode${pendingPermissionMode ? ` → ${pendingPermissionMode} (pending)` : ""}`}
+                            </Text>
+                        </>
+                    ) : null}
+                    {toolDialect === "codex" ? (
+                        <>
+                            <Text> </Text>
+                            <Text color={theme.accent}>codex mode</Text>
                         </>
                     ) : null}
                 </Box>

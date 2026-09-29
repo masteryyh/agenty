@@ -1,12 +1,28 @@
-import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { resolveBuildVersion } from "./build-version.mjs";
+import { packageManagerCommand, spawnSyncCommand } from "./command.mjs";
+import { resolveCoreBuildEnvironment } from "./core-build-env.mjs";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
-function packageManagerCommand(hostPlatform = process.platform) {
-    return hostPlatform === "win32" ? "pnpm.cmd" : "pnpm";
+function includesCoreBuild(task, filter) {
+    if (task !== "build" && task !== "test") {
+        return false;
+    }
+
+    return filter !== "file-editor";
+}
+
+function targetGoOS(environment, hostPlatform) {
+    if (environment.GOOS?.trim()) {
+        return environment.GOOS.trim();
+    }
+
+    if (hostPlatform === "win32") {
+        return "windows";
+    }
+    return hostPlatform;
 }
 
 export function resolveTurboPlan(
@@ -21,13 +37,18 @@ export function resolveTurboPlan(
         args.push(`--filter=${filter}`);
     }
 
+    const buildEnvironment = {
+        ...environment,
+        AGENTY_VERSION: resolveBuildVersion(environment, repositoryRoot),
+    };
+    if (includesCoreBuild(task, filter)) {
+        Object.assign(buildEnvironment, resolveCoreBuildEnvironment(buildEnvironment, targetGoOS(environment, hostPlatform)));
+    }
+
     return {
         args,
-        buildEnvironment: {
-            ...environment,
-            AGENTY_VERSION: resolveBuildVersion(environment, repositoryRoot),
-        },
-        packageManager: packageManagerCommand(hostPlatform),
+        buildEnvironment,
+        packageManager: packageManagerCommand(hostPlatform, environment),
     };
 }
 
@@ -46,7 +67,7 @@ function run() {
     const task = process.argv[2]?.trim() || "test";
     const filter = process.argv[3]?.trim();
     const plan = resolveTurboPlan(task, filter);
-    const result = spawnSync(plan.packageManager, plan.args, {
+    const result = spawnSyncCommand(plan.packageManager, plan.args, {
         cwd: REPOSITORY_ROOT,
         env: plan.buildEnvironment,
         stdio: "inherit",

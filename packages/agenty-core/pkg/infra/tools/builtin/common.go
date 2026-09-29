@@ -39,6 +39,14 @@ func resultContent(value any) (conversation.Content, error) {
 	return conversation.Text(encoded), nil
 }
 
+func stringEnumSchema(description string, values ...string) modelcall.JSONSchema {
+	enum := make([]any, 0, len(values))
+	for _, value := range values {
+		enum = append(enum, value)
+	}
+	return modelcall.JSONSchema{Type: modelcall.JSONSchemaTypeString, Description: description, Enum: enum}
+}
+
 func resolvePath(path, cwd string, allowEmpty bool) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

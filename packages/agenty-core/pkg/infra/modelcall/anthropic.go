@@ -119,7 +119,7 @@ func (caller *anthropicCaller) params(request ModelCallRequest) (anthropic.Messa
 		messages = append(messages, converted)
 	}
 
-	tools, err := anthropicTools(request.Tools)
+	tools, err := anthropicTools(request.Tools, nativeAnthropicProvider(caller.model))
 	if err != nil {
 		return anthropic.MessageNewParams{}, err
 	}
@@ -155,10 +155,19 @@ func (caller *anthropicCaller) params(request ModelCallRequest) (anthropic.Messa
 	return params, nil
 }
 
-func anthropicTools(definitions []ToolDefinition) ([]anthropic.ToolUnionParam, error) {
+func anthropicTools(definitions []ToolDefinition, nativeAnthropic ...bool) ([]anthropic.ToolUnionParam, error) {
+	useNativeTextEditor := len(nativeAnthropic) > 0 && nativeAnthropic[0]
 	tools := make([]anthropic.ToolUnionParam, 0, len(definitions))
 	for _, definition := range definitions {
 		if definition.Type == ToolTypeApplyPatch {
+			continue
+		}
+		if definition.Type == ToolTypeTextEditor && useNativeTextEditor {
+			tools = append(tools, anthropic.ToolUnionParam{
+				OfTextEditor20250728: &anthropic.ToolTextEditor20250728Param{
+					MaxCharacters: anthropic.Int(10_000),
+				},
+			})
 			continue
 		}
 		tool, err := anthropicToolDefinition(definition)
@@ -330,12 +339,11 @@ func anthropicResponse(result *anthropic.Message) (*ModelCallResponse, error) {
 				Signature: item.Data, Redacted: true, Extra: extra,
 			})
 		case "tool_use":
-			if !json.Valid(item.Input) {
-				return nil, fmt.Errorf("modelcall: Anthropic returned invalid tool input for %q", item.Name)
-			}
-			content = append(content, conversation.ToolUseBlock{
-				ID: item.ID, Name: item.Name, Input: shared.RawJSON(item.Input),
-			})
+			content = append(content, structuredToolUseBlock(
+				item.ID,
+				item.Name,
+				shared.RawJSON(item.Input),
+			))
 		}
 	}
 

@@ -2,16 +2,15 @@ import { AgentyClient } from "@/api/client";
 import { formatModelRef, modelRefFromModel } from "@/api/modelReference";
 import type { ModelDto, ModelProviderDto } from "@/api/types";
 import { loadOptions } from "@/config";
-import { startLocalCore } from "@/localCore";
+import { CoreHttp2Client } from "@/core/http2";
 
 export interface CommandResult {
     handled: boolean
     exitCode: number
 }
 
-export interface LocalCoreConnectResult {
+export interface CoreConnectResult {
     client: AgentyClient
-    stop?: () => Promise<void>
 }
 
 type FlagValue = string | boolean | string[];
@@ -44,13 +43,10 @@ const BOOLEAN_FLAGS = new Set([
     "version",
 ]);
 
-export async function connect(): Promise<LocalCoreConnectResult> {
-    const options = loadOptions();
-    const local = await startLocalCore({ dataDir: options.dataDir });
-    return {
-        client: new AgentyClient(local.rpc),
-        stop: local.stop
-    };
+export async function connect(): Promise<CoreConnectResult> {
+    loadOptions();
+    const transport = await CoreHttp2Client.connectFromEnvironment();
+    return { client: new AgentyClient(transport) };
 }
 
 export function requirePositionals(args: ParsedArgs, count: number, usage: string): string[] {

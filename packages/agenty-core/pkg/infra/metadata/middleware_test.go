@@ -78,6 +78,28 @@ func TestBuildMetadataIncludesPermissionMode(t *testing.T) {
 	}
 }
 
+func TestBuildMetadataDoesNotInsertToolDialectIntoModelContext(t *testing.T) {
+	session := conversation.StartSessionWithModes(
+		shared.NewModelRef("provider", "model"),
+		128_000,
+		shared.ReasoningOff,
+		nil,
+		conversation.PermissionAsk,
+		conversation.ToolDialectCodex,
+	)
+	metadata, err := buildMetadata(session, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := metadata.XML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(encoded, "tool-dialect") {
+		t.Fatalf("metadata XML contains tool dialect: %q", encoded)
+	}
+}
+
 func TestBeforeRoundEmitsPermissionModeAfterAnIdleSwitch(t *testing.T) {
 	provider, err := catalog.NewProvider("provider", "Provider", catalog.APIOpenAI)
 	if err != nil {

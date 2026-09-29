@@ -32,12 +32,11 @@ func NewProviderService(repo providerRepository) *ProviderService {
 }
 
 type ProviderInput struct {
-	Name         string          `json:"name"`
-	Type         catalog.APIType `json:"type"`
-	BaseURL      string          `json:"baseUrl,omitempty"`
-	APIKey       string          `json:"apiKey,omitempty"`
-	FreeFormTool bool            `json:"freeFormTool,omitempty"`
-	Metadata     shared.Metadata `json:"metadata,omitempty"`
+	Name     string          `json:"name"`
+	Type     catalog.APIType `json:"type"`
+	BaseURL  string          `json:"baseUrl,omitempty"`
+	APIKey   string          `json:"apiKey,omitempty"`
+	Metadata shared.Metadata `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Create(ctx context.Context, code string, in ProviderInput) (*catalog.Provider, error) {
@@ -63,7 +62,6 @@ func (s *ProviderService) Create(ctx context.Context, code string, in ProviderIn
 
 	p.BaseURL = in.BaseURL
 	p.APIKey = in.APIKey
-	p.FreeFormTool = supportsFreeFormTool(in.Type, in.FreeFormTool)
 	p.Metadata = in.Metadata
 
 	if err := s.repo.Save(ctx, p); err != nil {
@@ -218,12 +216,11 @@ func availableModelsFromCatalog(models []catalog.Model) []catalog.AvailableModel
 }
 
 type ProviderUpdate struct {
-	Name         *string          `json:"name,omitempty"`
-	Type         *catalog.APIType `json:"type,omitempty"`
-	BaseURL      *string          `json:"baseUrl,omitempty"`
-	APIKey       *string          `json:"apiKey,omitempty"`
-	FreeFormTool *bool            `json:"freeFormTool,omitempty"`
-	Metadata     *shared.Metadata `json:"metadata,omitempty"`
+	Name     *string          `json:"name,omitempty"`
+	Type     *catalog.APIType `json:"type,omitempty"`
+	BaseURL  *string          `json:"baseUrl,omitempty"`
+	APIKey   *string          `json:"apiKey,omitempty"`
+	Metadata *shared.Metadata `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderUpdate) (*catalog.Provider, error) {
@@ -240,7 +237,7 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
 	if p.Builtin {
-		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.FreeFormTool != nil || upd.Metadata != nil {
+		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.Metadata != nil {
 			return nil, Validation("built-in provider metadata is read-only; only the API key can be changed")
 		}
 		if upd.APIKey == nil {
@@ -268,10 +265,6 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 	if upd.APIKey != nil {
 		p.APIKey = *upd.APIKey
 	}
-	if upd.FreeFormTool != nil {
-		p.FreeFormTool = *upd.FreeFormTool
-	}
-	p.FreeFormTool = supportsFreeFormTool(p.Type, p.FreeFormTool)
 	if upd.Metadata != nil {
 		p.Metadata = *upd.Metadata
 	}
@@ -281,10 +274,6 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 		return nil, Internal("failed to save provider: " + err.Error())
 	}
 	return p, nil
-}
-
-func supportsFreeFormTool(apiType catalog.APIType, enabled bool) bool {
-	return apiType == catalog.APIOpenAI && enabled
 }
 
 func (s *ProviderService) Delete(ctx context.Context, code string) error {
