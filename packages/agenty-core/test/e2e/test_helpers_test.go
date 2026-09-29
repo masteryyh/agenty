@@ -40,6 +40,7 @@ func createExecutionResources(
 	fixture *providerFixture,
 	apiType string,
 	prefix string,
+	toolDialect ...string,
 ) (Session, error) {
 	providerCode := prefix + "-provider"
 	modelCode := prefix + "-model"
@@ -63,11 +64,15 @@ func createExecutionResources(
 		return Session{}, fmt.Errorf("add model: %w", err)
 	}
 
-	session, err := client.CreateSession(ctx, SessionCreateInput{
+	input := SessionCreateInput{
 		ProviderCode:  providerCode,
 		ModelCode:     modelCode,
 		ContextWindow: 128_000,
-	})
+	}
+	if len(toolDialect) > 0 {
+		input.ToolDialect = toolDialect[0]
+	}
+	session, err := client.CreateSession(ctx, input)
 	if err != nil {
 		return Session{}, fmt.Errorf("create session: %w", err)
 	}

@@ -28,6 +28,7 @@ import type {
     SkillDiagnosticDto,
     SkillDto,
     ToolApprovalResolution,
+    ToolDialect,
     UpdateModelDto,
     UpdateModelProviderDto,
 } from "./types";
@@ -240,6 +241,7 @@ export class AgentyClient {
         effort: ReasoningEffort = "off",
         permissionMode: PermissionMode = "ask",
         cwd = process.cwd(),
+        toolDialect: ToolDialect = "default",
     ): Promise<ChatSessionDto> {
         const session = await this.http.request<ChatSessionDto>("POST", "/v1/sessions", {
             providerCode: model.providerCode,
@@ -247,6 +249,7 @@ export class AgentyClient {
             contextWindow: model.contextWindow,
             reasoningEffort: effort,
             permissionMode,
+            ...(toolDialect === "codex" ? { toolDialect } : {}),
             cwd,
         });
         return requireSession(session, "session.create");
@@ -381,6 +384,13 @@ export class AgentyClient {
     async enableCodexMode(id: string): Promise<ChatSessionDto> {
         const session = await this.http.request<ChatSessionDto>("POST", `/v1/sessions/${encodeURIComponent(id)}/codex-mode`);
         return requireSession(session, `session.enableCodexMode ${id}`);
+    }
+
+    async setToolDialect(id: string, toolDialect: ToolDialect): Promise<ChatSessionDto> {
+        const session = await this.http.request<ChatSessionDto>(
+            "PUT", `/v1/sessions/${encodeURIComponent(id)}/tool-dialect`, { toolDialect },
+        );
+        return requireSession(session, `session.setToolDialect ${id}`);
     }
 
     startSession(id: string, text: string): Promise<ExecutionStart> {

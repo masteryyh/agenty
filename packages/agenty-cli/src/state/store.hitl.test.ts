@@ -28,7 +28,11 @@ function approval(id: string): ToolApprovalRequest {
 
 afterEach(() => useAppStore.setState(useAppStore.getInitialState(), true));
 
-function harness(options: { sessionPermissionBeforeRound?: boolean; blockSubscription?: boolean } = {}) {
+function harness(options: {
+    sessionPermissionBeforeRound?: boolean;
+    toolDialectBeforeRound?: boolean;
+    blockSubscription?: boolean;
+} = {}) {
     const listeners = new Set<(event: SessionEvent) => void>();
     let close: ((error: Error) => void) | undefined;
     let sequence = 0;
@@ -42,7 +46,8 @@ function harness(options: { sessionPermissionBeforeRound?: boolean; blockSubscri
     const submissions: ToolApprovalResolution[] = [];
     let startCount = 0;
     const emit = (event: Partial<SessionEvent>) => {
-        const sessionLevel = event.type === "permission_mode_changed" && event.roundId === nilRoundId;
+        const sessionLevel = (event.type === "permission_mode_changed" || event.type === "tool_dialect_changed") &&
+            event.roundId === nilRoundId;
         const sessionEvent = {
             type: "round_started", sessionId: session.id, roundId: "round-1",
             sequence: sessionLevel ? 1 : ++sequence, ...event,
@@ -82,6 +87,13 @@ function harness(options: { sessionPermissionBeforeRound?: boolean; blockSubscri
                     permissionMode: "auto",
                 });
             }
+            if (options.toolDialectBeforeRound) {
+                emit({
+                    type: "tool_dialect_changed",
+                    roundId: nilRoundId,
+                    toolDialect: "codex",
+                });
+            }
             emit({ type: "round_started" });
             emit({ type: "tool_approval_requested", approval: approval("first") });
             started.resolve();
@@ -108,6 +120,16 @@ function harness(options: { sessionPermissionBeforeRound?: boolean; blockSubscri
 }
 
 describe("tool approval lifecycle", () => {
+    test("applies session-level tool dialect changes before a round starts", async () => {
+        const h = harness({ toolDialectBeforeRound: true });
+        const run = useAppStore.getState().sendMessage("start a Codex Mode round");
+        await h.started.promise;
+
+        expect(useAppStore.getState().session?.toolDialect).toBe("codex");
+        h.emit({ type: "round_ended", status: "completed" });
+        await run;
+    });
+
     test("cancels unfinished tools in the ended round, including partial streamed calls", async () => {
         const h = harness();
         useAppStore.setState({ history: [{

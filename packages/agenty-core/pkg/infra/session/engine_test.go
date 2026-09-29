@@ -537,8 +537,8 @@ func TestEngineProjectsFileToolsBySessionDialect(t *testing.T) {
 		codex bool
 		want  []string
 	}{
-		{name: "default", want: []string{"str_replace_based_edit_tool"}},
-		{name: "codex", codex: true, want: []string{"apply_patch", "read_file"}},
+		{name: "default", want: []string{"future_builtin", "glob", "grep", "ls", "mcp__server__lookup", "shell", "str_replace_based_edit_tool"}},
+		{name: "codex", codex: true, want: []string{"apply_patch", "glob", "grep", "ls", "mcp__server__lookup", "read_file", "shell"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -547,6 +547,12 @@ func TestEngineProjectsFileToolsBySessionDialect(t *testing.T) {
 			for _, definition := range []modelcall.ToolDefinition{
 				{Type: modelcall.ToolTypeApplyPatch, Name: "apply_patch"},
 				{Type: modelcall.ToolTypeFunction, Name: "read_file"},
+				{Type: modelcall.ToolTypeFunction, Name: "shell"},
+				{Type: modelcall.ToolTypeFunction, Name: "grep"},
+				{Type: modelcall.ToolTypeFunction, Name: "glob"},
+				{Type: modelcall.ToolTypeFunction, Name: "ls"},
+				{Type: modelcall.ToolTypeFunction, Name: "mcp__server__lookup"},
+				{Type: modelcall.ToolTypeFunction, Name: "future_builtin"},
 				{Type: modelcall.ToolTypeTextEditor, Name: "str_replace_based_edit_tool"},
 			} {
 				if err := fixture.registry.Register(&executionTestTool{definition: definition}); err != nil {

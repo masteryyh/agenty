@@ -23,8 +23,10 @@ export const commands: Command[] = [
     },
     {
         name: "/new",
-        description: "Start a new empty session",
-        usage: "/new",
+        description: "Start a new session, optionally in Codex Mode",
+        usage: "/new [codex]",
+        argHint: "codex",
+        completeArgs: async () => ["codex"],
     },
     {
         name: "/provider",
@@ -68,7 +70,7 @@ export const commands: Command[] = [
     },
     {
         name: "/codex-mode",
-        description: "Enable one-way Codex file tools for this session",
+        description: "Toggle Codex Mode before conversation content exists",
         usage: "/codex-mode",
     },
 ];

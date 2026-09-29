@@ -1,6 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 
-import type { ChatSessionDto, ModelDto, PermissionMode } from "../api/types";
+import type { ChatSessionDto, ModelDto, PermissionMode, ToolDialect } from "../api/types";
 import type { CliOptions } from "../config";
 import {
     type OverlayKind,
@@ -21,7 +21,7 @@ export interface AppSlice {
     promptHistory: string[];
     init: () => Promise<void>;
     reset: () => void;
-    newSession: () => Promise<void>;
+    newSession: (toolDialect?: ToolDialect) => Promise<void>;
     switchModel: (model: ModelDto) => Promise<void>;
     resumeSession: (session: ChatSessionDto) => Promise<void>;
     setOverlay: (overlay: OverlayKind) => void;
@@ -31,7 +31,7 @@ export interface AppSlice {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
-    enableCodexMode: () => Promise<void>;
+    toggleCodexMode: () => Promise<void>;
     recordInput: (text: string) => Promise<boolean>;
 }
 
@@ -60,7 +60,7 @@ export function useApp(): AppSlice {
             setCwd: s.setCwd,
             setPermissionMode: s.setPermissionMode,
             togglePermissionMode: s.togglePermissionMode,
-            enableCodexMode: s.enableCodexMode,
+            toggleCodexMode: s.toggleCodexMode,
             recordInput: s.recordInput,
         })),
     );

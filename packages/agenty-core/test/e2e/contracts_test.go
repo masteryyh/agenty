@@ -189,6 +189,7 @@ type SessionCreateInput struct {
 	ModelCode       string  `json:"modelCode"`
 	ContextWindow   int64   `json:"contextWindow,omitempty"`
 	ReasoningEffort string  `json:"reasoningEffort,omitempty"`
+	ToolDialect     string  `json:"toolDialect,omitempty"`
 	Cwd             *string `json:"cwd,omitempty"`
 }
 

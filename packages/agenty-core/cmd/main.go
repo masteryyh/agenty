@@ -263,6 +263,7 @@ func run() (exitCode int) {
 	sessionService = application.NewSessionService(
 		repos.Conversation,
 		application.WithSessionExecutionState(execution),
+		application.WithSessionCatalog(repos.Catalog),
 	)
 	providerService := application.NewProviderService(repos.Catalog)
 	initializeService := application.NewInitializeService(providerService, config.Get())

@@ -16,6 +16,15 @@ import (
 
 const textEditorToolName = "str_replace_based_edit_tool"
 
+var codexBuiltinToolNames = map[string]struct{}{
+	"apply_patch": {},
+	"glob":        {},
+	"grep":        {},
+	"ls":          {},
+	"read_file":   {},
+	"shell":       {},
+}
+
 // Config controls the middleware's provider-neutral prompt guidance.
 type Config struct{}
 
@@ -76,7 +85,8 @@ func selectTools(runtime agentloop.ToolRuntime, dialect conversation.ToolDialect
 	return infratools.Filter(runtime, func(definition modelcall.ToolDefinition) bool {
 		switch dialect.Normalized() {
 		case conversation.ToolDialectCodex:
-			return definition.Name != textEditorToolName
+			_, isCodexBuiltin := codexBuiltinToolNames[definition.Name]
+			return isCodexBuiltin || strings.HasPrefix(definition.Name, "mcp__")
 		default:
 			return definition.Name != "read_file" && definition.Name != "apply_patch"
 		}
@@ -101,9 +111,9 @@ func appendPrompt(prompt string, dialect conversation.ToolDialect) string {
 }
 
 const defaultPrompt = `<file-editing>
-Use str_replace_based_edit_tool for every local file or directory read and every text edit. Its view command reads files or lists directories; use str_replace only when the old text occurs exactly once, create only for a new path, and insert after the requested 1-based line. Do not use shell commands to edit files.
+Use str_replace_based_edit_tool for every local file or directory read and every text edit. Its view command reads files or lists directories; use str_replace only when the old text occurs exactly once, create only for a new path, and insert after the requested 1-based line.
 </file-editing>`
 
 const codexPrompt = `<file-editing>
-This session uses Codex Mode. Use read_file to inspect files and the free-form apply_patch tool for every file modification. Submit a complete V4A patch directly to apply_patch. Do not use shell commands to edit files.
+Use read_file to inspect local files. Use the free-form apply_patch tool for file modifications. Its input must be a complete V4A patch, including the opening *** Begin Patch and closing *** End Patch markers.
 </file-editing>`

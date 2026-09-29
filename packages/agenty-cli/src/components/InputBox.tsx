@@ -69,10 +69,10 @@ export const InputBox = forwardRef<StructuredTextInputHandle, InputBoxProps>(({
 }: InputBoxProps, ref) => {
     const { columns } = useWindowSize();
     const shortcuts = columns >= 100
-        ? "? Help · Shift+Tab Permissions · ↑↓ History · Tab Complete · PgUp/PgDn Scroll"
+        ? "? Help · Shift+M Codex Mode · Shift+Tab Permissions · ↑↓ History · Tab Complete · PgUp/PgDn Scroll"
         : columns >= 60
-            ? "? Help · Shift+Tab Mode · ↑↓ History · PgUp/PgDn Scroll"
-            : "? Help · Shift+Tab · ↑↓ History";
+            ? "? Help · Shift+M Codex Mode · Shift+Tab Mode · ↑↓ History · PgUp/PgDn Scroll"
+            : "? Help · Shift+M · Shift+Tab · ↑↓ History";
 
     useInput(
         (_input, key, event) => {

@@ -530,6 +530,18 @@ func (engine *Engine) applyPendingPermissionMode(ctx context.Context, prepared *
 }
 
 func (engine *Engine) EnableCodexMode(ctx context.Context, sessionID string) (*conversation.Session, error) {
+	return engine.SetToolDialect(ctx, sessionID, conversation.ToolDialectCodex)
+}
+
+func (engine *Engine) SetToolDialect(
+	ctx context.Context,
+	sessionID string,
+	dialect conversation.ToolDialect,
+) (*conversation.Session, error) {
+	if !dialect.Valid() {
+		return nil, apperrors.Validation("invalid tool dialect: " + string(dialect))
+	}
+
 	id, err := uuid.Parse(sessionID)
 	if err != nil {
 		return nil, apperrors.Validation("invalid session id: " + err.Error())
@@ -553,24 +565,38 @@ func (engine *Engine) EnableCodexMode(ctx context.Context, sessionID string) (*c
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "failed to load session", err)
 	}
 	engine.bindExecutionSession(id, execution, session)
-	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
-		return nil, apperrors.Validation("session model is not configured")
+	var provider *catalog.Provider
+	var model *catalog.Model
+	if dialect == conversation.ToolDialectCodex {
+		if session.CurrentModel == nil || session.CurrentModel.IsZero() {
+			return nil, apperrors.Validation("session model is not configured")
+		}
+		provider, model, err = engine.loadCatalogModel(ctx, *session.CurrentModel)
+		if err != nil {
+			return nil, err
+		}
+		if provider.Type != catalog.APIOpenAI {
+			return nil, apperrors.Validation("Codex Mode requires a Responses API provider")
+		}
 	}
 
-	provider, model, err := engine.loadCatalogModel(ctx, *session.CurrentModel)
+	changed, err := session.SetToolDialect(dialect)
+	if errors.Is(err, conversation.ErrToolDialectLocked) {
+		return nil, apperrors.Validation("tool dialect can only change before conversation content exists")
+	}
+	if errors.Is(err, conversation.ErrInvalidToolDialect) {
+		return nil, apperrors.Validation("invalid tool dialect: " + string(dialect))
+	}
 	if err != nil {
-		return nil, err
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "change tool dialect", err)
 	}
-	if provider.Type != catalog.APIOpenAI {
-		return nil, apperrors.Validation("Codex Mode requires a Responses API provider")
-	}
-	if !session.EnableCodexMode() {
+	if !changed {
 		return session.VisibleCopy(), nil
 	}
 
-	change := conversation.SessionCodexModeEnabled{SessionID: session.ID}
+	change := conversation.SessionToolDialectChanged{SessionID: session.ID}
 	for _, pending := range slices.Backward(session.PendingEvents()) {
-		if recorded, ok := pending.(conversation.SessionCodexModeEnabled); ok {
+		if recorded, ok := pending.(conversation.SessionToolDialectChanged); ok {
 			change = recorded
 			break
 		}
@@ -579,7 +605,7 @@ func (engine *Engine) EnableCodexMode(ctx context.Context, sessionID string) (*c
 		Type:    agentloop.EventToolDialectChanged,
 		Payload: change,
 	}); err != nil {
-		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist Codex Mode", err)
+		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist tool dialect", err)
 	}
 	return session.VisibleCopy(), nil
 }

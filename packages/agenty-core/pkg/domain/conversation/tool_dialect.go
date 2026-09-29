@@ -1,8 +1,6 @@
 package conversation
 
 // ToolDialect selects the built-in file-tool contract for a session.
-// Codex mode is intentionally one-way: start a new session to return to the
-// default editor contract.
 type ToolDialect string
 
 const (

@@ -33,6 +33,7 @@ func (r *SessionRoutes) RegisterRoutes(v1 *gin.RouterGroup) {
 	sessions.PUT("/:id/reasoning-effort", r.SetReasoningEffort)
 	sessions.PUT("/:id/cwd", r.SetCwd)
 	sessions.PUT("/:id/permission-mode", r.SetPermissionMode)
+	sessions.PUT("/:id/tool-dialect", r.SetToolDialect)
 	sessions.POST("/:id/codex-mode", r.EnableCodexMode)
 	sessions.POST("/:id/rounds", r.Start)
 	sessions.POST("/:id/rounds/:roundId/cancel", r.Stop)
@@ -92,6 +93,11 @@ type sessionSetCwdParams struct {
 type sessionSetPermissionModeParams struct {
 	ID             string                      `json:"id"`
 	PermissionMode conversation.PermissionMode `json:"permissionMode"`
+}
+
+type sessionSetToolDialectParams struct {
+	ID          string                   `json:"id"`
+	ToolDialect conversation.ToolDialect `json:"toolDialect"`
 }
 
 type sessionStartParams struct {
@@ -167,6 +173,12 @@ func (r *SessionRoutes) SetPermissionMode(c *gin.Context) {
 func (r *SessionRoutes) EnableCodexMode(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p idParams) (any, error) {
 		return r.withPendingPermissionMode(r.execution.EnableCodexMode(ctx, p.ID))
+	})
+}
+
+func (r *SessionRoutes) SetToolDialect(c *gin.Context) {
+	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetToolDialectParams) (any, error) {
+		return r.withPendingPermissionMode(r.execution.SetToolDialect(ctx, p.ID, p.ToolDialect))
 	})
 }
 

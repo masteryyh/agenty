@@ -174,6 +174,14 @@ func (c *agentyClient) EnableCodexMode(ctx context.Context, id string) (Session,
 	return result, err
 }
 
+func (c *agentyClient) SetToolDialect(ctx context.Context, id, toolDialect string) (Session, error) {
+	var result Session
+	err := c.process.Request(ctx, http.MethodPut, "/v1/sessions/"+url.PathEscape(id)+"/tool-dialect", map[string]any{
+		"toolDialect": toolDialect,
+	}, &result)
+	return result, err
+}
+
 func (c *agentyClient) StartSession(ctx context.Context, id string, content []ContentInput) (ExecutionStart, error) {
 	if err := c.subscribeSession(ctx, id); err != nil {
 		return ExecutionStart{}, err

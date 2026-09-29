@@ -14,6 +14,7 @@ import type {
     SkillDto,
     ToolApprovalRequest,
     ToolApprovalResolution,
+    ToolDialect,
     ToolResult,
 } from "../api/types";
 import type { CliOptions } from "../config";
@@ -40,7 +41,6 @@ export type StoreClient = Pick<AgentyClient,
     | "createSession"
     | "deleteModel"
     | "deleteProvider"
-    | "enableCodexMode"
     | "eventCursor"
     | "getModel"
     | "getSession"
@@ -68,6 +68,7 @@ export type StoreClient = Pick<AgentyClient,
     | "setSessionModel"
     | "setSessionPermissionMode"
     | "setSessionReasoningEffort"
+    | "setToolDialect"
     | "updateModel"
     | "updateMcpServer"
     | "updateProvider"
@@ -150,7 +151,7 @@ interface AppState {
     recordInput: (text: string) => Promise<boolean>;
     abort: () => void;
     reset: () => void;
-    newSession: () => Promise<void>;
+    newSession: (toolDialect?: ToolDialect) => Promise<void>;
     switchModel: (model: ModelDto) => Promise<void>;
     resumeSession: (session: ChatSessionDto) => Promise<void>;
     setOverlay: (overlay: OverlayKind) => void;
@@ -160,7 +161,7 @@ interface AppState {
     setCwd: (path: string | null) => Promise<void>;
     setPermissionMode: (mode: PermissionMode) => Promise<void>;
     togglePermissionMode: () => Promise<void>;
-    enableCodexMode: () => Promise<void>;
+    toggleCodexMode: () => Promise<void>;
 }
 
 let idCounter = 0;
@@ -451,6 +452,7 @@ function mergeToolCalls(
 export const useAppStore = create<AppState>((set, get) => {
     let permissionChangeQueue: Promise<void> = Promise.resolve();
     let latestPermissionChange: { sessionId: string; mode: PermissionMode } | null = null;
+    let toolDialectChangeQueue: Promise<void> = Promise.resolve();
     const observedClients = new WeakSet<StoreClient>();
     const flushCurrent = () => {
         const current = get().current;
@@ -500,7 +502,7 @@ export const useAppStore = create<AppState>((set, get) => {
             } : {});
             return;
         }
-        if (event.type !== "permission_mode_changed" &&
+        if (event.type !== "permission_mode_changed" && event.type !== "tool_dialect_changed" &&
             (!get().activeRoundId || get().activeRoundId !== event.roundId)) {
             return;
         }
@@ -985,6 +987,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     session.id,
                     resolvedEffort.effort,
                 );
+                await toolDialectChangeQueue;
                 await permissionChangeQueue;
                 const started = await client.startSession(session.id, trimmed);
                 expectedRoundId = started.roundId;
@@ -1083,7 +1086,7 @@ export const useAppStore = create<AppState>((set, get) => {
             });
         },
 
-        newSession: async () => {
+        newSession: async (toolDialect = "default") => {
             if (get().activeSessionId) {
                 setToast("Stop the current round before starting another session.");
                 return;
@@ -1095,10 +1098,18 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const requestedEffort = reasoningEffort(thinkingEnabled, thinkingLevel);
                 const resolvedEffort = resolveReasoningEffortForModel(model, requestedEffort);
-                const session = await client.createSession(model, resolvedEffort.effort, "ask", process.cwd());
+                const session = await client.createSession(
+                    model,
+                    resolvedEffort.effort,
+                    "ask",
+                    process.cwd(),
+                    toolDialect,
+                );
                 client.subscribeSession(session.id, client.eventCursor(`session:${session.id}`));
                 set({ session, history: [], current: null, tokenConsumed: 0, overlay: null, activeRoundId: null });
-                setToast(resolvedEffort.notice ?? "New session created.");
+                setToast(resolvedEffort.notice ?? (toolDialect === "codex"
+                    ? "New Codex Mode session created."
+                    : "New session created."));
             } catch (error) {
                 pushSystem(`new session failed: ${(error as Error).message}`, true);
             }
@@ -1246,22 +1257,40 @@ export const useAppStore = create<AppState>((set, get) => {
             await get().setPermissionMode(mode);
         },
 
-        enableCodexMode: async () => {
-            const { client, session } = get();
+        toggleCodexMode: async () => {
+            const { activeSessionId, client, session } = get();
+            if (activeSessionId) {
+                setToast("Stop the current round before changing Codex Mode.");
+                return;
+            }
             if (!client || !session) {
                 return;
             }
-            if (session.toolDialect === "codex") {
-                setToast("Codex Mode is already enabled.");
-                return;
-            }
-            try {
-                const updated = await client.enableCodexMode(session.id);
-                set({ session: updated });
-                setToast("Codex Mode enabled for this session.");
-            } catch (error) {
-                setToast(`Codex Mode: ${(error as Error).message}`, true);
-            }
+            const send = async () => {
+                const state = get();
+                if (state.client !== client || state.session?.id !== session.id) {
+                    return;
+                }
+                if (state.activeSessionId) {
+                    setToast("Stop the current round before changing Codex Mode.");
+                    return;
+                }
+                const toolDialect = state.session.toolDialect === "codex" ? "default" : "codex";
+                try {
+                    const updated = await client.setToolDialect(session.id, toolDialect);
+                    if (get().client !== client || get().session?.id !== session.id) {
+                        return;
+                    }
+                    set({ session: updated });
+                    setToast(toolDialect === "codex" ? "Codex Mode enabled." : "Codex Mode disabled.");
+                } catch (error) {
+                    if (get().client === client && get().session?.id === session.id) {
+                        setToast(`Codex Mode: ${(error as Error).message}`, true);
+                    }
+                }
+            };
+            toolDialectChangeQueue = toolDialectChangeQueue.then(send);
+            await toolDialectChangeQueue;
         },
     };
 });

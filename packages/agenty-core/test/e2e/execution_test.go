@@ -220,7 +220,7 @@ func TestCodexModeUsesResponsesToolsAndLocksProviderDialect(t *testing.T) {
 
 	session, err := createExecutionResources(ctx, client, fixture, "openai", "codex")
 	requireNoError(t, err)
-	updated, err := client.EnableCodexMode(ctx, session.ID)
+	updated, err := client.SetToolDialect(ctx, session.ID, "codex")
 	requireNoError(t, err)
 	if updated.ToolDialect != "codex" {
 		t.Fatalf("tool dialect = %q, want codex", updated.ToolDialect)
@@ -233,6 +233,11 @@ func TestCodexModeUsesResponsesToolsAndLocksProviderDialect(t *testing.T) {
 	requireNoError(t, err)
 	_, err = client.WaitForRoundStatus(ctx, session.ID, started.RoundID, "completed")
 	requireNoError(t, err)
+	if _, err = client.SetToolDialect(ctx, session.ID, "default"); err == nil {
+		t.Fatal("tool dialect changed after conversation content was added")
+	} else {
+		requireAPIError(t, err, "invalid_params")
+	}
 
 	request := waitForProviderCall(t, ctx, fixture.requests, 1)
 	wantTools := []string{"apply_patch", "glob", "grep", "ls", "read_file", "shell"}
@@ -261,6 +266,21 @@ func TestCodexModeUsesResponsesToolsAndLocksProviderDialect(t *testing.T) {
 		ModelCode:    "legacy-model",
 	}); err == nil {
 		t.Fatal("Codex Mode accepted a non-Responses provider")
+	}
+}
+
+func TestCreateCodexModeSession(t *testing.T) {
+	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
+		return providerSuccess("openai", "Codex Mode reply", request.Call)
+	})
+	ctx, cancel := testContext(t)
+	defer cancel()
+	client := newAgentyClient(startCore(t))
+
+	session, err := createExecutionResources(ctx, client, fixture, "openai", "codex-create", "codex")
+	requireNoError(t, err)
+	if session.ToolDialect != "codex" {
+		t.Fatalf("created session tool dialect = %q, want codex", session.ToolDialect)
 	}
 }
 

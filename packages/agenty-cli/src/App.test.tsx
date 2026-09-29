@@ -6,6 +6,7 @@ import { act } from "react";
 import type { ChatSessionDto, ModelDto } from "./api/types";
 import { App } from "./App";
 import { useAppStore } from "./state/store";
+import { createStoreClient } from "./state/testClient";
 import { TuiRuntimeProvider } from "./tui/runtime";
 
 const model: ModelDto = {
@@ -78,6 +79,35 @@ afterEach(() => {
 });
 
 describe("chat input interactions", () => {
+    test("toggles Codex Mode with Shift+M and shows its footer label", async () => {
+        const client = createStoreClient({
+            async setToolDialect(_id, toolDialect) {
+                return { ...session, toolDialect };
+            },
+        });
+        useAppStore.setState({ client, session });
+        const setup = await testRender(<TestApp />, { width: 80, height: 24 });
+
+        try {
+            await act(async () => {
+                await setup.flush();
+            });
+            expect(setup.captureCharFrame()).toContain("Shift+M Codex Mode");
+            expect(setup.captureCharFrame()).not.toContain("codex mode");
+
+            await act(async () => {
+                setup.mockInput.pressKey("m", { shift: true });
+                await setup.flush();
+            });
+
+            expect(useAppStore.getState().session?.toolDialect).toBe("codex");
+            expect(useAppStore.getState().toast?.text).toBe("Codex Mode enabled.");
+            expect(setup.captureCharFrame()).toContain("codex mode");
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
     test("distinguishes the effective permission mode from the pending selection", async () => {
         useAppStore.setState({ session: { ...session, permissionMode: "auto", pendingPermissionMode: "yolo" } });
         const setup = await testRender(<TestApp />, { width: 100, height: 24 });
@@ -104,7 +134,7 @@ describe("chat input interactions", () => {
             await act(async () => {
                 await setup.flush();
             });
-            expect(setup.captureCharFrame()).toContain("? Help · Shift+Tab Mode · ↑↓ History");
+            expect(setup.captureCharFrame()).toContain("? Help · Shift+M Codex Mode · Shift+Tab Mode · ↑↓ History");
 
             await act(async () => {
                 await setup.mockInput.typeText("?");
@@ -126,7 +156,9 @@ describe("chat input interactions", () => {
             await act(async () => {
                 await setup.flush();
             });
-            expect(setup.captureCharFrame()).toContain("? Help · Shift+Tab · ↑↓ History");
+            const shortcutFrame = setup.captureCharFrame();
+            expect(shortcutFrame).toContain("? Help · Shift+M");
+            expect(shortcutFrame).toContain("↑↓ History");
 
             await act(async () => {
                 await setup.mockInput.typeText("?");

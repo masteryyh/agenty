@@ -17,6 +17,8 @@ var (
 	ErrRoundNotRunning    = errors.New("conversation: round is not running")
 	ErrInvalidRole        = errors.New("conversation: invalid message role")
 	ErrInvalidCompaction  = errors.New("conversation: invalid compaction")
+	ErrInvalidToolDialect = errors.New("conversation: invalid tool dialect")
+	ErrToolDialectLocked  = errors.New("conversation: tool dialect cannot change after conversation content exists")
 )
 
 type Session struct {
@@ -58,8 +60,22 @@ func StartSessionWithPermission(
 	cwd *string,
 	permissionMode PermissionMode,
 ) *Session {
+	return StartSessionWithModes(model, contextWindow, effort, cwd, permissionMode, ToolDialectDefault)
+}
+
+func StartSessionWithModes(
+	model shared.ModelRef,
+	contextWindow int64,
+	effort shared.ReasoningEffort,
+	cwd *string,
+	permissionMode PermissionMode,
+	toolDialect ToolDialect,
+) *Session {
 	if !permissionMode.Valid() {
 		permissionMode = PermissionAsk
+	}
+	if !toolDialect.Valid() {
+		toolDialect = ToolDialectDefault
 	}
 	s := &Session{Rounds: make([]Round, 0)}
 	s.record(SessionStarted{
@@ -68,7 +84,7 @@ func StartSessionWithPermission(
 		ContextWindow:   contextWindow,
 		ReasoningEffort: effort,
 		PermissionMode:  permissionMode,
-		ToolDialect:     ToolDialectDefault,
+		ToolDialect:     toolDialect.Normalized(),
 		Cwd:             cloneString(cwd),
 		At:              now(),
 	})
@@ -94,11 +110,41 @@ func (s *Session) CurrentToolDialect() ToolDialect {
 }
 
 func (s *Session) EnableCodexMode() bool {
-	if s == nil || s.CurrentToolDialect() == ToolDialectCodex {
+	changed, err := s.SetToolDialect(ToolDialectCodex)
+	return changed && err == nil
+}
+
+func (s *Session) HasConversationContent() bool {
+	if s == nil {
 		return false
 	}
-	s.record(SessionCodexModeEnabled{SessionID: s.ID, At: now()})
-	return true
+	for _, round := range s.Rounds {
+		for _, message := range round.Messages {
+			if !message.IsHidden() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Session) SetToolDialect(dialect ToolDialect) (bool, error) {
+	if s == nil || !dialect.Valid() {
+		return false, ErrInvalidToolDialect
+	}
+	if s.CurrentToolDialect() == dialect {
+		return false, nil
+	}
+	if s.HasConversationContent() {
+		return false, ErrToolDialectLocked
+	}
+	s.record(SessionToolDialectChanged{
+		SessionID:       s.ID,
+		PreviousDialect: s.CurrentToolDialect(),
+		ToolDialect:     dialect.Normalized(),
+		At:              now(),
+	})
+	return true, nil
 }
 
 func (s *Session) SetPermissionMode(mode PermissionMode, roundID uuid.UUID) bool {
@@ -446,6 +492,11 @@ func (s *Session) apply(e shared.Event) {
 		s.UpdatedAt = ev.At
 	case SessionCodexModeEnabled:
 		s.ToolDialect = ToolDialectCodex
+		s.updateMetadataToolDialect(s.ToolDialect)
+		s.refreshCompactionMetadata()
+		s.UpdatedAt = ev.At
+	case SessionToolDialectChanged:
+		s.ToolDialect = ev.ToolDialect.Normalized()
 		s.updateMetadataToolDialect(s.ToolDialect)
 		s.refreshCompactionMetadata()
 		s.UpdatedAt = ev.At

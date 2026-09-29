@@ -122,6 +122,9 @@ func projectSessionEvent(event agentloop.Event) (SessionEvent, bool) {
 	if _, ok := event.Payload.(conversation.SessionCodexModeEnabled); ok {
 		projected.ToolDialect = conversation.ToolDialectCodex
 	}
+	if change, ok := event.Payload.(conversation.SessionToolDialectChanged); ok {
+		projected.ToolDialect = change.ToolDialect
+	}
 	return projected, true
 }
 

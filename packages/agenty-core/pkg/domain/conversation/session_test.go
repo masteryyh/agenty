@@ -73,7 +73,7 @@ func TestSessionPermissionModeChangeIsPersistedAndReplayed(t *testing.T) {
 	}
 }
 
-func TestSessionCodexModeIsOneWayAndReplayed(t *testing.T) {
+func TestSessionToolDialectCanChangeOnlyBeforeVisibleConversationContent(t *testing.T) {
 	session := StartSession(
 		shared.NewModelRef("openai", "gpt-5.6"),
 		200_000,
@@ -83,19 +83,56 @@ func TestSessionCodexModeIsOneWayAndReplayed(t *testing.T) {
 	if got := session.CurrentToolDialect(); got != ToolDialectDefault {
 		t.Fatalf("default tool dialect = %q, want default", got)
 	}
-	if !session.EnableCodexMode() {
-		t.Fatal("EnableCodexMode() = false, want true")
+	if changed, err := session.SetToolDialect(ToolDialectCodex); err != nil || !changed {
+		t.Fatalf("SetToolDialect(codex) = (%v, %v), want (true, nil)", changed, err)
 	}
-	if session.EnableCodexMode() {
-		t.Fatal("second EnableCodexMode() = true, want false")
+	if changed, err := session.SetToolDialect(ToolDialectDefault); err != nil || !changed {
+		t.Fatalf("SetToolDialect(default) = (%v, %v), want (true, nil)", changed, err)
 	}
-	if got := session.CurrentToolDialect(); got != ToolDialectCodex {
-		t.Fatalf("tool dialect = %q, want codex", got)
+
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenMessage(roundID, RoleDeveloper, Text("metadata"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if session.HasConversationContent() {
+		t.Fatal("hidden metadata counts as conversation content")
+	}
+	if _, err := session.AppendUserMessage(roundID, Text("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if session.HasConversationContent() == false {
+		t.Fatal("visible user message does not count as conversation content")
+	}
+	if changed, err := session.SetToolDialect(ToolDialectCodex); changed || !errors.Is(err, ErrToolDialectLocked) {
+		t.Fatalf("SetToolDialect after conversation = (%v, %v), want (false, locked)", changed, err)
 	}
 
 	replayed := ReplaySession(session.PendingEvents())
+	if got := replayed.CurrentToolDialect(); got != ToolDialectDefault {
+		t.Fatalf("replayed tool dialect = %q, want default", got)
+	}
+	if !replayed.HasConversationContent() {
+		t.Fatal("replay lost visible conversation content")
+	}
+}
+
+func TestLegacyCodexModeEventStillReplays(t *testing.T) {
+	session := StartSession(
+		shared.NewModelRef("openai", "gpt-5.6"),
+		200_000,
+		shared.ReasoningOff,
+		nil,
+	)
+	started := session.PendingEvents()[0].(SessionStarted)
+	replayed := ReplaySession([]shared.Event{
+		started,
+		SessionCodexModeEnabled{SessionID: session.ID, At: now()},
+	})
 	if got := replayed.CurrentToolDialect(); got != ToolDialectCodex {
-		t.Fatalf("replayed tool dialect = %q, want codex", got)
+		t.Fatalf("legacy replayed tool dialect = %q, want codex", got)
 	}
 }
 

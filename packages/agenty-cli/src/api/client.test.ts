@@ -226,4 +226,31 @@ describe("AgentyClient HTTP endpoints", () => {
             body: { cwd: "D:\\work", providerCode: "openai", modelCode: "gpt-test" },
         });
     });
+
+    test("creates Codex Mode sessions with the requested tool dialect", async () => {
+        const session = { id: "session", rounds: [], toolDialect: "codex" } as unknown as ChatSessionDto;
+        const transport = new MockTransport(() => session);
+        const model = { providerCode: "openai", code: "gpt-test", contextWindow: 128000 } as ModelDto;
+
+        await new AgentyClient(transport).createSession(model, "off", "ask", "/workspace", "codex");
+
+        expect(transport.calls[0]).toMatchObject({
+            method: "POST",
+            path: "/v1/sessions",
+            body: { toolDialect: "codex" },
+        });
+    });
+
+    test("updates the session tool dialect", async () => {
+        const session = { id: "session", rounds: [], toolDialect: "default" } as unknown as ChatSessionDto;
+        const transport = new MockTransport(() => session);
+
+        await new AgentyClient(transport).setToolDialect("session", "default");
+
+        expect(transport.calls).toEqual([{
+            method: "PUT",
+            path: "/v1/sessions/session/tool-dialect",
+            body: { toolDialect: "default" },
+        }]);
+    });
 });
