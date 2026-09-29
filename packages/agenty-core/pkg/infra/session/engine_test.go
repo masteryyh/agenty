@@ -1077,15 +1077,6 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 		t.Fatal(changed.err)
 	}
 	waitForExecution(t, engine, session.ID)
-	expectedRoundID := started.result.RoundID
-	if engine.PendingPermissionMode(session.ID) != "" {
-		next, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("continue"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		expectedRoundID = next.RoundID
-		waitForExecution(t, engine, session.ID)
-	}
 
 	var modeEvent conversation.SessionPermissionModeChanged
 	found := false
@@ -1095,7 +1086,7 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || modeEvent.RoundID != expectedRoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
+	if !found || modeEvent.PermissionMode != conversation.PermissionAuto {
 		t.Fatalf("permission event = %+v, start = %+v", modeEvent, started.result)
 	}
 }

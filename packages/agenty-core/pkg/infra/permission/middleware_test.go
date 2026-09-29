@@ -346,7 +346,7 @@ func TestMiddlewareAutoReviewLifecycleAndRejection(t *testing.T) {
 	}
 }
 
-func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
+func TestPermissionModeChangeKeepsPendingApproval(t *testing.T) {
 	manager := permission.NewPermissionManager()
 	session := &conversation.Session{ID: uuid.New()}
 	round := &conversation.Round{ID: uuid.New()}
@@ -365,9 +365,7 @@ func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
 	request := <-requested
-	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionYolo); err != nil {
-		t.Fatal(err)
-	}
+	_ = session.SetPermissionMode(conversation.PermissionYolo, round.ID)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +382,7 @@ func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
 	}
 }
 
-func TestPermissionModeChangedRechecksPendingApprovalInAutoMode(t *testing.T) {
+func TestPermissionModeChangeDoesNotRecheckPendingApproval(t *testing.T) {
 	manager := permission.NewPermissionManager()
 	cwd := t.TempDir()
 	session := &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAsk}
@@ -412,9 +410,7 @@ func TestPermissionModeChangedRechecksPendingApprovalInAutoMode(t *testing.T) {
 	if !session.SetPermissionMode(conversation.PermissionAuto, round.ID) {
 		t.Fatal("failed to switch session to auto mode")
 	}
-	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionAuto); err != nil {
-		t.Fatal(err)
-	}
+	_ = session.SetPermissionMode(conversation.PermissionAuto, round.ID)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +459,7 @@ func TestManualDenialWinsWhileAutomaticRecheckIsRunning(t *testing.T) {
 				if !session.SetPermissionMode(conversation.PermissionAuto, round.ID) {
 					t.Fatal("failed to switch to auto mode")
 				}
-				return manager.PermissionModeChanged(ctx, session.ID, conversation.PermissionAuto)
+				return nil
 			}
 		case permission.EventResolved:
 			resolved <- event.Payload.(permission.Resolution)
@@ -653,7 +649,7 @@ func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
 					if !state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID) {
 						t.Fatal("failed to switch session to auto mode")
 					}
-					return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+					return nil
 				}
 				if request.Message == "" || strings.Contains(request.Message, "secret must") {
 					t.Fatalf("bad approval reason: %q", request.Message)
@@ -709,7 +705,7 @@ func TestInvalidReviewAfterRetryDeniesCurrentCall(t *testing.T) {
 							t.Fatal("invalid reviewer output fell back to manual approval")
 						}
 						state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID)
-						return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+						return nil
 					case permission.EventReviewResolved:
 						reviews++
 					case permission.EventResolved:

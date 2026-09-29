@@ -167,11 +167,10 @@ func run() (exitCode int) {
 		}
 		roundID, running := execution.ActiveRoundID(id)
 		return map[string]any{
-			"session":               session,
-			"isRunning":             running,
-			"roundId":               roundID,
-			"pendingApprovals":      permissionManager.PendingForSession(id),
-			"pendingPermissionMode": execution.PendingPermissionMode(id),
+			"session":          session,
+			"isRunning":        running,
+			"roundId":          roundID,
+			"pendingApprovals": permissionManager.PendingForSession(id),
 		}, nil
 	})
 	mcpRegistry, err = mcp.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcp.Options{
@@ -240,12 +239,11 @@ func run() (exitCode int) {
 	}
 	middlewareChain.SetEventBarrier(eventBroker.TopicBarrier)
 	execution, err = infrasession.NewEngine(ctx, infrasession.Dependencies{
-		Sessions:              repos.Conversation,
-		Catalog:               repos.Catalog,
-		Tools:                 toolRegistry,
-		LoopHooks:             middlewareChain.AgentLoopHooks(),
-		Lifecycle:             middlewareChain.LifecycleHooks(),
-		PermissionModeChanged: permissionManager.PermissionModeChanged,
+		Sessions:  repos.Conversation,
+		Catalog:   repos.Catalog,
+		Tools:     toolRegistry,
+		LoopHooks: middlewareChain.AgentLoopHooks(),
+		Lifecycle: middlewareChain.LifecycleHooks(),
 	})
 	if err != nil {
 		reportCoreError(ctx, "failed to initialize execution engine", "error", err)

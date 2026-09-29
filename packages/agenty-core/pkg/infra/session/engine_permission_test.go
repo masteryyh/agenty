@@ -75,8 +75,8 @@ func TestEngineAppliesLatestPermissionBeforeModelHook(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if engine.PendingPermissionMode(session.ID) != "" || len(fixture.sessions.events[session.ID]) != 1 {
-				t.Fatal("switching back to the effective mode must discard all staged changes")
+			if len(fixture.sessions.events[session.ID]) != 4 {
+				t.Fatal("permission changes must be persisted immediately")
 			}
 			if _, err := engine.SetPermissionMode(t.Context(), session.ID.String(), conversation.PermissionAuto); err != nil {
 				t.Fatal(err)
@@ -96,8 +96,8 @@ func TestEngineAppliesLatestPermissionBeforeModelHook(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if updated.CurrentPermissionMode() != conversation.PermissionAuto {
-					t.Fatal("staged mode affected the current model/tool iteration")
+				if updated.CurrentPermissionMode() != mode {
+					t.Fatal("permission mode did not apply immediately")
 				}
 			}
 			if cancelRound {
@@ -108,9 +108,6 @@ func TestEngineAppliesLatestPermissionBeforeModelHook(t *testing.T) {
 				close(release)
 			}
 			waitForExecution(t, engine, session.ID)
-			if engine.PendingPermissionMode(session.ID) != conversation.PermissionYolo {
-				t.Fatal("pending mode was lost at round completion")
-			}
 			if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("second")); err != nil {
 				t.Fatal(err)
 			}
@@ -128,8 +125,8 @@ func TestEngineAppliesLatestPermissionBeforeModelHook(t *testing.T) {
 					changes++
 				}
 			}
-			if changes != 2 || engine.PendingPermissionMode(session.ID) != "" {
-				t.Fatalf("permission events = %d, pending = %s", changes, engine.PendingPermissionMode(session.ID))
+			if changes != 7 {
+				t.Fatalf("permission events = %d", changes)
 			}
 		})
 	}

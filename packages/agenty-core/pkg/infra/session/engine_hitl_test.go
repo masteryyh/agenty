@@ -64,7 +64,6 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			engine, err := infrasession.NewEngine(t.Context(), infrasession.Dependencies{
 				Sessions: fixture.sessions, Catalog: fixture.catalog, Tools: fixture.registry,
 				InvokeModel: caller.Call, LoopHooks: chain.AgentLoopHooks(), Lifecycle: chain.LifecycleHooks(),
-				PermissionModeChanged: manager.PermissionModeChanged,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -104,7 +103,8 @@ func TestEngineHITLLifecycle(t *testing.T) {
 				select {
 				case event := <-events:
 					sequence++
-					if event.Sequence != sequence || event.SessionID != session.ID || event.RoundID != start.RoundID {
+					if event.Sequence != sequence || event.SessionID != session.ID ||
+						(event.RoundID != start.RoundID && event.Type != httpapi.SessionEventPermissionModeChanged) {
 						t.Fatalf("invalid event identity/sequence: %+v", event)
 					}
 					return event
@@ -346,15 +346,8 @@ func TestEnginePermissionSwitchesPreserveResponsesToolSequence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if updated.CurrentPermissionMode() != conversation.PermissionAsk {
-			t.Fatalf("permission mode changed before the next model call: %s", updated.CurrentPermissionMode())
-		}
-		wantPending := mode
-		if mode == conversation.PermissionAsk {
-			wantPending = ""
-		}
-		if engine.PendingPermissionMode(session.ID) != wantPending {
-			t.Fatalf("pending mode = %s, want %s", engine.PendingPermissionMode(session.ID), wantPending)
+		if updated.CurrentPermissionMode() != mode {
+			t.Fatalf("permission mode did not change immediately: %s", updated.CurrentPermissionMode())
 		}
 	}
 	close(release)
@@ -368,15 +361,12 @@ func TestEnginePermissionSwitchesPreserveResponsesToolSequence(t *testing.T) {
 	}
 	changes := 0
 	for _, event := range fixture.sessions.events[session.ID] {
-		if change, ok := event.(conversation.SessionPermissionModeChanged); ok {
+		if _, ok := event.(conversation.SessionPermissionModeChanged); ok {
 			changes++
-			if change.PermissionMode != conversation.PermissionYolo {
-				t.Fatalf("persisted an intermediate mode: %s", change.PermissionMode)
-			}
 		}
 	}
-	if changes != 1 {
-		t.Fatalf("permission change events = %d, want 1", changes)
+	if changes != 4 {
+		t.Fatalf("permission change events = %d, want 4", changes)
 	}
 	if err := engine.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)

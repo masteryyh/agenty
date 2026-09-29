@@ -512,13 +512,9 @@ export const useAppStore = create<AppState>((set, get) => {
                 if (state.session?.id !== event.sessionId) {
                     return {};
                 }
-                const requested = latestPermissionChange?.sessionId === event.sessionId
-                    ? latestPermissionChange.mode
-                    : state.session.pendingPermissionMode;
                 return { session: {
                     ...state.session,
                     permissionMode,
-                    pendingPermissionMode: requested === permissionMode ? undefined : requested,
                 } };
             });
             return;
@@ -1206,14 +1202,15 @@ export const useAppStore = create<AppState>((set, get) => {
             if (!client || !session || (mode !== "ask" && mode !== "auto" && mode !== "yolo")) {
                 return;
             }
-            if ((session.pendingPermissionMode ?? session.permissionMode ?? "ask") === mode) {
+            if ((latestPermissionChange?.sessionId === session.id && latestPermissionChange.mode === mode) ||
+                (latestPermissionChange === null && (session.permissionMode ?? "ask") === mode)) {
                 return;
             }
             const change = { sessionId: session.id, mode };
             latestPermissionChange = change;
             set({ session: {
                 ...session,
-                pendingPermissionMode: mode === (session.permissionMode ?? "ask") ? undefined : mode,
+                permissionMode: mode,
             } });
             const send = async () => {
                 if (latestPermissionChange !== change) {
@@ -1226,19 +1223,17 @@ export const useAppStore = create<AppState>((set, get) => {
                     }
                     set((state) => ({ session: state.session ? {
                         ...state.session,
-                        pendingPermissionMode: mode === (state.session.permissionMode ?? "ask")
-                            ? undefined
-                            : updated.pendingPermissionMode,
+                        permissionMode: updated.permissionMode ?? mode,
                     } : null }));
                     latestPermissionChange = null;
-                    setToast(`permissions: ${mode}${get().session?.pendingPermissionMode ? " (pending)" : ""}`);
+                    setToast(`permissions: ${mode}`);
                 } catch (error) {
                     if (latestPermissionChange === change && get().session?.id === session.id) {
                         const updated = await client.getSession(session.id).catch(() => null);
                         if (latestPermissionChange === change && get().session?.id === session.id) {
                             set((state) => ({ session: state.session ? {
                                 ...state.session,
-                                pendingPermissionMode: updated?.pendingPermissionMode,
+                                permissionMode: updated?.permissionMode ?? state.session.permissionMode,
                             } : null }));
                             setToast(`permissions: ${(error as Error).message}`, true);
                             latestPermissionChange = null;
@@ -1252,7 +1247,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
         togglePermissionMode: async () => {
             const session = get().session;
-            const current = session?.pendingPermissionMode ?? session?.permissionMode ?? "ask";
+            const current = session?.permissionMode ?? "ask";
             const mode = current === "ask" ? "auto" : current === "auto" ? "yolo" : "ask";
             await get().setPermissionMode(mode);
         },
