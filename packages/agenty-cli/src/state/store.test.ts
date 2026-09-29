@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentyClient } from "../api/client";
-import type { ChatSessionDto, ModelDto, SessionEvent } from "../api/types";
+import type { ChatSessionDto, ModelDto, ReasoningEffort, SessionEvent } from "../api/types";
 import { resolveReasoningEffortForModel, useAppStore } from "./store";
+import { createStoreClient } from "./testClient";
 
 const session: ChatSessionDto = {
     id: "session-1",
@@ -50,15 +50,15 @@ describe("reasoning effort fallback", () => {
         } satisfies ModelDto;
         let persistedEffort = "";
         const current = { ...session, currentReasoningEffort: "max" as const };
-        const client = {
+        const client = createStoreClient({
             async setSessionModel() {
                 return current;
             },
-            async setSessionReasoningEffort(_id: string, effort: string) {
+            async setSessionReasoningEffort(_id: string, effort: ReasoningEffort) {
                 persistedEffort = effort;
                 return { ...current, currentReasoningEffort: effort };
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({ client, session: current, thinkingEnabled: true, thinkingLevel: "max" });
 
         await useAppStore.getState().switchModel(nextModel);
@@ -114,7 +114,7 @@ describe("reasoning effort fallback", () => {
             isDefault: false,
         } satisfies ModelDto;
         let updates = 0;
-        const client = {
+        const client = createStoreClient({
             async prepareSession() {
                 return { model, session: resumed };
             },
@@ -125,7 +125,7 @@ describe("reasoning effort fallback", () => {
             async listSkills() {
                 return { skills: [], diagnostics: [] };
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({
             client,
             opts: { newSession: false },
@@ -157,7 +157,7 @@ function makeEvent(sequence: number, event: Omit<SessionEvent, "sessionId" | "ro
 describe("chat tool event projection", () => {
     test("upserts duplicate starts and upgrades placeholder ids before attaching results", async () => {
         const listeners = new Set<(event: SessionEvent) => void>();
-        const client = {
+        const client = createStoreClient({
             onSessionEvent(listener: (event: SessionEvent) => void) {
                 listeners.add(listener);
                 return () => listeners.delete(listener);
@@ -289,7 +289,7 @@ describe("chat tool event projection", () => {
             async getSession() {
                 return session;
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({
             client,
@@ -380,7 +380,7 @@ describe("chat tool event projection", () => {
                 endedAt: "2026-01-01T00:00:03Z",
             }],
         };
-        const client = {
+        const client = createStoreClient({
             async getSession() {
                 return persisted;
             },
@@ -397,7 +397,7 @@ describe("chat tool event projection", () => {
                     isDefault: true,
                 };
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({ client, session, history: [], current: null });
         await useAppStore.getState().resumeSession(session);
@@ -466,7 +466,7 @@ describe("chat tool event projection", () => {
                 endedAt: "2026-01-01T00:00:03Z",
             }],
         };
-        const client = {
+        const client = createStoreClient({
             async getSession() {
                 return persisted;
             },
@@ -483,7 +483,7 @@ describe("chat tool event projection", () => {
                     isDefault: true,
                 };
             },
-        } as unknown as AgentyClient;
+        });
 
         useAppStore.setState({ client, session, history: [], current: null });
         await useAppStore.getState().resumeSession(session);

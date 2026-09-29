@@ -59,7 +59,8 @@ describe("input history", () => {
     });
 
     test("resolves the history below the configured data directory", () => {
-        expect(resolveInputHistoryPath("/tmp/agenty-data")).toBe("/tmp/agenty-data/input-history");
+        const dataDirectory = join(tmpdir(), "agenty-data");
+        expect(resolveInputHistoryPath(dataDirectory)).toBe(join(dataDirectory, "input-history"));
     });
 
     test("reports a write error without changing an existing directory target", async () => {

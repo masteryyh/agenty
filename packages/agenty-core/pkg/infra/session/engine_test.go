@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -19,10 +20,10 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
+	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
-	infrarpc "github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	infrastorage "github.com/masteryyh/agenty-core/pkg/infra/storage"
 	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
@@ -182,22 +183,13 @@ func (fixture *executionFixture) newEngine(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
 ) *infrasession.Engine {
-	return fixture.newEngineWithEvents(t, invokeModel, nil)
+	return fixture.newEngineWithBroker(t, invokeModel, httpapi.NewStreamBroker(nil))
 }
 
-func (fixture *executionFixture) newEngineWithEvents(
+func (fixture *executionFixture) newEngineWithBroker(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
-	events func(context.Context, infrarpc.SessionEvent) error,
-) *infrasession.Engine {
-	return fixture.newEngineWithHandlers(t, invokeModel, events, nil)
-}
-
-func (fixture *executionFixture) newEngineWithHandlers(
-	t *testing.T,
-	invokeModel modelcall.InvokeFunc,
-	events func(context.Context, infrarpc.SessionEvent) error,
-	compactions func(context.Context, infracompaction.Event) error,
+	broker *httpapi.StreamBroker,
 ) *infrasession.Engine {
 	t.Helper()
 
@@ -217,32 +209,7 @@ func (fixture *executionFixture) newEngineWithHandlers(
 	if err := middlewareManager.Register(infrastorage.NewSessionMiddleware(fixture.sessions)); err != nil {
 		t.Fatal(err)
 	}
-	if err := middlewareManager.Register(infrarpc.NewSessionNotificationMiddleware(
-		func(ctx context.Context, method string, payload any) error {
-			switch method {
-			case "session.event":
-				if events == nil {
-					return nil
-				}
-				event, ok := payload.(infrarpc.SessionEvent)
-				if !ok {
-					return errors.New("unexpected session event payload")
-				}
-				return events(ctx, event)
-			case "session.compaction":
-				if compactions == nil {
-					return nil
-				}
-				event, ok := payload.(infracompaction.Event)
-				if !ok {
-					return errors.New("unexpected compaction event payload")
-				}
-				return compactions(ctx, event)
-			default:
-				return errors.New("unexpected notification method")
-			}
-		},
-	)); err != nil {
+	if err := middlewareManager.Register(httpapi.NewSessionEventMiddleware(broker)); err != nil {
 		t.Fatal(err)
 	}
 	middlewareChain, err := middlewareManager.Compile()
@@ -280,38 +247,43 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 		Usage:      conversation.TokenUsage{Input: 2, Output: 3, Total: 5},
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	events := make(chan infrarpc.SessionEvent, 16)
-	engine := fixture.newEngineWithEvents(
-		t,
-		caller.Call,
-		func(_ context.Context, event infrarpc.SessionEvent) error {
-			events <- event
-			return nil
-		},
-	)
+	broker := httpapi.NewStreamBroker(nil)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
 	started, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitForExecution(t, engine, session.ID)
 
-	got := make([]infrarpc.SessionEvent, 0, 6)
+	got := make([]httpapi.SessionEvent, 0, 6)
 	for len(got) < 6 {
 		select {
-		case event := <-events:
+		case frame := <-subscription.Frames:
+			if frame.Type != "event" {
+				continue
+			}
+			var event httpapi.SessionEvent
+			if err := json.Unmarshal(frame.Event, &event); err != nil {
+				t.Fatal(err)
+			}
 			got = append(got, event)
 		case <-time.After(time.Second):
 			t.Fatalf("received %d events, want 6", len(got))
 		}
 	}
-	wantTypes := []infrarpc.SessionEventType{
-		infrarpc.SessionEventRoundStarted,
-		infrarpc.SessionEventMessageAppended,
-		infrarpc.SessionEventModelStream,
-		infrarpc.SessionEventModelStream,
-		infrarpc.SessionEventMessageAppended,
-		infrarpc.SessionEventRoundEnded,
+	wantTypes := []httpapi.SessionEventType{
+		httpapi.SessionEventRoundStarted,
+		httpapi.SessionEventMessageAppended,
+		httpapi.SessionEventModelStream,
+		httpapi.SessionEventModelStream,
+		httpapi.SessionEventMessageAppended,
+		httpapi.SessionEventRoundEnded,
 	}
 	for i, event := range got {
 		if event.Type != wantTypes[i] {
@@ -335,7 +307,7 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 	}
 }
 
-func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
+func TestEngineContinuesAfterEventConsumerDisconnects(t *testing.T) {
 	t.Parallel()
 
 	fixture := newExecutionFixture(t, 8_192)
@@ -343,17 +315,14 @@ func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
 		Content:    conversation.Text("done"),
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	engine := fixture.newEngineWithEvents(
-		t,
-		caller.Call,
-		func(_ context.Context, event infrarpc.SessionEvent) error {
-			if event.Type == infrarpc.SessionEventRoundStarted {
-				return errors.New("client disconnected")
-			}
-			return nil
-		},
-	)
+	broker := httpapi.NewStreamBroker(nil)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription.Close()
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("hello")); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -363,7 +332,7 @@ func TestEngineCompletesRoundWhenInitialNotificationFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Rounds) != 1 || loaded.Rounds[0].Status != conversation.RoundFailed {
+	if len(loaded.Rounds) != 1 || loaded.Rounds[0].Status != conversation.RoundCompleted {
 		t.Fatalf("persisted rounds = %+v", loaded.Rounds)
 	}
 }
@@ -667,7 +636,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}
-	compactionEvents := make(chan infracompaction.Event, 2)
+	broker := httpapi.NewStreamBroker(nil)
 	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
 		{
 			Content: conversation.Text("Task goals: finish the task\nCompleted: initial work\nIncomplete: follow up"),
@@ -679,21 +648,18 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 			StopReason: modelcall.ModelCallStopReasonEndTurn,
 		},
 	}}
-	engine := fixture.newEngineWithHandlers(
-		t,
-		caller.Call,
-		nil,
-		func(_ context.Context, event infracompaction.Event) error {
-			compactionEvents <- event
-			return nil
-		},
-	)
+	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	session.SetModel(*session.CurrentModel, 100)
 	if err := fixture.sessions.Save(t.Context(), session); err != nil {
 		t.Fatal(err)
 	}
 	session.ClearPending()
+	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
 
 	if _, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("finish the task")); err != nil {
 		t.Fatal(err)
@@ -730,9 +696,32 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if len(requests[1].Messages) != 2 {
 		t.Fatalf("post-compaction message count = %d", len(requests[1].Messages))
 	}
-	started := <-compactionEvents
-	completed := <-compactionEvents
-	if started.Type != infracompaction.EventStarted || completed.Type != infracompaction.EventCompleted || started.CompactionID != completed.CompactionID {
+	var started, completed infracompaction.Event
+	deadline := time.After(time.Second)
+	for completed.Type == "" {
+		select {
+		case frame := <-subscription.Frames:
+			if frame.Type != "event" {
+				continue
+			}
+			var event httpapi.CompactionStreamEvent
+			if err := json.Unmarshal(frame.Event, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Kind != "compaction" {
+				continue
+			}
+			if event.Event.Type == infracompaction.EventStarted {
+				started = event.Event
+			}
+			if event.Event.Type == infracompaction.EventCompleted {
+				completed = event.Event
+			}
+		case <-deadline:
+			t.Fatalf("compaction stream events = %+v, %+v", started, completed)
+		}
+	}
+	if started.Type != infracompaction.EventStarted || started.CompactionID != completed.CompactionID {
 		t.Errorf("compaction events = %+v, %+v", started, completed)
 	}
 }

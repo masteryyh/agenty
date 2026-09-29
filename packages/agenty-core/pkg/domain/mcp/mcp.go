@@ -1,10 +1,12 @@
 package mcp
 
 import (
-	"encoding/json"
+	stdjson "encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+
+	json "github.com/bytedance/sonic"
 )
 
 // Transport identifies the wire transport used by an MCP server.
@@ -43,10 +45,12 @@ func (config *Config) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
+
+	var fields map[string]stdjson.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
+
 	if _, present := fields["enabled"]; !present {
 		decoded.Enabled = true
 	}

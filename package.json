@@ -24,7 +24,7 @@
         "file-editor:lint": "pnpm --filter file-editor lint",
         "file-editor:clean": "pnpm --filter file-editor clean",
         "cli:build": "node scripts/build.mjs agenty-cli",
-        "cli:dev": "node scripts/turbo.mjs build agenty-core && pnpm --filter agenty-cli dev",
+        "cli:dev": "node scripts/dev.mjs",
         "cli:typecheck": "pnpm --filter agenty-cli typecheck",
         "cli:clean": "pnpm --filter agenty-cli clean",
         "bootstrap:build": "node scripts/build.mjs agenty-bootstrap",

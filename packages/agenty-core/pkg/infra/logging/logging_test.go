@@ -111,7 +111,7 @@ func TestOpenTextFiltersByLevel(t *testing.T) {
 	}
 
 	logger.Debug("hidden debug message")
-	logger.Info("core ready", "component", "rpc")
+	logger.Info("core ready", "component", "httpapi")
 	if err := logger.Close(); err != nil {
 		t.Fatalf("close logger: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestOpenTextFiltersByLevel(t *testing.T) {
 	if strings.Contains(text, "hidden debug message") {
 		t.Fatalf("log contains filtered debug entry: %q", text)
 	}
-	if !strings.Contains(text, `level=INFO msg="core ready" component=rpc`) {
+	if !strings.Contains(text, `level=INFO msg="core ready" component=httpapi`) {
 		t.Fatalf("text log = %q", text)
 	}
 }

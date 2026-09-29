@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { AgentyClient } from "../api/client";
 import type {
     ChatSessionDto,
     PermissionMode,
+    ReasoningEffort,
     SessionEvent,
     ToolApprovalRequest,
     ToolApprovalResolution,
 } from "../api/types";
 import { useAppStore } from "./store";
+import { createStoreClient } from "./testClient";
 
 const session: ChatSessionDto = {
     id: "hitl-session", rounds: [], contextWindow: 32000,
@@ -27,26 +28,34 @@ function approval(id: string): ToolApprovalRequest {
 
 afterEach(() => useAppStore.setState(useAppStore.getInitialState(), true));
 
-function harness(options: { sessionPermissionBeforeRound?: boolean } = {}) {
-    let listener: ((event: SessionEvent) => void) | undefined;
+function harness(options: { sessionPermissionBeforeRound?: boolean; blockSubscription?: boolean } = {}) {
+    const listeners = new Set<(event: SessionEvent) => void>();
     let close: ((error: Error) => void) | undefined;
     let sequence = 0;
     const nilRoundId = "00000000-0000-0000-0000-000000000000";
     const started = Promise.withResolvers<void>();
     const response = Promise.withResolvers<void>();
+    const subscription = Promise.withResolvers<void>();
+    if (!options.blockSubscription) {
+        subscription.resolve();
+    }
     const submissions: ToolApprovalResolution[] = [];
+    let startCount = 0;
     const emit = (event: Partial<SessionEvent>) => {
         const sessionLevel = event.type === "permission_mode_changed" && event.roundId === nilRoundId;
-        listener?.({
+        const sessionEvent = {
             type: "round_started", sessionId: session.id, roundId: "round-1",
             sequence: sessionLevel ? 1 : ++sequence, ...event,
-        });
+        } as SessionEvent;
+        for (const listener of listeners) {
+            listener(sessionEvent);
+        }
     };
-    const client = {
+    const client = createStoreClient({
         onSessionEvent(callback: (event: SessionEvent) => void) {
-            listener = callback;
+            listeners.add(callback);
             return () => {
-                listener = undefined;
+                listeners.delete(callback);
             };
         },
         onClose(callback: (error: Error) => void) {
@@ -55,8 +64,17 @@ function harness(options: { sessionPermissionBeforeRound?: boolean } = {}) {
                 close = undefined;
             };
         },
-        async setSessionReasoningEffort() {},
+        async setSessionReasoningEffort(_id: string, reasoningEffort: ReasoningEffort) {
+            return { ...session, currentReasoningEffort: reasoningEffort };
+        },
+        async subscribeSessionAndWait(id: string) {
+            if (id !== session.id) {
+                throw new Error(`unexpected subscription topic ${id}`);
+            }
+            await subscription.promise;
+        },
         async startSession() {
+            startCount += 1;
             if (options.sessionPermissionBeforeRound) {
                 emit({
                     type: "permission_mode_changed",
@@ -76,9 +94,17 @@ function harness(options: { sessionPermissionBeforeRound?: boolean } = {}) {
             submissions.push(resolution);
             await response.promise;
         },
-    } as unknown as AgentyClient;
+    });
     useAppStore.setState({ ...useAppStore.getInitialState(), client, session, phase: "ready" });
-    return { emit, started, response, submissions, disconnect: () => close?.(new Error("core disconnected")) };
+    return {
+        emit,
+        started,
+        response,
+        subscription,
+        submissions,
+        get startCount() { return startCount; },
+        disconnect: () => close?.(new Error("core disconnected")),
+    };
 }
 
 describe("tool approval lifecycle", () => {
@@ -134,9 +160,9 @@ describe("tool approval lifecycle", () => {
                 content: [{ type: "tool_result", toolUseId: "complete", isError: true, content: [{ type: "text", text: "denied" }] }],
             }],
         }] };
-        const client = { async getSession() {
+        const client = createStoreClient({ async getSession() {
             return persisted;
-        } } as unknown as AgentyClient;
+        } });
         useAppStore.setState({ ...useAppStore.getInitialState(), client, session });
         await useAppStore.getState().resumeSession(session);
         const calls = useAppStore.getState().history[0].toolCalls!;
@@ -168,6 +194,21 @@ describe("tool approval lifecycle", () => {
         await run;
     });
 
+    test("waits for the subscription snapshot before submitting a non-idempotent start", async () => {
+        const h = harness({ blockSubscription: true });
+        const run = useAppStore.getState().sendMessage("read notes");
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(h.startCount).toBe(0);
+        expect(useAppStore.getState().activeRoundId).toBeNull();
+
+        h.subscription.resolve();
+        await h.started.promise;
+        expect(h.startCount).toBe(1);
+        h.emit({ type: "round_ended", status: "completed" });
+        await run;
+    });
+
     test("does not bind a session-level permission event to the active round", async () => {
         const h = harness({ sessionPermissionBeforeRound: true });
         const run = useAppStore.getState().sendMessage("read notes");
@@ -179,7 +220,7 @@ describe("tool approval lifecycle", () => {
         await run;
     });
 
-    test("retains the request and error after a failed decision RPC", async () => {
+    test("retains the request and error after a failed decision request", async () => {
         const h = harness();
         const run = useAppStore.getState().sendMessage("read notes");
         await h.started.promise;
@@ -203,28 +244,35 @@ describe("tool approval lifecycle", () => {
     });
 
     test("marks a tool as reviewing only between review lifecycle events", async () => {
-        let listener: ((event: SessionEvent) => void) | undefined;
+        const listeners = new Set<(event: SessionEvent) => void>();
         let sequence = 0;
         const reviewStarted = Promise.withResolvers<void>();
         const finishReview = Promise.withResolvers<void>();
-        const emit = (event: Partial<SessionEvent>) => listener?.({
-            type: "round_started",
-            sessionId: session.id,
-            roundId: "round-review",
-            sequence: ++sequence,
-            ...event,
-        });
-        const client = {
+        const emit = (event: Partial<SessionEvent>) => {
+            const sessionEvent = {
+                type: "round_started",
+                sessionId: session.id,
+                roundId: "round-review",
+                sequence: ++sequence,
+                ...event,
+            } as SessionEvent;
+            for (const listener of listeners) {
+                listener(sessionEvent);
+            }
+        };
+        const client = createStoreClient({
             onSessionEvent(callback: (event: SessionEvent) => void) {
-                listener = callback;
+                listeners.add(callback);
                 return () => {
-                    listener = undefined;
+                    listeners.delete(callback);
                 };
             },
             onClose() {
                 return () => {};
             },
-            async setSessionReasoningEffort() {},
+            async setSessionReasoningEffort(_id: string, reasoningEffort: ReasoningEffort) {
+                return { ...session, currentReasoningEffort: reasoningEffort };
+            },
             async startSession() {
                 emit({ type: "round_started" });
                 emit({
@@ -264,7 +312,7 @@ describe("tool approval lifecycle", () => {
             async getSession() {
                 return session;
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({ ...useAppStore.getInitialState(), client, session, phase: "ready" });
 
         const run = useAppStore.getState().sendMessage("review this tool");
@@ -284,11 +332,11 @@ describe("tool approval lifecycle", () => {
 });
 
 describe("pending permission selection", () => {
-    test("cycles immediately and serializes RPCs without accepting stale responses", async () => {
+    test("cycles immediately and serializes requests without accepting stale responses", async () => {
         const firstStarted = Promise.withResolvers<void>();
         const releaseFirst = Promise.withResolvers<void>();
         const requests: PermissionMode[] = [];
-        const client = {
+        const client = createStoreClient({
             async setSessionPermissionMode(_id: string, mode: PermissionMode) {
                 requests.push(mode);
                 if (requests.length === 1) {
@@ -297,7 +345,7 @@ describe("pending permission selection", () => {
                 }
                 return { ...session, permissionMode: "ask", pendingPermissionMode: mode === "ask" ? undefined : mode };
             },
-        } as unknown as AgentyClient;
+        });
         useAppStore.setState({ ...useAppStore.getInitialState(), client, session: { ...session, permissionMode: "ask" } });
         const first = useAppStore.getState().togglePermissionMode();
         await firstStarted.promise;
@@ -313,7 +361,7 @@ describe("pending permission selection", () => {
         expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
     });
 
-    test("does not restore pending mode when the effective event precedes its RPC response", async () => {
+    test("does not restore pending mode when the effective event precedes its response", async () => {
         const h = harness();
         const run = useAppStore.getState().sendMessage("read");
         await h.started.promise;

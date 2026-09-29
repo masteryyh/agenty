@@ -6,11 +6,12 @@ import { REPOSITORY_ROOT, workspaceModules } from "./workspaces.mjs";
 export function resolveUpdatePlan(
     repositoryRoot = REPOSITORY_ROOT,
     hostPlatform = process.platform,
+    environment = process.env,
 ) {
     const steps = [
         {
             args: ["update", "--recursive"],
-            command: packageManagerCommand(hostPlatform),
+            command: packageManagerCommand(hostPlatform, environment),
             cwd: repositoryRoot,
             label: "pnpm workspace dependencies",
         },
@@ -56,8 +57,8 @@ function exitCode(step, result) {
     return result.status;
 }
 
-export function runUpdate(repositoryRoot = REPOSITORY_ROOT, hostPlatform = process.platform) {
-    for (const step of resolveUpdatePlan(repositoryRoot, hostPlatform)) {
+export function runUpdate(repositoryRoot = REPOSITORY_ROOT, hostPlatform = process.platform, environment = process.env) {
+    for (const step of resolveUpdatePlan(repositoryRoot, hostPlatform, environment)) {
         console.log(`\n==> ${step.label}`);
         const result = spawnSyncCommand(step.command, step.args, {
             cwd: resolve(step.cwd),

@@ -1,4 +1,4 @@
-import type { StdioRPCClient } from "../core/rpc";
+import type { CoreTransport, EventCursor, StreamFrame } from "../core/http2";
 import { formatModelRef, resolveModelInput as resolveModelInputFromList } from "./modelReference";
 import type {
     AvailableModelDto,
@@ -39,38 +39,75 @@ export interface PreparedSession {
 }
 
 export class AgentyClient {
-    constructor(private readonly rpc: StdioRPCClient) {}
+    private readonly sessionListeners = new Set<(event: SessionEvent) => void>();
+    private readonly compactionListeners = new Set<(event: CompactionEvent) => void>();
+    private readonly mcpListeners = new Set<(event: McpEvent) => void>();
+    private readonly streamListeners = new Set<(frame: StreamFrame) => void | Promise<void>>();
+
+    constructor(private readonly http: CoreTransport) {
+        this.http.onFrame(async (frame) => {
+            const event = frame.event as { kind?: string } | undefined;
+            if (frame.type === "event" && event?.kind === "session") {
+                for (const listener of this.sessionListeners) listener(normalizeSessionEvent(event as SessionEvent));
+            } else if (frame.type === "event" && event?.kind === "compaction") {
+                for (const listener of this.compactionListeners) listener(event as CompactionEvent);
+            } else if (frame.type === "event" && frame.topic === "mcp" && event) {
+                for (const listener of this.mcpListeners) listener(event as McpEvent);
+            }
+            for (const listener of this.streamListeners) await listener(frame);
+        });
+    }
+
+    close(): void {
+        this.http.disconnect();
+    }
+
+    subscribeSession(id: string, after?: EventCursor): void {
+        this.http.subscribe(`session:${id}`, after);
+    }
+
+    subscribeSessionAndWait(id: string, after?: EventCursor): Promise<void> {
+        return this.http.subscribeAndWait(`session:${id}`, after);
+    }
+
+    unsubscribeSession(id: string): void {
+        this.http.unsubscribe(`session:${id}`);
+    }
+
+    subscribeMcp(after?: EventCursor): void {
+        this.http.subscribe("mcp", after);
+    }
+
+    onStreamFrame(listener: (frame: StreamFrame) => void | Promise<void>): () => void {
+        this.streamListeners.add(listener);
+        return () => this.streamListeners.delete(listener);
+    }
+
+    eventCursor(topic: string): EventCursor | undefined {
+        return this.http.getCursor(topic);
+    }
 
     onSessionEvent(listener: (event: SessionEvent) => void): () => void {
-        return this.rpc.onNotification<SessionEvent | null | undefined>("session.event", (event) => {
-            if (event) {
-                listener(normalizeSessionEvent(event));
-            }
-        });
+        this.sessionListeners.add(listener);
+        return () => this.sessionListeners.delete(listener);
     }
 
     onCompactionEvent(listener: (event: CompactionEvent) => void): () => void {
-        return this.rpc.onNotification<CompactionEvent | null | undefined>("session.compaction", (event) => {
-            if (event) {
-                listener(event);
-            }
-        });
+        this.compactionListeners.add(listener);
+        return () => this.compactionListeners.delete(listener);
     }
 
     onMcpEvent(listener: (event: McpEvent) => void): () => void {
-        return this.rpc.onNotification<McpEvent | null | undefined>("mcp.event", (event) => {
-            if (event) {
-                listener(event);
-            }
-        });
+        this.mcpListeners.add(listener);
+        return () => this.mcpListeners.delete(listener);
     }
 
     onClose(listener: (reason: Error) => void): () => void {
-        return this.rpc.onClose(listener);
+        return this.http.onClose(listener);
     }
 
     async initializationStatus(): Promise<InitializeStatusDto> {
-        const result = await this.rpc.call<InitializeStatusDto | null>("initialize.already");
+        const result = await this.http.request<InitializeStatusDto>("GET", "/v1/initialization");
         return {
             initialized: result?.initialized === true,
             defaultModel: result?.defaultModel,
@@ -83,14 +120,13 @@ export class AgentyClient {
     }
 
     async completeInitialization(input: InitializeCompleteInput): Promise<{ initialized: boolean }> {
-        const result = await this.rpc.call<{ initialized?: boolean } | null>("initialize.complete", input);
+        const result = await this.http.request<{ initialized?: boolean }>("POST", "/v1/initialization", input);
         return { initialized: result?.initialized === true };
     }
 
     async listProviders(providerCode?: string): Promise<ModelProviderDto[]> {
-        const providers = providerCode
-            ? await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list", { providerCode })
-            : await this.rpc.call<Array<ModelProviderDto | null> | null>("provider.list");
+        const query = providerCode ? `?providerCode=${encodeURIComponent(providerCode)}` : "";
+        const providers = await this.http.request<Array<ModelProviderDto | null>>("GET", `/v1/providers${query}`);
         return (providers ?? [])
             .filter((provider): provider is ModelProviderDto => provider !== null)
             .map(normalizeProvider);
@@ -101,9 +137,9 @@ export class AgentyClient {
     }
 
     async listProviderModels(providerCode: string): Promise<AvailableModelDto[]> {
-        const models = await this.rpc.call<Array<AvailableModelDto | null> | null>("provider.listModels", {
-            providerCode,
-        });
+        const models = await this.http.request<Array<AvailableModelDto | null>>(
+            "GET", `/v1/providers/${encodeURIComponent(providerCode)}/models`,
+        );
         return (models ?? [])
             .filter((model): model is AvailableModelDto => model !== null)
             .map((model) => ({
@@ -113,7 +149,7 @@ export class AgentyClient {
     }
 
     async createProvider(input: CreateModelProviderDto): Promise<ModelProviderDto> {
-        const provider = await this.rpc.call<ModelProviderDto | null>("provider.create", input);
+        const provider = await this.http.request<ModelProviderDto>("POST", "/v1/providers", input);
         if (!provider) {
             throw new Error("core returned an empty provider");
         }
@@ -121,7 +157,7 @@ export class AgentyClient {
     }
 
     async updateProvider(code: string, input: UpdateModelProviderDto): Promise<ModelProviderDto> {
-        const provider = await this.rpc.call<ModelProviderDto | null>("provider.update", { code, ...input });
+        const provider = await this.http.request<ModelProviderDto>("PATCH", `/v1/providers/${encodeURIComponent(code)}`, input);
         if (!provider) {
             throw new Error(`core returned an empty provider for ${code}`);
         }
@@ -129,7 +165,7 @@ export class AgentyClient {
     }
 
     async deleteProvider(code: string): Promise<void> {
-        await this.rpc.call("provider.delete", { code });
+        await this.http.request("DELETE", `/v1/providers/${encodeURIComponent(code)}`);
     }
 
     async listModels(): Promise<ModelDto[]> {
@@ -175,53 +211,62 @@ export class AgentyClient {
     }
 
     async createModel(input: CreateModelDto): Promise<ModelDto> {
-        const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", input);
+        const provider = await this.http.request<ModelProviderDto>(
+            "POST", `/v1/providers/${encodeURIComponent(input.providerCode)}/models`, input,
+        );
         return findProjectedModel(provider, input.modelCode);
     }
 
     async updateModel(providerCode: string, modelCode: string, input: UpdateModelDto): Promise<ModelDto> {
-        const provider = await this.rpc.call<ModelProviderDto | null>("provider.addModel", {
+        const inputWithTarget = {
             providerCode,
             modelCode,
             ...input,
-        });
+        };
+        const provider = await this.http.request<ModelProviderDto>(
+            "POST", `/v1/providers/${encodeURIComponent(providerCode)}/models`, inputWithTarget,
+        );
         return findProjectedModel(provider, modelCode);
     }
 
     async deleteModel(providerCode: string, modelCode: string): Promise<void> {
-        await this.rpc.call("provider.removeModel", { providerCode, modelCode });
+        await this.http.request(
+            "DELETE", `/v1/providers/${encodeURIComponent(providerCode)}/models/${encodeURIComponent(modelCode)}`,
+        );
     }
 
     async createSession(
         model: ModelDto,
         effort: ReasoningEffort = "off",
         permissionMode: PermissionMode = "ask",
+        cwd = process.cwd(),
     ): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.create", {
+        const session = await this.http.request<ChatSessionDto>("POST", "/v1/sessions", {
             providerCode: model.providerCode,
             modelCode: model.code,
             contextWindow: model.contextWindow,
             reasoningEffort: effort,
             permissionMode,
+            cwd,
         });
         return requireSession(session, "session.create");
     }
 
     async getSession(id: string): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.get", { id });
+        const session = await this.http.request<ChatSessionDto>("GET", `/v1/sessions/${encodeURIComponent(id)}`);
         return requireSession(session, `session.get ${id}`);
     }
 
     async listSessionSummaries(): Promise<SessionSummaryDto[]> {
-        const summaries = await this.rpc.call<Array<SessionSummaryDto | null> | null>("session.list", {});
+        const summaries = await this.http.request<Array<SessionSummaryDto | null>>("GET", "/v1/sessions");
         return (summaries ?? []).filter((summary): summary is SessionSummaryDto => summary !== null);
     }
 
     async listSkills(): Promise<{ skills: SkillDto[]; diagnostics: SkillDiagnosticDto[] }> {
-        const result = await this.rpc.call<{
+        const result = await this.http.request<{
             skills?: SkillDto[];
             diagnostics?: SkillDiagnosticDto[];
-        } | null>("skill.list");
+        }>("GET", "/v1/skills");
         return {
             skills: result?.skills ?? [],
             diagnostics: result?.diagnostics ?? [],
@@ -229,17 +274,19 @@ export class AgentyClient {
     }
 
     async listMcpServers(): Promise<McpServerDto[]> {
-        const servers = await this.rpc.call<Array<McpServerDto | null> | null>("mcp.list");
+        const servers = await this.http.request<Array<McpServerDto | null>>("GET", "/v1/mcp");
         return (servers ?? []).filter((server): server is McpServerDto => server !== null);
     }
 
     async listMcpServerLogs(name: string): Promise<McpLogEntry[]> {
-        const logs = await this.rpc.call<Array<McpLogEntry | null> | null>("mcp.logs", { name });
+        const logs = await this.http.request<Array<McpLogEntry | null>>(
+            "GET", `/v1/mcp/${encodeURIComponent(name)}/logs`,
+        );
         return (logs ?? []).filter((log): log is McpLogEntry => log !== null);
     }
 
     async createMcpServer(name: string, config: McpServerConfig): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.create", { name, config });
+        const server = await this.http.request<McpServerDto>("POST", "/v1/mcp", { name, config });
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -247,7 +294,7 @@ export class AgentyClient {
     }
 
     async updateMcpServer(name: string, config: McpServerConfig): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.update", { name, config });
+        const server = await this.http.request<McpServerDto>("PUT", `/v1/mcp/${encodeURIComponent(name)}`, { config });
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -255,7 +302,9 @@ export class AgentyClient {
     }
 
     async setMcpEnabled(name: string, enabled: boolean): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.enable", { name, enabled });
+        const server = await this.http.request<McpServerDto>(
+            "PUT", `/v1/mcp/${encodeURIComponent(name)}/enabled`, { enabled },
+        );
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -263,7 +312,7 @@ export class AgentyClient {
     }
 
     async reconnectMcpServer(name: string): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.reconnect", { name });
+        const server = await this.http.request<McpServerDto>("POST", `/v1/mcp/${encodeURIComponent(name)}/reconnect`);
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -271,7 +320,7 @@ export class AgentyClient {
     }
 
     async loginMcpServer(name: string): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.login", { name });
+        const server = await this.http.request<McpServerDto>("POST", `/v1/mcp/${encodeURIComponent(name)}/login`);
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -279,7 +328,7 @@ export class AgentyClient {
     }
 
     async logoutMcpServer(name: string): Promise<McpServerDto> {
-        const server = await this.rpc.call<McpServerDto | null>("mcp.logout", { name });
+        const server = await this.http.request<McpServerDto>("POST", `/v1/mcp/${encodeURIComponent(name)}/logout`);
         if (!server) {
             throw new Error(`core returned an empty MCP server for ${name}`);
         }
@@ -287,7 +336,7 @@ export class AgentyClient {
     }
 
     async removeMcpServer(name: string): Promise<void> {
-        await this.rpc.call("mcp.remove", { name });
+        await this.http.request("DELETE", `/v1/mcp/${encodeURIComponent(name)}`);
     }
 
     async listSessions(): Promise<ChatSessionDto[]> {
@@ -301,8 +350,7 @@ export class AgentyClient {
     }
 
     async setSessionModel(id: string, model: ModelDto): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.setModel", {
-            id,
+        const session = await this.http.request<ChatSessionDto>("PUT", `/v1/sessions/${encodeURIComponent(id)}/model`, {
             providerCode: model.providerCode,
             modelCode: model.code,
         });
@@ -310,42 +358,49 @@ export class AgentyClient {
     }
 
     async setSessionReasoningEffort(id: string, reasoningEffort: ReasoningEffort): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.setReasoningEffort", { id, reasoningEffort });
+        const session = await this.http.request<ChatSessionDto>(
+            "PUT", `/v1/sessions/${encodeURIComponent(id)}/reasoning-effort`, { reasoningEffort },
+        );
         return requireSession(session, `session.setReasoningEffort ${id}`);
     }
 
     async setSessionCwd(id: string, cwd: string | null): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.setCwd", { id, cwd });
+        const session = await this.http.request<ChatSessionDto>("PUT", `/v1/sessions/${encodeURIComponent(id)}/cwd`, { cwd });
         return requireSession(session, `session.setCwd ${id}`);
     }
 
     async setSessionPermissionMode(id: string, permissionMode: PermissionMode): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.setPermissionMode", {
-            id,
+        const session = await this.http.request<ChatSessionDto>(
+            "PUT", `/v1/sessions/${encodeURIComponent(id)}/permission-mode`, {
             permissionMode,
-        });
+            },
+        );
         return requireSession(session, `session.setPermissionMode ${id}`);
     }
 
     async enableCodexMode(id: string): Promise<ChatSessionDto> {
-        const session = await this.rpc.call<ChatSessionDto | null>("session.enableCodexMode", { id });
+        const session = await this.http.request<ChatSessionDto>("POST", `/v1/sessions/${encodeURIComponent(id)}/codex-mode`);
         return requireSession(session, `session.enableCodexMode ${id}`);
     }
 
     startSession(id: string, text: string): Promise<ExecutionStart> {
-        return this.rpc.call("session.start", { id, content: [{ type: "text", text }] });
+        return this.http.request("POST", `/v1/sessions/${encodeURIComponent(id)}/rounds`, { content: [{ type: "text", text }] });
     }
 
-    async stopSession(id: string): Promise<void> {
-        await this.rpc.call("session.stop", { id });
+    async stopSession(id: string, roundId: string): Promise<void> {
+        await this.http.request(
+            "POST", `/v1/sessions/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/cancel`,
+        );
     }
 
     async resolveToolApproval(resolution: ToolApprovalResolution): Promise<void> {
-        await this.rpc.call("session.resolveToolApproval", resolution);
+        await this.http.request(
+            "POST", `/v1/tool-approvals/${encodeURIComponent(resolution.approvalId)}/resolution`, resolution,
+        );
     }
 
     async compactSession(id: string): Promise<void> {
-        await this.rpc.call("session.compact", { id });
+        await this.http.request("POST", `/v1/sessions/${encodeURIComponent(id)}/compact`);
     }
 
     async prepareSession(options: {

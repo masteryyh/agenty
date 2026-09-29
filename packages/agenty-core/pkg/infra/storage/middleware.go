@@ -14,7 +14,7 @@ type SessionSaver interface {
 }
 
 // NewSessionMiddleware persists pending session events before later event
-// consumers, such as CLI notification delivery, observe them.
+// consumers, such as the HTTP event stream, observe them.
 func NewSessionMiddleware(saver SessionSaver) middleware.Middleware {
 	return middleware.Middleware{
 		Name: "session-storage",

@@ -6,7 +6,7 @@ export interface Command {
     description: string;
     usage: string;
     argHint?: string;
-    completeArgs?: (client: AgentyClient) => Promise<string[]>;
+    completeArgs?: (client: Pick<AgentyClient, "listModels">) => Promise<string[]>;
 }
 
 export const commands: Command[] = [

@@ -132,6 +132,15 @@ type HookChain struct {
 	afterToolCall      []namedHook[AfterToolCallHook]
 	afterSessionStop   []namedHook[AfterSessionStopHook]
 	onEvent            []namedHook[OnEventHook]
+	eventBarrier       EventBarrier
+}
+
+// EventBarrier serializes an event's persistence and publication with a
+// snapshot taken for the same logical topic.
+type EventBarrier func(context.Context, string) (context.Context, func())
+
+func (chain *HookChain) SetEventBarrier(barrier EventBarrier) {
+	chain.eventBarrier = barrier
 }
 
 func (chain *HookChain) BeforeSessionStart(ctx context.Context, state *SessionStartContext) error {
@@ -244,8 +253,13 @@ func (chain *HookChain) AfterSessionStop(ctx context.Context, state *SessionStop
 
 // OnEvent delivers an emitted runtime event in registration order. Unlike
 // after hooks, an error stops delivery so an unpersisted event cannot reach
-// the CLI notification consumer.
+// the HTTP event stream consumer.
 func (chain *HookChain) OnEvent(ctx context.Context, state *EventContext) error {
+	if state != nil && state.Event != nil && chain.eventBarrier != nil {
+		ctx, release := chain.eventBarrier(ctx, "session:"+state.Event.SessionID.String())
+		defer release()
+		state.Context = ctx
+	}
 	for _, entry := range chain.onEvent {
 		ctx = hookContext(ctx, state.Context)
 		state.Context = ctx

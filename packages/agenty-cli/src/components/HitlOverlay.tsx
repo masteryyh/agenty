@@ -27,7 +27,7 @@ export function HitlOverlay({ approval, onDecision, onTogglePermission = () => u
     const [choice, setChoice] = useState<ToolApprovalResolution["decision"]>("deny");
     const scroll = useRef<ScrollBoxRenderable | null>(null);
     const submitted = useRef(false);
-    // A failed RPC makes the same request actionable again.
+    // A failed request makes the same approval actionable again.
     if (!approval.submitting && approval.error) {
         submitted.current = false;
     }

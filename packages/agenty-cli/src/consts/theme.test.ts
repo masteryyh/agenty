@@ -30,17 +30,18 @@ describe("theme", () => {
         const packageRoot = `${import.meta.dir}/../..`;
         const offenders: string[] = [];
         for await (const path of glob.scan({ cwd: packageRoot })) {
-            if (path === "src/consts/theme.ts" || path.includes(".test.")) {
+            const normalizedPath = path.replaceAll("\\", "/");
+            if (normalizedPath === "src/consts/theme.ts" || normalizedPath.includes(".test.")) {
                 continue;
             }
             const source = await Bun.file(`${packageRoot}/${path}`).text();
             if (/#[0-9a-fA-F]{6}\b/.test(source)) {
-                offenders.push(`${path}: hex literal`);
+                offenders.push(`${normalizedPath}: hex literal`);
             }
             const lines = source.split("\n");
             for (const [index, line] of lines.entries()) {
                 if (TERMINAL_COLOR_NAME.test(line)) {
-                    offenders.push(`${path}:${index + 1}: ${line.trim()}`);
+                    offenders.push(`${normalizedPath}:${index + 1}: ${line.trim()}`);
                 }
             }
         }

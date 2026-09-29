@@ -182,9 +182,20 @@ func (engine *Engine) Start(
 }
 
 func (engine *Engine) Stop(_ context.Context, sessionID string) (*StopResult, error) {
+	return engine.StopRound(sessionID, "")
+}
+
+func (engine *Engine) StopRound(sessionID, expectedRoundID string) (*StopResult, error) {
 	id, err := uuid.Parse(sessionID)
 	if err != nil {
 		return nil, apperrors.Validation("invalid session id: " + err.Error())
+	}
+	var expected uuid.UUID
+	if expectedRoundID != "" {
+		expected, err = uuid.Parse(expectedRoundID)
+		if err != nil {
+			return nil, apperrors.Validation("invalid round id: " + err.Error())
+		}
 	}
 
 	engine.mu.Lock()
@@ -192,7 +203,11 @@ func (engine *Engine) Stop(_ context.Context, sessionID string) (*StopResult, er
 	var roundID uuid.UUID
 	if ok {
 		roundID = execution.roundID
-		execution.cancel()
+		if expected != uuid.Nil && expected != roundID {
+			ok = false
+		} else {
+			execution.cancel()
+		}
 	}
 	engine.mu.Unlock()
 	if !ok {
@@ -387,6 +402,16 @@ func (engine *Engine) IsRunning(sessionID uuid.UUID) bool {
 
 	_, ok := engine.active[sessionID]
 	return ok
+}
+
+func (engine *Engine) ActiveRoundID(sessionID uuid.UUID) (uuid.UUID, bool) {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	active, ok := engine.active[sessionID]
+	if !ok {
+		return uuid.Nil, false
+	}
+	return active.roundID, true
 }
 
 // SetPermissionMode keeps only the latest requested mode. The running tool batch

@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveBuildVersion } from "../../../scripts/build-version.mjs";
+import { resolveCoreBuildEnvironment } from "../../../scripts/core-build-env.mjs";
 
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 
@@ -57,7 +58,9 @@ export function resolveCoreBuildPlan(
     const helperName = `fileedit${target.extension}`;
     const repositoryRoot = resolve(packageRoot, "../..");
     const version = resolveBuildVersion(environment, repositoryRoot);
+    const buildEnvironment = resolveCoreBuildEnvironment(environment, target.goOS);
     return {
+        buildEnvironment,
         corePath: join(outputDirectory, coreName),
         goArgs: [
             "build",
@@ -93,13 +96,18 @@ function run() {
     const build = spawnSync("go", plan.goArgs, {
         cwd: plan.packageRoot,
         env: {
-            ...process.env,
+            ...plan.buildEnvironment,
             AGENTY_VERSION: plan.version,
         },
         stdio: "inherit",
     });
     const buildExitCode = exitCode("go build", build);
     if (buildExitCode !== 0) {
+        console.error(
+            "agenty-core requires CGO_ENABLED=1 and a working GCC-compatible C compiler. " +
+                "On Windows, use MinGW-w64 or LLVM-MinGW and set CC to gcc.exe or clang.exe; " +
+                "MSVC cl.exe is unsupported.",
+        );
         return buildExitCode;
     }
     if (!existsSync(plan.helperSource)) {

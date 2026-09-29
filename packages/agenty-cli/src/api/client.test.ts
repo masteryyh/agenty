@@ -1,64 +1,99 @@
 import { describe, expect, test } from "bun:test";
 
-import type { StdioRPCClient } from "../core/rpc";
+import type { CoreTransport, StreamFrame } from "../core/http2";
 import { AgentyClient } from "./client";
-import type { ChatMessageDto, ChatSessionDto, ModelDto, ModelProviderDto } from "./types";
+import type {
+    ChatMessageDto,
+    ChatSessionDto,
+    ModelDto,
+    ModelProviderDto,
+} from "./types";
 
-describe("AgentyClient session list", () => {
-    test("sends a scoped tool approval decision", async () => {
-        const calls: Array<{ method: string; params: unknown }> = [];
-        const rpc = {
-            async call(method: string, params: unknown) {
-                calls.push({ method, params });
-                return {};
-            },
-        } as unknown as StdioRPCClient;
-        const resolution = { sessionId: "session", roundId: "round", approvalId: "approval", decision: "deny" as const };
-        await new AgentyClient(rpc).resolveToolApproval(resolution);
-        expect(calls).toEqual([{ method: "session.resolveToolApproval", params: resolution }]);
+class MockTransport implements CoreTransport {
+    readonly calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    readonly frames = new Set<(frame: StreamFrame) => void | Promise<void>>();
+    private readonly cursors = new Map<string, { streamId: string; sequence: number }>();
+    private closeListener?: (reason: Error) => void;
+
+    constructor(private readonly respond: (method: string, path: string, body?: unknown) => unknown = () => ({})) {}
+
+    async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+        this.calls.push({ method, path, ...(body === undefined ? {} : { body }) });
+        return this.respond(method, path, body) as T;
+    }
+
+    onFrame(listener: (frame: StreamFrame) => void | Promise<void>): () => void {
+        this.frames.add(listener);
+        return () => this.frames.delete(listener);
+    }
+
+    onClose(listener: (reason: Error) => void): () => void {
+        this.closeListener = listener;
+        return () => { this.closeListener = undefined; };
+    }
+
+    subscribe(): void {}
+    subscribeAndWait(): Promise<void> {
+        return Promise.resolve();
+    }
+    unsubscribe(): void {}
+    getCursor(topic: string): { streamId: string; sequence: number } | undefined {
+        return this.cursors.get(topic);
+    }
+    setCursor(topic: string, cursor: { streamId: string; sequence: number }): void {
+        this.cursors.set(topic, cursor);
+    }
+    disconnect(): void {
+        this.closeListener?.(new Error("disconnected"));
+    }
+
+    async emit(frame: StreamFrame): Promise<void> {
+        for (const listener of this.frames) await listener(frame);
+    }
+}
+
+const emptyTransport = () => new MockTransport();
+
+describe("AgentyClient HTTP endpoints", () => {
+    test("posts a scoped tool approval decision to the approval resource", async () => {
+        const transport = emptyTransport();
+        const resolution = {
+            sessionId: "session",
+            roundId: "round",
+            approvalId: "approval",
+            decision: "deny" as const,
+        };
+        await new AgentyClient(transport).resolveToolApproval(resolution);
+        expect(transport.calls).toEqual([{
+            method: "POST",
+            path: "/v1/tool-approvals/approval/resolution",
+            body: resolution,
+        }]);
     });
 
-    test("treats a null initialize status as not initialized", async () => {
-        const rpc = {
-            call: async () => null,
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
+    test("normalizes a null initialization response", async () => {
+        const transport = new MockTransport(() => null);
+        const client = new AgentyClient(transport);
         await expect(client.isInitialized()).resolves.toBe(false);
         await expect(client.completeInitialization({
             providerCode: "openai",
             modelCode: "gpt-test",
         })).resolves.toEqual({ initialized: false });
+        expect(transport.calls.map(({ method, path }) => [method, path])).toEqual([
+            ["GET", "/v1/initialization"],
+            ["POST", "/v1/initialization"],
+        ]);
     });
 
-    test("normalizes an empty core result from null to an empty array", async () => {
-        const rpc = {
-            call: async () => null,
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
+    test("normalizes null session and provider collections", async () => {
+        const transport = new MockTransport(() => null);
+        const client = new AgentyClient(transport);
         await expect(client.listSessionSummaries()).resolves.toEqual([]);
-    });
-
-    test("normalizes null provider lists", async () => {
-        const rpc = {
-            call: async () => null,
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
         await expect(client.listProviders()).resolves.toEqual([]);
+        expect(transport.calls.map(({ path }) => path)).toEqual(["/v1/sessions", "/v1/providers"]);
     });
 
-    test("normalizes empty skill discovery results", async () => {
-        const rpc = {
-            call: async () => null,
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.listSkills()).resolves.toEqual({ skills: [], diagnostics: [] });
-    });
-
-    test("normalizes null provider models before model projection", async () => {
+    test("normalizes provider models before projecting a model list", async () => {
         const provider = {
             code: "empty",
             name: "Empty",
@@ -69,48 +104,11 @@ describe("AgentyClient session list", () => {
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
         } as unknown as ModelProviderDto;
-        const rpc = {
-            call: async () => [provider],
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.listModels()).resolves.toEqual([]);
+        const transport = new MockTransport(() => [provider]);
+        await expect(new AgentyClient(transport).listModels()).resolves.toEqual([]);
     });
 
-    test("normalizes null event messages and nested tool results", () => {
-        let notify: ((event: unknown) => void) | undefined;
-        let received: ChatMessageDto | undefined;
-        const rpc = {
-            onNotification: (_method: string, listener: (event: unknown) => void) => {
-                notify = listener;
-                return () => {};
-            },
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        client.onSessionEvent((event) => {
-            received = event.message;
-        });
-        notify?.({
-            type: "message_appended",
-            sessionId: "session",
-            roundId: "round",
-            sequence: 1,
-            message: {
-                id: "message",
-                roundId: "round",
-                role: "assistant",
-                content: [{ type: "tool_result", toolUseId: "tool", content: null, isError: false }],
-                createdAt: "2026-01-01T00:00:00Z",
-            },
-        });
-
-        expect(received?.content).toEqual([
-            { type: "tool_result", toolUseId: "tool", content: [], isError: false },
-        ]);
-    });
-
-    test("normalizes null session collections for old core responses", async () => {
+    test("normalizes session messages and collections", async () => {
         const session = {
             id: "session",
             contextWindow: 128000,
@@ -118,220 +116,114 @@ describe("AgentyClient session list", () => {
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
         } as unknown as ChatSessionDto;
-        const rpc = {
-            call: async () => session,
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.getSession("session")).resolves.toMatchObject({ rounds: [] });
-    });
-
-    test("updates a resumed session when an explicit model is requested", async () => {
-        const currentModel = { providerCode: "openai", modelCode: "gpt-old" };
-        const requestedModel = {
-            code: "gpt-new",
-            providerCode: "openai",
-            providerName: "OpenAI",
-        } as ModelDto;
-        const existing = {
-            id: "session",
-            currentModel,
-            rounds: [],
-        } as unknown as ChatSessionDto;
-        let updatedWith: ModelDto | undefined;
-        const client = new AgentyClient({} as StdioRPCClient);
-        client.resolveModelInput = async () => requestedModel;
-        client.getLastSession = async () => existing;
-        client.setSessionModel = async (_id, model) => {
-            updatedWith = model;
-            return { ...existing, currentModel: { providerCode: model.providerCode, modelCode: model.code } };
-        };
-
-        const prepared = await client.prepareSession({
-            modelInput: "openai/gpt-new",
-            newSession: false,
+        const transport = new MockTransport(() => session);
+        await expect(new AgentyClient(transport).getSession("session"))
+            .resolves.toMatchObject({ rounds: [] });
+        expect(transport.calls[0]).toMatchObject({
+            method: "GET",
+            path: "/v1/sessions/session",
         });
-
-        expect(updatedWith).toBe(requestedModel);
-        expect(prepared.model).toBe(requestedModel);
-        expect(prepared.session.currentModel).toEqual({ providerCode: "openai", modelCode: "gpt-new" });
     });
 
-    test("resolves a persisted current model through its structured reference", async () => {
-        const currentModel = { providerCode: "deepseek", modelCode: "deepseek-v4-pro" };
-        const resolvedModel = {
-            code: "deepseek-v4-pro",
-            providerCode: "deepseek",
-            providerName: "DeepSeek",
-            name: "DeepSeek V4 Pro",
-        } as ModelDto;
-        const session = {
-            id: "session",
-            currentModel,
-            rounds: [],
-        } as unknown as ChatSessionDto;
-        let requestedRef: unknown;
-        const client = new AgentyClient({} as StdioRPCClient);
-        client.getLastSession = async () => session;
-        client.getModel = async (ref) => {
-            requestedRef = ref;
-            return resolvedModel;
-        };
-
-        const prepared = await client.prepareSession({ newSession: false });
-
-        expect(requestedRef).toEqual(currentModel);
-        expect(prepared.model).toBe(resolvedModel);
-    });
-});
-
-describe("AgentyClient provider model discovery", () => {
-    test("expands default efforts for a reasoning model with an empty list", async () => {
-        const rpc = {
-            call: async () => [{
-                code: "provider",
-                name: "Provider",
-                type: "openai",
-                baseUrl: "https://example.invalid",
-                apiKey: "configured",
-                models: [{
-                    code: "reasoning-model",
-                    name: "Reasoning model",
-                    contextWindow: 128000,
-                    maxOutputTokens: 8192,
-                    multiModal: false,
-                    light: false,
-                    reasoning: true,
-                    reasoningEfforts: [],
-                    isDefault: true,
-                }],
-                createdAt: "2026-01-01T00:00:00Z",
-                updatedAt: "2026-01-01T00:00:00Z",
-            }],
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.listModels()).resolves.toMatchObject([{
-            reasoning: true,
-            reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
-        }]);
+    test("normalizes null event messages and nested tool results", async () => {
+        const transport = emptyTransport();
+        let received: ChatMessageDto | undefined;
+        const client = new AgentyClient(transport);
+        client.onSessionEvent((event) => { received = event.message; });
+        await transport.emit({
+            type: "event",
+            topic: "session:session",
+            streamId: "stream",
+            sequence: 1,
+            cursor: { streamId: "stream", sequence: 1 },
+            event: {
+                kind: "session",
+                type: "message_appended",
+                sessionId: "session",
+                roundId: "round",
+                sequence: 1,
+                message: {
+                    id: "message",
+                    roundId: "round",
+                    role: "assistant",
+                    content: [{ type: "tool_result", toolUseId: "tool", content: null, isError: false }],
+                    createdAt: "2026-01-01T00:00:00Z",
+                },
+            },
+        });
+        expect(received?.content).toEqual([
+            { type: "tool_result", toolUseId: "tool", content: [], isError: false },
+        ]);
     });
 
-    test("skips unconfigured providers when resolving the default model", async () => {
-        const provider = (code: string, apiKey: string, modelCode: string): ModelProviderDto => ({
-            code,
-            name: code,
+    test("queries a provider-scoped model endpoint", async () => {
+        const provider = {
+            code: "openrouter",
+            name: "OpenRouter",
             type: "openai",
             baseUrl: "https://example.invalid",
-            apiKey,
+            apiKey: "configured",
             models: [{
-                code: modelCode,
-                name: modelCode,
+                code: "deepseek/deepseek-v4-pro",
+                name: "DeepSeek: DeepSeek V4 Pro",
                 contextWindow: 128000,
                 maxOutputTokens: 8192,
                 multiModal: false,
                 light: false,
+                isDefault: false,
+            }],
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+        };
+        const transport = new MockTransport(() => [provider]);
+        const model = await new AgentyClient(transport).getModel({
+            providerCode: "openrouter",
+            modelCode: "deepseek/deepseek-v4-pro",
+        });
+        expect(model).toMatchObject({ providerCode: "openrouter", code: "deepseek/deepseek-v4-pro" });
+        expect(transport.calls[0].path).toBe("/v1/providers?providerCode=openrouter");
+    });
+
+    test("uses the current HTTP API for model discovery and resolves defaults", async () => {
+        const providers: ModelProviderDto[] = [{
+            code: "anthropic",
+            name: "Anthropic",
+            type: "anthropic",
+            baseUrl: "https://example.invalid",
+            apiKey: "configured",
+            models: [{
+                code: "claude-configured",
+                name: "Claude",
+                contextWindow: 128000,
+                maxOutputTokens: 8192,
+                multiModal: false,
+                light: false,
+                reasoning: true,
+                reasoningEfforts: [],
                 isDefault: true,
             }],
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
-        });
-        const rpc = {
-            call: async () => [
-                provider("openai", "", "gpt-unconfigured"),
-                provider("anthropic", "configured", "claude-configured"),
-            ],
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.getDefaultModel()).resolves.toMatchObject({
+        }];
+        const transport = new MockTransport(() => providers);
+        await expect(new AgentyClient(transport).getDefaultModel()).resolves.toMatchObject({
             providerCode: "anthropic",
             code: "claude-configured",
+            reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
         });
+        expect(transport.calls[0].path).toBe("/v1/initialization");
+        expect(transport.calls[1].path).toBe("/v1/providers");
     });
 
-    test("resolves structured references within the requested provider", async () => {
-        let method = "";
-        let params: unknown;
-        const rpc = {
-            call: async (name: string, input?: unknown) => {
-                method = name;
-                params = input;
-                return [{
-                    code: "openrouter",
-                    name: "OpenRouter",
-                    type: "openai",
-                    baseUrl: "https://example.invalid",
-                    apiKey: "configured",
-                    models: [{
-                        code: "deepseek/deepseek-v4-pro",
-                        name: "DeepSeek: DeepSeek V4 Pro 0423",
-                        contextWindow: 128000,
-                        maxOutputTokens: 8192,
-                        multiModal: false,
-                        light: false,
-                        isDefault: false,
-                    }],
-                    createdAt: "2026-01-01T00:00:00Z",
-                    updatedAt: "2026-01-01T00:00:00Z",
-                }];
-            },
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.getModel({
-            providerCode: "openrouter",
-            modelCode: "deepseek/deepseek-v4-pro",
-        })).resolves.toMatchObject({
-            providerCode: "openrouter",
-            code: "deepseek/deepseek-v4-pro",
+    test("creates sessions with an explicit cwd", async () => {
+        const session = { id: "session", rounds: [] } as unknown as ChatSessionDto;
+        const transport = new MockTransport(() => session);
+        const model = { providerCode: "openai", code: "gpt-test", contextWindow: 128000 } as ModelDto;
+        await new AgentyClient(transport).createSession(model, "off", "ask", "D:\\work");
+        expect(transport.calls[0]).toMatchObject({
+            method: "POST",
+            path: "/v1/sessions",
+            body: { cwd: "D:\\work", providerCode: "openai", modelCode: "gpt-test" },
         });
-        expect(method).toBe("provider.list");
-        expect(params).toEqual({ providerCode: "openrouter" });
-    });
-
-    test("passes an optional target provider to core provider.list", async () => {
-        let method = "";
-        let params: unknown;
-        const rpc = {
-            call: async (name: string, input?: unknown) => {
-                method = name;
-                params = input;
-                return [];
-            },
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.listProviders("openrouter")).resolves.toEqual([]);
-        expect(method).toBe("provider.list");
-        expect(params).toEqual({ providerCode: "openrouter" });
-    });
-
-    test("normalizes a null model list and reasoning capabilities", async () => {
-        let params: unknown;
-        const rpc = {
-            call: async (_method: string, input: unknown) => {
-                params = input;
-                return [{
-                    code: "gpt-test",
-                    name: "GPT Test",
-                    contextWindow: 256000,
-                    maxOutputTokens: 65536,
-                    multiModal: false,
-                    reasoningEfforts: undefined,
-                }, null];
-            },
-        } as unknown as StdioRPCClient;
-        const client = new AgentyClient(rpc);
-
-        await expect(client.listProviderModels("openai")).resolves.toEqual([{
-            code: "gpt-test",
-            name: "GPT Test",
-            contextWindow: 256000,
-            maxOutputTokens: 65536,
-            multiModal: false,
-            reasoningEfforts: [],
-        }]);
-        expect(params).toEqual({ providerCode: "openai" });
     });
 });

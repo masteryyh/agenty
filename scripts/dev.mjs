@@ -37,6 +37,7 @@ export function resolveDevPlan(
         buildArgs: turboPlan.args,
         launcher,
         launcherArgs: args,
+        packageManager: turboPlan.packageManager,
     };
 }
 
@@ -53,7 +54,7 @@ function exitCode(label, result) {
 
 function run() {
     const plan = resolveDevPlan(process.argv.slice(2));
-    const build = spawnSyncCommand(packageManagerCommand(), plan.buildArgs, {
+    const build = spawnSyncCommand(plan.packageManager, plan.buildArgs, {
         cwd: REPOSITORY_ROOT,
         env: plan.buildEnvironment,
         stdio: "inherit",

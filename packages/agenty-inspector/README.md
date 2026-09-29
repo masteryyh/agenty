@@ -115,7 +115,8 @@ The URL saves the session, view and selected event record.
 tool definitions and final model-budget trimming are not fully persisted. The
 inspector does not substitute current configuration for historical facts.
 
-JSONL event `seq`, round `sequence`, and live RPC notification `sequence` are distinct.
+JSONL event `seq`, domain round `sequence`, and the live HTTP/2 event-stream topic
+sequence are distinct.
 `wroteAt` is populated from event occurrence time, not an independent disk-flush time.
 A `running` round without a terminal event does not establish that core is alive.
 Token deltas, exact tool durations, failed partial model streams and the internal

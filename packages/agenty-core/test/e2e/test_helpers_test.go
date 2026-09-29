@@ -21,26 +21,17 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
-func requireRPCCode(t *testing.T, err error, code int) *RPCError {
+func requireAPIError(t *testing.T, err error, code string) *APIError {
 	t.Helper()
 
-	var rpcErr *RPCError
-	if !errors.As(err, &rpcErr) {
-		t.Fatalf(
-			"error = %v, want RPC code %d",
-			err,
-			code,
-		)
+	var apiError *APIError
+	if !errors.As(err, &apiError) {
+		t.Fatalf("error = %v, want HTTP API error %q", err, code)
 	}
-	if rpcErr.Code != code {
-		t.Fatalf(
-			"RPC code = %d, want %d: %s",
-			rpcErr.Code,
-			code,
-			rpcErr.Message,
-		)
+	if apiError.Code != code {
+		t.Fatalf("API error code = %q, want %q: %s", apiError.Code, code, apiError.Message)
 	}
-	return rpcErr
+	return apiError
 }
 
 func createExecutionResources(
@@ -81,14 +72,4 @@ func createExecutionResources(
 		return Session{}, fmt.Errorf("create session: %w", err)
 	}
 	return session, nil
-}
-
-func mergeMethodCounts(clients ...*rpcClient) map[string]int {
-	merged := map[string]int{}
-	for _, client := range clients {
-		for method, count := range client.CalledMethods() {
-			merged[method] += count
-		}
-	}
-	return merged
 }

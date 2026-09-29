@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
+func TestClientJourneyCoversPublicHTTPSurfaceAcrossRestart(t *testing.T) {
 	t.Parallel()
 
 	fixture := newProviderFixture(t, func(request providerRequest) providerReply {
@@ -273,10 +273,10 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 		cancelSession.ID,
 		[]ContentInput{{Type: "text", Text: "duplicate"}},
 	)
-	requireRPCCode(t, err, errAlreadyExists)
+	requireAPIError(t, err, "already_exists")
 	_, err = second.DeleteSession(ctx, cancelSession.ID)
-	requireRPCCode(t, err, errAlreadyExists)
-	stop, err := second.StopSession(ctx, cancelSession.ID)
+	requireAPIError(t, err, "already_exists")
+	stop, err := second.StopSession(ctx, cancelSession.ID, cancelRound.RoundID)
 	requireNoError(t, err)
 	if !stop.StopRequested || stop.RoundID != cancelRound.RoundID {
 		t.Fatalf("stop result = %+v", stop)
@@ -293,17 +293,11 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	if _, err = second.EnableCodexMode(ctx, primary.ID); err == nil {
 		t.Fatal("Codex Mode accepted an OpenAI Chat Completions session")
 	}
-	requireNoError(t, second.rpc.Call(ctx, "skill.list", map[string]any{}, nil))
-	requireNoError(t, second.rpc.CallChunked(ctx, "skill.list", map[string]any{}, 1, nil))
-
-	requireNoError(t, second.rpc.AbortChunk(ctx, "aborted-upload", "provider.list"))
-	err = second.rpc.Call(
-		ctx,
-		"chunk.commit",
-		map[string]any{"requestId": "aborted-upload"},
-		nil,
-	)
-	requireRPCCode(t, err, errNotFound)
+	var skills struct {
+		Skills      []map[string]any
+		Diagnostics []map[string]any
+	}
+	requireNoError(t, second.process.Request(ctx, http.MethodGet, "/v1/skills", nil, &skills))
 
 	_, err = second.DeleteSession(ctx, cancelSession.ID)
 	requireNoError(t, err)
@@ -316,12 +310,6 @@ func TestClientJourneyCoversPublicRPCSurfaceAcrossRestart(t *testing.T) {
 	_, err = second.DeleteProvider(ctx, "local-openai")
 	requireNoError(t, err)
 
-	called := mergeMethodCounts(first.rpc, second.rpc)
-	for _, method := range publicRPCMethods {
-		if called[method] == 0 {
-			t.Errorf("public RPC method %q was not exercised", method)
-		}
-	}
 }
 
 func assertCompletedRound(t *testing.T, session Session, roundID, text string) {

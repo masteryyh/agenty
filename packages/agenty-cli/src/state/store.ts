@@ -18,6 +18,7 @@ import type {
 } from "../api/types";
 import type { CliOptions } from "../config";
 import { loadOptions, parseThinking } from "../config";
+import { CoreHttp2Client, type StreamFrame } from "../core/http2";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
 import type { LoadedInputHistory } from "../history/inputHistory";
 import {
@@ -25,10 +26,57 @@ import {
     loadInputHistory,
     resolveInputHistoryPath,
 } from "../history/inputHistory";
-import { startLocalCore } from "../localCore";
 
 export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
 export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | "mcp" | null;
+
+export type StoreClient = Pick<AgentyClient,
+    | "compactSession"
+    | "close"
+    | "completeInitialization"
+    | "createModel"
+    | "createMcpServer"
+    | "createProvider"
+    | "createSession"
+    | "deleteModel"
+    | "deleteProvider"
+    | "enableCodexMode"
+    | "eventCursor"
+    | "getModel"
+    | "getSession"
+    | "isInitialized"
+    | "listMcpServerLogs"
+    | "listMcpServers"
+    | "listModels"
+    | "listProviders"
+    | "listProviderModels"
+    | "listSessions"
+    | "listSessionSummaries"
+    | "listSkills"
+    | "loginMcpServer"
+    | "onMcpEvent"
+    | "onClose"
+    | "onCompactionEvent"
+    | "onSessionEvent"
+    | "onStreamFrame"
+    | "prepareSession"
+    | "removeMcpServer"
+    | "resolveToolApproval"
+    | "resolveModelInput"
+    | "setMcpEnabled"
+    | "setSessionCwd"
+    | "setSessionModel"
+    | "setSessionPermissionMode"
+    | "setSessionReasoningEffort"
+    | "updateModel"
+    | "updateMcpServer"
+    | "updateProvider"
+    | "startSession"
+    | "stopSession"
+    | "subscribeMcp"
+    | "subscribeSession"
+    | "subscribeSessionAndWait"
+>;
 export type SystemMessageVariant = "compacted";
 const TOAST_DURATION_MS = 3000;
 
@@ -73,7 +121,7 @@ interface AppState {
     phase: Phase;
     initError: string | null;
     opts: CliOptions;
-    client: AgentyClient | null;
+    client: StoreClient | null;
     model: ModelDto | null;
     session: ChatSessionDto | null;
     skills: SkillDto[];
@@ -92,9 +140,9 @@ interface AppState {
     inputHistoryPath: string | null;
     inputHistoryWarning: string | null;
     activeSessionId: string | null;
+    activeRoundId: string | null;
     pendingApproval: PendingToolApproval | null;
     resolveToolApproval: (decision: ToolApprovalResolution["decision"]) => Promise<void>;
-    _localCoreStop: (() => Promise<void>) | null;
     init: () => Promise<void>;
     finishWizard: () => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
@@ -403,6 +451,7 @@ function mergeToolCalls(
 export const useAppStore = create<AppState>((set, get) => {
     let permissionChangeQueue: Promise<void> = Promise.resolve();
     let latestPermissionChange: { sessionId: string; mode: PermissionMode } | null = null;
+    const observedClients = new WeakSet<StoreClient>();
     const flushCurrent = () => {
         const current = get().current;
         if (current && hasContent(current)) {
@@ -436,6 +485,25 @@ export const useAppStore = create<AppState>((set, get) => {
     };
 
     const handleEvent = (event: SessionEvent) => {
+        if (get().session?.id !== event.sessionId) {
+            return;
+        }
+        if (event.type === "round_started") {
+            set((state) => state.session?.id === event.sessionId ? {
+                activeSessionId: event.sessionId,
+                activeRoundId: event.roundId,
+                status: state.status === "idle" || state.status === "error" ? "streaming" : state.status,
+                phrase: state.phrase ?? pickStreamingPhrase(),
+                current: state.current
+                    ? { ...state.current, roundId: event.roundId }
+                    : newAssistantMessage(event.roundId),
+            } : {});
+            return;
+        }
+        if (event.type !== "permission_mode_changed" &&
+            (!get().activeRoundId || get().activeRoundId !== event.roundId)) {
+            return;
+        }
         if (event.type === "permission_mode_changed") {
             const permissionMode = event.permissionMode ?? "ask";
             set((state) => {
@@ -492,6 +560,10 @@ export const useAppStore = create<AppState>((set, get) => {
                 : message;
             set((state) => ({
                 pendingApproval: null,
+                activeRoundId: state.activeRoundId === event.roundId ? null : state.activeRoundId,
+                activeSessionId: state.activeRoundId === event.roundId ? null : state.activeSessionId,
+                status: state.activeRoundId === event.roundId ? "idle" : state.status,
+                phrase: state.activeRoundId === event.roundId ? null : state.phrase,
                 history: state.history.map(finalize),
                 current: state.current ? finalize(state.current) : null,
             }));
@@ -582,6 +654,17 @@ export const useAppStore = create<AppState>((set, get) => {
                     const updated = attachToolResults([current], event.message!);
                     return { current: updated[0] };
                 });
+            } else if (event.message.role === "user") {
+                set((state) => {
+                    const text = textFromBlocks(event.message!.content ?? [], "text");
+                    const last = state.history.at(-1);
+                    if (last?.role === "user" && last.content === text && (!last.roundId || last.roundId === event.roundId)) {
+                        const history = [...state.history];
+                        history[history.length - 1] = { ...last, roundId: event.roundId };
+                        return { history };
+                    }
+                    return { history: [...state.history, messageToUI(event.message!)] };
+                });
             } else if (event.message.role === "assistant") {
                 set((state) => {
                     let current = state.current ?? newAssistantMessage(event.roundId);
@@ -636,7 +719,24 @@ export const useAppStore = create<AppState>((set, get) => {
         }
     };
 
-    const prepareAndReady = async (client: AgentyClient, options: CliOptions) => {
+    const observeClient = (client: StoreClient) => {
+        if (observedClients.has(client)) {
+            return;
+        }
+        observedClients.add(client);
+        client.onSessionEvent((event) => {
+            if (get().client === client) {
+                handleEvent(event);
+            }
+        });
+        client.onCompactionEvent((event) => {
+            if (get().client === client) {
+                handleCompactionEvent(event);
+            }
+        });
+    };
+
+    const prepareAndReady = async (client: StoreClient, options: CliOptions) => {
         const requestedEffort = requestedReasoningEffort(options.thinking);
         const prepared = await client.prepareSession({
             modelInput: options.modelInput,
@@ -663,6 +763,11 @@ export const useAppStore = create<AppState>((set, get) => {
             thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort,
             initError: null,
         });
+        const summaries = await client.listSessionSummaries();
+        for (const summary of summaries) {
+            client.subscribeSession(summary.id, client.eventCursor(`session:${summary.id}`));
+        }
+        client.subscribeSession(session.id, client.eventCursor(`session:${session.id}`));
         const inputHistoryWarning = get().inputHistoryWarning;
         if (inputHistoryWarning) {
             setToast(inputHistoryWarning, true);
@@ -706,8 +811,8 @@ export const useAppStore = create<AppState>((set, get) => {
         inputHistoryPath: null,
         inputHistoryWarning: null,
         activeSessionId: null,
+        activeRoundId: null,
         pendingApproval: null,
-        _localCoreStop: null,
 
         init: async () => {
             try {
@@ -727,10 +832,54 @@ export const useAppStore = create<AppState>((set, get) => {
                         ? `${loadedInputHistory.invalidLines} invalid input history line(s) were skipped.`
                         : null),
                 });
-                const local = await startLocalCore({ dataDir: options.dataDir });
-                const client = new AgentyClient(local.rpc);
-                set({ client, _localCoreStop: local.stop });
-                client.onCompactionEvent(handleCompactionEvent);
+                const transport = await CoreHttp2Client.connectFromEnvironment();
+                const client = new AgentyClient(transport);
+                set({ client });
+                observeClient(client);
+                client.onStreamFrame(async (frame: StreamFrame) => {
+                    if (frame.type !== "snapshot" || !frame.topic.startsWith("session:")) {
+                        return;
+                    }
+                    const id = frame.topic.slice("session:".length);
+                    const snapshot = frame.snapshot?.state as {
+                        session?: ChatSessionDto;
+                        isRunning?: boolean;
+                        roundId?: string;
+                        pendingApprovals?: ToolApprovalRequest[];
+                    } | undefined;
+                    if (get().session?.id !== id || !snapshot?.session) {
+                        return;
+                    }
+                    set({
+                        session: snapshot.session,
+                        history: buildHistory(snapshot.session),
+                        current: null,
+                        tokenConsumed: actualContextSize(snapshot.session),
+                        activeSessionId: snapshot.isRunning ? id : null,
+                        activeRoundId: snapshot.isRunning ? snapshot.roundId ?? null : null,
+                        status: snapshot.isRunning ? "streaming" : "idle",
+                        phrase: snapshot.isRunning ? pickStreamingPhrase() : null,
+                        pendingApproval: snapshot.pendingApprovals?.[0] && snapshot.roundId
+                            ? {
+                                ...snapshot.pendingApprovals[0],
+                                sessionId: id,
+                                roundId: snapshot.roundId,
+                                submitting: false,
+                                error: null,
+                            }
+                            : null,
+                    });
+                    for (const recent of frame.snapshot?.recentEvents ?? []) {
+                        if (recent.type !== "event" || recent.topic !== frame.topic || !recent.event) {
+                            continue;
+                        }
+                        const event = recent.event as SessionEvent & { kind?: string };
+                        if (event.kind === "session" && (!snapshot.roundId || event.roundId === snapshot.roundId)) {
+                            handleEvent(event);
+                        }
+                    }
+                });
+                client.subscribeMcp(client.eventCursor("mcp"));
                 if (!(await client.isInitialized())) {
                     set({ phase: "wizard", initError: null });
                     return;
@@ -779,6 +928,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 return;
             }
             const { client, model, session } = state;
+            observeClient(client);
             set((currentState) => ({
                 history: [...currentState.history, { id: nextId(), role: "user", content: trimmed }],
                 current: newAssistantMessage(),
@@ -786,6 +936,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 chatError: null,
                 phrase: pickStreamingPhrase(),
                 activeSessionId: session.id,
+                activeRoundId: null,
                 pendingApproval: null,
             }));
 
@@ -801,45 +952,18 @@ export const useAppStore = create<AppState>((set, get) => {
                 set({ pendingApproval: null });
                 rejectTerminal(error);
             });
-            let lastSequence = 0;
-            let activeRoundId: string | null = null;
+            let expectedRoundId: string | null = null;
             const unsubscribe = client.onSessionEvent((event) => {
-                if (event.sessionId !== session.id || get().activeSessionId !== session.id) {
+                if (get().client !== client || event.sessionId !== session.id) {
                     return;
                 }
-
-                const sessionLevelChange = (event.type === "permission_mode_changed" ||
-                    event.type === "tool_dialect_changed") &&
-                    (!event.roundId || event.roundId === "00000000-0000-0000-0000-000000000000");
-                if (sessionLevelChange) {
-                    handleEvent(event);
-                    return;
-                }
-
                 if (event.type === "round_started") {
-                    if (activeRoundId !== null && activeRoundId !== event.roundId) {
+                    if (expectedRoundId !== null && expectedRoundId !== event.roundId) {
                         return;
                     }
-                    activeRoundId = event.roundId;
-                    set((state) => ({ current: state.current ? { ...state.current, roundId: event.roundId } : null }));
-                } else if (activeRoundId === null &&
-                    (event.type === "permission_mode_changed" || event.type === "tool_dialect_changed")) {
-                    activeRoundId = event.roundId;
-                } else if (activeRoundId === null) {
-                    return;
+                    expectedRoundId = event.roundId;
                 }
-                if (activeRoundId !== null && activeRoundId !== event.roundId) {
-                    return;
-                }
-                if (event.sequence <= lastSequence) {
-                    return;
-                }
-                if (event.sequence !== lastSequence + 1) {
-                    pushSystem(`session event sequence gap: received ${event.sequence} after ${lastSequence}`, true);
-                }
-                lastSequence = event.sequence;
-                handleEvent(event);
-                if (event.type === "round_ended") {
+                if (event.type === "round_ended" && (!expectedRoundId || event.roundId === expectedRoundId)) {
                     resolveTerminal(event);
                 }
             });
@@ -853,12 +977,18 @@ export const useAppStore = create<AppState>((set, get) => {
                     set({ thinkingEnabled: resolvedEffort.effort !== "off", thinkingLevel: resolvedEffort.effort === "off" ? "" : resolvedEffort.effort });
                     setToast(resolvedEffort.notice);
                 }
+                await client.subscribeSessionAndWait(
+                    session.id,
+                    client.eventCursor(`session:${session.id}`),
+                );
                 await client.setSessionReasoningEffort(
                     session.id,
                     resolvedEffort.effort,
                 );
                 await permissionChangeQueue;
-                await client.startSession(session.id, trimmed);
+                const started = await client.startSession(session.id, trimmed);
+                expectedRoundId = started.roundId;
+                set({ activeRoundId: started.roundId });
                 const ended = await terminal;
                 if (ended.status === "failed" || ended.error) {
                     const message = ended.error ?? "agent round failed";
@@ -883,7 +1013,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 unsubscribe();
                 unsubscribeClose();
                 flushCurrent();
-                set({ status: "idle", phrase: null, activeSessionId: null, pendingApproval: null });
+                set({ status: "idle", phrase: null, activeSessionId: null, activeRoundId: null, pendingApproval: null });
             }
         },
 
@@ -928,9 +1058,9 @@ export const useAppStore = create<AppState>((set, get) => {
         },
 
         abort: () => {
-            const { client, activeSessionId } = get();
-            if (client && activeSessionId) {
-                void client.stopSession(activeSessionId).catch((error: unknown) =>
+            const { client, activeSessionId, activeRoundId } = get();
+            if (client && activeSessionId && activeRoundId) {
+                void client.stopSession(activeSessionId, activeRoundId).catch((error: unknown) =>
                     pushSystem(error instanceof Error ? error.message : String(error), true));
             }
         },
@@ -947,6 +1077,7 @@ export const useAppStore = create<AppState>((set, get) => {
                 tokenConsumed: 0,
                 phrase: null,
                 activeSessionId: null,
+                activeRoundId: null,
                 overlay: null,
                 pendingApproval: null,
             });
@@ -964,8 +1095,9 @@ export const useAppStore = create<AppState>((set, get) => {
             try {
                 const requestedEffort = reasoningEffort(thinkingEnabled, thinkingLevel);
                 const resolvedEffort = resolveReasoningEffortForModel(model, requestedEffort);
-                const session = await client.createSession(model, resolvedEffort.effort);
-                set({ session, history: [], current: null, tokenConsumed: 0, overlay: null });
+                const session = await client.createSession(model, resolvedEffort.effort, "ask", process.cwd());
+                client.subscribeSession(session.id, client.eventCursor(`session:${session.id}`));
+                set({ session, history: [], current: null, tokenConsumed: 0, overlay: null, activeRoundId: null });
                 setToast(resolvedEffort.notice ?? "New session created.");
             } catch (error) {
                 pushSystem(`new session failed: ${(error as Error).message}`, true);
@@ -1017,10 +1149,11 @@ export const useAppStore = create<AppState>((set, get) => {
             }
             try {
                 const full = await client.getSession(session.id);
+                client.subscribeSession(full.id, client.eventCursor(`session:${full.id}`));
                 const model = full.currentModel
                     ? await client.getModel(full.currentModel)
                     : get().model;
-                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null });
+                set({ session: full, model, history: buildHistory(full), current: null, tokenConsumed: actualContextSize(full), overlay: null, activeRoundId: null });
             } catch (error) {
                 pushSystem(`resume failed: ${(error as Error).message}`, true);
             }

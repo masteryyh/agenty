@@ -33,7 +33,9 @@ export function loadOptions(): CliOptions {
     return {
         modelInput: typeof flags.model === "string" ? flags.model : undefined,
         thinking: typeof flags.thinking === "string" ? flags.thinking : undefined,
-        dataDir: typeof flags["data-dir"] === "string" ? flags["data-dir"] : undefined,
+        dataDir: typeof flags["data-dir"] === "string"
+            ? flags["data-dir"]
+            : process.env.AGENTY_DATA_DIR || undefined,
         newSession: flags["new-session"] === true,
     };
 }

@@ -241,6 +241,16 @@ pub fn artifact_paths(home: &Path) -> ArtifactPaths {
     }
 }
 
+pub fn artifact_paths_for_version(home: &Path, version: &[u8; 32]) -> ArtifactPaths {
+    let dir = home.join(".agenty").join("versions").join(hex(version));
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    ArtifactPaths {
+        cli: dir.join(format!("cli{ext}")),
+        core: dir.join(format!("core{ext}")),
+        file_editor: dir.join(format!("fileedit{ext}")),
+    }
+}
+
 fn temp_path_for(target: &Path) -> PathBuf {
     let mut name = target.as_os_str().to_owned();
     name.push(format!(".{}.tmp", std::process::id()));

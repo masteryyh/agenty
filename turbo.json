@@ -52,6 +52,7 @@
                 "pkg/**/*.go",
                 "!pkg/**/*_test.go",
                 "scripts/build.mjs",
+                "$TURBO_ROOT$/scripts/core-build-env.mjs",
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
@@ -80,6 +81,7 @@
         },
         "test": {
             "dependsOn": ["^build"],
+            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
             "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         },
         "lint": {},
@@ -116,6 +118,7 @@
                 "$TURBO_ROOT$/packages/agenty-core/go.mod",
                 "$TURBO_ROOT$/packages/agenty-core/go.sum"
             ],
+            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
             "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
         }
     }

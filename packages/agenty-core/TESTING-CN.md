@@ -1,148 +1,63 @@
 # agenty-core 测试指南
 
-本文档说明 agenty-core 当前的测试情况和运行方式。英文版本见
-[TESTING.md](./TESTING.md)。
+本文档说明当前 HTTP/2 core 测试。英文版见 TESTING.md。
 
-## §1. 测试范围
+## 测试范围
 
-| 范围 | 测试环境 | 覆盖行为 | 默认运行 |
+| 范围 | 测试环境 | 覆盖内容 | 构建标签 |
 | --- | --- | --- | --- |
-| Domain | 仅内存值 | 聚合不变量、Session 状态转换与 replay、event 和 content 序列化、Provider model 生命周期、code 和 reasoning effort 映射校验 | 是 |
-| Application | 内存 repository fake | Provider 和 Session 用例；execution loop 完成、tool continuation、model 输出 token 上限、多 session 并行、取消、shutdown、输入校验、错误映射和 pending event 生命周期 | 是 |
-| 内置工具 | `t.TempDir()`、helper fixture 和真实文件系统操作 | 注册、通过 `fileedit` 的文本编辑器读取与写入、结构化 `apply_patch` 子进程结果、正则搜索、递归 glob、目录列表、输出限制和错误路径 | 是 |
-| RPC | buffer、fake handler 和合成时间 | JSON-RPC/NDJSON framing、notification、batch、非法请求、单行限制、chunk 组装与清理 | 是 |
-| Config、logging 与 storage | `t.TempDir()`、真实文件和本地 SQLite | 配置文件与 env override 合并、单例 Manager、日志等级/格式/路径选择、JSON repository、append-only transcript、SQLite projection 和 schema 初始化 | 是 |
-| 完整装配 | 隔离的文件系统和 SQLite 状态 | repository 初始化，以及包括异步 session start/stop 在内的 RPC 到 application 再到 storage 完整流程 | 启用 `integration` 时 |
-| 可执行 E2E | 真实 `cmd` 子进程、独立数据目录、typed IPC client、本地 provider fixtures 和可选真实上游 | 完整用户旅程、全部 25 个公开 RPC methods、有序 session event notifications、四类 provider 协议、内置工具 definitions、连续多轮、完成/失败/取消、同通道并发、运行中退出、重启持久化和 stdio 协议边界 | 启用 `e2e` 时 |
+| Domain 与 Application | 内存值和 repository fake | 聚合不变量、初始化、provider/session 用例、round 生命周期、取消、审批决策、并发和错误映射 | 默认 |
+| HTTP 响应与 Stream Broker | httptest、本地 HTTP/2、合成时间 | 统一响应体、任意值/null 数据、编码失败、全双工流命令、topic 共享序号、重放、游标过期、快照、慢消费者和持久化交接 | 默认 |
+| Config、日志、存储 | 临时目录和本地 SQLite | 配置/env 合并、日志初始化、JSONL transcript、projection 重建和 repository 持久化 | 默认 |
+| 完整装配 | 隔离文件系统和 SQLite | Repository 初始化及 application 到 storage 的完整流程 | integration |
+| 可执行 E2E | 真实 core 子进程和隔离数据目录 | REST 生命周期、真实 HTTP/2 传输、事件顺序、CRUD 旅程、provider fixture、取消、并发、重启持久化和关闭 stdin 行为 | e2e |
+| Bun 与编译 CLI 传输 | Windows 命名管道、真实 Bun 和编译 CLI | 双向 Node HTTP/2、事件流持续打开时发 REST 请求、编译后 CLI 握手 | Windows 可选 |
+| Bootstrap 生命周期 | 真实释放的 core/CLI 子进程 | 同目录附着、不同目录并行所有者、CLI/core/bootstrap 退出后的清理 | Windows 忽略测试 |
 
-当前 `integration` 构建标签会启用：
+E2E 测试 client 只使用公开 HTTP 资源，不导入 core 内部实现包，并检查 REST 路径与稳定错误码。
+项目不再包含 JSON-RPC dispatcher 或分块组装器。
 
-- `pkg/infra/initialize/initialize_test.go`，验证完整 repository 初始化和生命周期。
-- `pkg/infra/rpc/adapter/adapter_test.go`，验证完整 RPC adapter 流程，其中包括分块输入。
+## 测试环境
 
-`e2e` build tag 会启用 `test/e2e`。`TestMain` 只构建一次 core 二进制，每个测试使用
-唯一的 `AGENTY_DATA_DIR` 启动自己的进程。测试侧 typed client 使用公开 NDJSON 协议，
-支持并发 request ID 路由、notification、batch 和 chunk，不导入 core 内部实现包；
-`blackbox_test.go` 会持续检查这一依赖边界。
+- 需要 Go 1.26 或更新版本。
+- SQLite 依赖要求启用 CGO 并安装 C 编译器。
+- 测试使用临时数据根目录，不会访问或修改用户的 ~/.agenty。
+- 修改进程环境的测试不会并行运行。
+- E2E 子进程使用各自的 AGENTY_DATA_DIR 和日志配置。
+- Provider E2E fixture 会绑定 loopback HTTP 端口；禁止本地监听的沙箱需要在允许的环境中重跑。
+- 可选真实 provider 测试读取 OPENAI_API_KEY、ANTHROPIC_API_KEY 和 GEMINI_API_KEY。缺少 Key
+  时跳过对应测试；已配置但无效的 Key 会正常失败。
+- Windows 命名管道测试需要设置 AGENTY_BUN_BIN 和 AGENTY_COMPILED_CLI。未同时设置时，可选
+  集成测试会跳过。
+- Bootstrap 生命周期测试会启动并终止真实子进程，因此标记为 ignored；可在 Windows 开发
+  环境中显式选择运行。
+- 本地 MCP stdio fixture 是外部子进程，使用隔离的测试资源。
 
-测试套件有意跳过纯 DTO、简单结构体构造、薄 getter，以及只做字段赋值的构造器，
-包括 `NewID`、`ModelRef.String` 和 `TokenUsage.Add`。命令装配和会终止
-进程的 signal 路径也不属于单元测试范围。
+## 命令
 
-## §2. 测试环境
+在 packages/agenty-core 目录运行 Go 命令：
 
-- 需要 Go 1.26 或更高版本。
-- `github.com/mattn/go-sqlite3` 要求启用 CGO 并提供可用的 C 编译器。
-- 文件系统和 SQLite 测试使用独立临时目录，不会访问用户的 `~/.agenty` 目录。
-- Application 测试使用互不共享的内存 repository fake。
-- 设置 `AGENTY_DATA_DIR`、`AGENTY_LOG_LEVEL` 或 `AGENTY_LOG_FORMAT` 的测试不会并行
-  运行，因为环境变量是进程级状态。
-- E2E 测试把数据目录设置到各自子进程的环境中，并清空日志环境变量，使子进程由配置
-  文件（默认 info/text）驱动；不修改测试 runner 的环境，因此独立业务流程可以安全
-  使用 `t.Parallel()`，日志也只会写入各自的隔离数据目录。
-- Agent loop E2E 使用本地 `httptest` HTTP server 分别模拟 OpenAI Responses、OpenAI Chat
-  Completions、Anthropic Messages 和 Google GenAI。执行环境必须允许绑定 loopback 端口；
-  沙箱若拒绝 `listen`，需要在允许绑定的环境复跑相同命令。
-- `TestLiveProviderConversationsThroughIPC` 使用同一 typed client 通过真实 core 子进程发起
-  可选真实上游对话。每个 provider 独立检查对应 API Key；Key 未设置或只包含空白时用
-  `t.Skip` 跳过该子测试，其他已配置 provider 继续运行。已设置但无效的 Key 会正常失败，
-  不会被当作“未配置”静默跳过。
-- Chunk 过期测试使用 `testing/synctest`，不等待真实时间。
+- go test ./...
+- go test -tags=integration ./...
+- go test -tags=e2e -count=1 -parallel=8 ./test/e2e
+- go test -race -tags=e2e -count=1 -parallel=4 ./test/e2e
+- go test -race -count=1 ./...
+- go test -shuffle=on -count=10 ./...
 
-Go 命令应在 `packages/agenty-core/` 下运行。模块 pnpm 命令可以在该目录直接运行；
-从仓库根目录执行时，使用对应的 `pnpm core:*` 命令。
+从仓库根目录可以运行 pnpm core:test、core:test:integration、core:test:e2e、
+core:test:e2e:race、core:test:race 或 core:test:repeat。
 
-## §3. 运行测试
+要运行 Windows Bun/CLI 命名管道检查，设置 AGENTY_BUN_BIN 和 AGENTY_COMPILED_CLI，
+然后运行 httpapi package 中名为 TestBunAndCompiledCLIUseNamedPipeHTTP2Bidirectionally
+的测试。
 
-| 模块命令 | 根目录命令 | 用途 |
-| --- | --- | --- |
-| `pnpm test` | `pnpm core:test` | 所有不带 `integration` 或 `e2e` build tag 的测试 |
-| `pnpm test:integration` | `pnpm core:test:integration` | 默认测试加 integration 测试 |
-| `pnpm test:e2e` | `pnpm core:test:e2e` | 最多八路并行的真实二进制 E2E 测试 |
-| `pnpm test:e2e:race` | `pnpm core:test:e2e:race` | 同时启用 race detector 的 E2E harness 和 core 二进制 |
-| `pnpm test:race` | `pnpm core:test:race` | 使用 race detector 且不复用结果缓存的默认测试 |
-| `pnpm test:repeat` | `pnpm core:test:repeat` | 运行十次 shuffle，检查测试隔离性 |
+Bootstrap 单元测试使用 packages/agenty-bootstrap 下的 cargo test。CLI 检查使用
+pnpm cli:typecheck 和 CLI package 的 Bun 测试。使用 pnpm bootstrap:build 或 pnpm build
+构建整合后的 launcher。
 
-端到端测试使用 `e2e` build tag，确保 `pnpm core:test` 始终是排除复杂集成和进程环境
-之后的完整快速测试集。
+## 验证边界
 
-对应的 Go 命令为：
-
-```sh
-go test ./...
-go test -tags=integration ./...
-go test -tags=e2e -count=1 -parallel=8 ./test/e2e
-go test -race -tags=e2e -count=1 -parallel=4 ./test/e2e
-go test -race -count=1 ./...
-go test -shuffle=on -count=10 ./...
-```
-
-LLM 真实 integration 和可选 live E2E 用例读取以下环境变量：
-
-- `OPENAI_API_KEY`，可选 `OPENAI_BASE_URL`、`OPENAI_RESPONSES_MODEL` 和
-  `OPENAI_CHAT_MODEL`。
-- `ANTHROPIC_API_KEY`，可选 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_MODEL`。
-- `GEMINI_API_KEY`，可选 `GEMINI_BASE_URL` 和 `GEMINI_MODEL`。
-
-Integration 中的每个 Provider 子测试都会验证 `Invoke` 和 `Stream`；live E2E 则通过
-stdio IPC 运行一个真实非流式 conversation。两者都在缺少对应 API Key 时通过 `t.Skip`
-显示提示并跳过，不会导致 suite 失败。请求/响应转换测试和本地 provider fixture E2E
-仍完全离线，不需要凭证。
-
-开发时可以定向运行 package 或单个测试：
-
-```sh
-go test ./pkg/domain/conversation
-go test ./pkg/domain/conversation -run '^TestSessionLifecycleAndReplay$' -count=1
-```
-
-改动跨层行为时，运行带 race detector 的 integration 测试：
-
-```sh
-go test -race -tags=integration -count=1 ./...
-```
-
-如果沙箱中的默认 Go cache 不可写，指定一个可写缓存：
-
-```sh
-GOCACHE=/private/tmp/agenty-core-go-cache go test ./...
-```
-
-使用以下命令生成 coverage 报告：
-
-```sh
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-go tool cover -html=coverage.out
-```
-
-## §4. 当前状态与边界
-
-2026-07-22 验证的默认测试快照为 70.1% statement coverage。其中
-`pkg/domain/conversation` 为 92.8%，`pkg/infra/rpc` 为 91.8%，
-`pkg/application` 为 76.4%。模块总覆盖率包含有意不测试的简单构造和 wiring 代码，
-因此这里只记录快照。
-
-Storage/RPC integration 测试和全部 E2E 测试使用本地文件与 SQLite。可选 LLM integration
-和 `TestLiveProviderConversationsThroughIPC` 会访问外部服务，并且只在环境中存在对应
-Provider API Key 时执行。其余 E2E 用例使用本地 provider fixtures。E2E 聚焦可观察的进程
-contract；穷举 parser 变体、真实 64 MiB 单行限制和 chunk assembler 输入校验继续由更快的
-RPC 测试覆盖，不在子进程中用大 payload 重复。
-
-E2E system 将 core 视为由 stdin、stdout、stderr、退出码和公开 provider HTTP 请求组成的
-黑箱。完整用户旅程通过 typed client 创建和修改 Provider/Model 与 Session，跨进程
-连续执行多轮会话，再通过 IPC 查询持久化结果；不会断言 SQLite、JSONL 或 repository 的
-物理布局。Provider fixtures 覆盖 OpenAI Responses、OpenAI Chat Completions、Anthropic
-Messages 和 Google GenAI，并验证 8,192 输出 token 裁剪、上游失败、同一 IPC client 的
-并发 session、重复启动/运行中删除拒绝、stop 取消和运行中进程退出后的恢复状态。
-
-当前 25 个公开 methods 由用户旅程统一覆盖：Initialize 2 个、Provider/Model 8 个、
-Session 11 个和 Chunk 4 个。Session events、batch、精确 request ID、malformed JSON 恢复、末行无换行、stdin
-EOF 和启动失败保留为进程级协议场景；穷举 parser 和 chunk 非法输入仍由低层 RPC 测试负责。
-
-测试涉及两个实现边界：
-
-- `ConversationRepository.Save` 在 JSONL 追加成功、SQLite projection 更新失败时没有
-  跨存储回滚。
-- `Server.Serve` 取消后，阻塞在 input 上的 goroutine 只有在底层 reader 关闭后才会
-  退出。
+标准 Go 测试使用本地 fixture，不需要 provider 凭据。传输测试通过只说明命名管道上的
+HTTP/2 连接和全双工行为正常；单独的传输测试不能证明完整 provider 用户旅程。E2E suite
+会使用本地 provider fixture 实际启动 core 进程。Release 签名、macOS/Linux 进程生命周期和
+真实上游 provider 可用性，需要对应的运行环境。

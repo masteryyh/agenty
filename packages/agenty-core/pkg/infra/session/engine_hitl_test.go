@@ -15,10 +15,10 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
+	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
 	"github.com/masteryyh/agenty-core/pkg/infra/permission"
-	"github.com/masteryyh/agenty-core/pkg/infra/rpc"
 	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
@@ -44,15 +44,13 @@ func TestEngineHITLLifecycle(t *testing.T) {
 				{Content: conversation.Text("done")},
 			}}
 			manager := permission.NewPermissionManager()
+			broker := httpapi.NewStreamBroker(nil)
 			middlewares := middleware.NewManager()
-			events := make(chan rpc.SessionEvent, 64)
+			events := make(chan httpapi.SessionEvent, 64)
 			for _, mw := range []middleware.Middleware{
 				infratools.NewValidationMiddleware(),
 				storage.NewSessionMiddleware(fixture.sessions),
-				rpc.NewSessionNotificationMiddleware(func(_ context.Context, _ string, payload any) error {
-					events <- payload.(rpc.SessionEvent)
-					return nil
-				}),
+				httpapi.NewSessionEventMiddleware(broker),
 				manager.Middleware(),
 			} {
 				if err := middlewares.Register(mw); err != nil {
@@ -78,6 +76,23 @@ func TestEngineHITLLifecycle(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(subscription.Close)
+			go func() {
+				for frame := range subscription.Frames {
+					if frame.Type != "event" {
+						continue
+					}
+					var event httpapi.SessionEvent
+					if err := json.Unmarshal(frame.Event, &event); err != nil {
+						return
+					}
+					events <- event
+				}
+			}()
 			start, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("lookup"))
 			if err != nil {
 				t.Fatal(err)
@@ -85,7 +100,7 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			var sequence uint64
-			next := func() rpc.SessionEvent {
+			next := func() httpapi.SessionEvent {
 				select {
 				case event := <-events:
 					sequence++
@@ -95,7 +110,7 @@ func TestEngineHITLLifecycle(t *testing.T) {
 					return event
 				case <-ctx.Done():
 					t.Fatal("timed out waiting for execution event")
-					return rpc.SessionEvent{}
+					return httpapi.SessionEvent{}
 				}
 			}
 			var request *permission.Request
@@ -129,8 +144,8 @@ func TestEngineHITLLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var ended rpc.SessionEvent
-			for ended.Type != rpc.SessionEventRoundEnded {
+			var ended httpapi.SessionEvent
+			for ended.Type != httpapi.SessionEventRoundEnded {
 				ended = next()
 			}
 			if manager.Resolve(ctx, resolution) == nil {
