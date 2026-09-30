@@ -7,8 +7,8 @@ func TestLoadProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProviders: %v", err)
 	}
-	if len(providers) != 5 {
-		t.Fatalf("providers = %d, want 5", len(providers))
+	if len(providers) != 6 {
+		t.Fatalf("providers = %d, want 6", len(providers))
 	}
 
 	byCode := make(map[string]struct {
@@ -19,7 +19,7 @@ func TestLoadProviders(t *testing.T) {
 		if !provider.Builtin {
 			t.Errorf("provider %s is not built in", provider.Code)
 		}
-		if provider.Code != "openrouter" && !provider.Official {
+		if provider.Code != "openrouter" && provider.Code != "deepseek" && !provider.Official {
 			t.Errorf("provider %s is not official", provider.Code)
 		}
 		byCode[provider.Code.String()] = struct {
