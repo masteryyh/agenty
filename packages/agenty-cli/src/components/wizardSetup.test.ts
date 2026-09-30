@@ -176,6 +176,22 @@ describe("first-run provider setup", () => {
         expect(validateModelDraft({ ...model, code: "org/model_name[v2]" })).toBeNull();
     });
 
+    test("requires a completed OAuth sign-in and keeps custom providers API-key only", () => {
+        const openrouter = createBuiltinDraft({
+            ...createProviderResource(),
+            code: "openrouter",
+            name: "OpenRouter",
+            oauth: true,
+        });
+        expect(validateProviderDraft({ ...openrouter, authMethod: "oauth", apiKey: "" })).toContain("OAuth");
+        expect(validateProviderDraft({ ...openrouter, authMethod: "oauth", apiKey: "oauth-key" })).toBeNull();
+
+        const custom = createCustomDraft("custom:0");
+        expect(custom.oauth).toBe(false);
+        expect(validateProviderDraft({ ...custom, code: "custom", name: "Custom", baseUrl: "https://example.test", authMethod: "oauth", apiKey: "oauth-key" }))
+            .toContain("OAuth");
+    });
+
     test("creates resources in the core initialization order", async () => {
         const draft = createDraft();
         const model = createModel(draft);

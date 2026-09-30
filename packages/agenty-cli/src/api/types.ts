@@ -67,6 +67,8 @@ export interface ModelProviderDto {
     type: APIType;
     baseUrl: string;
     apiKey: string;
+    oauth?: boolean;
+    authMethod?: "apiKey" | "oauth";
     builtin?: boolean;
     official?: boolean;
     modelsUrl?: string;
@@ -153,6 +155,7 @@ export interface CreateModelProviderDto {
     type: APIType;
     baseUrl?: string;
     apiKey?: string;
+    authMethod?: "apiKey" | "oauth";
     metadata?: Record<string, unknown>;
 }
 

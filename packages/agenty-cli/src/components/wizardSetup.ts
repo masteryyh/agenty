@@ -113,21 +113,27 @@ export async function persistWizardSetup(
         const existing = existingProviders.find((provider) => provider.code === providerCode);
         let providerChanged = false;
         if (draft.builtin) {
-            providerChanged = existing?.apiKey !== draft.apiKey.trim();
+            providerChanged = existing?.apiKey !== draft.apiKey.trim() ||
+                (existing?.authMethod ?? "apiKey") !== draft.authMethod;
             if (providerChanged) {
-                await client.updateProvider(providerCode, { apiKey: draft.apiKey.trim() });
+                await client.updateProvider(providerCode, {
+                    apiKey: draft.apiKey.trim(),
+                    authMethod: draft.authMethod,
+                });
             }
         } else if (existing) {
             providerChanged = existing.name !== draft.name.trim() ||
                 existing.type !== draft.type ||
                 existing.baseUrl !== draft.baseUrl.trim() ||
-                existing.apiKey !== draft.apiKey.trim();
+                existing.apiKey !== draft.apiKey.trim() ||
+                (existing.authMethod ?? "apiKey") !== draft.authMethod;
             if (providerChanged) {
                 await client.updateProvider(providerCode, {
                     name: draft.name.trim(),
                     type: draft.type,
                     baseUrl: draft.baseUrl.trim(),
                     apiKey: draft.apiKey.trim(),
+                    authMethod: draft.authMethod,
                 });
             }
         } else {
@@ -137,6 +143,7 @@ export async function persistWizardSetup(
                 type: draft.type,
                 baseUrl: draft.baseUrl.trim(),
                 apiKey: draft.apiKey.trim(),
+                authMethod: draft.authMethod,
             };
             await client.createProvider(providerInput);
         }

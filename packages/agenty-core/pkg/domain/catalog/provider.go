@@ -12,6 +12,13 @@ var (
 	ErrBuiltinProviderReadOnly = errors.New("catalog: built-in provider is read-only")
 )
 
+type AuthMethod string
+
+const (
+	AuthMethodAPIKey AuthMethod = "apiKey"
+	AuthMethodOAuth  AuthMethod = "oauth"
+)
+
 type Provider struct {
 	Code          shared.Code     `json:"code"`
 	Name          string          `json:"name"`
@@ -22,6 +29,8 @@ type Provider struct {
 	Official      bool            `json:"official"`
 	ModelsURL     string          `json:"modelsUrl,omitempty"`
 	TokenCountURL string          `json:"tokenCountUrl,omitempty"`
+	OAuth         bool            `json:"oauth,omitempty"`
+	AuthMethod    AuthMethod      `json:"authMethod,omitempty"`
 	Models        []Model         `json:"models"`
 	ModelsCached  bool            `json:"modelsCached,omitempty"`
 	Metadata      shared.Metadata `json:"metadata,omitempty"`

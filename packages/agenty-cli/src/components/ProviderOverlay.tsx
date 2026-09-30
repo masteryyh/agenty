@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { loginWithOpenRouter } from "../api/openRouterOAuth";
 import type {
     APIType,
     CoreModelDto,
@@ -55,6 +56,8 @@ type ProviderFormMode = "edit" | "configure";
 export function buildProviderFields(
     target: ModelProviderDto,
     mode: ProviderFormMode,
+    oauthSignedIn = target.authMethod === "oauth",
+    oauthPending = false,
 ): FormField[] {
     const configuringBuiltin = mode === "configure";
     return [
@@ -98,15 +101,40 @@ export function buildProviderFields(
             value: "",
             placeholder: "leave blank to keep",
             secret: true,
+            visible: !oauthSignedIn,
         },
+        ...(target.oauth && !oauthSignedIn ? [{
+            key: "authorize",
+            label: "Sign in with OAuth...",
+            kind: "action" as const,
+            value: "",
+            readOnly: oauthPending,
+        }] : []),
     ];
 }
 
 export function buildBuiltinProviderUpdate(
     values: FormValues,
+    authMethod?: "apiKey" | "oauth",
+    oauthApiKey?: string,
 ): UpdateModelProviderDto | null {
     const apiKey = formString(values, "apiKey").trim();
-    return apiKey ? { apiKey } : null;
+    const nextAuthMethod = authMethod ?? "apiKey";
+    const update: UpdateModelProviderDto = {};
+    if (nextAuthMethod === "oauth") {
+        if (oauthApiKey) {
+            update.apiKey = oauthApiKey;
+        }
+        update.authMethod = "oauth";
+    } else {
+        if (apiKey) {
+            update.apiKey = apiKey;
+        }
+        if (authMethod !== undefined) {
+            update.authMethod = "apiKey";
+        }
+    }
+    return Object.keys(update).length > 0 ? update : null;
 }
 
 const reasoningOptions = STANDARD_REASONING_EFFORTS.map((effort) => ({ label: effort, value: effort }));
@@ -235,6 +263,11 @@ export function ProviderOverlay() {
     const [expandedProviderCodes, setExpandedProviderCodes] = useState<Set<string>>(new Set());
     const [advancedModelOptions, setAdvancedModelOptions] = useState(false);
     const [formType, setFormType] = useState<string>(providerTypes[0]);
+    const [oauthSignedIn, setOAuthSignedIn] = useState(false);
+    const [oauthStatus, setOAuthStatus] = useState("");
+    const [oauthFailed, setOAuthFailed] = useState(false);
+    const [oauthApiKey, setOAuthApiKey] = useState<string | null>(null);
+    const oauthControllerRef = useRef<AbortController | null>(null);
     const modeRef = useRef(mode);
     const expansionInitializedRef = useRef(false);
     const previousProviderCodesRef = useRef<Set<string>>(new Set());
@@ -286,15 +319,35 @@ export function ProviderOverlay() {
         }
     });
 
+    useEffect(() => () => {
+        oauthControllerRef.current?.abort();
+    }, []);
+
     const close = () => setOverlay(null);
-    const returnToList = () => setMode({ kind: "list" });
+    const returnToList = () => {
+        oauthControllerRef.current?.abort();
+        oauthControllerRef.current = null;
+        setOAuthSignedIn(false);
+        setOAuthStatus("");
+        setOAuthFailed(false);
+        setOAuthApiKey(null);
+        setMode({ kind: "list" });
+    };
 
     const openAction = (action: ProviderRowEnterAction) => {
         switch (action.kind) {
             case "configure-provider":
+                setOAuthSignedIn(action.provider.authMethod === "oauth");
+                setOAuthStatus(action.provider.authMethod === "oauth" ? "Signed in with OAuth." : "");
+                setOAuthFailed(false);
+                setOAuthApiKey(null);
                 setMode({ kind: "configure-provider", target: action.provider });
                 return;
             case "edit-provider":
+                setOAuthSignedIn(false);
+                setOAuthStatus("");
+                setOAuthFailed(false);
+                setOAuthApiKey(null);
                 setMode({ kind: "edit-provider", target: action.provider });
                 return;
             case "view-model":
@@ -315,6 +368,34 @@ export function ProviderOverlay() {
                 return;
             case "none":
                 return;
+        }
+    };
+
+    const authorizeProvider = async (provider: ModelProviderDto) => {
+        if (!provider.oauth || oauthControllerRef.current) {
+            return;
+        }
+        const controller = new AbortController();
+        oauthControllerRef.current = controller;
+        setOAuthStatus(`Waiting for ${provider.name} in your browser…`);
+        setOAuthFailed(false);
+        try {
+            const key = await loginWithOpenRouter(controller.signal);
+            if (oauthControllerRef.current !== controller) {
+                return;
+            }
+            setOAuthApiKey(key);
+            setOAuthSignedIn(true);
+            setOAuthStatus("Signed in with OAuth.");
+        } catch (cause) {
+            if (!controller.signal.aborted) {
+                setOAuthFailed(true);
+                setOAuthStatus(errorMessage(cause));
+            }
+        } finally {
+            if (oauthControllerRef.current === controller) {
+                oauthControllerRef.current = null;
+            }
         }
     };
 
@@ -388,14 +469,32 @@ export function ProviderOverlay() {
             returnToList();
             return;
         }
-        const update = buildBuiltinProviderUpdate(values);
+        if (oauthControllerRef.current) {
+            return;
+        }
+        const nextAuthMethod = target.oauth && oauthSignedIn
+            ? "oauth"
+            : "apiKey";
+        const hasOAuthCredential = Boolean(oauthApiKey) || target.authMethod === "oauth";
+        if (nextAuthMethod === "oauth" && !hasOAuthCredential) {
+            setToast(`Sign in with ${target.name} before saving OAuth authentication.`, true);
+            return;
+        }
+        if (nextAuthMethod === "apiKey" && !target.apiKey.trim() && !formString(values, "apiKey").trim()) {
+            setToast("Enter an API key before switching to API key authentication.", true);
+            return;
+        }
+        const update = buildBuiltinProviderUpdate(values, nextAuthMethod, oauthApiKey ?? undefined);
         if (!update) {
             returnToList();
             return;
         }
         try {
             await client.updateProvider(target.code, update);
-            setToast(`Provider API key updated: ${target.name}`);
+            if (target.modelsUrl) {
+                await client.listProviderModels(target.code);
+            }
+            setToast(`Provider authentication updated: ${target.name}`);
             await reload();
             returnToList();
         } catch (cause: unknown) {
@@ -505,7 +604,21 @@ export function ProviderOverlay() {
         return (
             <FormPanel
                 title={`${configuringBuiltin ? "Configure" : "Edit"}: ${target.name}`}
-                fields={buildProviderFields(target, configuringBuiltin ? "configure" : "edit")}
+                fields={buildProviderFields(
+                    target,
+                    configuringBuiltin ? "configure" : "edit",
+                    oauthSignedIn,
+                    Boolean(oauthControllerRef.current),
+                )}
+                afterFields={oauthStatus ? (
+                    <Text color={oauthFailed ? theme.danger : oauthSignedIn ? theme.success : theme.textMuted}>
+                        {oauthStatus}
+                    </Text>
+                ) : undefined}
+                actions={[
+                    { key: "save", label: "Save" },
+                    { key: "cancel", label: "Back" },
+                ]}
                 shortcutHint={!configuringBuiltin ? "d delete" : undefined}
                 onShortcut={(input) => {
                     if (!configuringBuiltin && input.toLowerCase() === "d") {
@@ -515,7 +628,9 @@ export function ProviderOverlay() {
                     return false;
                 }}
                 onAction={(action, values) => {
-                    if (action !== "save") {
+                    if (action === "authorize") {
+                        void authorizeProvider(target);
+                    } else if (action !== "save") {
                         returnToList();
                     } else if (configuringBuiltin) {
                         void handleConfigureProvider(target, values);

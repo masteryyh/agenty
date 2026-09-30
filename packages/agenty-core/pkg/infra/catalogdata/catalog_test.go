@@ -34,11 +34,14 @@ func TestLoadProviders(t *testing.T) {
 	if openRouter.Code != "openrouter" || openRouter.Name != "OpenRouter" || openRouter.Type != "openai" {
 		t.Errorf("OpenRouter provider = %+v", openRouter)
 	}
-	if openRouter.Official || openRouter.BaseURL != "https://openrouter.ai/api/v1" || openRouter.ModelsURL != "models" {
+	if openRouter.Official || !openRouter.OAuth || openRouter.BaseURL != "https://openrouter.ai/api/v1" || openRouter.ModelsURL != "models" {
 		t.Errorf("OpenRouter discovery config = %+v", openRouter)
 	}
 	if openRouter.Models == nil || len(openRouter.Models) != 0 {
 		t.Errorf("OpenRouter embedded models = %#v, want empty", openRouter.Models)
+	}
+	if providers[5].Code != "deepseek" || providers[5].OAuth {
+		t.Errorf("DeepSeek OAuth capability = %v, want false", providers[5].OAuth)
 	}
 	for _, provider := range providers {
 		for _, model := range provider.Models {

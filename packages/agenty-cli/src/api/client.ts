@@ -463,6 +463,8 @@ function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
         ...provider,
         builtin: provider.builtin === true,
         official: provider.official === true,
+        oauth: provider.oauth === true,
+        authMethod: provider.authMethod === "oauth" ? "oauth" : "apiKey",
         modelsCached: provider.modelsCached === true,
         models: Array.isArray(provider.models)
             ? provider.models

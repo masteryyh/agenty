@@ -21,7 +21,10 @@ export interface ProviderDraft {
     type: APIType;
     baseUrl: string;
     apiKey: string;
+    oauth: boolean;
+    authMethod: "apiKey" | "oauth";
     builtin: boolean;
+    modelsDiscovered: boolean;
 }
 
 export interface ModelDraft {
@@ -54,7 +57,10 @@ export function createBuiltinDraft(provider: ModelProviderDto, existing?: ModelP
         type: provider.type,
         baseUrl: provider.baseUrl,
         apiKey: source.apiKey ?? "",
+        oauth: provider.oauth === true,
+        authMethod: source.authMethod === "oauth" ? "oauth" : "apiKey",
         builtin: true,
+        modelsDiscovered: source.modelsCached === true || (Boolean(provider.modelsUrl) && provider.models.length === 0),
     };
 }
 
@@ -68,7 +74,10 @@ export function createCustomDraft(id: string, existing?: ModelProviderDto): Prov
         type: existing?.type ?? "openai_completions",
         baseUrl: existing?.baseUrl ?? "",
         apiKey: existing?.apiKey ?? "",
+        oauth: false,
+        authMethod: "apiKey",
         builtin: false,
+        modelsDiscovered: existing?.modelsCached === true,
     };
 }
 
@@ -132,8 +141,11 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
     if (!draft.baseUrl.trim()) {
         return "Base URL is required.";
     }
-    if (!draft.apiKey.trim()) {
+    if (draft.authMethod === "apiKey" && !draft.apiKey.trim()) {
         return `Enter an API key for ${draft.name.trim()}.`;
+    }
+    if (draft.authMethod === "oauth" && (!draft.oauth || !draft.apiKey.trim())) {
+        return `Complete OAuth sign-in for ${draft.name.trim()}.`;
     }
     return null;
 }
