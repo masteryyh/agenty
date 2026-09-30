@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -513,5 +515,56 @@ func TestSessionClearPending(t *testing.T) {
 	}
 	if session.ID == uuid.Nil {
 		t.Error("ClearPending changed projected session state")
+	}
+}
+
+func TestAdoptPermissionModePreservesRoundsAndCompactedContext(t *testing.T) {
+	session := StartSession(shared.NewModelRef("provider", "model"), 8192, shared.ReasoningOff, nil)
+	roundID, err := session.StartRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.AppendHiddenUserMessage(roundID, Text("<metadata><permission-mode>ask</permission-mode></metadata>")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Compact(CompactionInput{Trigger: CompactionTriggerManual, Summary: "summary"}); err != nil {
+		t.Fatal(err)
+	}
+	events := append([]shared.Event(nil), session.PendingEvents()...)
+	session.ClearPending()
+	before := session.Snapshot()
+	updated := session.Snapshot()
+	updated.SetPermissionMode(PermissionYolo, uuid.Nil)
+	if !reflect.DeepEqual(session.Snapshot(), before) {
+		t.Fatal("preparing permission update mutated the original")
+	}
+	events = append(events, updated.PendingEvents()...)
+	updated.ClearPending()
+
+	// Approval reads can continue while the committed mode is adopted.
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = session.CurrentPermissionMode()
+			}
+		}
+	})
+	session.AdoptPermissionMode(updated)
+	close(stop)
+	readers.Wait()
+	if session.CurrentPermissionMode() != PermissionYolo || len(session.PendingEvents()) != 0 || !session.UpdatedAt.Equal(updated.UpdatedAt) {
+		t.Fatal("committed permission state was not adopted")
+	}
+	if !reflect.DeepEqual(session.Rounds, before.Rounds) {
+		t.Fatal("permission update replaced round history")
+	}
+	replayed := ReplaySession(events)
+	if !reflect.DeepEqual(session.ContextMessages(), replayed.ContextMessages()) || !reflect.DeepEqual(session.LastMetadata(), replayed.LastMetadata()) {
+		t.Fatal("adopted metadata and context disagree with transcript replay")
 	}
 }

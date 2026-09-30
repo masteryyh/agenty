@@ -512,6 +512,10 @@ export const useAppStore = create<AppState>((set, get) => {
                 if (state.session?.id !== event.sessionId) {
                     return {};
                 }
+                if (latestPermissionChange?.sessionId === event.sessionId &&
+                    latestPermissionChange.mode !== permissionMode) {
+                    return {};
+                }
                 return { session: {
                     ...state.session,
                     permissionMode,

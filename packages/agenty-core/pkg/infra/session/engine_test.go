@@ -1295,6 +1295,57 @@ func TestEngineSerializesSessionDeleteWithStart(t *testing.T) {
 	}
 }
 
+func TestEngineSerializesSessionDeleteWithPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	engine := fixture.newEngine(t, nil)
+	session := fixture.createSession(t)
+	fixture.sessions.saveStarted = make(chan struct{})
+	fixture.sessions.saveRelease = make(chan struct{})
+	releaseSave := sync.OnceFunc(func() { close(fixture.sessions.saveRelease) })
+	defer releaseSave()
+
+	modeResult := make(chan error, 1)
+	go func() {
+		_, err := engine.SetPermissionMode(t.Context(), session.ID.String(), conversation.PermissionAuto)
+		modeResult <- err
+	}()
+	select {
+	case <-fixture.sessions.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("permission mode save did not start")
+	}
+
+	sessionService := application.NewSessionService(
+		fixture.sessions,
+		application.WithSessionExecutionState(engine),
+	)
+	deleteResult := make(chan error, 1)
+	go func() {
+		deleteResult <- sessionService.Delete(t.Context(), session.ID.String())
+	}()
+	select {
+	case err := <-deleteResult:
+		if appErrorCode(err) != application.CodeAlreadyExists {
+			t.Fatalf("delete during permission update = %v, want busy", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session delete blocked on permission update")
+	}
+
+	releaseSave()
+	if err := <-modeResult; err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionService.Delete(t.Context(), session.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.sessions.Load(t.Context(), session.ID); !errors.Is(err, infrastorage.ErrConversationNotFound) {
+		t.Fatalf("session after delete = %v, want not found", err)
+	}
+}
+
 func TestEngineShutdownCancelsAllSessions(t *testing.T) {
 	t.Parallel()
 

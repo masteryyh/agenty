@@ -54,6 +54,9 @@ func cloneProvider(provider *catalog.Provider) *catalog.Provider {
 type sessionRepositoryFake struct {
 	mu            sync.RWMutex
 	events        map[uuid.UUID][]shared.Event
+	saveStarted   chan struct{}
+	saveRelease   chan struct{}
+	saveOnce      sync.Once
 	loadAttempted chan struct{}
 	loadRelease   chan struct{}
 	loadOnce      sync.Once
@@ -91,6 +94,13 @@ func (repository *sessionRepositoryFake) Save(
 	_ context.Context,
 	session *conversation.Session,
 ) error {
+	if repository.saveStarted != nil {
+		repository.saveOnce.Do(func() { close(repository.saveStarted) })
+	}
+	if repository.saveRelease != nil {
+		<-repository.saveRelease
+	}
+
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 

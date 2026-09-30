@@ -245,7 +245,7 @@ func (engine *Engine) Compact(
 	engine.bindExecutionSession(id, execution, session)
 	resources, ok := engine.cachedSessionResourcesForModel(id, session)
 	if !ok {
-		resources, err = engine.loadResources(ctx, runCtx, session)
+		resources, err = engine.loadResources(ctx, session)
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +326,7 @@ func (engine *Engine) SetModel(
 
 	source, ok := engine.cachedSessionResourcesForModel(id, session)
 	if !ok {
-		source, err = engine.loadResources(ctx, runCtx, session)
+		source, err = engine.loadResources(ctx, session)
 		if err != nil {
 			return nil, err
 		}
@@ -451,20 +451,25 @@ func (engine *Engine) SetPermissionMode(
 		return session.VisibleCopy(), nil
 	}
 
-	session.SetPermissionMode(mode, uuid.Nil)
-	roundID := uuid.Nil
-	if active, ok := engine.active[id]; ok {
-		roundID = active.roundID
-	}
-
-	change := conversation.SessionPermissionModeChanged{
-		SessionID: id, RoundID: roundID, PreviousMode: previous, PermissionMode: mode, At: session.UpdatedAt,
-	}
-	if err := engine.emitForSession(ctx, session, uuid.Nil, nil, nil, agentloop.Event{
+	// Tools keep seeing the committed mode while storage writes the update.
+	updated := session.Snapshot()
+	updated.SetPermissionMode(mode, uuid.Nil)
+	pending := updated.PendingEvents()
+	change := pending[len(pending)-1].(conversation.SessionPermissionModeChanged)
+	if err := engine.emitForSession(ctx, updated, uuid.Nil, nil, nil, agentloop.Event{
 		Type: agentloop.EventPermissionModeChanged, Payload: change,
 	}); err != nil {
+		if len(updated.PendingEvents()) == 0 {
+			// Storage succeeded; a later notification failure must not undo it.
+			session.AdoptPermissionMode(updated)
+		} else if persisted, loadErr := engine.sessions.Load(context.WithoutCancel(ctx), id); loadErr == nil &&
+			persisted.CurrentPermissionMode() == mode && persisted.UpdatedAt.Equal(change.At) {
+			// The transcript may have been appended before the index update failed.
+			session.AdoptPermissionMode(persisted)
+		}
 		return nil, apperrors.WrapError(apperrors.CodeInternal, "persist permission mode", err)
 	}
+	session.AdoptPermissionMode(updated)
 	return session.VisibleCopy(), nil
 }
 
@@ -588,9 +593,16 @@ func (engine *Engine) ExecuteSessionIfIdle(
 	sessionID uuid.UUID,
 	execute func() error,
 ) (bool, error) {
+	lock := engine.sessionLock(sessionID)
+	// Repository routes already hold the event barrier. Do not wait for a
+	// session mutation that may itself be waiting to publish through it.
+	if !lock.TryLock() {
+		return false, nil
+	}
+	defer lock.Unlock()
+
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
-
 	if _, running := engine.active[sessionID]; running {
 		return false, nil
 	}
@@ -713,7 +725,7 @@ func (engine *Engine) prepare(
 	}
 	engine.bindExecutionSession(sessionID, execution, session)
 
-	resources, err := engine.loadResources(ctx, runCtx, session)
+	resources, err := engine.loadResources(ctx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -902,7 +914,6 @@ func modelMaxOutputTokens(model catalog.Model) int64 {
 
 func (engine *Engine) loadResources(
 	ctx context.Context,
-	runCtx context.Context,
 	session *conversation.Session,
 ) (*executionResources, error) {
 	if session.CurrentModel == nil || session.CurrentModel.IsZero() {
