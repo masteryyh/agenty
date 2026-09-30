@@ -421,13 +421,25 @@ function WizardContent() {
                     .find((provider) => provider.code === next.code) ?? savedProvider;
             }
 
-            const addedModels = modelDraftsForProvider(next, providerWithModels);
-            setDrafts((current) => {
-                const index = current.findIndex((draft) => draft.id === next.id);
-                if (index < 0) {
-                    return [...current, next];
+            const discoveredModels = modelDraftsForProvider(next, providerWithModels);
+            const pendingModels = models.filter((model) => model.providerId === next.id);
+            const pendingByCode = new Map(pendingModels.map((model) => [model.code.trim(), model]));
+            const addedModels = discoveredModels.map((model) => pendingByCode.get(model.code.trim()) ?? model);
+            const discoveredCodes = new Set(addedModels.map((model) => model.code.trim()));
+            for (const pendingModel of pendingModels) {
+                if (!discoveredCodes.has(pendingModel.code.trim())) {
+                    addedModels.push({ ...pendingModel, providerCode: next.code, providerName: next.name });
                 }
-                return current.map((draft, draftIndex) => draftIndex === index ? next : draft);
+            }
+            const persistedNext = next.source === "custom" && !next.originalCode
+                ? { ...next, originalCode: savedProvider.code }
+                : next;
+            setDrafts((current) => {
+                const index = current.findIndex((draft) => draft.id === persistedNext.id);
+                if (index < 0) {
+                    return [...current, persistedNext];
+                }
+                return current.map((draft, draftIndex) => draftIndex === index ? persistedNext : draft);
             });
             setModels((current) => {
                 const retained = current.filter((model) => model.providerId !== next.id);
@@ -570,6 +582,7 @@ function WizardContent() {
         return (
             <Box flexDirection="column" flexGrow={1}>
                 <FormPanel
+                    fullHeight
                     error={error}
                     key={editing.id}
                     title={editing.source === "builtin" ? `Configure ${editing.name}` : "Add compatible provider"}
@@ -608,6 +621,7 @@ function WizardContent() {
         return (
             <Box flexDirection="column" flexGrow={1} width="100%" position="relative">
                 <FormPanel
+                    fullHeight
                     key={editingModel.id}
                     title={editingModel.originalCode
                         ? `Edit model: ${editingModel.name}`

@@ -66,6 +66,7 @@ export interface FormPanelProps {
     active?: boolean;
     error?: string | null;
     hint?: string;
+    fullHeight?: boolean;
     shortcutHint?: string;
     onChange?: (key: string, allValues: FormValues) => void;
     onShortcut?: (
@@ -171,6 +172,7 @@ export function FormPanel({
     active = true,
     error,
     hint: hintOverride,
+    fullHeight = false,
     shortcutHint,
     onChange,
     onShortcut,
@@ -393,10 +395,10 @@ export function FormPanel({
         choiceScalarField ? choiceFieldTop + 1 + menuHeight : 1,
     );
     const compact = height < titleLines.length + errorLines.length + actionRows.length + 5;
-    const bodyHeight = Math.max(1, Math.min(
-        preferredBodyHeight,
-        height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3),
-    ));
+    const availableBodyHeight = height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3);
+    const bodyHeight = fullHeight
+        ? Math.max(1, availableBodyHeight)
+        : Math.max(1, Math.min(preferredBodyHeight, availableBodyHeight));
 
     // Keep keyboard focus in view when fields expand or the terminal resizes.
     useLayoutEffect(() => {
@@ -429,6 +431,7 @@ export function FormPanel({
             preferredBodyHeight={preferredBodyHeight}
             bodyHeight={bodyHeight}
             compact={compact}
+            fullHeight={fullHeight}
             footerHeight={actionRows.length}
             footer={actionRows.map((row, index) => (
                 <ActionBar

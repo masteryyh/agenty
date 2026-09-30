@@ -44,7 +44,7 @@
         "eslint-plugin-import-newlines": "^2.0.0",
         "eslint-plugin-jsonc": "^3.4.2",
         "eslint-plugin-simple-import-sort": "^14.0.0",
-        "turbo": "^2.10.12",
+        "turbo": "^2.11.5",
         "typescript-eslint": "^8.70.0"
     }
 }

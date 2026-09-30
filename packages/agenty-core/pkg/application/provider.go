@@ -251,7 +251,10 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 			return p, nil
 		}
 		if upd.APIKey != nil {
-			p.APIKey = *upd.APIKey
+			p.APIKey = strings.TrimSpace(*upd.APIKey)
+			if p.APIKey != "" {
+				p.AuthMethod = catalog.AuthMethodAPIKey
+			}
 		}
 		if upd.AuthMethod != nil {
 			if err := validateAuthMethod(p, *upd.AuthMethod); err != nil {
