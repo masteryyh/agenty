@@ -11,6 +11,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	"github.com/masteryyh/agenty-core/pkg/infra/catalogdata"
 )
 
 func TestProviderCreateAndGet(t *testing.T) {
@@ -270,6 +271,57 @@ func TestBuiltinProviderAllowsOnlyAPIKeyUpdate(t *testing.T) {
 	}
 	if err := providerSvc.Delete(ctx, "openai"); appErrorCode(err) != application.CodeValidation {
 		t.Fatalf("builtin Delete error = %v, want validation", err)
+	}
+}
+
+func TestOAuthAuthenticationIsLimitedToBuiltinsThatOptIn(t *testing.T) {
+	providers, err := catalogdata.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newProviderRepositoryFake()
+	for _, provider := range providers {
+		if provider.Code == "openrouter" || provider.Code == "deepseek" {
+			repo.providers[provider.Code] = provider
+		}
+	}
+	providerSvc := application.NewProviderService(repo)
+
+	method := catalog.AuthMethodOAuth
+	key := "openrouter-oauth-key"
+	updated, err := providerSvc.Update(t.Context(), "openrouter", application.ProviderUpdate{
+		APIKey:     &key,
+		AuthMethod: &method,
+	})
+	if err != nil {
+		t.Fatalf("enable OpenRouter OAuth: %v", err)
+	}
+	if updated.AuthMethod != catalog.AuthMethodOAuth || updated.APIKey != key {
+		t.Fatalf("OpenRouter OAuth credentials = %+v", updated)
+	}
+	apiKeyMethod := catalog.AuthMethodAPIKey
+	updated, err = providerSvc.Update(t.Context(), "openrouter", application.ProviderUpdate{AuthMethod: &apiKeyMethod})
+	if err != nil {
+		t.Fatalf("switch OpenRouter to API-key authentication: %v", err)
+	}
+	if updated.AuthMethod != catalog.AuthMethodAPIKey || updated.APIKey != key {
+		t.Fatalf("OpenRouter API-key credentials = %+v", updated)
+	}
+
+	if _, err := providerSvc.Update(t.Context(), "deepseek", application.ProviderUpdate{
+		APIKey:     &key,
+		AuthMethod: &method,
+	}); appErrorCode(err) != application.CodeValidation {
+		t.Fatalf("enable DeepSeek OAuth error = %v, want validation", err)
+	}
+	if _, err := providerSvc.Create(t.Context(), "custom-oauth", application.ProviderInput{
+		Name:       "Custom OAuth",
+		Type:       catalog.APIOpenAI,
+		BaseURL:    "https://example.test/v1",
+		APIKey:     key,
+		AuthMethod: method,
+	}); appErrorCode(err) != application.CodeValidation {
+		t.Fatalf("create custom OAuth provider error = %v, want validation", err)
 	}
 }
 

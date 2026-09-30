@@ -108,6 +108,34 @@ describe("AgentyClient HTTP endpoints", () => {
         await expect(new AgentyClient(transport).listModels()).resolves.toEqual([]);
     });
 
+    test("normalizes provider OAuth capability and authentication mode", async () => {
+        const openrouter = {
+            code: "openrouter",
+            name: "OpenRouter",
+            type: "openai",
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: "oauth-key",
+            oauth: true,
+            authMethod: "oauth",
+            models: [],
+            createdAt: "",
+            updatedAt: "",
+        } as ModelProviderDto;
+        const deepseek = {
+            ...openrouter,
+            code: "deepseek",
+            name: "DeepSeek",
+            oauth: undefined,
+            authMethod: undefined,
+        };
+        const client = new AgentyClient(new MockTransport(() => [openrouter, deepseek]));
+
+        await expect(client.listProviders()).resolves.toMatchObject([
+            { code: "openrouter", oauth: true, authMethod: "oauth" },
+            { code: "deepseek", oauth: false, authMethod: "apiKey" },
+        ]);
+    });
+
     test("normalizes session messages and collections", async () => {
         const session = {
             id: "session",

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -32,11 +33,12 @@ func NewProviderService(repo providerRepository) *ProviderService {
 }
 
 type ProviderInput struct {
-	Name     string          `json:"name"`
-	Type     catalog.APIType `json:"type"`
-	BaseURL  string          `json:"baseUrl,omitempty"`
-	APIKey   string          `json:"apiKey,omitempty"`
-	Metadata shared.Metadata `json:"metadata,omitempty"`
+	Name       string             `json:"name"`
+	Type       catalog.APIType    `json:"type"`
+	BaseURL    string             `json:"baseUrl,omitempty"`
+	APIKey     string             `json:"apiKey,omitempty"`
+	AuthMethod catalog.AuthMethod `json:"authMethod,omitempty"`
+	Metadata   shared.Metadata    `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Create(ctx context.Context, code string, in ProviderInput) (*catalog.Provider, error) {
@@ -62,6 +64,10 @@ func (s *ProviderService) Create(ctx context.Context, code string, in ProviderIn
 
 	p.BaseURL = in.BaseURL
 	p.APIKey = in.APIKey
+	p.AuthMethod = normalizedAuthMethod(in.AuthMethod)
+	if err := validateAuthMethod(p, p.AuthMethod); err != nil {
+		return nil, Validation(err.Error())
+	}
 	p.Metadata = in.Metadata
 
 	if err := s.repo.Save(ctx, p); err != nil {
@@ -216,11 +222,12 @@ func availableModelsFromCatalog(models []catalog.Model) []catalog.AvailableModel
 }
 
 type ProviderUpdate struct {
-	Name     *string          `json:"name,omitempty"`
-	Type     *catalog.APIType `json:"type,omitempty"`
-	BaseURL  *string          `json:"baseUrl,omitempty"`
-	APIKey   *string          `json:"apiKey,omitempty"`
-	Metadata *shared.Metadata `json:"metadata,omitempty"`
+	Name       *string             `json:"name,omitempty"`
+	Type       *catalog.APIType    `json:"type,omitempty"`
+	BaseURL    *string             `json:"baseUrl,omitempty"`
+	APIKey     *string             `json:"apiKey,omitempty"`
+	AuthMethod *catalog.AuthMethod `json:"authMethod,omitempty"`
+	Metadata   *shared.Metadata    `json:"metadata,omitempty"`
 }
 
 func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderUpdate) (*catalog.Provider, error) {
@@ -238,14 +245,28 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 	}
 	if p.Builtin {
 		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.Metadata != nil {
-			return nil, Validation("built-in provider metadata is read-only; only the API key can be changed")
+			return nil, Validation("built-in provider metadata is read-only; only authentication credentials can be changed")
 		}
-		if upd.APIKey == nil {
+		if upd.APIKey == nil && upd.AuthMethod == nil {
 			return p, nil
 		}
-		p.APIKey = *upd.APIKey
+		if upd.APIKey != nil {
+			p.APIKey = strings.TrimSpace(*upd.APIKey)
+			if p.APIKey != "" {
+				p.AuthMethod = catalog.AuthMethodAPIKey
+			}
+		}
+		if upd.AuthMethod != nil {
+			if err := validateAuthMethod(p, *upd.AuthMethod); err != nil {
+				return nil, Validation(err.Error())
+			}
+			if *upd.AuthMethod == catalog.AuthMethodOAuth && strings.TrimSpace(p.APIKey) == "" {
+				return nil, Validation("OAuth authentication requires a completed sign-in")
+			}
+			p.AuthMethod = *upd.AuthMethod
+		}
 		if err := s.repo.Save(ctx, p); err != nil {
-			return nil, Internal("failed to save provider API key: " + err.Error())
+			return nil, Internal("failed to save provider credentials: " + err.Error())
 		}
 		return p, nil
 	}
@@ -265,6 +286,15 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 	if upd.APIKey != nil {
 		p.APIKey = *upd.APIKey
 	}
+	if upd.AuthMethod != nil {
+		if err := validateAuthMethod(p, *upd.AuthMethod); err != nil {
+			return nil, Validation(err.Error())
+		}
+		if *upd.AuthMethod == catalog.AuthMethodOAuth && strings.TrimSpace(p.APIKey) == "" {
+			return nil, Validation("OAuth authentication requires a completed sign-in")
+		}
+		p.AuthMethod = *upd.AuthMethod
+	}
 	if upd.Metadata != nil {
 		p.Metadata = *upd.Metadata
 	}
@@ -274,6 +304,23 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 		return nil, Internal("failed to save provider: " + err.Error())
 	}
 	return p, nil
+}
+
+func normalizedAuthMethod(method catalog.AuthMethod) catalog.AuthMethod {
+	if method == "" {
+		return catalog.AuthMethodAPIKey
+	}
+	return method
+}
+
+func validateAuthMethod(provider *catalog.Provider, method catalog.AuthMethod) error {
+	if method != catalog.AuthMethodAPIKey && method != catalog.AuthMethodOAuth {
+		return fmt.Errorf("invalid provider auth method %q", method)
+	}
+	if method == catalog.AuthMethodOAuth && !provider.OAuth {
+		return fmt.Errorf("provider %s does not support OAuth", provider.Code)
+	}
+	return nil
 }
 
 func (s *ProviderService) Delete(ctx context.Context, code string) error {

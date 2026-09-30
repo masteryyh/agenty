@@ -29,7 +29,7 @@ export interface FormOption {
 interface ScalarFormField {
     key: string;
     label: string;
-    kind: "text" | "select" | "boolean" | "multiselect" | "disclosure";
+    kind: "text" | "select" | "boolean" | "multiselect" | "disclosure" | "action";
     value: string;
     options?: FormOption[];
     placeholder?: string;
@@ -66,6 +66,7 @@ export interface FormPanelProps {
     active?: boolean;
     error?: string | null;
     hint?: string;
+    fullHeight?: boolean;
     shortcutHint?: string;
     onChange?: (key: string, allValues: FormValues) => void;
     onShortcut?: (
@@ -171,6 +172,7 @@ export function FormPanel({
     active = true,
     error,
     hint: hintOverride,
+    fullHeight = false,
     shortcutHint,
     onChange,
     onShortcut,
@@ -212,14 +214,14 @@ export function FormPanel({
 
     const width = dialogSize.width > 1 ? dialogSize.width : terminal.columns;
     const height = dialogSize.width > 1 ? dialogSize.height : terminal.rows;
-    const layout = resolveFormLayout(width, fields.filter((field) => field.kind !== "disclosure").map((field) => field.label));
+    const layout = resolveFormLayout(width, fields.filter((field) => field.kind !== "disclosure" && field.kind !== "action").map((field) => field.label));
     const fieldLayouts = visibleFields.map((field) => {
         const labelLines = wrapFormLabel(`${field.label}:`, layout.labelWidth);
         const valueTop = layout.mode === "stacked" ? labelLines.length : 0;
         return {
             labelLines,
             valueTop,
-            height: field.kind === "disclosure" ? 1 : Math.max(labelLines.length, valueTop + 1),
+            height: field.kind === "disclosure" || field.kind === "action" ? 1 : Math.max(labelLines.length, valueTop + 1),
         };
     });
     const fieldOffsets: number[] = [];
@@ -353,7 +355,11 @@ export function FormPanel({
         if (!field || field.focusable === false || editingText) {
             return;
         }
-        if (field.kind === "disclosure") {
+        if (field.kind === "action") {
+            if (!field.readOnly && key.return) {
+                onAction(field.key, valuesRef.current);
+            }
+        } else if (field.kind === "disclosure") {
             const expanded = formString(valuesRef.current, field.key) === "true";
             if (key.leftArrow && expanded) {
                 updateValue(field.key, "false");
@@ -389,10 +395,10 @@ export function FormPanel({
         choiceScalarField ? choiceFieldTop + 1 + menuHeight : 1,
     );
     const compact = height < titleLines.length + errorLines.length + actionRows.length + 5;
-    const bodyHeight = Math.max(1, Math.min(
-        preferredBodyHeight,
-        height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3),
-    ));
+    const availableBodyHeight = height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3);
+    const bodyHeight = fullHeight
+        ? Math.max(1, availableBodyHeight)
+        : Math.max(1, Math.min(preferredBodyHeight, availableBodyHeight));
 
     // Keep keyboard focus in view when fields expand or the terminal resizes.
     useLayoutEffect(() => {
@@ -425,6 +431,7 @@ export function FormPanel({
             preferredBodyHeight={preferredBodyHeight}
             bodyHeight={bodyHeight}
             compact={compact}
+            fullHeight={fullHeight}
             footerHeight={actionRows.length}
             footer={actionRows.map((row, index) => (
                 <ActionBar
@@ -490,10 +497,12 @@ export function FormPanel({
                             disabled={!active || field.focusable === false}
                             disclosure={field.kind === "disclosure"
                                 ? `${scalarValue === "true" ? "▾" : "▸"} ${field.label}`
-                                : undefined}
+                                : field.kind === "action" ? field.label : undefined}
                             onPress={() => {
                                 activate();
-                                if (field.kind === "disclosure" || (field.kind === "boolean" && !field.readOnly)) {
+                                if (field.kind === "action" && !field.readOnly) {
+                                    onAction(field.key, valuesRef.current);
+                                } else if (field.kind === "disclosure" || (field.kind === "boolean" && !field.readOnly)) {
                                     updateValue(field.key, scalarValue === "true" ? "false" : "true");
                                 }
                             }}
@@ -597,12 +606,13 @@ export function FormPanel({
 
 function formHint(field: FormField | undefined, width: number, choosing: boolean): string {
     let action = !field ? "Enter confirm"
-        : field.kind === "disclosure" ? "←→ expand/collapse"
-            : field.readOnly ? ""
-                : field.kind === "text" ? "type to edit · Enter next"
-                    : field.kind === "string-list" ? "Enter add · Backspace remove"
-                        : field.kind === "boolean" ? "Space toggle"
-                            : choosing && field.kind === "multiselect" ? "Space toggle · Enter confirm" : "Enter choose";
+        : field.kind === "action" ? "Enter confirm"
+            : field.kind === "disclosure" ? "←→ expand/collapse"
+                : field.readOnly ? ""
+                    : field.kind === "text" ? "type to edit · Enter next"
+                        : field.kind === "string-list" ? "Enter add · Backspace remove"
+                            : field.kind === "boolean" ? "Space toggle"
+                                : choosing && field.kind === "multiselect" ? "Space toggle · Enter confirm" : "Enter choose";
     if (width < 60) {
         action = action.replace("type to edit · ", "").replace("Backspace remove", "⌫ remove");
     }

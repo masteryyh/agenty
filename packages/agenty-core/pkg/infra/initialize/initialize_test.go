@@ -30,8 +30,8 @@ func TestOpenRepositoriesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List built-in providers: %v", err)
 	}
-	if len(builtinProviders) != 5 {
-		t.Fatalf("built-in providers = %d, want 5", len(builtinProviders))
+	if len(builtinProviders) != 6 {
+		t.Fatalf("built-in providers = %d, want 6", len(builtinProviders))
 	}
 	openRouter, err := repos.Catalog.Get(ctx, mustCode("openrouter"))
 	if err != nil {

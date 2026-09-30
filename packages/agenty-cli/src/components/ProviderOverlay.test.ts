@@ -44,6 +44,32 @@ describe("provider overlay builtin configuration", () => {
         expect(buildBuiltinProviderUpdate({ apiKey: "   " })).toBeNull();
     });
 
+    test("places the OAuth sign-in option after the API key without a switch", () => {
+        const provider = { ...builtinProvider(), oauth: true };
+        const fields = buildProviderFields(provider, "configure");
+
+        expect(fields.filter((field) => field.visible !== false && field.focusable !== false)
+            .map((field) => [field.key, field.kind])).toEqual([
+            ["apiKey", "text"],
+            ["authorize", "action"],
+        ]);
+        expect(fields.find((field) => field.key === "authorize")?.label).toBe("Sign in with OAuth...");
+        expect(fields.some((field) => field.kind === "boolean")).toBe(false);
+        expect(buildProviderFields(builtinProvider(), "configure").some((field) => field.key === "authorize"))
+            .toBe(false);
+        expect(buildBuiltinProviderUpdate({}, "oauth", "oauth-key")).toEqual({
+            apiKey: "oauth-key",
+            authMethod: "oauth",
+        });
+        expect(buildBuiltinProviderUpdate({}, "apiKey")).toEqual({ authMethod: "apiKey" });
+    });
+
+    test("hides the API key and sign-in option after successful OAuth authentication", () => {
+        const fields = buildProviderFields({ ...builtinProvider(), oauth: true, authMethod: "oauth" }, "configure");
+        expect(fields.find((field) => field.key === "apiKey")?.visible).toBe(false);
+        expect(fields.some((field) => field.key === "authorize")).toBe(false);
+    });
+
 });
 
 describe("provider overlay model advanced options", () => {

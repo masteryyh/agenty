@@ -9,6 +9,57 @@
         "tokenCountUrl": "responses/input_tokens",
         "models": [
             {
+                "name": "GPT-6.1 Sol",
+                "code": "gpt-6.1-sol",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": true,
+                "reasoning": true
+            },
+            {
+                "name": "GPT-6 Astra",
+                "code": "gpt-6-astra",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
+                "name": "GPT-6 Luna",
+                "code": "gpt-6-luna",
+                "contextWindow": 1050000,
+                "maxOutputTokens": 128000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": true,
+                "isDefault": false,
+                "reasoning": true
+            },
+            {
                 "name": "GPT-5.6 Sol",
                 "code": "gpt-5.6-sol",
                 "contextWindow": 1050000,
@@ -22,7 +73,7 @@
                 ],
                 "multiModal": true,
                 "light": false,
-                "isDefault": true,
+                "isDefault": false,
                 "reasoning": true
             },
             {
@@ -124,6 +175,7 @@
         "code": "openrouter",
         "type": "openai",
         "baseUrl": "https://openrouter.ai/api/v1",
+        "oauth": true,
         "modelsUrl": "models",
         "tokenCountUrl": "",
         "models": []
@@ -138,8 +190,8 @@
         "tokenCountUrl": "v1/messages/count_tokens",
         "models": [
             {
-                "name": "Claude Fable 5",
-                "code": "claude-fable-5",
+                "name": "Claude Fable 5.1",
+                "code": "claude-fable-5-1",
                 "contextWindow": 1000000,
                 "maxOutputTokens": 128000,
                 "reasoningEfforts": [
@@ -155,8 +207,8 @@
                 "reasoning": true
             },
             {
-                "name": "Claude Opus 5",
-                "code": "claude-opus-5",
+                "name": "Claude Opus 5.5",
+                "code": "claude-opus-5-5",
                 "contextWindow": 1000000,
                 "maxOutputTokens": 128000,
                 "reasoningEfforts": [
@@ -245,8 +297,8 @@
         "tokenCountUrl": "models/{model}:countTokens",
         "models": [
             {
-                "name": "Gemini 3.7 Flash",
-                "code": "gemini-3.7-flash",
+                "name": "Gemini 3.8 Flash",
+                "code": "gemini-3.8-flash",
                 "contextWindow": 1048576,
                 "maxOutputTokens": 65536,
                 "reasoningEfforts": [
@@ -285,6 +337,51 @@
                     "high"
                 ],
                 "multiModal": true,
+                "light": false,
+                "isDefault": false,
+                "reasoning": true
+            }
+        ]
+    },
+    {
+        "name": "DeepSeek",
+        "code": "deepseek",
+        "type": "openai",
+        "baseUrl": "https://api.deepseek.com",
+        "official": false,
+        "modelsUrl": "models",
+        "tokenCountUrl": "",
+        "models": [
+            {
+                "name": "DeepSeek V4.1 Flash",
+                "code": "deepseek-flash",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 384000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": true,
+                "light": true,
+                "isDefault": true,
+                "reasoning": true
+            },
+            {
+                "name": "DeepSeek V4 Pro",
+                "code": "deepseek-v4-pro",
+                "contextWindow": 1000000,
+                "maxOutputTokens": 384000,
+                "reasoningEfforts": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                ],
+                "multiModal": false,
                 "light": false,
                 "isDefault": false,
                 "reasoning": true

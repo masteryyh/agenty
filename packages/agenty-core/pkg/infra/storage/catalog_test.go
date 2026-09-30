@@ -153,7 +153,7 @@ func TestCatalogReasoningModelWithEmptyEffortsUsesDefaults(t *testing.T) {
 	}
 }
 
-func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
+func TestCatalogBuiltinProviderPersistsCredentials(t *testing.T) {
 	repo := newCatalogRepo(t)
 	builtins, err := catalogdata.LoadProviders()
 	if err != nil {
@@ -178,7 +178,7 @@ func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "{\n  \"apiKey\": \"secret\"\n}" {
+	if string(data) != "{\n  \"apiKey\": \"secret\",\n  \"authMethod\": \"apiKey\"\n}" {
 		t.Fatalf("builtin credentials = %s", data)
 	}
 
@@ -196,6 +196,62 @@ func TestCatalogBuiltinProviderPersistsOnlyAPIKey(t *testing.T) {
 	}
 	if err := repo.Delete(ctx, provider.Code); err != catalog.ErrBuiltinProviderReadOnly {
 		t.Fatalf("Delete builtin = %v, want read-only", err)
+	}
+}
+
+func TestCatalogBuiltinOAuthCredentialsRoundTrip(t *testing.T) {
+	repo := newCatalogRepo(t)
+	builtins, err := catalogdata.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo = NewCatalogRepository(repo.providersDir, builtins...)
+	provider, err := repo.Get(t.Context(), mustCode("openrouter"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.APIKey = "oauth-key"
+	provider.AuthMethod = catalog.AuthMethodOAuth
+	if err := repo.Save(t.Context(), provider); err != nil {
+		t.Fatalf("Save OAuth credentials: %v", err)
+	}
+
+	loaded, err := repo.Get(t.Context(), provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.APIKey != "oauth-key" || loaded.AuthMethod != catalog.AuthMethodOAuth || !loaded.OAuth {
+		t.Fatalf("loaded OpenRouter credentials = %+v", loaded)
+	}
+}
+
+func TestCatalogCustomProviderCannotUseOAuth(t *testing.T) {
+	repo := newCatalogRepo(t)
+	provider, err := catalog.NewProvider("custom-oauth", "Custom OAuth", catalog.APIOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.BaseURL = "https://example.test/v1"
+	provider.APIKey = "key"
+	provider.OAuth = true
+	provider.AuthMethod = catalog.AuthMethodOAuth
+	if err := repo.Save(t.Context(), provider); err == nil {
+		t.Fatal("Save accepted OAuth authentication for a custom provider")
+	}
+
+	if err := os.MkdirAll(repo.providersDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo.providersDir, "custom-oauth.json")
+	if err := os.WriteFile(path, []byte(`{"code":"custom-oauth","name":"Custom OAuth","type":"openai","baseUrl":"https://example.test/v1","apiKey":"key","oauth":true,"authMethod":"oauth","models":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.Get(t.Context(), provider.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuth || loaded.AuthMethod != catalog.AuthMethodAPIKey {
+		t.Fatalf("custom provider OAuth settings = oauth:%v authMethod:%q", loaded.OAuth, loaded.AuthMethod)
 	}
 }
 

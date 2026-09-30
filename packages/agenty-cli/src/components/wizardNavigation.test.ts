@@ -31,6 +31,10 @@ describe("wizard list navigation", () => {
         expect(rowIndexForFocus(focus)).toBe(1);
     });
 
+    test("keeps focus at the first row when moving up", () => {
+        expect(moveWizardListFocus({ kind: "row", index: 0 }, 3, "up")).toEqual({ kind: "row", index: 0 });
+    });
+
     test("does not produce an invalid row for an empty list", () => {
         const focus: WizardListFocus = { kind: "row", index: 0 };
 

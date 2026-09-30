@@ -59,6 +59,9 @@ func validateProvider(provider *catalog.Provider) error {
 	if !provider.Type.Valid() {
 		return fmt.Errorf("invalid API type %q", provider.Type)
 	}
+	if provider.AuthMethod != "" && provider.AuthMethod != catalog.AuthMethodAPIKey && provider.AuthMethod != catalog.AuthMethodOAuth {
+		return fmt.Errorf("invalid auth method %q", provider.AuthMethod)
+	}
 	if strings.TrimSpace(provider.BaseURL) == "" {
 		return errors.New("base URL is empty")
 	}

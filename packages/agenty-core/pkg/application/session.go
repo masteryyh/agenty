@@ -45,6 +45,7 @@ type sessionRepository interface {
 
 type sessionCatalogRepository interface {
 	Get(ctx context.Context, code shared.Code) (*catalog.Provider, error)
+	List(ctx context.Context) ([]*catalog.Provider, error)
 }
 
 func NewSessionService(repo sessionRepository, options ...SessionServiceOption) *SessionService {
@@ -141,7 +142,73 @@ func (s *SessionService) Get(ctx context.Context, idStr string) (*conversation.S
 		}
 		return nil, Internal("failed to load session: " + err.Error())
 	}
+	if err := s.repairSessionModel(ctx, sess); err != nil {
+		return nil, err
+	}
 	return sess.VisibleCopy(), nil
+}
+
+func (s *SessionService) repairSessionModel(ctx context.Context, sess *conversation.Session) error {
+	if s.catalog == nil || sess == nil || sess.CurrentModel == nil {
+		return nil
+	}
+
+	current := *sess.CurrentModel
+	provider, err := s.catalog.Get(ctx, current.ProviderCode)
+	if err != nil && !errors.Is(err, storage.ErrProviderNotFound) {
+		return Internal("failed to validate session model: " + err.Error())
+	}
+	if errors.Is(err, storage.ErrProviderNotFound) {
+		providers, listErr := s.catalog.List(ctx)
+		if listErr != nil {
+			return Internal("failed to find fallback session model: " + listErr.Error())
+		}
+		if len(providers) == 0 {
+			return nil
+		}
+		return s.repairWithFirstConfiguredProvider(ctx, sess)
+	}
+	if err == nil && provider != nil {
+		if _, modelErr := provider.Model(current.ModelCode); modelErr == nil {
+			return nil
+		}
+		if len(provider.Models) == 0 {
+			return nil
+		}
+		if model, ok := provider.DefaultModel(); ok {
+			sess.SetModel(shared.NewModelRef(provider.Code, model.Code), int64(model.ContextWindow))
+			return s.saveRepairedSession(ctx, sess)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (s *SessionService) repairWithFirstConfiguredProvider(ctx context.Context, sess *conversation.Session) error {
+	providers, listErr := s.catalog.List(ctx)
+	if listErr != nil {
+		return Internal("failed to find fallback session model: " + listErr.Error())
+	}
+	for _, candidate := range providers {
+		if candidate == nil {
+			continue
+		}
+		model, ok := candidate.DefaultModel()
+		if ok {
+			sess.SetModel(shared.NewModelRef(candidate.Code, model.Code), int64(model.ContextWindow))
+			return s.saveRepairedSession(ctx, sess)
+		}
+	}
+
+	return Validation("session provider no longer exists and no configured default model is available")
+}
+
+func (s *SessionService) saveRepairedSession(ctx context.Context, sess *conversation.Session) error {
+	if err := s.repo.Save(ctx, sess); err != nil {
+		return Internal("failed to persist repaired session model: " + err.Error())
+	}
+	sess.ClearPending()
+	return nil
 }
 
 type SessionListQuery struct {

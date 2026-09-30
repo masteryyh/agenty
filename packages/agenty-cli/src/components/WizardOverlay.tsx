@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { ScrollBoxRenderable } from "@opentui/core";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { loginWithOpenRouter } from "../api/openRouterOAuth";
 import {
     type APIType,
     type ModelProviderDto,
@@ -39,8 +41,7 @@ import {
     TableHeader,
     TableRow,
 } from "./Table";
-import { TreeList } from "./TreeList";
-import { ActionBar, Box, Spinner, Text } from "./ui";
+import { ActionBar, Box, Pressable, Spinner, Text, TextInput } from "./ui";
 import {
     moveWizardListFocus,
     rowIndexForFocus,
@@ -49,6 +50,7 @@ import {
 import {
     buildWizardModelRows,
     buildWizardProviderRows,
+    filterWizardModelRows,
     wizardModelEnterAction,
     type WizardModelRow,
     type WizardProviderRow,
@@ -65,7 +67,10 @@ function isAPIType(value: string): value is APIType {
     return compatibleProviderTypes.some((option) => option.value === value);
 }
 
-function providerFields(draft: ProviderDraft): FormField[] {
+function providerFields(
+    draft: ProviderDraft,
+    oauthPending: boolean,
+): FormField[] {
     const typeOptions: FormOption[] = compatibleProviderTypes.map((option) => ({
         label: option.label,
         value: option.value,
@@ -78,6 +83,7 @@ function providerFields(draft: ProviderDraft): FormField[] {
             value: draft.name,
             placeholder: "My provider",
             readOnly: draft.source === "builtin",
+            focusable: draft.source !== "builtin",
         },
         {
             key: "code",
@@ -86,6 +92,7 @@ function providerFields(draft: ProviderDraft): FormField[] {
             value: draft.code,
             placeholder: "my-provider",
             readOnly: draft.source === "builtin" || draft.originalCode !== undefined,
+            focusable: draft.source !== "builtin",
         },
         {
             key: "type",
@@ -94,6 +101,7 @@ function providerFields(draft: ProviderDraft): FormField[] {
             value: draft.type,
             options: typeOptions,
             readOnly: draft.source === "builtin",
+            focusable: draft.source !== "builtin",
         },
         {
             key: "baseUrl",
@@ -102,15 +110,24 @@ function providerFields(draft: ProviderDraft): FormField[] {
             value: draft.baseUrl,
             placeholder: "https://api.example.com/v1",
             readOnly: draft.source === "builtin",
+            focusable: draft.source !== "builtin",
         },
         {
             key: "apiKey",
             label: "API key",
             kind: "text",
-            value: draft.apiKey,
+            value: draft.authMethod === "oauth" ? "" : draft.apiKey,
             placeholder: "paste a key",
             secret: true,
+            visible: draft.authMethod !== "oauth",
         },
+        ...(draft.oauth && draft.authMethod !== "oauth" ? [{
+            key: "authorize",
+            label: "Sign in with OAuth...",
+            kind: "action" as const,
+            value: "",
+            readOnly: oauthPending,
+        }] : []),
     ];
 }
 
@@ -211,6 +228,10 @@ function WizardContent() {
     const [modelFocus, setModelFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [oauthStatus, setOAuthStatus] = useState("");
+    const [oauthFailed, setOAuthFailed] = useState(false);
+    const [providerSaving, setProviderSaving] = useState(false);
+    const oauthControllerRef = useRef<AbortController | null>(null);
     const draftCounter = useRef(0);
     const modelCounter = useRef(0);
 
@@ -281,6 +302,8 @@ function WizardContent() {
         }
         const draft = drafts.find((candidate) => candidate.code === code) ?? createBuiltinDraft(provider);
         setEditing(draft);
+        setOAuthStatus(draft.authMethod === "oauth" ? "Signed in with OAuth." : "");
+        setOAuthFailed(false);
         setError(null);
         setStep("provider-form");
     };
@@ -288,12 +311,52 @@ function WizardContent() {
     const openCustom = (draft?: ProviderDraft) => {
         const next = draft ?? createCustomDraft(`custom:${draftCounter.current++}`);
         setEditing(next);
+        setOAuthStatus("");
+        setOAuthFailed(false);
         setError(null);
         setStep("provider-form");
     };
 
-    const saveDraft = (values: FormValues) => {
-        if (!editing) {
+    const abortOAuth = () => {
+        oauthControllerRef.current?.abort();
+        oauthControllerRef.current = null;
+        setOAuthStatus("");
+    };
+
+    useEffect(() => () => {
+        oauthControllerRef.current?.abort();
+    }, []);
+
+    const authorizeProvider = async () => {
+        if (!editing?.oauth || oauthControllerRef.current) {
+            return;
+        }
+        const controller = new AbortController();
+        oauthControllerRef.current = controller;
+        setOAuthStatus(`Waiting for ${editing.name} in your browser…`);
+        setOAuthFailed(false);
+        setError(null);
+        try {
+            const apiKey = await loginWithOpenRouter(controller.signal);
+            if (oauthControllerRef.current !== controller) {
+                return;
+            }
+            setEditing((current) => current ? { ...current, apiKey, authMethod: "oauth" } : current);
+            setOAuthStatus("Signed in with OAuth.");
+        } catch (cause) {
+            if (!controller.signal.aborted) {
+                setOAuthFailed(true);
+                setOAuthStatus(cause instanceof Error ? cause.message : String(cause));
+            }
+        } finally {
+            if (oauthControllerRef.current === controller) {
+                oauthControllerRef.current = null;
+            }
+        }
+    };
+
+    const saveDraft = async (values: FormValues) => {
+        if (!editing || providerSaving || oauthControllerRef.current) {
             return;
         }
         const type = formString(values, "type");
@@ -307,7 +370,9 @@ function WizardContent() {
             code: formString(values, "code").trim(),
             type,
             baseUrl: formString(values, "baseUrl").trim(),
-            apiKey: formString(values, "apiKey").trim(),
+            apiKey: editing.authMethod === "oauth"
+                ? editing.apiKey
+                : formString(values, "apiKey").trim(),
         };
         const duplicate = drafts.some(
             (draft) => draft.id !== next.id && draft.code.trim() !== "" && draft.code === next.code,
@@ -321,32 +386,78 @@ function WizardContent() {
             setError(validationError);
             return;
         }
-        const existingDraft = drafts.find((draft) => draft.id === next.id);
-        const builtinProvider = builtinProviders.find((candidate) => candidate.code === next.code);
-        const addedModels = !existingDraft && builtinProvider
-            ? modelDraftsForProvider(next, builtinProvider)
-            : [];
-        setDrafts((current) => {
-            const index = current.findIndex((draft) => draft.id === next.id);
-            if (index < 0) {
-                return [...current, next];
-            }
-            return current.map((draft, draftIndex) => draftIndex === index ? next : draft);
-        });
-        setModels((current) => {
-            if (!existingDraft) {
-                return [...current, ...addedModels];
-            }
-            return current.map((model) => model.providerId === next.id
-                ? { ...model, providerCode: next.code, providerName: next.name }
-                : model);
-        });
-        if (!selectedModelDraftId && addedModels[0]) {
-            setSelectedModelDraftId(addedModels[0].id);
+        if (!client) {
+            setError("Core is not connected.");
+            return;
         }
-        setProviderFocus({ kind: "row", index: 0 });
+
+        setProviderSaving(true);
         setError(null);
-        setStep("providers");
+        try {
+            const existing = (await client.listProviders(next.code)).find((provider) => provider.code === next.code);
+            const savedProvider = next.builtin
+                ? await client.updateProvider(next.code, { apiKey: next.apiKey, authMethod: next.authMethod })
+                : existing
+                    ? await client.updateProvider(next.code, {
+                        name: next.name,
+                        type: next.type,
+                        baseUrl: next.baseUrl,
+                        apiKey: next.apiKey,
+                        authMethod: next.authMethod,
+                    })
+                    : await client.createProvider({
+                        code: next.code,
+                        name: next.name,
+                        type: next.type,
+                        baseUrl: next.baseUrl,
+                        apiKey: next.apiKey,
+                        authMethod: next.authMethod,
+                    });
+
+            let providerWithModels = savedProvider;
+            if (next.builtin && savedProvider.modelsUrl) {
+                await client.listProviderModels(next.code);
+                providerWithModels = (await client.listProviders(next.code))
+                    .find((provider) => provider.code === next.code) ?? savedProvider;
+            }
+
+            const discoveredModels = modelDraftsForProvider(next, providerWithModels);
+            const pendingModels = models.filter((model) => model.providerId === next.id);
+            const pendingByCode = new Map(pendingModels.map((model) => [model.code.trim(), model]));
+            const addedModels = discoveredModels.map((model) => pendingByCode.get(model.code.trim()) ?? model);
+            const discoveredCodes = new Set(addedModels.map((model) => model.code.trim()));
+            for (const pendingModel of pendingModels) {
+                if (!discoveredCodes.has(pendingModel.code.trim())) {
+                    addedModels.push({ ...pendingModel, providerCode: next.code, providerName: next.name });
+                }
+            }
+            const persistedNext = next.source === "custom" && !next.originalCode
+                ? { ...next, originalCode: savedProvider.code }
+                : next;
+            setDrafts((current) => {
+                const index = current.findIndex((draft) => draft.id === persistedNext.id);
+                if (index < 0) {
+                    return [...current, persistedNext];
+                }
+                return current.map((draft, draftIndex) => draftIndex === index ? persistedNext : draft);
+            });
+            setModels((current) => {
+                const retained = current.filter((model) => model.providerId !== next.id);
+                return [...retained, ...addedModels];
+            });
+            if (!selectedModelDraftId && addedModels[0]) {
+                setSelectedModelDraftId(addedModels[0].id);
+            }
+            setProviderFocus({ kind: "row", index: 0 });
+            setError(null);
+            setStep("providers");
+            setOAuthStatus("");
+            setOAuthFailed(false);
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+            setProviderSaving(false);
+        }
     };
 
     const continueToModels = () => {
@@ -471,20 +582,34 @@ function WizardContent() {
         return (
             <Box flexDirection="column" flexGrow={1}>
                 <FormPanel
+                    fullHeight
                     error={error}
                     key={editing.id}
                     title={editing.source === "builtin" ? `Configure ${editing.name}` : "Add compatible provider"}
-                    fields={providerFields(editing)}
-                    actions={[{ key: "save", label: "Save provider" }, { key: "cancel", label: "Back" }]}
+                    fields={providerFields(editing, Boolean(oauthControllerRef.current))}
+                    afterFields={oauthStatus ? (
+                        <Text color={oauthFailed ? theme.danger : editing.authMethod === "oauth" ? theme.success : theme.textMuted}>
+                            {oauthStatus}
+                        </Text>
+                    ) : undefined}
+                    actions={[
+                        { key: "save", label: providerSaving ? "Saving…" : "Save provider" },
+                        { key: "cancel", label: "Back" },
+                    ]}
+                    active={!providerSaving}
                     onAction={(action, values) => {
                         if (action === "save") {
-                            saveDraft(values);
+                            void saveDraft(values);
+                        } else if (action === "authorize") {
+                            void authorizeProvider();
                         } else {
+                            abortOAuth();
                             setError(null);
                             setStep("providers");
                         }
                     }}
                     onClose={() => {
+                        abortOAuth();
                         setError(null);
                         setStep("providers");
                     }}
@@ -496,6 +621,7 @@ function WizardContent() {
         return (
             <Box flexDirection="column" flexGrow={1} width="100%" position="relative">
                 <FormPanel
+                    fullHeight
                     key={editingModel.id}
                     title={editingModel.originalCode
                         ? `Edit model: ${editingModel.name}`
@@ -804,7 +930,7 @@ function ProviderTable({
                 }
                 return;
             }
-            const row = rows[focus.index];
+            const row = rows[focus.kind === "row" ? focus.index : rowIndexForFocus(focus)];
             if (row) {
                 onActivate(row);
             }
@@ -863,7 +989,7 @@ function ProviderTable({
     );
 }
 
-function ModelStep({
+export function ModelStep({
     rows,
     focus,
     error,
@@ -887,13 +1013,46 @@ function ModelStep({
     onBack: () => void;
 }) {
     const dialogSize = useBottomDialogSize();
-    const currentRow = rows[rowIndexForFocus(focus)];
+    const [searchQueries, setSearchQueries] = useState<Record<string, string>>({});
+    const visibleRows = useMemo(() => filterWizardModelRows(rows, searchQueries), [rows, searchQueries]);
+    const rowCursor = Math.min(rowIndexForFocus(focus), Math.max(visibleRows.length - 1, 0));
+    const currentRow = visibleRows[rowCursor];
     const currentModel = currentRow?.kind === "model" ? currentRow.model : undefined;
-    const maxVisible = Math.max(dialogSize.height - 10, 1);
+    const maxVisible = Math.max(dialogSize.height - 9 - (error ? 2 : 0), 1);
+    const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+    const noMatches = (providerId: string) => !visibleRows.some((row) =>
+        row.kind === "model" && row.provider.id === providerId,
+    );
+    const rowHeight = (row: WizardModelRow) => row.kind === "search"
+        ? 3 + (noMatches(row.provider.id) ? 1 : 0)
+        : 1;
+    const rowOffsets: number[] = [];
+    let contentHeight = 0;
+    for (const row of visibleRows) {
+        rowOffsets.push(contentHeight);
+        contentHeight += rowHeight(row);
+    }
+    useLayoutEffect(() => {
+        const scroll = scrollRef.current;
+        const row = visibleRows[rowCursor];
+        if (!scroll || !row) {
+            return;
+        }
+        const top = rowOffsets[rowCursor] ?? 0;
+        const bottom = top + rowHeight(row);
+        const next = top < scroll.scrollTop
+            ? top
+            : bottom > scroll.scrollTop + scroll.viewport.height ? bottom - scroll.viewport.height : scroll.scrollTop;
+        scroll.scrollTo(Math.max(next, 0));
+    }, [rowCursor, contentHeight, maxVisible]);
+
     const rowLabel = (row: WizardModelRow): string => {
         const providerLabel = `${row.provider.name} (${row.provider.code})`;
         if (row.kind === "provider") {
             return providerLabel;
+        }
+        if (row.kind === "search") {
+            return "";
         }
         const childLabel = row.kind === "model"
             ? `${row.model.name} · ${row.model.code}`
@@ -945,29 +1104,32 @@ function ModelStep({
     ];
     const tableLayout = createTableLayout(
         columns,
-        rows,
+        visibleRows,
         Math.max(dialogSize.width - 2, 0),
     );
 
     useInput((input, key) => {
+        if (focus.kind === "row" && currentRow?.kind === "search") {
+            return;
+        }
         if (key.escape) {
             onBack();
             return;
         }
         if (key.upArrow) {
-            onFocus(moveWizardListFocus(focus, rows.length, "up"));
+            onFocus(moveWizardListFocus(focus, visibleRows.length, "up"));
             return;
         }
         if (key.downArrow) {
-            onFocus(moveWizardListFocus(focus, rows.length, "down"));
+            onFocus(moveWizardListFocus(focus, visibleRows.length, "down"));
             return;
         }
         if (key.leftArrow) {
-            onFocus(moveWizardListFocus(focus, rows.length, "left"));
+            onFocus(moveWizardListFocus(focus, visibleRows.length, "left"));
             return;
         }
         if (key.rightArrow) {
-            onFocus(moveWizardListFocus(focus, rows.length, "right"));
+            onFocus(moveWizardListFocus(focus, visibleRows.length, "right"));
             return;
         }
         if (key.return) {
@@ -979,7 +1141,7 @@ function ModelStep({
                 }
                 return;
             }
-            const row = rows[focus.index];
+            const row = visibleRows[rowCursor];
             const action = wizardModelEnterAction(row);
             if (action.kind === "select") {
                 onSelect(action.model);
@@ -1000,40 +1162,83 @@ function ModelStep({
 
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
-            <Box flexDirection="column">
+            <Box flexDirection="column" height={2} flexShrink={0}>
                 <Text color={theme.accent} bold>02 / Default session model</Text>
-                <Text dimColor>Choose a model. Custom providers also allow model management here.</Text>
+                <Text dimColor wrap="truncate">Choose a model. Custom providers also allow model management here.</Text>
             </Box>
             {error ? <Text color={theme.danger}>{error}</Text> : null}
-            <Box height={1} overflow="hidden">
+            <Box height={1} flexShrink={0} overflow="hidden">
                 <Box width={2} height={1}><Text> </Text></Box>
                 <TableHeader columns={tableLayout} />
             </Box>
-            <TreeList
-                items={rows.map((row) => ({
-                    key: row.key,
-                    depth: row.kind === "provider" ? 0 : 1,
-                    value: row,
-                }))}
-                cursor={rowIndexForFocus(focus)}
-                visibleCount={maxVisible}
-                active={focus.kind === "row"}
-                onCursor={(index) => onFocus({ kind: "row", index })}
-                onActivate={(row) => {
-                    if (row.kind === "model") {
-                        onSelect(row.model);
-                    } else if (row.kind === "add-model") {
-                        onAdd(row.provider);
-                    }
-                }}
-                renderItem={(row, { selected: active }) => (
-                    <TableRow
-                        columns={tableLayout}
-                        row={row}
-                        selected={active}
-                    />
-                )}
-            />
+            <scrollbox
+                ref={scrollRef}
+                width="100%"
+                height={maxVisible}
+                flexGrow={0}
+                flexShrink={0}
+                scrollX={false}
+                scrollY
+                focused={false}
+                verticalScrollbarOptions={{ visible: false }}
+                contentOptions={{ flexDirection: "column" }}
+            >
+                {visibleRows.map((row, index) => row.kind === "search" ? (
+                    <Box key={row.key} width="100%" flexDirection="column" flexShrink={0} marginTop={1} marginBottom={1}>
+                        <Box width="100%" height={1} flexShrink={0} gap={1}>
+                            <Box width={2} height={1} flexShrink={0}><Text> </Text></Box>
+                            <Text dimColor>Search:</Text>
+                            <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
+                                <TextInput
+                                    value={searchQueries[row.provider.id] ?? ""}
+                                    onChange={(next) => setSearchQueries((current) => ({ ...current, [row.provider.id]: next }))}
+                                    onSubmit={() => onFocus(moveWizardListFocus({ kind: "row", index }, visibleRows.length, "down"))}
+                                    placeholder="filter by model name or code"
+                                    focus={focus.kind === "row" && rowCursor === index}
+                                    onMouseDown={() => onFocus({ kind: "row", index })}
+                                    onKeyDown={(event) => {
+                                        if (event.name === "escape") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            onBack();
+                                        } else if (event.name === "up" || event.name === "down" || event.name === "tab") {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            onFocus(moveWizardListFocus(
+                                                { kind: "row", index },
+                                                visibleRows.length,
+                                                event.name === "up" || (event.name === "tab" && event.shift) ? "up" : "down",
+                                            ));
+                                        }
+                                    }}
+                                />
+                            </Box>
+                        </Box>
+                        {noMatches(row.provider.id) ? <Text dimColor>  No models match.</Text> : null}
+                    </Box>
+                ) : (
+                    <Pressable
+                        key={row.key}
+                        width="100%"
+                        height={1}
+                        flexShrink={0}
+                        overflow="hidden"
+                        onPress={() => {
+                            onFocus({ kind: "row", index });
+                            if (row.kind === "model") {
+                                onSelect(row.model);
+                            } else if (row.kind === "add-model") {
+                                onAdd(row.provider);
+                            }
+                        }}
+                    >
+                        <Box width={2} height={1} flexShrink={0}>
+                            <Text color={theme.selection}>{focus.kind === "row" && rowCursor === index ? "❯" : " "}</Text>
+                        </Box>
+                        <TableRow columns={tableLayout} row={row} selected={focus.kind === "row" && rowCursor === index} />
+                    </Pressable>
+                ))}
+            </scrollbox>
             <ActionBar
                 actions={[
                     { key: "complete", label: "Complete setup" },

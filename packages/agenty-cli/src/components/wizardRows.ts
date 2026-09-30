@@ -28,6 +28,11 @@ export type WizardModelRow =
         modelCount: number;
     }
     | {
+        kind: "search";
+        key: string;
+        provider: ProviderDraft;
+    }
+    | {
         kind: "model";
         key: string;
         provider: ProviderDraft;
@@ -95,6 +100,9 @@ export function buildWizardModelRows(
             provider,
             modelCount: providerModels.length,
         });
+        if (provider.modelsDiscovered) {
+            rows.push({ kind: "search", key: `${provider.id}:search`, provider });
+        }
         rows.push(...providerModels.map((model) => ({
             kind: "model" as const,
             key: model.id,
@@ -113,8 +121,22 @@ export function buildWizardModelRows(
     return rows;
 }
 
+export function filterWizardModelRows(
+    rows: WizardModelRow[],
+    queries: Record<string, string>,
+): WizardModelRow[] {
+    return rows.filter((row) => {
+        if (row.kind !== "model" || !row.provider.modelsDiscovered) {
+            return true;
+        }
+        const normalized = (queries[row.provider.id] ?? "").trim().toLocaleLowerCase();
+        return row.model.name.toLocaleLowerCase().includes(normalized) ||
+            row.model.code.toLocaleLowerCase().includes(normalized);
+    });
+}
+
 export function wizardModelEnterAction(row: WizardModelRow | undefined): WizardModelEnterAction {
-    if (!row || row.kind === "provider") {
+    if (!row || row.kind === "provider" || row.kind === "search") {
         return { kind: "none" };
     }
     if (row.kind === "add-model") {

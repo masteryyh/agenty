@@ -63,11 +63,15 @@ func (r *CatalogRepository) Get(_ context.Context, code shared.Code) (*catalog.P
 func (r *CatalogRepository) getLocked(code shared.Code, includeDiscoveryCache bool) (*catalog.Provider, error) {
 	if builtin, ok := r.builtinProviders[code]; ok {
 		provider := cloneProvider(builtin)
-		apiKey, err := r.readAPIKey(code)
+		credentials, err := r.readCredentials(code)
 		if err != nil {
 			return nil, err
 		}
-		provider.APIKey = apiKey
+		provider.APIKey = credentials.APIKey
+		provider.AuthMethod = credentials.AuthMethod
+		if provider.AuthMethod == "" {
+			provider.AuthMethod = catalog.AuthMethodAPIKey
+		}
 		if includeDiscoveryCache {
 			r.applyModelDiscoveryCache(provider)
 		}
@@ -88,6 +92,10 @@ func (r *CatalogRepository) getLocked(code shared.Code, includeDiscoveryCache bo
 		return nil, err
 	}
 	provider.ModelsCached = false
+	provider.OAuth = false
+	if provider.AuthMethod == "" || provider.AuthMethod == catalog.AuthMethodOAuth {
+		provider.AuthMethod = catalog.AuthMethodAPIKey
+	}
 	clearCachedModelMarkers(&provider)
 	normalizeModels(&provider)
 	if includeDiscoveryCache {
@@ -167,13 +175,20 @@ func (r *CatalogRepository) Save(_ context.Context, provider *catalog.Provider) 
 	defer r.cacheMu.Unlock()
 	if _, builtin := r.builtinProviders[provider.Code]; builtin {
 		delete(r.modelCache, provider.Code)
-		return r.saveAPIKey(provider.Code, provider.APIKey)
+		return r.saveCredentials(provider.Code, provider.APIKey, provider.AuthMethod)
 	}
 	if err := os.MkdirAll(r.providersDir, 0700); err != nil {
 		return err
 	}
 
 	providerToPersist := cloneProvider(provider)
+	providerToPersist.OAuth = false
+	if providerToPersist.AuthMethod == "" {
+		providerToPersist.AuthMethod = catalog.AuthMethodAPIKey
+	}
+	if providerToPersist.AuthMethod == catalog.AuthMethodOAuth {
+		return fmt.Errorf("custom providers cannot use OAuth authentication")
+	}
 	if provider.ModelsCached {
 		configured, err := r.getLocked(provider.Code, false)
 		if err != nil {
@@ -258,9 +273,6 @@ func (r *CatalogRepository) ReplaceModels(
 			normalized[index].MaxOutputTokens = catalog.DefaultMaxOutputTokens
 		}
 	}
-	if normalized == nil {
-		normalized = make([]catalog.Model, 0)
-	}
 
 	r.modelCache[code] = modelDiscoveryCache{
 		ExpiresAt: expiresAt.UTC(),
@@ -300,8 +312,10 @@ func providerConfigurationEqual(left, right *catalog.Provider) bool {
 		left.Type == right.Type &&
 		left.BaseURL == right.BaseURL &&
 		left.APIKey == right.APIKey &&
+		left.AuthMethod == right.AuthMethod &&
 		left.Builtin == right.Builtin &&
 		left.Official == right.Official &&
+		left.OAuth == right.OAuth &&
 		left.ModelsURL == right.ModelsURL &&
 		left.TokenCountURL == right.TokenCountURL &&
 		reflect.DeepEqual(left.Metadata, right.Metadata)
@@ -393,31 +407,35 @@ func clearCachedModelMarkers(provider *catalog.Provider) {
 }
 
 type providerCredentials struct {
-	APIKey string `json:"apiKey"`
+	APIKey     string             `json:"apiKey"`
+	AuthMethod catalog.AuthMethod `json:"authMethod,omitempty"`
 }
 
-func (r *CatalogRepository) readAPIKey(code shared.Code) (string, error) {
+func (r *CatalogRepository) readCredentials(code shared.Code) (providerCredentials, error) {
 	providerPath := filepath.Join(r.providersDir, code.String()+".json")
 	data, err := os.ReadFile(providerPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return providerCredentials{AuthMethod: catalog.AuthMethodAPIKey}, nil
 		}
-		return "", err
+		return providerCredentials{}, err
 	}
 
 	var credentials providerCredentials
 	if err := json.Unmarshal(data, &credentials); err != nil {
-		return "", err
+		return providerCredentials{}, err
 	}
-	return credentials.APIKey, nil
+	return credentials, nil
 }
 
-func (r *CatalogRepository) saveAPIKey(code shared.Code, apiKey string) error {
+func (r *CatalogRepository) saveCredentials(code shared.Code, apiKey string, authMethod catalog.AuthMethod) error {
 	if err := os.MkdirAll(r.providersDir, 0700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(providerCredentials{APIKey: apiKey}, "", "  ")
+	if authMethod == "" {
+		authMethod = catalog.AuthMethodAPIKey
+	}
+	data, err := json.MarshalIndent(providerCredentials{APIKey: apiKey, AuthMethod: authMethod}, "", "  ")
 	if err != nil {
 		return err
 	}

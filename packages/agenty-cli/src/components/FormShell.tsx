@@ -13,6 +13,7 @@ interface FormShellProps {
     footer: ReactNode;
     hint: string;
     compact: boolean;
+    fullHeight?: boolean;
     children: ReactNode;
 }
 
@@ -25,9 +26,12 @@ export function FormShell({
     footer,
     hint,
     compact,
+    fullHeight = false,
     children,
 }: FormShellProps) {
-    useDialogContentHeight(titleLines.length + 1 + errorLines.length + preferredBodyHeight + footerHeight + 2);
+    useDialogContentHeight(fullHeight
+        ? Number.MAX_SAFE_INTEGER
+        : titleLines.length + 1 + errorLines.length + preferredBodyHeight + footerHeight + 2);
 
     return (
         <Box flexDirection="column" width="100%" flexGrow={1}>

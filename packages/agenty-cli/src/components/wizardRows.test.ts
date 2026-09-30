@@ -9,6 +9,7 @@ import {
 import {
     buildWizardModelRows,
     buildWizardProviderRows,
+    filterWizardModelRows,
     wizardModelEnterAction,
 } from "./wizardRows";
 
@@ -115,5 +116,55 @@ describe("wizard hierarchical rows", () => {
             .toEqual({ kind: "edit", model: customModel });
         expect(wizardModelEnterAction(rows.find((row) => row.kind === "add-model")))
             .toEqual({ kind: "add", provider: custom });
+    });
+
+    test("filters discovered models per provider and preserves fixed lists and empty search fields", () => {
+        const openrouter = createBuiltinDraft({
+            ...provider("openrouter", true),
+            name: "OpenRouter",
+            modelsUrl: "models",
+        });
+        const deepseek = createBuiltinDraft({
+            ...provider("deepseek", true),
+            name: "DeepSeek",
+        });
+        const claude = createModelDraft(openrouter, "openrouter:claude", {
+            code: "anthropic/claude-sonnet-4",
+            name: "Claude Sonnet 4",
+            contextWindow: 200_000,
+            maxOutputTokens: 64_000,
+            multiModal: true,
+            light: false,
+            isDefault: false,
+        });
+        const openai = createModelDraft(openrouter, "openrouter:gpt", {
+            ...claude,
+            code: "openai/gpt-5",
+            name: "GPT-5",
+        });
+        const deepseekModel = createModelDraft(deepseek, "deepseek:v4", {
+            ...claude,
+            code: "deepseek-v4-pro",
+            name: "DeepSeek V4 Pro",
+        });
+        const rows = buildWizardModelRows(
+            [openrouter, deepseek],
+            [claude, openai, deepseekModel],
+        );
+
+        expect(filterWizardModelRows(rows, { [openrouter.id]: "CLAUDE" }).map((row) => row.key)).toEqual([
+            openrouter.id,
+            `${openrouter.id}:search`,
+            claude.id,
+            deepseek.id,
+            deepseekModel.id,
+        ]);
+        expect(filterWizardModelRows(rows, { [openrouter.id]: "missing" }).map((row) => row.key)).toEqual([
+            openrouter.id,
+            `${openrouter.id}:search`,
+            deepseek.id,
+            deepseekModel.id,
+        ]);
+        expect(filterWizardModelRows(rows, { [openrouter.id]: " " })).toEqual(rows);
     });
 });
