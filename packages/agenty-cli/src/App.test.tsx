@@ -109,19 +109,18 @@ describe("chat input interactions", () => {
     });
 
     test("distinguishes the effective permission mode from the pending selection", async () => {
-        useAppStore.setState({ session: { ...session, permissionMode: "auto", pendingPermissionMode: "yolo" } });
+        useAppStore.setState({ session: { ...session, permissionMode: "auto" } });
         const setup = await testRender(<TestApp />, { width: 100, height: 24 });
         try {
             await act(async () => {
                 await setup.flush();
             });
-            expect(setup.captureCharFrame()).toContain("auto mode → yolo (pending)");
+            expect(setup.captureCharFrame()).toContain("auto mode");
             await act(async () => {
                 useAppStore.setState({ session: { ...session, permissionMode: "yolo" } });
                 await setup.flush();
             });
             expect(setup.captureCharFrame()).toContain("yolo mode");
-            expect(setup.captureCharFrame()).not.toContain("(pending)");
         } finally {
             act(() => setup.renderer.destroy());
         }

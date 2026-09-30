@@ -146,6 +146,7 @@ type pendingRequest struct {
 	decision       chan Decision
 	rechecking     bool
 	manualDecision Decision
+	mode           conversation.PermissionMode
 }
 
 type PermissionManager struct {
@@ -159,46 +160,6 @@ func NewPermissionManager() *PermissionManager {
 
 func (manager *PermissionManager) Middleware() middleware.Middleware {
 	return middleware.Middleware{Name: "permissions", BeforeToolCall: manager.beforeToolCall}
-}
-
-// PermissionModeChanged wakes a manual approval when a later auto-mode change
-// needs to re-evaluate it. Switching to yolo keeps the existing immediate
-// release behavior.
-func (manager *PermissionManager) PermissionModeChanged(
-	ctx context.Context,
-	sessionID uuid.UUID,
-	mode conversation.PermissionMode,
-) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	for approvalID, pending := range manager.pending {
-		if pending.sessionID != sessionID || pending.ctx.Err() != nil {
-			continue
-		}
-
-		switch mode {
-		case conversation.PermissionYolo:
-			delete(manager.pending, approvalID)
-			select {
-			case pending.decision <- Allow:
-			default:
-			}
-		case conversation.PermissionAuto:
-			if pending.rechecking {
-				continue
-			}
-			pending.rechecking = true
-			select {
-			case pending.decision <- recheck:
-			default:
-			}
-		}
-	}
-	return nil
 }
 
 func (manager *PermissionManager) beforeToolCall(ctx context.Context, state *middleware.ToolCallContext) error {
@@ -217,9 +178,10 @@ func (manager *PermissionManager) beforeToolCall(ctx context.Context, state *mid
 		return err
 	}
 	call := cloneCall(*state.Call)
+	mode := state.Session.CurrentPermissionMode()
 	var message string
 
-	switch state.Session.CurrentPermissionMode() {
+	switch mode {
 	case conversation.PermissionYolo:
 		return nil
 	case conversation.PermissionAuto:
@@ -339,6 +301,7 @@ func (manager *PermissionManager) awaitManualDecision(
 		request:   request,
 		ctx:       ctx,
 		decision:  make(chan Decision, 1),
+		mode:      state.Session.CurrentPermissionMode(),
 	}
 
 	manager.mu.Lock()
@@ -350,88 +313,36 @@ func (manager *PermissionManager) awaitManualDecision(
 		manager.mu.Unlock()
 	}()
 
-	if state.Session.CurrentPermissionMode() == conversation.PermissionYolo {
+	if pending.mode == conversation.PermissionYolo {
 		return nil
 	}
 	if err := state.Emit(ctx, agentloop.Event{Type: EventRequested, Iteration: state.Iteration, Payload: request}); err != nil {
 		return fmt.Errorf("publish tool approval: %w", err)
 	}
 
-	for {
-		var decision Decision
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case decision = <-pending.decision:
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if decision == recheck {
-			switch state.Session.CurrentPermissionMode() {
-			case conversation.PermissionYolo:
-				decision = Allow
-			case conversation.PermissionAuto:
-				autoDecision, err := manager.autoDecision(ctx, state, call, cwd)
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if err != nil || autoDecision.Decision == Ask {
-					var manual bool
-					decision, manual = manager.finishRecheck(request.ApprovalID, Ask)
-					if manual {
-						if decision == Deny {
-							state.Result = deniedResult(call.ID, DeniedMessage)
-						}
-						return state.Emit(ctx, agentloop.Event{
-							Type:      EventResolved,
-							Iteration: state.Iteration,
-							Payload: Resolution{
-								SessionID:  pending.sessionID,
-								RoundID:    pending.roundID,
-								ApprovalID: request.ApprovalID,
-								Decision:   decision,
-							},
-						})
-					}
-					request.Message = autoDecision.Message
-					if err != nil {
-						request.Message = reviewFailureMessage(err)
-					}
-					if err := state.Emit(ctx, agentloop.Event{Type: EventRequested, Iteration: state.Iteration, Payload: request}); err != nil {
-						return fmt.Errorf("publish updated tool approval: %w", err)
-					}
-					continue
-				}
-				var manual bool
-				decision, manual = manager.finishRecheck(request.ApprovalID, autoDecision.Decision)
-				if manual {
-					if decision == Deny {
-						state.Result = deniedResult(call.ID, DeniedMessage)
-					}
-				} else if decision == Deny {
-					state.Result = deniedResult(call.ID, AutoDeniedMessage+" "+autoDecision.Message)
-				}
-			default:
-				continue
-			}
-		}
-
-		if decision == Deny && state.Result == nil {
-			state.Result = deniedResult(call.ID, DeniedMessage)
-		}
-		return state.Emit(ctx, agentloop.Event{
-			Type:      EventResolved,
-			Iteration: state.Iteration,
-			Payload: Resolution{
-				SessionID:  pending.sessionID,
-				RoundID:    pending.roundID,
-				ApprovalID: request.ApprovalID,
-				Decision:   decision,
-			},
-		})
+	var decision Decision
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case decision = <-pending.decision:
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if decision == Deny && state.Result == nil {
+		state.Result = deniedResult(call.ID, DeniedMessage)
+	}
+	return state.Emit(ctx, agentloop.Event{
+		Type:      EventResolved,
+		Iteration: state.Iteration,
+		Payload: Resolution{
+			SessionID:  pending.sessionID,
+			RoundID:    pending.roundID,
+			ApprovalID: request.ApprovalID,
+			Decision:   decision,
+		},
+	})
 }
 
 func (manager *PermissionManager) PendingForSession(sessionID uuid.UUID) []Request {

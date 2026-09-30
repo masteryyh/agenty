@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/masteryyh/agenty-core/pkg/api/middlewares"
 	"github.com/masteryyh/agenty-core/pkg/api/response"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 )
 
 const maxRequestBytes = 4 << 20
@@ -32,14 +32,14 @@ type SystemInfo struct {
 type API struct {
 	routes   *APIRoutes
 	info     SystemInfo
-	stream   *httpapi.StreamBroker
+	stream   *event.StreamBroker
 	shutdown func()
 	logger   *slog.Logger
 	router   http.Handler
 	stopping atomic.Bool
 }
 
-func NewServer(deps Dependencies, info SystemInfo, stream *httpapi.StreamBroker, shutdown func()) *API {
+func NewServer(deps Dependencies, info SystemInfo, stream *event.StreamBroker, shutdown func()) *API {
 	api := &API{
 		info:     info,
 		stream:   stream,

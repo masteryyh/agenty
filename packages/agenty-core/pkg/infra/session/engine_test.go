@@ -20,7 +20,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	infracompaction "github.com/masteryyh/agenty-core/pkg/infra/compaction"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
@@ -183,13 +183,13 @@ func (fixture *executionFixture) newEngine(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
 ) *infrasession.Engine {
-	return fixture.newEngineWithBroker(t, invokeModel, httpapi.NewStreamBroker(nil))
+	return fixture.newEngineWithBroker(t, invokeModel, event.NewStreamBroker(nil))
 }
 
 func (fixture *executionFixture) newEngineWithBroker(
 	t *testing.T,
 	invokeModel modelcall.InvokeFunc,
-	broker *httpapi.StreamBroker,
+	broker *event.StreamBroker,
 ) *infrasession.Engine {
 	t.Helper()
 
@@ -209,7 +209,7 @@ func (fixture *executionFixture) newEngineWithBroker(
 	if err := middlewareManager.Register(infrastorage.NewSessionMiddleware(fixture.sessions)); err != nil {
 		t.Fatal(err)
 	}
-	if err := middlewareManager.Register(httpapi.NewSessionEventMiddleware(broker)); err != nil {
+	if err := middlewareManager.Register(event.NewSessionEventMiddleware(broker)); err != nil {
 		t.Fatal(err)
 	}
 	middlewareChain, err := middlewareManager.Compile()
@@ -247,7 +247,7 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 		Usage:      conversation.TokenUsage{Input: 2, Output: 3, Total: 5},
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
@@ -261,14 +261,14 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 	}
 	waitForExecution(t, engine, session.ID)
 
-	got := make([]httpapi.SessionEvent, 0, 6)
+	got := make([]event.SessionEvent, 0, 6)
 	for len(got) < 6 {
 		select {
 		case frame := <-subscription.Frames:
 			if frame.Type != "event" {
 				continue
 			}
-			var event httpapi.SessionEvent
+			var event event.SessionEvent
 			if err := json.Unmarshal(frame.Event, &event); err != nil {
 				t.Fatal(err)
 			}
@@ -277,13 +277,13 @@ func TestEngineStreamsOrderedSessionEvents(t *testing.T) {
 			t.Fatalf("received %d events, want 6", len(got))
 		}
 	}
-	wantTypes := []httpapi.SessionEventType{
-		httpapi.SessionEventRoundStarted,
-		httpapi.SessionEventMessageAppended,
-		httpapi.SessionEventModelStream,
-		httpapi.SessionEventModelStream,
-		httpapi.SessionEventMessageAppended,
-		httpapi.SessionEventRoundEnded,
+	wantTypes := []event.SessionEventType{
+		event.SessionEventRoundStarted,
+		event.SessionEventMessageAppended,
+		event.SessionEventModelStream,
+		event.SessionEventModelStream,
+		event.SessionEventMessageAppended,
+		event.SessionEventRoundEnded,
 	}
 	for i, event := range got {
 		if event.Type != wantTypes[i] {
@@ -315,7 +315,7 @@ func TestEngineContinuesAfterEventConsumerDisconnects(t *testing.T) {
 		Content:    conversation.Text("done"),
 		StopReason: modelcall.ModelCallStopReasonEndTurn,
 	}}}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	engine := fixture.newEngineWithBroker(t, caller.Call, broker)
 	session := fixture.createSession(t)
 	_, subscription, err := broker.Subscribe(t.Context(), "session:"+session.ID.String(), nil)
@@ -642,7 +642,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 	if err := fixture.catalog.Save(t.Context(), provider); err != nil {
 		t.Fatal(err)
 	}
-	broker := httpapi.NewStreamBroker(nil)
+	broker := event.NewStreamBroker(nil)
 	caller := &scriptedCaller{responses: []*modelcall.ModelCallResponse{
 		{
 			Content: conversation.Text("Task goals: finish the task\nCompleted: initial work\nIncomplete: follow up"),
@@ -710,7 +710,7 @@ func TestEngineCompactsAutomaticallyAndPreservesTranscript(t *testing.T) {
 			if frame.Type != "event" {
 				continue
 			}
-			var event httpapi.CompactionStreamEvent
+			var event event.CompactionStreamEvent
 			if err := json.Unmarshal(frame.Event, &event); err != nil {
 				t.Fatal(err)
 			}
@@ -1077,15 +1077,6 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 		t.Fatal(changed.err)
 	}
 	waitForExecution(t, engine, session.ID)
-	expectedRoundID := started.result.RoundID
-	if engine.PendingPermissionMode(session.ID) != "" {
-		next, err := engine.Start(t.Context(), session.ID.String(), conversation.Text("continue"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		expectedRoundID = next.RoundID
-		waitForExecution(t, engine, session.ID)
-	}
 
 	var modeEvent conversation.SessionPermissionModeChanged
 	found := false
@@ -1095,7 +1086,7 @@ func TestEnginePermissionModeUsesPreparedSessionDuringStart(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || modeEvent.RoundID != expectedRoundID || modeEvent.PermissionMode != conversation.PermissionAuto {
+	if !found || modeEvent.PermissionMode != conversation.PermissionAuto {
 		t.Fatalf("permission event = %+v, start = %+v", modeEvent, started.result)
 	}
 }
@@ -1301,6 +1292,57 @@ func TestEngineSerializesSessionDeleteWithStart(t *testing.T) {
 	}
 	if err := <-startResult; appErrorCode(err) != application.CodeNotFound {
 		t.Fatalf("start after delete error = %v, want not found", err)
+	}
+}
+
+func TestEngineSerializesSessionDeleteWithPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	fixture := newExecutionFixture(t, 8_192)
+	engine := fixture.newEngine(t, nil)
+	session := fixture.createSession(t)
+	fixture.sessions.saveStarted = make(chan struct{})
+	fixture.sessions.saveRelease = make(chan struct{})
+	releaseSave := sync.OnceFunc(func() { close(fixture.sessions.saveRelease) })
+	defer releaseSave()
+
+	modeResult := make(chan error, 1)
+	go func() {
+		_, err := engine.SetPermissionMode(t.Context(), session.ID.String(), conversation.PermissionAuto)
+		modeResult <- err
+	}()
+	select {
+	case <-fixture.sessions.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("permission mode save did not start")
+	}
+
+	sessionService := application.NewSessionService(
+		fixture.sessions,
+		application.WithSessionExecutionState(engine),
+	)
+	deleteResult := make(chan error, 1)
+	go func() {
+		deleteResult <- sessionService.Delete(t.Context(), session.ID.String())
+	}()
+	select {
+	case err := <-deleteResult:
+		if appErrorCode(err) != application.CodeAlreadyExists {
+			t.Fatalf("delete during permission update = %v, want busy", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session delete blocked on permission update")
+	}
+
+	releaseSave()
+	if err := <-modeResult; err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionService.Delete(t.Context(), session.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.sessions.Load(t.Context(), session.ID); !errors.Is(err, infrastorage.ErrConversationNotFound) {
+		t.Fatalf("session after delete = %v, want not found", err)
 	}
 }
 

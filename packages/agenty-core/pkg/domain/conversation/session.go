@@ -436,6 +436,19 @@ func (s *Session) Snapshot() *Session {
 	return &copy
 }
 
+// AdoptPermissionMode commits a detached permission update after persistence.
+// The caller holds the execution lock and transfers ownership of the snapshot.
+func (s *Session) AdoptPermissionMode(snapshot *Session) {
+	mu := s.permissionMutex()
+	mu.Lock()
+	s.PermissionMode = snapshot.PermissionMode
+	mu.Unlock()
+	s.UpdatedAt = snapshot.UpdatedAt
+	s.pending = snapshot.pending
+	s.metadata = snapshot.metadata
+	s.context = snapshot.context
+}
+
 func ReplaySession(events []shared.Event) *Session {
 	s := &Session{Rounds: make([]Round, 0), permissionMu: &sync.RWMutex{}}
 	for _, e := range events {

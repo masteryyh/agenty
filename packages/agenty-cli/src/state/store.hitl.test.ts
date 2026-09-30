@@ -365,22 +365,22 @@ describe("pending permission selection", () => {
                     firstStarted.resolve();
                     await releaseFirst.promise;
                 }
-                return { ...session, permissionMode: "ask", pendingPermissionMode: mode === "ask" ? undefined : mode };
+                return { ...session, permissionMode: mode };
             },
         });
         useAppStore.setState({ ...useAppStore.getInitialState(), client, session: { ...session, permissionMode: "ask" } });
         const first = useAppStore.getState().togglePermissionMode();
         await firstStarted.promise;
-        expect(useAppStore.getState().session?.pendingPermissionMode).toBe("auto");
+        expect(useAppStore.getState().session?.permissionMode).toBe("auto");
         const second = useAppStore.getState().togglePermissionMode();
-        expect(useAppStore.getState().session?.pendingPermissionMode).toBe("yolo");
+        expect(useAppStore.getState().session?.permissionMode).toBe("yolo");
         const third = useAppStore.getState().togglePermissionMode();
-        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+        expect(useAppStore.getState().session?.permissionMode).toBe("ask");
         releaseFirst.resolve();
         await Promise.all([first, second, third]);
         expect(requests).toEqual(["auto", "ask"]);
         expect(useAppStore.getState().session?.permissionMode).toBe("ask");
-        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+        expect(useAppStore.getState().session?.permissionMode).toBe("ask");
     });
 
     test("does not restore pending mode when the effective event precedes its response", async () => {
@@ -390,12 +390,47 @@ describe("pending permission selection", () => {
         const client = useAppStore.getState().client!;
         client.setSessionPermissionMode = async () => {
             h.emit({ type: "permission_mode_changed", permissionMode: "yolo" });
-            return { ...session, permissionMode: "ask", pendingPermissionMode: "yolo" };
+            return { ...session, permissionMode: "yolo" };
         };
         await useAppStore.getState().setPermissionMode("yolo");
         expect(useAppStore.getState().session?.permissionMode).toBe("yolo");
-        expect(useAppStore.getState().session?.pendingPermissionMode).toBeUndefined();
+        expect(useAppStore.getState().session?.permissionMode).toBe("yolo");
         expect(useAppStore.getState().toast?.text).toBe("permissions: yolo");
+        h.emit({ type: "round_ended", status: "completed" });
+        await run;
+    });
+
+    test("preserves the latest selection across older events and subsequent toggles", async () => {
+        const h = harness();
+        const run = useAppStore.getState().sendMessage("read");
+        await h.started.promise;
+        const firstStarted = Promise.withResolvers<void>();
+        const releaseFirst = Promise.withResolvers<void>();
+        const requests: PermissionMode[] = [];
+        const client = useAppStore.getState().client!;
+        client.setSessionPermissionMode = async (_id, mode) => {
+            requests.push(mode);
+            if (requests.length === 1) {
+                firstStarted.resolve();
+                await releaseFirst.promise;
+            }
+            return { ...session, permissionMode: mode };
+        };
+
+        const first = useAppStore.getState().togglePermissionMode();
+        await firstStarted.promise;
+        const second = useAppStore.getState().togglePermissionMode();
+        h.emit({ type: "permission_mode_changed", permissionMode: "auto" });
+        const selected = useAppStore.getState().session?.permissionMode;
+        const third = useAppStore.getState().togglePermissionMode();
+        releaseFirst.resolve();
+        await Promise.all([first, second, third]);
+        expect(selected).toBe("yolo");
+        expect(requests).toEqual(["auto", "ask"]);
+        expect(useAppStore.getState().session?.permissionMode).toBe("ask");
+
+        h.emit({ type: "permission_mode_changed", permissionMode: "yolo" });
+        expect(useAppStore.getState().session?.permissionMode).toBe("yolo");
         h.emit({ type: "round_ended", status: "completed" });
         await run;
     });

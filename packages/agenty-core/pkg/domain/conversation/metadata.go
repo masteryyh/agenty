@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"slices"
 	"encoding/xml"
 )
 
@@ -98,6 +99,18 @@ func (s *Session) LastMetadata() *SessionMetadata {
 
 	copy := *s.metadata
 	return &copy
+}
+
+// LastContextPermissionMode is the mode most recently sent to a model.
+// A permission change event can be newer than the last hidden metadata message.
+func (s *Session) LastContextPermissionMode() PermissionMode {
+	for _, v := range slices.Backward(s.context) {
+		update, ok := parseMetadataMessage(v)
+		if ok && update.PermissionMode != nil {
+			return PermissionMode(*update.PermissionMode).Normalized()
+		}
+	}
+	return ""
 }
 
 func (s *Session) applyMessageMetadata(message Message) {

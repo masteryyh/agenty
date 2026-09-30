@@ -17,7 +17,7 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
 	"github.com/masteryyh/agenty-core/pkg/infra/config"
-	"github.com/masteryyh/agenty-core/pkg/infra/httpapi"
+	"github.com/masteryyh/agenty-core/pkg/infra/event"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
 	"github.com/masteryyh/agenty-core/pkg/infra/instance"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
@@ -152,7 +152,7 @@ func run() (exitCode int) {
 	var execution *infrasession.Engine
 	var mcpRegistry *mcp.Registry
 	var permissionManager *permission.PermissionManager
-	eventBroker := httpapi.NewStreamBroker(func(snapshotCtx context.Context, topic string) (any, error) {
+	eventBroker := event.NewStreamBroker(func(snapshotCtx context.Context, topic string) (any, error) {
 		if topic == "mcp" {
 			return map[string]any{"servers": mcpRegistry.List(snapshotCtx)}, nil
 		}
@@ -167,11 +167,10 @@ func run() (exitCode int) {
 		}
 		roundID, running := execution.ActiveRoundID(id)
 		return map[string]any{
-			"session":               session,
-			"isRunning":             running,
-			"roundId":               roundID,
-			"pendingApprovals":      permissionManager.PendingForSession(id),
-			"pendingPermissionMode": execution.PendingPermissionMode(id),
+			"session":          session,
+			"isRunning":        running,
+			"roundId":          roundID,
+			"pendingApprovals": permissionManager.PendingForSession(id),
 		}, nil
 	})
 	mcpRegistry, err = mcp.NewRegistry(ctx, config.Get().Paths().MCPDir, toolRegistry, mcp.Options{
@@ -225,7 +224,7 @@ func run() (exitCode int) {
 		reportCoreError(ctx, "failed to register session storage middleware", "error", err)
 		return 1
 	}
-	if err := middlewareManager.Register(httpapi.NewSessionEventMiddleware(eventBroker)); err != nil {
+	if err := middlewareManager.Register(event.NewSessionEventMiddleware(eventBroker)); err != nil {
 		reportCoreError(ctx, "failed to register session event middleware", "error", err)
 		return 1
 	}
@@ -240,12 +239,11 @@ func run() (exitCode int) {
 	}
 	middlewareChain.SetEventBarrier(eventBroker.TopicBarrier)
 	execution, err = infrasession.NewEngine(ctx, infrasession.Dependencies{
-		Sessions:              repos.Conversation,
-		Catalog:               repos.Catalog,
-		Tools:                 toolRegistry,
-		LoopHooks:             middlewareChain.AgentLoopHooks(),
-		Lifecycle:             middlewareChain.LifecycleHooks(),
-		PermissionModeChanged: permissionManager.PermissionModeChanged,
+		Sessions:  repos.Conversation,
+		Catalog:   repos.Catalog,
+		Tools:     toolRegistry,
+		LoopHooks: middlewareChain.AgentLoopHooks(),
+		Lifecycle: middlewareChain.LifecycleHooks(),
 	})
 	if err != nil {
 		reportCoreError(ctx, "failed to initialize execution engine", "error", err)

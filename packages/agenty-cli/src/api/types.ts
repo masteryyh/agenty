@@ -241,7 +241,6 @@ export interface ChatSessionDto {
     contextWindow: number;
     currentReasoningEffort?: ReasoningEffort;
     permissionMode?: PermissionMode;
-    pendingPermissionMode?: PermissionMode;
     toolDialect?: ToolDialect;
     rounds: RoundDto[];
     createdAt: string;

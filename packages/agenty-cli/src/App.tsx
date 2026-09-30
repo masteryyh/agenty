@@ -427,7 +427,6 @@ function ChatView() {
                     contextWindow={app.session?.contextWindow ?? 0}
                     tokenConsumed={chat.tokenConsumed}
                     permissionMode={app.session?.permissionMode ?? "ask"}
-                    pendingPermissionMode={app.session?.pendingPermissionMode}
                     toolDialect={app.session?.toolDialect ?? "default"}
                     thinkingLevel={thinkingLevel}
                     reasoningActive={reasoningActive}

@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/masteryyh/agenty-core/pkg/application"
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
@@ -47,17 +46,6 @@ func sessionMutationUsesRepository(method, route string) bool {
 	default:
 		return false
 	}
-}
-
-func (r *SessionRoutes) withPendingPermissionMode(result any, err error) (any, error) {
-	session, ok := result.(*conversation.Session)
-	if err != nil || !ok || session == nil || r.execution == nil {
-		return result, err
-	}
-	return struct {
-		*conversation.Session
-		PendingPermissionMode conversation.PermissionMode `json:"pendingPermissionMode,omitempty"`
-	}{Session: session, PendingPermissionMode: r.execution.PendingPermissionMode(session.ID)}, nil
 }
 
 type idParams struct {
@@ -118,7 +106,7 @@ func (r *SessionRoutes) Create(c *gin.Context) {
 
 func (r *SessionRoutes) Get(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p idParams) (any, error) {
-		return r.withPendingPermissionMode(r.service.Get(ctx, p.ID))
+		return r.service.Get(ctx, p.ID)
 	})
 }
 
@@ -133,52 +121,49 @@ func (r *SessionRoutes) Delete(c *gin.Context) {
 		if err := r.service.Delete(ctx, p.ID); err != nil {
 			return nil, err
 		}
-		if r.execution != nil {
-			r.execution.ClearPendingPermissionMode(uuid.MustParse(p.ID))
-		}
 		return map[string]any{"id": p.ID, "deleted": true}, nil
 	})
 }
 
 func (r *SessionRoutes) SetTitle(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetTitleParams) (any, error) {
-		return r.withPendingPermissionMode(r.service.SetTitle(ctx, p.ID, p.Title))
+		return r.service.SetTitle(ctx, p.ID, p.Title)
 	})
 }
 
 func (r *SessionRoutes) SetModel(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetModelParams) (any, error) {
-		return r.withPendingPermissionMode(r.execution.SetModel(ctx, p.ID, p.ProviderCode, p.ModelCode))
+		return r.execution.SetModel(ctx, p.ID, p.ProviderCode, p.ModelCode)
 	})
 }
 
 func (r *SessionRoutes) SetReasoningEffort(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetReasoningEffortParams) (any, error) {
-		return r.withPendingPermissionMode(r.service.SetReasoningEffort(ctx, p.ID, p.ReasoningEffort))
+		return r.service.SetReasoningEffort(ctx, p.ID, p.ReasoningEffort)
 	})
 }
 
 func (r *SessionRoutes) SetCwd(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetCwdParams) (any, error) {
-		return r.withPendingPermissionMode(r.service.SetCwd(ctx, p.ID, p.Cwd))
+		return r.service.SetCwd(ctx, p.ID, p.Cwd)
 	})
 }
 
 func (r *SessionRoutes) SetPermissionMode(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetPermissionModeParams) (any, error) {
-		return r.withPendingPermissionMode(r.execution.SetPermissionMode(ctx, p.ID, p.PermissionMode))
+		return r.execution.SetPermissionMode(ctx, p.ID, p.PermissionMode)
 	})
 }
 
 func (r *SessionRoutes) EnableCodexMode(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p idParams) (any, error) {
-		return r.withPendingPermissionMode(r.execution.EnableCodexMode(ctx, p.ID))
+		return r.execution.EnableCodexMode(ctx, p.ID)
 	})
 }
 
 func (r *SessionRoutes) SetToolDialect(c *gin.Context) {
 	execute(r.api, c, http.StatusOK, map[string]string{"id": "id"}, nil, func(ctx context.Context, p sessionSetToolDialectParams) (any, error) {
-		return r.withPendingPermissionMode(r.execution.SetToolDialect(ctx, p.ID, p.ToolDialect))
+		return r.execution.SetToolDialect(ctx, p.ID, p.ToolDialect)
 	})
 }
 

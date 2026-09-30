@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
+	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/masteryyh/agenty-core/pkg/infra/agentloop"
 	"github.com/masteryyh/agenty-core/pkg/infra/middleware"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
@@ -346,150 +347,78 @@ func TestMiddlewareAutoReviewLifecycleAndRejection(t *testing.T) {
 	}
 }
 
-func TestPermissionModeChangedReleasesPendingApproval(t *testing.T) {
-	manager := permission.NewPermissionManager()
-	session := &conversation.Session{ID: uuid.New()}
-	round := &conversation.Round{ID: uuid.New()}
-	state := &middleware.ToolCallContext{
-		Session: session,
-		Round:   round,
-		Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
-	}
-	requested := make(chan permission.Request, 1)
-	state.Emit = func(_ context.Context, event agentloop.Event) error {
-		if request, ok := event.Payload.(permission.Request); ok {
-			requested <- request
+func TestPermissionModeChangeKeepsPendingApproval(t *testing.T) {
+	for _, mode := range []conversation.PermissionMode{conversation.PermissionAuto, conversation.PermissionYolo} {
+		for _, decision := range []permission.Decision{permission.Allow, permission.Deny} {
+			t.Run(string(mode)+"/"+string(decision), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					manager := permission.NewPermissionManager()
+					session := conversation.StartSession(shared.NewModelRef("provider", "model"), 8192, shared.ReasoningOff, nil)
+					state := &middleware.ToolCallContext{
+						Session: session,
+						Round:   &conversation.Round{ID: uuid.New()},
+						Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
+						Tools:   &autoApprovalRuntime{automaticallyAllowed: true},
+					}
+					var request permission.Request
+					var resolutions []permission.Resolution
+					reviews := 0
+					state.Emit = func(_ context.Context, event agentloop.Event) error {
+						switch event.Type {
+						case permission.EventRequested:
+							request = event.Payload.(permission.Request)
+						case permission.EventResolved:
+							resolutions = append(resolutions, event.Payload.(permission.Resolution))
+						case permission.EventReviewStarted:
+							reviews++
+						}
+						return nil
+					}
+					done := make(chan error, 1)
+					go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
+					synctest.Wait()
+					session.SetPermissionMode(mode, state.Round.ID)
+					synctest.Wait()
+					select {
+					case err := <-done:
+						t.Fatalf("mode change released approval: %v", err)
+					default:
+					}
+					if reviews != 0 || len(resolutions) != 0 || len(manager.PendingForSession(session.ID)) != 1 {
+						t.Fatal("mode change rechecked or resolved the pending approval")
+					}
+					resolution := permission.Resolution{
+						SessionID: session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: decision,
+					}
+					if err := manager.Resolve(t.Context(), resolution); err != nil {
+						t.Fatal(err)
+					}
+					if err := <-done; err != nil {
+						t.Fatal(err)
+					}
+					if len(resolutions) != 1 || resolutions[0] != resolution {
+						t.Fatalf("resolutions = %#v", resolutions)
+					}
+					if decision == permission.Deny {
+						if state.Result == nil || !state.Result.IsError || state.Result.Content[0].(conversation.TextBlock).Text != permission.DeniedMessage {
+							t.Fatalf("manual denial was not preserved: %#v", state.Result)
+						}
+					} else if state.Result != nil {
+						t.Fatalf("allowed call was rejected: %#v", state.Result)
+					}
+					if manager.Resolve(t.Context(), resolution) == nil {
+						t.Fatal("resolved approval remained available")
+					}
+					state.Result = nil
+					if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
+						t.Fatal(err)
+					}
+					if len(resolutions) != 1 || state.Result != nil {
+						t.Fatal("new call did not use the updated permission mode")
+					}
+				})
+			})
 		}
-		return nil
-	}
-	done := make(chan error, 1)
-	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
-	request := <-requested
-	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionYolo); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if state.Result != nil {
-		t.Fatal("switching to yolo denied the pending call")
-	}
-	if manager.Resolve(t.Context(), permission.Resolution{
-		SessionID:  session.ID,
-		RoundID:    round.ID,
-		ApprovalID: request.ApprovalID,
-		Decision:   permission.Allow,
-	}) == nil {
-		t.Fatal("released approval remained resolvable")
-	}
-}
-
-func TestPermissionModeChangedRechecksPendingApprovalInAutoMode(t *testing.T) {
-	manager := permission.NewPermissionManager()
-	cwd := t.TempDir()
-	session := &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAsk}
-	round := &conversation.Round{ID: uuid.New(), Cwd: &cwd}
-	state := &middleware.ToolCallContext{
-		Session: session,
-		Round:   round,
-		Call:    &conversation.ToolUseBlock{ID: "call", Name: "read_file", Input: []byte(`{"path":"notes.txt"}`)},
-		Tools:   &autoApprovalRuntime{automaticallyAllowed: true},
-	}
-	requested := make(chan permission.Request, 1)
-	resolved := make(chan permission.Resolution, 1)
-	state.Emit = func(_ context.Context, event agentloop.Event) error {
-		switch event.Type {
-		case permission.EventRequested:
-			requested <- event.Payload.(permission.Request)
-		case permission.EventResolved:
-			resolved <- event.Payload.(permission.Resolution)
-		}
-		return nil
-	}
-	done := make(chan error, 1)
-	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
-	request := <-requested
-	if !session.SetPermissionMode(conversation.PermissionAuto, round.ID) {
-		t.Fatal("failed to switch session to auto mode")
-	}
-	if err := manager.PermissionModeChanged(t.Context(), session.ID, conversation.PermissionAuto); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if state.Result != nil {
-		t.Fatalf("result = %#v", state.Result)
-	}
-	resolution := <-resolved
-	if resolution.ApprovalID != request.ApprovalID || resolution.Decision != permission.Allow {
-		t.Fatalf("resolution = %#v", resolution)
-	}
-}
-
-func TestManualDenialWinsWhileAutomaticRecheckIsRunning(t *testing.T) {
-	reviewStarted := make(chan struct{})
-	releaseReview := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		select {
-		case <-reviewStarted:
-		default:
-			close(reviewStarted)
-		}
-		<-releaseReview
-		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"id":"review","choices":[{"message":{"role":"assistant","content":"{\"decision\":\"allow\",\"message\":null}"},"finish_reason":"stop"}]}`)
-	}))
-	defer server.Close()
-
-	manager := permission.NewPermissionManager()
-	cwd := t.TempDir()
-	session := &conversation.Session{ID: uuid.New(), PermissionMode: conversation.PermissionAsk}
-	round := &conversation.Round{ID: uuid.New(), Cwd: &cwd}
-	state := &middleware.ToolCallContext{
-		Session: session,
-		Round:   round,
-		Call:    &conversation.ToolUseBlock{ID: "call", Name: "shell", Input: []byte(`{"commands":["printf hello"]}`)},
-		Model:   modelcall.ModelCallConfig{APIType: modelcall.APIOpenAICompletions, BaseURL: server.URL, APIKey: "test", ModelCode: "test"},
-	}
-	requested := make(chan permission.Request, 1)
-	resolved := make(chan permission.Resolution, 1)
-	state.Emit = func(ctx context.Context, event agentloop.Event) error {
-		switch event.Type {
-		case permission.EventRequested:
-			request := event.Payload.(permission.Request)
-			requested <- request
-			if session.CurrentPermissionMode() == conversation.PermissionAsk {
-				if !session.SetPermissionMode(conversation.PermissionAuto, round.ID) {
-					t.Fatal("failed to switch to auto mode")
-				}
-				return manager.PermissionModeChanged(ctx, session.ID, conversation.PermissionAuto)
-			}
-		case permission.EventResolved:
-			resolved <- event.Payload.(permission.Resolution)
-		}
-		return nil
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- manager.Middleware().BeforeToolCall(t.Context(), state) }()
-	request := <-requested
-	<-reviewStarted
-	if err := manager.Resolve(t.Context(), permission.Resolution{
-		SessionID: session.ID, RoundID: round.ID, ApprovalID: request.ApprovalID, Decision: permission.Deny,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	close(releaseReview)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	resolution := <-resolved
-	if resolution.Decision != permission.Deny {
-		t.Fatalf("resolution = %#v", resolution)
-	}
-	if state.Result == nil || state.Result.Content[0].(conversation.TextBlock).Text != permission.DeniedMessage {
-		t.Fatalf("result = %#v", state.Result)
 	}
 }
 
@@ -613,7 +542,7 @@ func TestGenericPreviewPreservesLargeNumbers(t *testing.T) {
 }
 
 func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
-	for _, scenario := range []string{"ask", "request error", "manual recheck"} {
+	for _, scenario := range []string{"ask", "request error", "manual mode change"} {
 		t.Run(scenario, func(t *testing.T) {
 			requests := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -636,7 +565,7 @@ func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
 				Call:    &conversation.ToolUseBlock{ID: "shell", Name: "shell", Input: []byte(`{"commands":["git reset --hard"]}`)},
 				Model:   modelcall.ModelCallConfig{APIType: modelcall.APIOpenAICompletions, BaseURL: server.URL, APIKey: "test", ModelCode: "test"},
 			}
-			if scenario == "manual recheck" {
+			if scenario == "manual mode change" {
 				state.Session.PermissionMode = conversation.PermissionAsk
 			}
 			seen := 0
@@ -646,19 +575,19 @@ func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
 				}
 				request := event.Payload.(permission.Request)
 				seen++
-				if scenario == "manual recheck" && seen == 1 {
+				if scenario == "manual mode change" && seen == 1 {
 					if request.Message != "" {
 						t.Fatal("manual mode unexpectedly has a review reason")
 					}
 					if !state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID) {
 						t.Fatal("failed to switch session to auto mode")
 					}
-					return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+					return manager.Resolve(ctx, permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Allow})
 				}
 				if request.Message == "" || strings.Contains(request.Message, "secret must") {
 					t.Fatalf("bad approval reason: %q", request.Message)
 				}
-				if (scenario == "ask" || scenario == "manual recheck") && request.Message != "Confirm discarding uncommitted changes." {
+				if (scenario == "ask" || scenario == "manual mode change") && request.Message != "Confirm discarding uncommitted changes." {
 					t.Fatalf("message = %q", request.Message)
 				}
 				return manager.Resolve(ctx, permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Allow})
@@ -669,8 +598,12 @@ func TestMiddlewareShowsAskAndFailureReasons(t *testing.T) {
 			if seen == 0 || state.Result != nil {
 				t.Fatalf("approvals = %d, result = %#v", seen, state.Result)
 			}
-			if requests != 1 {
-				t.Fatalf("requests = %d", requests)
+			wantRequests := 1
+			if scenario == "manual mode change" {
+				wantRequests = 0
+			}
+			if requests != wantRequests || seen != 1 {
+				t.Fatalf("requests = %d, approvals = %d", requests, seen)
 			}
 		})
 	}
@@ -705,11 +638,12 @@ func TestInvalidReviewAfterRetryDeniesCurrentCall(t *testing.T) {
 					switch event.Type {
 					case permission.EventRequested:
 						approvals++
+						request := event.Payload.(permission.Request)
 						if initialMode == conversation.PermissionAuto || approvals > 1 {
 							t.Fatal("invalid reviewer output fell back to manual approval")
 						}
 						state.Session.SetPermissionMode(conversation.PermissionAuto, state.Round.ID)
-						return manager.PermissionModeChanged(ctx, state.Session.ID, conversation.PermissionAuto)
+						return manager.Resolve(ctx, permission.Resolution{SessionID: state.Session.ID, RoundID: state.Round.ID, ApprovalID: request.ApprovalID, Decision: permission.Deny})
 					case permission.EventReviewResolved:
 						reviews++
 					case permission.EventResolved:
@@ -723,7 +657,13 @@ func TestInvalidReviewAfterRetryDeniesCurrentCall(t *testing.T) {
 				if err := manager.Middleware().BeforeToolCall(t.Context(), state); err != nil {
 					t.Fatal(err)
 				}
-				if requests != 2 || reviews != 1 {
+				wantRequests, wantReviews := 2, 1
+				wantMessage := permission.AutoDeniedMessage + " Auto review failed: invalid output after retry."
+				if initialMode == conversation.PermissionAsk {
+					wantRequests, wantReviews = 0, 0
+					wantMessage = permission.DeniedMessage
+				}
+				if requests != wantRequests || reviews != wantReviews {
 					t.Fatalf("requests = %d, review resolutions = %d", requests, reviews)
 				}
 				if initialMode == conversation.PermissionAsk && (approvals != 1 || resolutions != 1) {
@@ -733,7 +673,7 @@ func TestInvalidReviewAfterRetryDeniesCurrentCall(t *testing.T) {
 					t.Fatalf("call was not rejected: %#v", state.Result)
 				}
 				message, ok := state.Result.Content[0].(conversation.TextBlock)
-				if !ok || message.Text != permission.AutoDeniedMessage+" Auto review failed: invalid output after retry." {
+				if !ok || message.Text != wantMessage {
 					t.Fatalf("rejection reason = %#v", state.Result.Content)
 				}
 				if state.Session.CurrentPermissionMode() != conversation.PermissionAuto {
