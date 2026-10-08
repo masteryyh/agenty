@@ -16,6 +16,7 @@ export interface ConfirmDialogProps {
     onConfirm: () => void;
     onCancel: () => void;
     active?: boolean;
+    letterShortcuts?: boolean;
 }
 
 export function ConfirmDialog({
@@ -26,6 +27,7 @@ export function ConfirmDialog({
     onConfirm,
     onCancel,
     active = true,
+    letterShortcuts = true,
 }: ConfirmDialogProps) {
     const dialogSize = useBottomDialogSize();
     const [cursor, setCursor] = useState(1);
@@ -41,11 +43,11 @@ export function ConfirmDialog({
     };
 
     useInput((input, key) => {
-        if (key.escape || input.toLowerCase() === "n") {
+        if (key.escape || (letterShortcuts && input.toLowerCase() === "n")) {
             onCancel();
             return;
         }
-        if (input.toLowerCase() === "y") {
+        if (letterShortcuts && input.toLowerCase() === "y") {
             onConfirm();
             return;
         }

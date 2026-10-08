@@ -196,7 +196,10 @@ describe("common TUI components", () => {
                 .toBe(true);
             await act(async () => {
                 await setup.mockMouse.click(5, 1);
+            });
+            await act(async () => {
                 await setup.flush();
+                await setup.waitForVisualIdle();
             });
 
             frame = setup.captureCharFrame();

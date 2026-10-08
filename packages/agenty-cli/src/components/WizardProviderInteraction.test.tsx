@@ -1,5 +1,5 @@
 import { testRender } from "@opentui/react/test-utils";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { act, useState } from "react";
 
 import { AgentyClient } from "../api/client";
@@ -29,7 +29,11 @@ function provider(code: string, discovered: boolean, modelCount = 2): ModelProvi
     };
 }
 
-function ModelHarness({ providers }: { providers: ModelProviderDto[] }) {
+function ModelHarness({ providers, onSelect = () => undefined, onComplete = () => undefined }: {
+    providers: ModelProviderDto[];
+    onSelect?: () => void;
+    onComplete?: () => void;
+}) {
     const [focus, setFocus] = useState<WizardListFocus>({ kind: "row", index: 0 });
     const drafts = providers.map(draftForProvider);
     const models = providers.flatMap((resource, index) => modelDraftsForProvider(drafts[index], resource));
@@ -37,13 +41,42 @@ function ModelHarness({ providers }: { providers: ModelProviderDto[] }) {
         <BottomDialog width={98} height={30}>
             <ModelStep rows={buildWizardModelRows(drafts, models)} focus={focus}
                 selectedModelId={models[0]?.id ?? null} error={null} onFocus={setFocus}
-                onSelect={() => undefined} onAdd={() => undefined} onEdit={() => undefined}
-                onComplete={() => undefined} onBack={() => undefined} />
+                onSelect={onSelect} onAdd={() => undefined} onEdit={() => undefined}
+                onComplete={onComplete} onBack={() => undefined} />
         </BottomDialog>
     );
 }
 
 describe("wizard provider model search", () => {
+    test("ignores letter shortcuts while model selection remains available by clicking a row", async () => {
+        const onSelect = mock(() => undefined);
+        const onComplete = mock(() => undefined);
+        const setup = await testRender(
+            <ModelHarness providers={[provider("Fixed", false)]} onSelect={onSelect} onComplete={onComplete} />,
+            { width: 100, height: 32 },
+        );
+        try {
+            await act(async () => {
+                await setup.flush();
+                setup.mockInput.pressArrow("down");
+            });
+            await act(async () => {
+                await setup.flush();
+                await setup.mockInput.typeText("acdsyn");
+            });
+            expect(onSelect).not.toHaveBeenCalled();
+            expect(onComplete).not.toHaveBeenCalled();
+            const lines = setup.captureCharFrame().split("\n");
+            const row = lines.findIndex((line) => line.includes("Fixed Claude"));
+            await act(async () => {
+                await setup.mockMouse.click(lines[row]!.indexOf("Fixed Claude") + 1, row);
+            });
+            expect(onSelect).toHaveBeenCalledTimes(1);
+        } finally {
+            act(() => setup.renderer.destroy());
+        }
+    });
+
     test("places independent searches below discovered provider names with spacing", async () => {
         const setup = await testRender(<ModelHarness providers={[
             provider("OpenRouter", true), provider("Other", true), provider("Fixed", false),
@@ -56,7 +89,7 @@ describe("wizard provider model search", () => {
                 await setup.flush();
             });
             const lines = setup.captureCharFrame().split("\n");
-            const titleIndex = lines.findIndex((line) => line.includes("02 / Default session model"));
+            const titleIndex = lines.findIndex((line) => line.includes("Default session model"));
             expect(titleIndex).toBeGreaterThanOrEqual(0);
             expect(lines[titleIndex + 1]).toContain("Choose a model.");
             const providerIndex = lines.findIndex((line) => line.includes("OpenRouter (OpenRouter)"));

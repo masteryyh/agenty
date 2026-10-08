@@ -46,12 +46,6 @@ if (command.handled) {
         }
     };
 
-    const onSignal = () => {
-        void shutdown(0);
-    };
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
-
     root.render(
         <TuiRuntimeProvider runtime={{ exit: (code) => void shutdown(code) }}>
             {/* Absolute dark base: every token is an absolute hex value, so the
@@ -64,6 +58,4 @@ if (command.handled) {
     );
 
     await destroyed;
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
 }

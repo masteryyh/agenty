@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { loginWithOpenRouter } from "../api/openRouterOAuth";
 import {
@@ -25,7 +25,7 @@ import { useInput } from "../hooks/useInput";
 import { useWindowSize } from "../hooks/useWindowSize";
 import { useAppStore } from "../state/store";
 import { useTuiRuntime } from "../tui/runtime";
-import { BottomDialog, useBottomDialogSize } from "./BottomDialog";
+import { useBottomDialogSize, useDialogContentHeight } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
     type FormField,
@@ -47,6 +47,7 @@ import {
     rowIndexForFocus,
     type WizardListFocus,
 } from "./wizardNavigation";
+import { WizardPage } from "./WizardPage";
 import {
     buildWizardModelRows,
     buildWizardProviderRows,
@@ -60,6 +61,7 @@ import {
     selectedModelId,
     validateWizardDrafts,
 } from "./wizardSetup";
+import { WizardWelcome } from "./WizardWelcome";
 
 type WizardStep = "welcome" | "providers" | "provider-form" | "models" | "model-form" | "saving" | "done";
 
@@ -200,18 +202,15 @@ function parseReasoningEfforts(value: string | undefined): ReasoningEffort[] {
 }
 
 export function WizardOverlay() {
-    const { columns, rows } = useWindowSize();
-    const width = Math.max(columns - 2, 1);
-    const height = Math.max(rows - 1, 12);
-
-    return (
-        <BottomDialog width={width} height={height}>
-            <WizardContent />
-        </BottomDialog>
-    );
+    return <WizardContent />;
 }
 
 function WizardContent() {
+    const page = (content: ReactNode, maxWidth = 88) => (
+        <WizardPage maxWidth={maxWidth}>
+            {content}
+        </WizardPage>
+    );
     const client = useAppStore((state) => state.client);
     const finishWizard = useAppStore((state) => state.finishWizard);
     const { exit } = useTuiRuntime();
@@ -576,13 +575,13 @@ function WizardContent() {
     };
 
     if (step === "welcome") {
-        return <WelcomeStep onBegin={begin} onExit={() => exit()} />;
+        return <WizardWelcome onBegin={begin} onExit={() => exit()} />;
     }
     if (step === "provider-form" && editing) {
-        return (
+        return page(
             <Box flexDirection="column" flexGrow={1}>
                 <FormPanel
-                    fullHeight
+                    showHint={false}
                     error={error}
                     key={editing.id}
                     title={editing.source === "builtin" ? `Configure ${editing.name}` : "Add compatible provider"}
@@ -614,14 +613,15 @@ function WizardContent() {
                         setStep("providers");
                     }}
                 />
-            </Box>
+            </Box>,
+            54,
         );
     }
     if (step === "model-form" && editingModel) {
-        return (
+        return page(
             <Box flexDirection="column" flexGrow={1} width="100%" position="relative">
                 <FormPanel
-                    fullHeight
+                    showHint={false}
                     key={editingModel.id}
                     title={editingModel.originalCode
                         ? `Edit model: ${editingModel.name}`
@@ -634,18 +634,18 @@ function WizardContent() {
                     }}
                     active={!deletingModel}
                     error={error}
-                    shortcutHint={editingModel.originalCode ? "d delete" : undefined}
-                    onShortcut={(input) => {
-                        if (input.toLowerCase() !== "d" || !editingModel.originalCode) {
-                            return false;
-                        }
-                        setDeletingModel(editingModel);
-                        return true;
-                    }}
-                    actions={[{ key: "save", label: "Save model" }, { key: "cancel", label: "Back" }]}
+                    actions={[
+                        { key: "save", label: "Save model" },
+                        ...(models.some((model) => model.id === editingModel.id)
+                            ? [{ key: "delete", label: "Delete model" }]
+                            : []),
+                        { key: "cancel", label: "Back" },
+                    ]}
                     onAction={(action, values) => {
                         if (action === "save") {
                             saveModel(values);
+                        } else if (action === "delete") {
+                            setDeletingModel(editingModel);
                         } else {
                             setError(null);
                             setEditingModel(null);
@@ -660,17 +660,19 @@ function WizardContent() {
                 />
                 {deletingModel ? (
                     <ConfirmDialog
+                        letterShortcuts={false}
                         title={`Delete model "${deletingModel.name}"?`}
                         message="The model will be removed when setup is completed."
                         onConfirm={() => removeModel(deletingModel)}
                         onCancel={() => setDeletingModel(null)}
                     />
                 ) : null}
-            </Box>
+            </Box>,
+            54,
         );
     }
     if (step === "models") {
-        return (
+        return page(
             <ModelStep
                 rows={modelRows}
                 focus={modelFocus}
@@ -692,19 +694,13 @@ function WizardContent() {
         );
     }
     if (step === "saving" || step === "done") {
-        return (
-            <Box flexDirection="column" padding={1} gap={1}>
-                {step === "done" ? (
-                    <Text color={theme.success} bold>Setup complete. Starting agenty-cli…</Text>
-                ) : (
-                    <Spinner label="Saving providers, model, and session defaults…" />
-                )}
-                {error ? <Text color={theme.danger}>{error}</Text> : null}
-            </Box>
+        return page(
+            <WizardStatus done={step === "done"} error={error} />,
+            54,
         );
     }
 
-    return (
+    return page(
         <ProviderStep
             rows={providerRows}
             focus={providerFocus}
@@ -716,61 +712,24 @@ function WizardContent() {
             onCustom={openCustom}
             onAddCustom={() => openCustom()}
             onContinue={continueToModels}
-            onExit={() => exit()}
+            onBack={() => {
+                setError(null);
+                setStep("welcome");
+            }}
         />
     );
 }
 
-function WelcomeStep({ onBegin, onExit }: { onBegin: () => void; onExit: () => void }) {
-    useInput((input, key) => {
-        if (key.return || input.toLowerCase() === "y") {
-            onBegin();
-        } else if (key.escape || input.toLowerCase() === "n") {
-            onExit();
-        }
-    });
-
+function WizardStatus({ done, error }: { done: boolean; error: string | null }) {
+    useDialogContentHeight(error ? 3 : 1);
     return (
-        <Box flexDirection="column" flexGrow={1} padding={1} gap={1}>
-            <Text color={theme.accent} bold>AGENTY / FIRST RUN</Text>
-            <Text color={theme.accent} bold>Welcome to agenty</Text>
-            <Text>Connect a model provider, configure its models, and choose the default session model.</Text>
-            <Box flexDirection="column" height={10} borderStyle="single" borderColor={theme.border} padding={1} marginTop={1}>
-                <Box height={1}>
-                    <Text color={theme.accent} bold>01  Provider access</Text>
-                </Box>
-                <Box height={1}>
-                    <Text dimColor wrap="truncate">Configure OpenAI, Anthropic, Google, or a compatible endpoint.</Text>
-                </Box>
-                <Box height={1}>
-                    <Text color={theme.accent} bold>02  Model details</Text>
-                </Box>
-                <Box height={1}>
-                    <Text dimColor wrap="truncate">Enter the model code and limits used by the core loop.</Text>
-                </Box>
-                <Box height={1}>
-                    <Text color={theme.accent} bold>03  Default session model</Text>
-                </Box>
-                <Box height={1}>
-                    <Text dimColor wrap="truncate">Pick the model used when a new session starts.</Text>
-                </Box>
-            </Box>
-            <ActionBar
-                actions={[
-                    { key: "begin", label: "Begin setup" },
-                    { key: "exit", label: "Exit" },
-                ]}
-                activeKey="begin"
-                gap={3}
-                onAction={(key) => {
-                    if (key === "begin") {
-                        onBegin();
-                    } else {
-                        onExit();
-                    }
-                }}
-            />
-            <Text dimColor>Enter/y to begin · Esc/n to exit</Text>
+        <Box flexDirection="column" gap={1}>
+            {done ? (
+                <Text color={theme.success} bold>Setup complete. Starting agenty-cli…</Text>
+            ) : (
+                <Spinner label="Saving providers, model, and session defaults…" />
+            )}
+            {error ? <Text color={theme.danger}>{error}</Text> : null}
         </Box>
     );
 }
@@ -786,7 +745,7 @@ function ProviderStep({
     onCustom,
     onAddCustom,
     onContinue,
-    onExit,
+    onBack,
 }: {
     rows: WizardProviderRow[];
     focus: WizardListFocus;
@@ -798,13 +757,19 @@ function ProviderStep({
     onCustom: (draft?: ProviderDraft) => void;
     onAddCustom: () => void;
     onContinue: () => void;
-    onExit: () => void;
+    onBack: () => void;
 }) {
+    useDialogContentHeight(rows.length + 7 + (loading ? 2 : 0) + (error ? 2 : 0));
+    useInput((_input, key) => {
+        if (key.escape) {
+            onBack();
+        }
+    });
     return (
         <Box flexDirection="column" flexGrow={1} gap={1}>
             <Box flexDirection="column">
-                <Text color={theme.accent} bold>01 / Provider connections</Text>
-                <Text dimColor>Choose a row to configure it. You can add more than one provider.</Text>
+                <Text color={theme.accent} bold>Provider connections</Text>
+                <Text dimColor wrap="truncate">Choose a row to configure it. You can add more than one provider.</Text>
             </Box>
             {loading ? <Spinner label="Loading existing providers…" /> : null}
             {error ? <Text color={theme.danger}>{error}</Text> : null}
@@ -822,9 +787,8 @@ function ProviderStep({
                             onAddCustom();
                         }
                     }}
-                    onAddCustom={onAddCustom}
                     onContinue={onContinue}
-                    onExit={onExit}
+                    onBack={onBack}
                     canContinue={configuredCount > 0}
                 />
             ) : null}
@@ -837,22 +801,20 @@ function ProviderTable({
     focus,
     onFocus,
     onActivate,
-    onAddCustom,
     onContinue,
-    onExit,
+    onBack,
     canContinue,
 }: {
     rows: WizardProviderRow[];
     focus: WizardListFocus;
     onFocus: (focus: WizardListFocus) => void;
     onActivate: (row: WizardProviderRow) => void;
-    onAddCustom: () => void;
     onContinue: () => void;
-    onExit: () => void;
+    onBack: () => void;
     canContinue: boolean;
 }) {
     const dialogSize = useBottomDialogSize();
-    const maxVisible = Math.max(dialogSize.height - 8, 1);
+    const maxVisible = Math.max(dialogSize.height - 7, 1);
     const providerStatus = (row: WizardProviderRow): string => {
         if (row.kind === "add") {
             return "";
@@ -900,11 +862,7 @@ function ProviderTable({
         Math.max(dialogSize.width - 2, 0),
     );
 
-    useInput((input, key) => {
-        if (key.escape) {
-            onExit();
-            return;
-        }
+    useInput((_input, key) => {
         if (key.upArrow) {
             onFocus(moveWizardListFocus(focus, rows.length, "up"));
             return;
@@ -926,7 +884,7 @@ function ProviderTable({
                 if (focus.index === 0 && canContinue) {
                     onContinue();
                 } else if (focus.index === 1) {
-                    onExit();
+                    onBack();
                 }
                 return;
             }
@@ -935,11 +893,6 @@ function ProviderTable({
                 onActivate(row);
             }
             return;
-        }
-        if (input.toLowerCase() === "a") {
-            onAddCustom();
-        } else if (input.toLowerCase() === "c" && canContinue) {
-            onContinue();
         }
     });
 
@@ -968,23 +921,20 @@ function ProviderTable({
             <ActionBar
                 actions={[
                     { key: "continue", label: "Continue to model", disabled: !canContinue },
-                    { key: "exit", label: "Exit" },
+                    { key: "back", label: "Back" },
                 ]}
                 activeKey={focus.kind === "action"
-                    ? focus.index === 0 ? "continue" : "exit"
+                    ? focus.index === 0 ? "continue" : "back"
                     : undefined}
                 gap={3}
                 onAction={(key) => {
                     if (key === "continue") {
                         onContinue();
                     } else {
-                        onExit();
+                        onBack();
                     }
                 }}
             />
-            <Text dimColor wrap="truncate">
-                ↑↓ rows/actions · ←→ choose action · Enter select · a add provider · c continue · Esc exit
-            </Text>
         </Box>
     );
 }
@@ -1013,12 +963,14 @@ export function ModelStep({
     onBack: () => void;
 }) {
     const dialogSize = useBottomDialogSize();
+    const { rows: terminalRows } = useWindowSize();
+    const compact = terminalRows < 20;
+    const chromeHeight = compact ? 4 : 7;
     const [searchQueries, setSearchQueries] = useState<Record<string, string>>({});
     const visibleRows = useMemo(() => filterWizardModelRows(rows, searchQueries), [rows, searchQueries]);
     const rowCursor = Math.min(rowIndexForFocus(focus), Math.max(visibleRows.length - 1, 0));
     const currentRow = visibleRows[rowCursor];
-    const currentModel = currentRow?.kind === "model" ? currentRow.model : undefined;
-    const maxVisible = Math.max(dialogSize.height - 9 - (error ? 2 : 0), 1);
+    const maxVisible = Math.max(dialogSize.height - chromeHeight - (error ? compact ? 1 : 2 : 0), 1);
     const scrollRef = useRef<ScrollBoxRenderable | null>(null);
     const noMatches = (providerId: string) => !visibleRows.some((row) =>
         row.kind === "model" && row.provider.id === providerId,
@@ -1032,14 +984,16 @@ export function ModelStep({
         rowOffsets.push(contentHeight);
         contentHeight += rowHeight(row);
     }
+    useDialogContentHeight(contentHeight + chromeHeight + (error ? compact ? 1 : 2 : 0));
     useLayoutEffect(() => {
         const scroll = scrollRef.current;
         const row = visibleRows[rowCursor];
         if (!scroll || !row) {
             return;
         }
-        const top = rowOffsets[rowCursor] ?? 0;
-        const bottom = top + rowHeight(row);
+        const top = (rowOffsets[rowCursor] ?? 0)
+            + (row.kind === "search" && scroll.viewport.height < rowHeight(row) ? 1 : 0);
+        const bottom = top + Math.min(rowHeight(row), scroll.viewport.height);
         const next = top < scroll.scrollTop
             ? top
             : bottom > scroll.scrollTop + scroll.viewport.height ? bottom - scroll.viewport.height : scroll.scrollTop;
@@ -1108,7 +1062,7 @@ export function ModelStep({
         Math.max(dialogSize.width - 2, 0),
     );
 
-    useInput((input, key) => {
+    useInput((_input, key) => {
         if (focus.kind === "row" && currentRow?.kind === "search") {
             return;
         }
@@ -1152,18 +1106,12 @@ export function ModelStep({
             }
             return;
         }
-        const lower = input.toLowerCase();
-        if (lower === "c") {
-            onComplete();
-        } else if (lower === "s" && currentModel) {
-            onSelect(currentModel);
-        }
     });
 
     return (
-        <Box flexDirection="column" flexGrow={1} gap={1}>
+        <Box flexDirection="column" flexGrow={1} gap={compact ? 0 : 1}>
             <Box flexDirection="column" height={2} flexShrink={0}>
-                <Text color={theme.accent} bold>02 / Default session model</Text>
+                <Text color={theme.accent} bold>Default session model</Text>
                 <Text dimColor wrap="truncate">Choose a model. Custom providers also allow model management here.</Text>
             </Box>
             {error ? <Text color={theme.danger}>{error}</Text> : null}
@@ -1256,9 +1204,6 @@ export function ModelStep({
                     }
                 }}
             />
-            <Text dimColor wrap="truncate">
-                ↑↓ rows/actions · Enter edit/add · click/s select · c complete · Esc back
-            </Text>
         </Box>
     );
 }

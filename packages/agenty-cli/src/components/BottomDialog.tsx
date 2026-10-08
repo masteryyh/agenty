@@ -27,6 +27,8 @@ const BottomDialogSizeContext = createContext<BottomDialogSize>({
     height: 1,
 });
 
+export const DialogSizeProvider = BottomDialogSizeContext.Provider;
+
 export function useBottomDialogSize(): BottomDialogSize {
     return useContext(BottomDialogSizeContext);
 }

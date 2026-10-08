@@ -1,6 +1,6 @@
 import { BaseRenderable, InputRenderable } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 
 import type { ChatSessionDto, ModelDto } from "./api/types";
@@ -79,6 +79,39 @@ afterEach(() => {
 });
 
 describe("chat input interactions", () => {
+    for (const phase of ["ready", "wizard", "error", "loading"] as const) {
+        test(`never exits with Esc and requires two Ctrl+C presses during ${phase}`, async () => {
+            useAppStore.setState({ phase, initError: phase === "error" ? "Test failure" : null });
+            const exit = mock((_code?: number) => undefined);
+            const setup = await testRender(
+                <TuiRuntimeProvider runtime={{ exit }}><App /></TuiRuntimeProvider>,
+                { width: 80, height: 24, exitSignals: [], exitOnCtrlC: false },
+            );
+            try {
+                await act(async () => {
+                    await setup.flush();
+                    setup.mockInput.pressEscape();
+                    await Bun.sleep(30);
+                });
+                expect(exit).not.toHaveBeenCalled();
+                await act(async () => {
+                    setup.mockInput.pressCtrlC();
+                    await setup.flush();
+                });
+                expect(exit).not.toHaveBeenCalled();
+                expect(setup.captureCharFrame()).toContain("Press Ctrl+C again to exit.");
+                await act(async () => {
+                    setup.mockInput.pressCtrlC();
+                    await setup.flush();
+                });
+                expect(exit).toHaveBeenCalledTimes(1);
+                expect(exit).toHaveBeenCalledWith(130);
+            } finally {
+                act(() => setup.renderer.destroy());
+            }
+        });
+    }
+
     test("toggles Codex Mode with Shift+M and shows its footer label", async () => {
         const client = createStoreClient({
             async setToolDialect(_id, toolDialect) {

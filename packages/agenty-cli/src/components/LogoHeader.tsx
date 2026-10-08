@@ -1,42 +1,36 @@
-import { useMemo } from "react";
-
-import { pickAsciiArt } from "../consts/asciiArts";
 import { theme } from "../consts/theme";
+import { useWindowSize } from "../hooks/useWindowSize";
 import { AGENTY_VERSION } from "../version";
+import { BRAND_LOGO_WIDTH, BrandLogo } from "./BrandLogo";
 import { Box, Text } from "./ui";
 
 export const LOGO_HEADER_HEIGHT = 5;
 
 export function LogoHeader() {
-    const art = useMemo(() => pickAsciiArt(), []);
-    const artLines = art.split("\n");
+    const { columns } = useWindowSize();
+    const versionLabel = `v${AGENTY_VERSION}`;
+    const compact = columns < BRAND_LOGO_WIDTH + 5 + versionLabel.length;
 
     return (
         <Box
-            borderStyle="rounded"
-            borderColor={theme.border}
+            id="agenty-header"
             paddingX={1}
-            flexDirection="row"
+            paddingY={1}
+            flexDirection={compact ? "column" : "row"}
             flexShrink={0}
-            gap={3}
+            gap={compact ? 0 : 3}
             height={LOGO_HEADER_HEIGHT}
             overflow="hidden"
         >
-            <Box flexDirection="column" flexShrink={1} overflow="hidden">
-                {artLines.map((line, i) => (
-                    <Text key={i} color={theme.accent} bold wrap="truncate">
-                        {line}
-                    </Text>
-                ))}
-            </Box>
+            <BrandLogo compact={compact} />
             <Box
                 flexDirection="column"
-                flexShrink={0}
+                flexShrink={1}
+                minWidth={0}
                 justifyContent="center"
                 gap={0}
             >
-                <Text color={theme.accentBright} bold>agenty</Text>
-                <Text color={theme.textMuted} wrap="truncate">v{AGENTY_VERSION}</Text>
+                <Text color={theme.textMuted} wrap="truncate">{versionLabel}</Text>
             </Box>
         </Box>
     );

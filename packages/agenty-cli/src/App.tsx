@@ -62,16 +62,6 @@ function panelHeight(overlay: OverlayKind): number | null {
 export function App() {
     const app = useApp();
     const renderer = useRenderer();
-    const { exit } = useTuiRuntime();
-
-    useInput((_input, key, event) => {
-        if (key.ctrl && event.name === "c") {
-            event.preventDefault();
-            event.stopPropagation();
-            exit(130);
-        }
-    });
-
     useSelectionHandler((selection) => {
         if (selection.isDragging) {
             return;
@@ -97,7 +87,7 @@ export function App() {
                     Failed to start agenty-cli:
                 </Text>
                 <Text color={theme.danger}>{app.initError}</Text>
-                <Text dimColor>Make sure the core binary is executable and its data directory is writable. Press Ctrl+C to exit.</Text>
+                <Text dimColor>Make sure the core binary is executable and its data directory is writable. Press Ctrl+C twice to exit.</Text>
             </Box>
         );
     }

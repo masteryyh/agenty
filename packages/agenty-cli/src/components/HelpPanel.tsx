@@ -72,7 +72,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             <HelpLine label="Esc" labelWidth={labelWidth} description="Cancel, close an overlay or deny approval." />
             <HelpLine label="PageUp / PageDown" labelWidth={labelWidth} description="Scroll the message list or this panel." />
             <HelpLine label="End" labelWidth={labelWidth} description="Jump the message list to the latest output." />
-            <HelpLine label="Ctrl+C" labelWidth={labelWidth} description="Exit agenty." />
+            <HelpLine label="Ctrl+C ×2" labelWidth={labelWidth} description="Exit agenty." />
             <HelpLine label="Ctrl+R / Ctrl+T" labelWidth={labelWidth} description="Toggle reasoning or tool details." />
             <HelpLine label="Shift+M" labelWidth={labelWidth} description="Toggle Codex Mode before conversation content exists." />
             <HelpLine label="Shift+Tab" labelWidth={labelWidth} description="Cycle permission mode: ask, auto, yolo." />

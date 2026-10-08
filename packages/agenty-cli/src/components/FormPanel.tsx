@@ -66,6 +66,7 @@ export interface FormPanelProps {
     active?: boolean;
     error?: string | null;
     hint?: string;
+    showHint?: boolean;
     fullHeight?: boolean;
     shortcutHint?: string;
     onChange?: (key: string, allValues: FormValues) => void;
@@ -172,6 +173,7 @@ export function FormPanel({
     active = true,
     error,
     hint: hintOverride,
+    showHint = true,
     fullHeight = false,
     shortcutHint,
     onChange,
@@ -394,8 +396,9 @@ export function FormPanel({
         fieldsHeight + (afterFields ? afterFieldsHeight + 1 : 0),
         choiceScalarField ? choiceFieldTop + 1 + menuHeight : 1,
     );
-    const compact = height < titleLines.length + errorLines.length + actionRows.length + 5;
-    const availableBodyHeight = height - titleLines.length - errorLines.length - actionRows.length - (compact ? 1 : 3);
+    const hintHeight = showHint ? 1 : 0;
+    const compact = height < titleLines.length + errorLines.length + actionRows.length + 4 + hintHeight;
+    const availableBodyHeight = height - titleLines.length - errorLines.length - actionRows.length - (compact ? 0 : 2) - hintHeight;
     const bodyHeight = fullHeight
         ? Math.max(1, availableBodyHeight)
         : Math.max(1, Math.min(preferredBodyHeight, availableBodyHeight));
@@ -432,6 +435,7 @@ export function FormPanel({
             bodyHeight={bodyHeight}
             compact={compact}
             fullHeight={fullHeight}
+            showHint={showHint}
             footerHeight={actionRows.length}
             footer={actionRows.map((row, index) => (
                 <ActionBar
