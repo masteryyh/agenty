@@ -4,6 +4,7 @@ packages:
   - "packages/agenty-cli"
   - "packages/agenty-bootstrap"
   - "packages/file-editor"
+  - "packages/llm-codec"
 
 peerDependencyRules:
   allowedVersions:

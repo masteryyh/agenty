@@ -1,0 +1,10 @@
+{
+    "name": "llm-codec",
+    "private": true,
+    "scripts": {
+        "build": "node scripts/build.mjs",
+        "test": "cargo test --locked && node --test scripts/build.test.mjs && node scripts/smoke.mjs",
+        "lint": "cargo fmt --all -- --check && cargo clippy --locked --all-targets -- -D warnings",
+        "clean": "cargo clean"
+    }
+}

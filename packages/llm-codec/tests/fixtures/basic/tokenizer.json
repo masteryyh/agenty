@@ -1,0 +1,34 @@
+{
+    "version": "1.0",
+    "truncation": null,
+    "padding": null,
+    "added_tokens": [
+        {"id": 0, "content": "[UNK]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+        {"id": 1, "content": "[BOS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
+        {"id": 2, "content": "[EOS]", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true}
+    ],
+    "normalizer": null,
+    "pre_tokenizer": {"type": "WhitespaceSplit"},
+    "post_processor": {
+        "type": "TemplateProcessing",
+        "single": [
+            {"SpecialToken": {"id": "[BOS]", "type_id": 0}},
+            {"Sequence": {"id": "A", "type_id": 0}},
+            {"SpecialToken": {"id": "[EOS]", "type_id": 0}}
+        ],
+        "pair": [
+            {"Sequence": {"id": "A", "type_id": 0}},
+            {"Sequence": {"id": "B", "type_id": 1}}
+        ],
+        "special_tokens": {
+            "[BOS]": {"id": "[BOS]", "ids": [1], "tokens": ["[BOS]"]},
+            "[EOS]": {"id": "[EOS]", "ids": [2], "tokens": ["[EOS]"]}
+        }
+    },
+    "decoder": {"type": "WordPiece", "prefix": "##", "cleanup": false},
+    "model": {
+        "type": "WordLevel",
+        "vocab": {"[UNK]": 0, "[BOS]": 1, "[EOS]": 2, "Hello": 3, "world": 4, "你好": 5},
+        "unk_token": "[UNK]"
+    }
+}

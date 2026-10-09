@@ -73,6 +73,18 @@
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
             "outputs": ["target/release/fileedit", "target/release/fileedit.exe"]
         },
+        "llm-codec#build": {
+            "inputs": ["Cargo.toml", "Cargo.lock", "build.rs", "cbindgen.toml", "package.json", "src/**", "scripts/build.mjs", "$TURBO_ROOT$/scripts/platform.mjs"],
+            "outputs": ["bin/**", "include/llm_codec.h"],
+            "env": ["OS", "ARCH", "GOOS", "GOARCH", "CC", "CXX"],
+            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+        },
+        "llm-codec#test": {
+            "dependsOn": ["build"],
+            "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/core-build-env.mjs", "$TURBO_ROOT$/scripts/platform.mjs"],
+            "env": ["OS", "ARCH", "GOOS", "GOARCH", "CGO_ENABLED", "CC", "CXX", "CGO_LDFLAGS"],
+            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME", "GOCACHE"]
+        },
         "agenty-bootstrap#test": {
             "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
         },

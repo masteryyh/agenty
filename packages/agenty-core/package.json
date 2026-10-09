@@ -14,6 +14,7 @@
         "clean": "rm -rf bin"
     },
     "devDependencies": {
+        "llm-codec": "workspace:*",
         "file-editor": "workspace:*"
     }
 }

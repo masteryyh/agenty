@@ -2,11 +2,12 @@
 
 ## Project overview
 
-Agenty is a local-first pnpm + Turborepo monorepo. The active product path has four workspaces:
+Agenty is a local-first pnpm + Turborepo monorepo. The product and supporting-library path has five workspaces:
 
 - packages/agenty-core: Go 1.26 core, exposed to its local client through HTTP/2 over a Unix domain socket or Windows named pipe.
 - packages/agenty-cli: Bun/TypeScript/React OpenTUI client.
 - packages/file-editor: Rust transactional filesystem helper for V4A patches and text-editor operations.
+- packages/llm-codec: Rust tokenizer/chat-template static library with a generated C ABI; built before core, with production inference integration still pending. Tokenization requires tokenizer.json; GGUF supplies metadata/templates only.
 - packages/agenty-bootstrap: Rust self-extracting supervisor and launcher.
 
 The optional agenty-inspector workspace is a read-only local web debugger. It uses core's config path resolution and transcript reader/decoder/domain replay. It must not initialize or write the inspected data directory.
@@ -69,7 +70,7 @@ The footer stores offsets, lengths, and SHA3-256 digests for the three decompres
 
 The bootstrap extracts payloads into version-addressed paths derived from all three payload digests, prepares fileedit on PATH, resolves --data-dir, starts or attaches to core, verifies HTTP/2 protocol and data-directory identity, then launches the CLI with real terminal stdio. An owning bootstrap gracefully stops its child core when its CLI exits and kills remaining children if the bootstrap is terminated. An attaching bootstrap only manages its own CLI.
 
-pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun builds the CLI and packs payloads, Go builds core, and Cargo builds the patch helper and launcher. Do not add an npm workspaces field. The dependency graph builds the patch helper before core, then CLI and bootstrap.
+pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun builds the CLI and packs payloads, Go builds core, and Cargo builds the patch helper, llm-codec library, and launcher. Do not add an npm workspaces field. The dependency graph builds the patch helper and llm-codec static library before core, then CLI and bootstrap.
 
 Builds resolve AGENTY_VERSION from the process environment first, then the ignored root .env, and otherwise use dev. Only .env.example is committed. Release CI passes target-specific GOOS, GOARCH, CC, CXX, PACKAGE_DIR, BIN_NAME, OS, ARCH, and OPENTUI_LIBC inputs.
 
@@ -79,6 +80,7 @@ Important commands:
 - pnpm core:build, core:test, core:test:integration, core:test:e2e, core:test:e2e:race, core:test:race, core:test:repeat, core:tidyup
 - pnpm cli:build, cli:dev, cli:typecheck
 - pnpm bootstrap:build, bootstrap:test
+- pnpm llm-codec:build, llm-codec:test, llm-codec:lint
 
 pnpm run update updates pnpm, Go, and Cargo dependencies across the workspace. pnpm clean removes build outputs; pnpm deepclean also removes local caches, dependency stores, node_modules, and other generated temporary files. pnpm tidyup runs go fmt ./..., go vet ./..., and go mod tidy in every Go module.
 

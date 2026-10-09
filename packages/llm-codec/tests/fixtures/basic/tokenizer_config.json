@@ -1,0 +1,5 @@
+{
+    "bos_token": "[BOS]",
+    "eos_token": {"content": "[EOS]"},
+    "unk_token": "[UNK]"
+}

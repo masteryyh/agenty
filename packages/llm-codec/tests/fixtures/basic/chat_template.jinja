@@ -1,0 +1,1 @@
+{{- bos_token }}{% for message in messages %}{{ message['role'] }}: {{ message['content'] }}{{ eos_token }}{% endfor %}{% if add_generation_prompt %}assistant: {% endif %}

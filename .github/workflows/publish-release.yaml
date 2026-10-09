@@ -105,12 +105,17 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Rust target for Windows cgo
+        if: matrix.goos == 'windows'
+        run: rustup target add x86_64-pc-windows-gnu
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             packages/agenty-bootstrap
             packages/patch-applier
+            packages/llm-codec
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -133,6 +138,15 @@ jobs:
           ARCH="${{ matrix.arch }}" \
           OPENTUI_LIBC="${{ matrix.opentui_libc }}" \
           pnpm run bootstrap:build
+
+      - name: Verify llm-codec static-library FFI
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.arch }}
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "1"
+        run: pnpm run llm-codec:test
 
       - name: Verify static linkage
         if: matrix.goos != 'windows'

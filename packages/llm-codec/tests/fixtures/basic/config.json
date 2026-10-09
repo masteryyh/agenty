@@ -1,0 +1,6 @@
+{
+    "_name_or_path": "llm-codec-test-model",
+    "model_type": "fixture",
+    "bos_token_id": 1,
+    "eos_token_id": 2
+}

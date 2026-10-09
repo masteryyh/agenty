@@ -183,6 +183,9 @@ importers:
 
   packages/agenty-core:
     devDependencies:
+      llm-codec:
+        specifier: workspace:*
+        version: link:../llm-codec
       file-editor:
         specifier: workspace:*
         version: link:../file-editor
@@ -217,6 +220,8 @@ importers:
       vite:
         specifier: ^8.3.0
         version: 8.3.0(@types/node@22.20.2)
+
+  packages/llm-codec: {}
 
   packages/file-editor: {}
 

@@ -104,6 +104,8 @@ pnpm core:test:integration
 pnpm core:test:e2e
 pnpm cli:typecheck
 pnpm bootstrap:test
+pnpm llm-codec:build
+pnpm llm-codec:test
 pnpm build
 pnpm run update
 pnpm tidyup
@@ -114,8 +116,13 @@ pnpm deepclean
 The build version comes from `AGENTY_VERSION` in the process environment, then from
 the ignored root `.env`; it defaults to `dev`. Copy `.env.example` to `.env` if you
 want a persistent local version, then run `pnpm build` for a complete launcher build.
-The default build includes file-editor, core, CLI and bootstrap. Build Inspector
+The default build includes file-editor, the llm-codec static library, core, CLI and bootstrap. Build Inspector
 separately with `pnpm inspector:build`.
+
+The Rust [llm-codec library](./packages/llm-codec/README.md) provides a C ABI
+for local model tokenization and chat-template rendering. It requires a local
+`tokenizer.json`; GGUF supplies metadata and templates only. Core integration
+into a local inference provider remains future work.
 
 Core builds use CGO for SQLite. Windows builds need a GCC-compatible compiler such as
 MinGW-w64 or LLVM-MinGW configured through `CC`; MSVC `cl.exe` is unsupported. See the

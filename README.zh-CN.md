@@ -91,6 +91,8 @@ pnpm core:test:integration
 pnpm core:test:e2e
 pnpm cli:typecheck
 pnpm bootstrap:test
+pnpm llm-codec:build
+pnpm llm-codec:test
 pnpm build
 pnpm run update
 pnpm tidyup
@@ -100,8 +102,12 @@ pnpm deepclean
 
 构建版本优先来自进程环境中的 `AGENTY_VERSION`，其次读取被忽略的根目录 `.env`，两者都
 没有时默认为 `dev`。如需固定本地版本，可把 `.env.example` 复制为 `.env`，直接运行
-`pnpm build` 即可构建完整 launcher。默认构建 file-editor、core、CLI 和 bootstrap；
+`pnpm build` 即可构建完整 launcher。默认构建 file-editor、llm-codec 静态库、core、CLI 和 bootstrap；
 Inspector 通过 `pnpm inspector:build` 单独构建。
+
+Rust [llm-codec 静态库](./packages/llm-codec/README.md) 提供本地模型分词和 chat template
+渲染的 C ABI。分词必须使用本地 `tokenizer.json`；GGUF 仅用于提取 metadata 和模板。
+后续再由 core 的本地推理 provider 接入。
 
 Core 使用 CGO 构建 SQLite。Windows 需要通过 `CC` 配置 MinGW-w64 或 LLVM-MinGW 等 GCC
 兼容编译器；MSVC `cl.exe` 不受支持。进程级配置示例见 [core 构建说明](./packages/agenty-core/README-CN.md)。
