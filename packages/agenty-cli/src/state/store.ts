@@ -6,6 +6,8 @@ import type {
     ChatSessionDto,
     CompactionEvent,
     ContentBlock,
+    LocalRuntimeSnapshot,
+    ModelDownload,
     ModelDto,
     PermissionMode,
     ReasoningEffort,
@@ -16,11 +18,12 @@ import type {
     ToolApprovalResolution,
     ToolDialect,
     ToolResult,
+    WorkerInstallation,
 } from "../api/types";
 import type { CliOptions } from "../config";
 import { loadOptions, parseThinking } from "../config";
-import { CoreHttp2Client, type StreamFrame } from "../core/http2";
 import { pickStreamingPhrase } from "../consts/streamingPhrases";
+import { CoreHttp2Client, type StreamFrame } from "../core/http2";
 import type { LoadedInputHistory } from "../history/inputHistory";
 import {
     appendInputHistory,
@@ -32,6 +35,22 @@ export type MessageStatus = "idle" | "streaming" | "compacting" | "error";
 export type OverlayKind = "model-select" | "provider" | "session-select" | "help" | "status" | "mcp" | null;
 
 export type StoreClient = Pick<AgentyClient,
+    | "searchHubModels"
+    | "hubModel"
+    | "modelStorage"
+    | "prepareModelDownload"
+    | "modelDownloads"
+    | "startModelDownload"
+    | "cancelModelDownload"
+    | "localInferenceConfig"
+    | "configureLocalInference"
+    | "localInferenceRuntime"
+    | "workerInstallations"
+    | "workerBundles"
+    | "installWorker"
+    | "cancelWorkerInstallation"
+    | "probeLocalModel"
+    | "subscribeLocalInference"
     | "compactSession"
     | "close"
     | "completeInitialization"
@@ -119,6 +138,9 @@ export interface PendingToolApproval extends ToolApprovalRequest {
 }
 
 interface AppState {
+    localRuntime: LocalRuntimeSnapshot | null;
+    workerInstallations: WorkerInstallation[];
+    modelDownloads: ModelDownload[];
     phase: Phase;
     initError: string | null;
     opts: CliOptions;
@@ -795,6 +817,9 @@ export const useAppStore = create<AppState>((set, get) => {
         initError: null,
         opts: loadOptions(),
         client: null,
+        localRuntime: null,
+        workerInstallations: [],
+        modelDownloads: [],
         model: null,
         session: null,
         skills: [],
@@ -836,9 +861,39 @@ export const useAppStore = create<AppState>((set, get) => {
                 });
                 const transport = await CoreHttp2Client.connectFromEnvironment();
                 const client = new AgentyClient(transport);
-                set({ client });
+                set({ client, modelDownloads: [] });
                 observeClient(client);
                 client.onStreamFrame(async (frame: StreamFrame) => {
+                    if (get().client !== client) {
+                        return;
+                    }
+                    if (frame.topic === "localInference") {
+                        const update = (frame.type === "snapshot" ? frame.snapshot?.state : frame.event) as {
+                            runtime?: LocalRuntimeSnapshot;
+                            installation?: WorkerInstallation;
+                            installations?: WorkerInstallation[];
+                            modelDownload?: ModelDownload;
+                            modelDownloads?: ModelDownload[];
+                        } | undefined;
+                        if (update?.runtime) {
+                            set({ localRuntime: update.runtime });
+                        }
+                        if (update?.installations) {
+                            set({ workerInstallations: update.installations });
+                        }
+                        if (update?.installation) {
+                            const item = update.installation;
+                            set({ workerInstallations: [...get().workerInstallations.filter((entry) => entry.id !== item.id), item] });
+                        }
+                        if (update?.modelDownloads) {
+                            set({ modelDownloads: update.modelDownloads });
+                        }
+                        if (update?.modelDownload) {
+                            const item = update.modelDownload;
+                            set({ modelDownloads: [...get().modelDownloads.filter((entry) => entry.id !== item.id), item] });
+                        }
+                        return;
+                    }
                     if (frame.type !== "snapshot" || !frame.topic.startsWith("session:")) {
                         return;
                     }
@@ -882,6 +937,7 @@ export const useAppStore = create<AppState>((set, get) => {
                     }
                 });
                 client.subscribeMcp(client.eventCursor("mcp"));
+                client.subscribeLocalInference(client.eventCursor("localInference"));
                 if (!(await client.isInitialized())) {
                     set({ phase: "wizard", initError: null });
                     return;

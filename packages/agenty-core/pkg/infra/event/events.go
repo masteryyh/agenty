@@ -477,7 +477,7 @@ func (broker *StreamBroker) SubscriberCount() int {
 }
 
 func validTopic(topic string) bool {
-	if topic == "mcp" {
+	if topic == "mcp" || topic == "localInference" {
 		return true
 	}
 	if !strings.HasPrefix(topic, "session:") {

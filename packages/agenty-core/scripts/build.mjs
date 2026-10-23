@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveBuildVersion } from "../../../scripts/build-version.mjs";
+import { codecLinkEnvironment } from "../../../scripts/codec-link-env.mjs";
 import { resolveCoreBuildEnvironment } from "../../../scripts/core-build-env.mjs";
 
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
@@ -96,7 +97,7 @@ function run() {
     const build = spawnSync("go", plan.goArgs, {
         cwd: plan.packageRoot,
         env: {
-            ...plan.buildEnvironment,
+            ...codecLinkEnvironment(plan.buildEnvironment),
             AGENTY_VERSION: plan.version,
         },
         stdio: "inherit",

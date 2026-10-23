@@ -7,19 +7,47 @@ import (
 	"strings"
 	"sync"
 
+	json "github.com/bytedance/sonic"
+	"github.com/masteryyh/agenty-core/pkg/domain/localinference"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 	"github.com/spf13/viper"
 )
 
 type Manager struct {
-	mu    sync.RWMutex
-	cfg   *Config
-	paths *Paths
+	mu               sync.RWMutex
+	cfg              *Config
+	paths            *Paths
+	workerOverrides  map[localinference.Backend]string
+	persistedWorkers []localinference.Worker
 }
 
 func (m *Manager) Config() *Config { return m.cfg }
 
 func (m *Manager) Paths() *Paths { return m.paths }
+
+func (m *Manager) LocalInference() localinference.Config {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var copy localinference.Config
+	data, _ := json.Marshal(m.cfg.LocalInference)
+	_ = json.Unmarshal(data, &copy)
+	return copy
+}
+
+func (m *Manager) SetLocalInference(value localinference.Config) error {
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	persisted := m.persistableLocalInference(value)
+	if err := persistConfigValue(m.paths.ConfigFile, "localInference", persisted); err != nil {
+		return err
+	}
+	m.persistedWorkers = persisted.Workers
+	m.cfg.LocalInference = m.withWorkerOverrides(value)
+	return nil
+}
 
 func (m *Manager) Initialized() bool {
 	m.mu.RLock()
@@ -157,6 +185,7 @@ func Init() (*Manager, error) {
 			return
 		}
 		mgr = &Manager{cfg: cfg, paths: paths}
+		initErr = mgr.loadWorkerOverrides(os.Getenv)
 	})
 	return mgr, initErr
 }

@@ -35,6 +35,7 @@ import {
     type FormValues
 } from "./FormPanel";
 import { List } from "./List";
+import { LocalInferencePanel } from "./LocalInferencePanel";
 import {
     createTableLayout,
     type TableColumn,
@@ -215,6 +216,7 @@ function WizardContent() {
     const finishWizard = useAppStore((state) => state.finishWizard);
     const { exit } = useTuiRuntime();
     const [step, setStep] = useState<WizardStep>("welcome");
+    const [localSetupOpen, setLocalSetupOpen] = useState(false);
     const [drafts, setDrafts] = useState<ProviderDraft[]>([]);
     const [builtinProviders, setBuiltinProviders] = useState<ModelProviderDto[]>([]);
     const [models, setModels] = useState<ModelDraft[]>([]);
@@ -262,7 +264,7 @@ function WizardContent() {
                     return { provider, draft };
                 });
                 const configured = restored.filter(({ provider, draft }) =>
-                    provider.builtin !== true || draft.apiKey.trim() !== "",
+                    provider.builtin !== true || draft.apiKey.trim() !== "" || provider.type === "local" && provider.localEnabled === true && provider.models.length > 0,
                 );
                 const restoredModels = configured.flatMap(({ provider, draft }) =>
                     modelDraftsForProvider(draft, provider),
@@ -295,6 +297,10 @@ function WizardContent() {
     };
 
     const openBuiltin = (code: string) => {
+        if (code === "local") {
+            setLocalSetupOpen(true);
+            return;
+        }
         const provider = builtinProviders.find((candidate) => candidate.code === code);
         if (!provider) {
             return;
@@ -574,6 +580,27 @@ function WizardContent() {
         }
     };
 
+    if (localSetupOpen) {
+        return page(<LocalInferencePanel wizard onDone={(provider) => {
+            setLocalSetupOpen(false);
+            if (!provider) {
+                return;
+            }
+            setBuiltinProviders((current) => current.map((item) => item.code === "local" ? provider : item));
+            if (!provider.localEnabled) {
+                setDrafts((current) => current.filter((item) => item.code !== "local"));
+                setModels((current) => current.filter((item) => item.providerCode !== "local"));
+                return;
+            }
+            const draft = draftForProvider(provider);
+            const nextModels = modelDraftsForProvider(draft, provider);
+            setDrafts((current) => [...current.filter((item) => item.code !== "local"), draft]);
+            setModels((current) => [...current.filter((item) => item.providerCode !== "local"), ...nextModels]);
+            if (nextModels[0] && !selectedModelDraftId) {
+                setSelectedModelDraftId(nextModels[0].id);
+            }
+        }} />);
+    }
     if (step === "welcome") {
         return <WizardWelcome onBegin={begin} onExit={() => exit()} />;
     }
@@ -822,7 +849,7 @@ function ProviderTable({
         if (!row.draft) {
             return "○ not set";
         }
-        return row.draft.apiKey.trim() ? "✓ ready" : "! key";
+        return row.draft.type === "local" ? "✓ local" : row.draft.apiKey.trim() ? "✓ ready" : "! key";
     };
     const columns: Array<TableColumn<WizardProviderRow>> = [
         {

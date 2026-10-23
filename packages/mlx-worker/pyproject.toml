@@ -1,0 +1,12 @@
+[project]
+name = "agenty-mlx-worker"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["mlx-lm==0.32.2"]
+
+[project.scripts]
+mlx-worker = "mlx_worker.__main__:main"
+
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"

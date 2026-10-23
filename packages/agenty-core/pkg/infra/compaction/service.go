@@ -89,6 +89,13 @@ func EstimateRequestTokens(request modelcall.ModelCallRequest) int64 {
 	return tokens
 }
 
+func CountRequestTokens(ctx context.Context, model modelcall.ModelCallConfig, request modelcall.ModelCallRequest) (int64, error) {
+	if model.APIType == modelcall.APILocal {
+		return modelcall.CountLocalTokens(ctx, model, request)
+	}
+	return EstimateRequestTokens(request), nil
+}
+
 func estimateMessageTokens(message modelcall.ModelCallMessage) int64 {
 	encoded, _ := json.Marshal(message.Content)
 	return 4 + estimateTextTokens(string(encoded))
@@ -148,7 +155,10 @@ func (executor Executor) Compact(
 		MaxOutputTokens: prepared.MaxOutputTokens,
 		ReasoningEffort: preparedReasoningEffort(prepared.Session),
 	}
-	contextTokensBefore := EstimateRequestTokens(baseRequest)
+	contextTokensBefore, err := CountRequestTokens(ctx, prepared.Model, baseRequest)
+	if err != nil {
+		return nil, err
+	}
 	compactionID := uuid.Must(uuid.NewV7())
 	if err := executor.emit(ctx, agentloop.Event{
 		Type:                agentloop.EventCompactionStarted,
@@ -183,7 +193,15 @@ func (executor Executor) Compact(
 	}
 	if prepared.RequestForWindow != nil {
 		compactedRequest := prepared.RequestForWindow(contextWindow, maxOutputTokens)
-		event.ContextTokensAfter = EstimateRequestTokens(compactedRequest)
+		event.ContextTokensAfter, err = CountRequestTokens(ctx, prepared.Model, compactedRequest)
+		if err != nil {
+			// The compaction mutation already exists. Counting is diagnostic here;
+			// preserve its persistence/event lifecycle if resources disappear.
+			event.ContextTokensAfter = EstimateRequestTokens(compactedRequest)
+			if executor.Logger != nil {
+				executor.Logger.WarnContext(ctx, "failed to count compacted context", "error", err)
+			}
+		}
 	}
 
 	usage := event.Usage

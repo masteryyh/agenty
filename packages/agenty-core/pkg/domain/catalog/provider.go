@@ -17,9 +17,11 @@ type AuthMethod string
 const (
 	AuthMethodAPIKey AuthMethod = "apiKey"
 	AuthMethodOAuth  AuthMethod = "oauth"
+	AuthMethodNone   AuthMethod = "none"
 )
 
 type Provider struct {
+	LocalEnabled  bool            `json:"localEnabled,omitempty"`
 	Code          shared.Code     `json:"code"`
 	Name          string          `json:"name"`
 	Type          APIType         `json:"type"`

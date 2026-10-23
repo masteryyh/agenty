@@ -13,7 +13,7 @@ import (
 )
 
 func newCaller(ctx context.Context, model ModelCallConfig, config callConfig) (caller, error) {
-	if strings.TrimSpace(model.APIKey) == "" {
+	if model.APIType != APILocal && strings.TrimSpace(model.APIKey) == "" {
 		return nil, invalidRequest("model call has no API key")
 	}
 	if strings.TrimSpace(model.ModelCode) == "" {
@@ -21,6 +21,11 @@ func newCaller(ctx context.Context, model ModelCallConfig, config callConfig) (c
 	}
 
 	switch model.APIType {
+	case APILocal:
+		if config.localRuntime == nil {
+			return nil, invalidRequest("local inference runtime was not injected")
+		}
+		return &localCaller{model: model, runtime: config.localRuntime}, nil
 	case APIOpenAI:
 		client := newOpenAIClient(model, config)
 		return &openAIResponsesCaller{client: &client, model: model}, nil

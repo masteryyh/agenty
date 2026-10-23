@@ -17,6 +17,9 @@ export interface ConfirmDialogProps {
     onCancel: () => void;
     active?: boolean;
     letterShortcuts?: boolean;
+    tone?: "danger" | "default";
+    dialogWidth?: number;
+    dialogHeight?: number;
 }
 
 export function ConfirmDialog({
@@ -28,11 +31,15 @@ export function ConfirmDialog({
     onCancel,
     active = true,
     letterShortcuts = true,
+    tone = "danger",
+    dialogWidth = 52,
+    dialogHeight = 7,
 }: ConfirmDialogProps) {
     const dialogSize = useBottomDialogSize();
     const [cursor, setCursor] = useState(1);
-    const width = Math.max(Math.min(52, dialogSize.width), 1);
-    const height = Math.max(Math.min(7, dialogSize.height), 1);
+    const width = Math.max(Math.min(dialogWidth, dialogSize.width), 1);
+    const height = Math.max(Math.min(dialogHeight, dialogSize.height), 1);
+    const color = tone === "danger" ? theme.danger : theme.accent;
 
     const activate = (index: number) => {
         if (index === 0) {
@@ -77,18 +84,18 @@ export function ConfirmDialog({
                 height={height}
                 flexDirection="column"
                 borderStyle="single"
-                borderColor={theme.danger}
+                borderColor={color}
                 backgroundColor={theme.surfaceRaised}
                 paddingX={1}
                 paddingY={1}
             >
-                <Text color={theme.danger} bold>{title}</Text>
+                <Text color={color} bold>{title}</Text>
                 <Box flexGrow={1} width="100%" overflow="hidden">
-                    <Text wrap="wrap">{message}</Text>
+                    {typeof message === "string" || typeof message === "number" ? <Text wrap="wrap">{message}</Text> : message}
                 </Box>
                 <ActionBar
                     actions={[
-                        { key: "confirm", label: confirmLabel, tone: "danger" },
+                        { key: "confirm", label: confirmLabel, tone },
                         { key: "cancel", label: cancelLabel },
                     ]}
                     activeKey={cursor === 0 ? "confirm" : "cancel"}

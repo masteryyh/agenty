@@ -19,6 +19,7 @@ import { useBottomDialogSize } from "./BottomDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { type FormField, FormPanel, formString, type FormValues } from "./FormPanel";
 import { List, useListNavigation } from "./List";
+import { LocalInferencePanel } from "./LocalInferencePanel";
 import { Panel } from "./Panel";
 import {
     buildProviderRows,
@@ -239,6 +240,7 @@ export function buildModelUpdate(target: CoreModelDto, input: CreateModelDto): U
 }
 
 type Mode =
+    | { kind: "local" }
     | { kind: "list" }
     | { kind: "create-provider" }
     | { kind: "edit-provider"; target: ModelProviderDto }
@@ -335,6 +337,10 @@ export function ProviderOverlay() {
     };
 
     const openAction = (action: ProviderRowEnterAction) => {
+        if ("provider" in action && action.provider.type === "local") {
+            setMode({ kind: "local" });
+            return;
+        }
         switch (action.kind) {
             case "configure-provider":
                 setOAuthSignedIn(action.provider.authMethod === "oauth");
@@ -576,6 +582,12 @@ export function ProviderOverlay() {
         }
     };
 
+    if (mode.kind === "local") {
+        return <LocalInferencePanel onDone={() => {
+            void reload();
+            returnToList();
+        }} />;
+    }
     if (mode.kind === "create-provider") {
         return (
             <FormPanel

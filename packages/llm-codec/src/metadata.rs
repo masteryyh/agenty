@@ -143,7 +143,7 @@ impl ModelMetadata {
         for source in [sources.tokenizer_config, sources.special_map] {
             if let Some(object) = source.as_object() {
                 for (name, value) in object {
-                    if !name.ends_with("_token") || value.is_null() {
+                    if !name.ends_with("_token") || name.starts_with("add_") || value.is_null() {
                         continue;
                     }
                     let content = token_content(value)?;
@@ -213,6 +213,17 @@ impl ModelMetadata {
             .map(parse_ids)
             .transpose()?
             .unwrap_or_default();
+        if let Some(value) = sources
+            .config
+            .get("text_config")
+            .and_then(|text| text.get("eos_token_id"))
+        {
+            for id in parse_ids(value)? {
+                if !eos_ids.contains(&id) {
+                    eos_ids.push(id);
+                }
+            }
+        }
         if let Some(id) = ids["eos"] {
             if !eos_ids.contains(&id) {
                 eos_ids.push(id);

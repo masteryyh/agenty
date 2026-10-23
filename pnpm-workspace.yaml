@@ -5,6 +5,8 @@ packages:
   - "packages/agenty-bootstrap"
   - "packages/file-editor"
   - "packages/llm-codec"
+  - "packages/mlx-worker"
+  - "packages/llama-cpp-worker"
 
 peerDependencyRules:
   allowedVersions:

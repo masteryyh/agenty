@@ -77,7 +77,7 @@ async fn bootstrap() -> Result<i32> {
     )?;
     progress.finish();
 
-    let (args, data_dir_arg) = parse_args(std::env::args_os().skip(1))?;
+    let (args, options) = parse_args(std::env::args_os().skip(1))?;
     let core_path = std::env::var_os("AGENTY_CORE_BIN")
         .map(PathBuf::from)
         .unwrap_or_else(|| artifacts.core.clone());
@@ -87,7 +87,7 @@ async fn bootstrap() -> Result<i32> {
         &artifacts.file_editor,
         &home,
         args,
-        data_dir_arg,
+        options,
     )
     .await
 }
@@ -98,9 +98,9 @@ async fn supervise(
     file_editor_path: &Path,
     home: &Path,
     args: Vec<OsString>,
-    data_dir_arg: Option<OsString>,
+    options: BootstrapOptions,
 ) -> Result<i32> {
-    let data_dir = resolve_data_dir(&home, data_dir_arg)?;
+    let data_dir = resolve_data_dir(home, options.data_dir.clone())?;
     let (transport, address) = address_for_data_dir(&data_dir);
     if !core_path.is_file() {
         return Err(BootstrapError::Invalid(format!(
@@ -117,6 +117,7 @@ async fn supervise(
         &transport,
         &address,
         &executable_path,
+        &options,
         &mut job,
     )?);
     let started_at = Instant::now();
@@ -190,6 +191,12 @@ async fn supervise(
         }
         sleep(Duration::from_millis(100)).await;
     };
+
+    if !owns_core && (options.llama_cpp_worker.is_some() || options.mlx_worker.is_some()) {
+        return Err(BootstrapError::Invalid(
+            "worker paths cannot override an already running core; stop its owning bootstrap or use a different --data-dir".to_string(),
+        ));
+    }
 
     let mut cli = match spawn_cli(
         cli_path,
@@ -286,28 +293,58 @@ async fn wait_child(child: &mut Child, limit: Duration) -> Result<bool> {
     }
 }
 
-fn parse_args(args: impl Iterator<Item = OsString>) -> Result<(Vec<OsString>, Option<OsString>)> {
+#[derive(Debug, Default)]
+struct BootstrapOptions {
+    data_dir: Option<OsString>,
+    llama_cpp_worker: Option<PathBuf>,
+    mlx_worker: Option<PathBuf>,
+}
+
+fn parse_args(args: impl Iterator<Item = OsString>) -> Result<(Vec<OsString>, BootstrapOptions)> {
     let mut retained = Vec::new();
-    let mut data_dir = None;
+    let mut options = BootstrapOptions::default();
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         let text = arg.to_string_lossy();
-        if text == "--data-dir" {
-            data_dir = Some(args.next().ok_or_else(|| {
-                BootstrapError::Invalid("--data-dir requires a path".to_string())
-            })?);
-        } else if let Some(value) = text.strip_prefix("--data-dir=") {
-            if value.is_empty() {
-                return Err(BootstrapError::Invalid(
-                    "--data-dir requires a path".to_string(),
-                ));
-            }
-            data_dir = Some(OsString::from(value));
-        } else {
+        if text == "--" {
             retained.push(arg);
+            retained.extend(args);
+            break;
+        }
+        let option = ["--data-dir", "--llama-cpp-worker", "--mlx-worker"]
+            .into_iter()
+            .find(|option| text == *option || text.starts_with(&format!("{option}=")));
+        let Some(option) = option else {
+            retained.push(arg);
+            continue;
+        };
+        let value = if let Some(value) = text.strip_prefix(&format!("{option}=")) {
+            OsString::from(value)
+        } else {
+            args.next()
+                .ok_or_else(|| BootstrapError::Invalid(format!("{option} requires a path")))?
+        };
+        if value.is_empty() || value.to_string_lossy().starts_with("--") {
+            return Err(BootstrapError::Invalid(format!("{option} requires a path")));
+        }
+        if option == "--data-dir" {
+            options.data_dir = Some(value);
+            continue;
+        }
+        let path = fs::canonicalize(PathBuf::from(value))
+            .map_err(|error| BootstrapError::Invalid(format!("{option}: {error}")))?;
+        if !path.is_file() {
+            return Err(BootstrapError::Invalid(format!(
+                "{option} requires a regular executable file"
+            )));
+        }
+        if option == "--llama-cpp-worker" {
+            options.llama_cpp_worker = Some(path);
+        } else {
+            options.mlx_worker = Some(path);
         }
     }
-    Ok((retained, data_dir))
+    Ok((retained, options))
 }
 
 fn resolve_data_dir(home: &Path, arg: Option<OsString>) -> Result<String> {
@@ -358,9 +395,17 @@ fn spawn_core(
     transport: &str,
     address: &str,
     executable_path: &std::ffi::OsStr,
+    options: &BootstrapOptions,
     job: &mut ChildJob,
 ) -> Result<Child> {
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    if let Some(path) = &options.llama_cpp_worker {
+        command.env("AGENTY_LLAMA_CPP_WORKER_BIN", path);
+    }
+    if let Some(path) = &options.mlx_worker {
+        command.env("AGENTY_MLX_WORKER_BIN", path);
+    }
+    let mut child = command
         .env("AGENTY_TRANSPORT", transport)
         .env("AGENTY_CORE_ADDR", address)
         .env("AGENTY_DATA_DIR", data_dir)
@@ -707,7 +752,7 @@ mod tests {
         (core, file_editor, powershell)
     }
 
-    fn supervisor_args(data_dir: &Path, script: &Path) -> (Vec<OsString>, Option<OsString>) {
+    fn supervisor_args(data_dir: &Path, script: &Path) -> (Vec<OsString>, BootstrapOptions) {
         let (args, data_dir_arg) = parse_args(
             [
                 OsString::from("--data-dir"),
@@ -876,7 +921,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args, ["--quiet", "mcp", "list"].map(OsString::from));
-        assert_eq!(data_dir, Some(OsString::from("C:\\data")));
+        assert_eq!(data_dir.data_dir, Some(OsString::from("C:\\data")));
     }
 
     #[test]
@@ -888,7 +933,105 @@ mod tests {
         )
         .unwrap();
         assert_eq!(args, [OsString::from("help")]);
-        assert_eq!(data_dir, Some(OsString::from("/tmp/agenty")));
+        assert_eq!(data_dir.data_dir, Some(OsString::from("/tmp/agenty")));
+    }
+
+    #[test]
+    fn worker_options_are_resolved_and_removed_before_cli_launch() {
+        let executable = std::env::current_exe().unwrap();
+        let (args, options) = parse_args(
+            [
+                OsString::from("--llama-cpp-worker"),
+                executable.clone().into_os_string(),
+                OsString::from(format!("--mlx-worker={}", executable.display())),
+                OsString::from("local"),
+                OsString::from("status"),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(args, ["local", "status"].map(OsString::from));
+        assert_eq!(
+            options.llama_cpp_worker,
+            Some(fs::canonicalize(&executable).unwrap())
+        );
+        assert_eq!(options.mlx_worker, options.llama_cpp_worker);
+    }
+
+    #[test]
+    fn bootstrap_options_reject_missing_empty_and_invalid_paths() {
+        for option in ["--data-dir", "--llama-cpp-worker", "--mlx-worker"] {
+            for args in [
+                vec![option.to_string()],
+                vec![format!("{option}=")],
+                vec![option.to_string(), "--quiet".to_string()],
+            ] {
+                assert!(parse_args(args.into_iter().map(OsString::from)).is_err());
+            }
+        }
+        for path in [
+            std::env::temp_dir(),
+            std::env::temp_dir().join("agenty-worker-does-not-exist"),
+        ] {
+            assert!(parse_args(
+                [OsString::from("--mlx-worker"), path.into_os_string()].into_iter()
+            )
+            .is_err());
+        }
+        let (_, options) = parse_args(std::iter::empty()).unwrap();
+        assert!(options.llama_cpp_worker.is_none() && options.mlx_worker.is_none());
+    }
+
+    #[test]
+    fn bootstrap_preserves_arguments_after_separator() {
+        let (args, options) = parse_args(
+            ["--", "--mlx-worker", "a user prompt"]
+                .into_iter()
+                .map(OsString::from),
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            ["--", "--mlx-worker", "a user prompt"].map(OsString::from)
+        );
+        assert!(options.mlx_worker.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn core_receives_worker_paths_through_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = test_directory();
+        fs::create_dir_all(&root.0).unwrap();
+        let script = root.0.join("core stub");
+        let output = root.0.join("environment");
+        fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' \"$AGENTY_LLAMA_CPP_WORKER_BIN\" \"$AGENTY_MLX_WORKER_BIN\" > '{}'\n", output.display())).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let options = BootstrapOptions {
+            llama_cpp_worker: Some(root.0.join("native worker")),
+            mlx_worker: Some(root.0.join("mlx worker")),
+            ..BootstrapOptions::default()
+        };
+        let mut job = ChildJob::new().unwrap();
+        let mut child = spawn_core(
+            &script,
+            "/data",
+            "uds",
+            "/socket",
+            std::ffi::OsStr::new("/usr/bin:/bin"),
+            &options,
+            &mut job,
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            fs::read_to_string(output).unwrap(),
+            format!(
+                "{}\n{}\n",
+                options.llama_cpp_worker.unwrap().display(),
+                options.mlx_worker.unwrap().display()
+            )
+        );
     }
 
     #[test]

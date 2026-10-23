@@ -8,7 +8,118 @@ export const STANDARD_REASONING_EFFORTS: readonly ReasoningEffort[] = [
     "xhigh",
     "max",
 ];
-export type APIType = "openai" | "openai_completions" | "anthropic" | "gemini";
+export type APIType = "openai" | "openai_completions" | "anthropic" | "gemini" | "local";
+
+export interface LocalResource {
+    resourceId: string;
+    backend: "mlx" | "llamaCpp";
+    format: "safetensors" | "gguf";
+    weightsPath: string;
+    codecDirectory: string;
+    tokenizerSha256?: string;
+}
+export interface LocalModel {
+    backendPreference: "auto" | "mlx" | "llamaCpp";
+    outputParser: "qwen3" | "qwen3_5";
+    templateName?: string;
+    thinkingEffort?: "medium";
+    resources: LocalResource[];
+}
+export interface LocalWorker {
+    id: string;
+    backend: "mlx" | "llamaCpp";
+    enabled: boolean;
+    command: string;
+    arguments?: string[];
+    version?: string;
+}
+export interface LocalInferenceConfig {
+    enabled: boolean;
+    workers: LocalWorker[];
+}
+
+export type ModelHubSource = "huggingface" | "modelscope";
+export interface HubModel {
+    id: string;
+    name: string;
+    parameters?: number;
+    sizeBytes?: number;
+    architecture: string;
+    modelType?: string;
+    downloads: number;
+    tags?: string[];
+}
+export interface HubModelPage {
+    models: HubModel[];
+    next?: string;
+}
+export interface HubModelDetails extends HubModel {
+    source: ModelHubSource;
+    revision: string;
+    variants: Array<{ id: string; format: "gguf" | "safetensors"; size: number }>;
+    baseModel?: string;
+}
+export interface ModelStorage {
+    directory: string;
+    volume: string;
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+}
+export interface ModelDownloadInput {
+    source: ModelHubSource;
+    repository: string;
+    variant: string;
+    codecRepository?: string;
+}
+export interface ModelDownloadPlan {
+    id: string;
+    source: ModelHubSource;
+    repository: string;
+    variant: string;
+    codecRepository?: string;
+    directory: string;
+    files: Array<{ path: string; size: number; sha256?: string }>;
+    totalBytes: number;
+    requiredBytes: number;
+    storage: ModelStorage;
+    supported: boolean;
+    reason?: string;
+    enoughSpace: boolean;
+}
+export interface ModelDownload {
+    id: string;
+    source: ModelHubSource;
+    repository: string;
+    variant: string;
+    codecRepository?: string;
+    directory: string;
+    status: "downloading" | "checking" | "registering" | "downloaded" | "ready" | "failed" | "cancelled";
+    downloadedBytes: number;
+    totalBytes: number;
+    files: Array<{ path: string; downloadedBytes: number; totalBytes: number; status: string }>;
+    error?: string;
+    modelCode?: string;
+}
+export interface LocalRuntimeSnapshot {
+    enabled: boolean;
+    workers: Array<{ id: string; backend: string; status: string; modelResourceId?: string; error?: string; engineVersion?: string }>;
+}
+export interface WorkerInstallation {
+    id: string;
+    status: string;
+    downloadedBytes: number;
+    totalBytes: number;
+    error?: string;
+    worker?: LocalWorker;
+}
+export interface WorkerBundle {
+    name: string;
+    backend: "mlx" | "llamaCpp";
+    version: string;
+    url: string;
+    sha256: string;
+}
 
 export interface ModelRef {
     providerCode: string;
@@ -16,6 +127,7 @@ export interface ModelRef {
 }
 
 export interface ModelDto {
+    local?: LocalModel;
     code: string;
     providerCode: string;
     providerName: string;
@@ -46,6 +158,7 @@ export interface AvailableModelDto {
 }
 
 export interface CreateModelDto {
+    local?: LocalModel;
     providerCode: string;
     modelCode: string;
     name: string;
@@ -68,7 +181,8 @@ export interface ModelProviderDto {
     baseUrl: string;
     apiKey: string;
     oauth?: boolean;
-    authMethod?: "apiKey" | "oauth";
+    authMethod?: "apiKey" | "oauth" | "none";
+    localEnabled?: boolean;
     builtin?: boolean;
     official?: boolean;
     modelsUrl?: string;
@@ -155,7 +269,7 @@ export interface CreateModelProviderDto {
     type: APIType;
     baseUrl?: string;
     apiKey?: string;
-    authMethod?: "apiKey" | "oauth";
+    authMethod?: "apiKey" | "oauth" | "none";
     metadata?: Record<string, unknown>;
 }
 

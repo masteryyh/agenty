@@ -13,9 +13,38 @@ type caller interface {
 }
 
 type callConfig struct {
+	localRuntime  LocalRuntime
 	maxRetries    *int
 	httpClient    *http.Client
 	streamHandler ModelCallStreamHandler
+}
+
+func WithLocalRuntime(runtime LocalRuntime) Option {
+	return func(config *callConfig) error {
+		if runtime == nil {
+			return invalidRequest("local runtime is nil")
+		}
+		config.localRuntime = runtime
+		return nil
+	}
+}
+
+// Client shares only runtime dependencies. Per-call options remain isolated.
+type Client struct{ LocalRuntime LocalRuntime }
+
+func (c *Client) Call(ctx context.Context, model ModelCallConfig, request ModelCallRequest, options ...Option) (*ModelCallResponse, error) {
+	if c.LocalRuntime != nil {
+		options = append(options, WithLocalRuntime(c.LocalRuntime))
+	}
+	return Call(ctx, model, request, options...)
+}
+
+func (c *Client) Invoke(ctx context.Context, model ModelCallConfig, request ModelCallRequest, handler ModelCallStreamHandler) (*ModelCallResponse, error) {
+	var options []Option
+	if handler != nil {
+		options = append(options, WithStreamHandler(handler))
+	}
+	return c.Call(ctx, model, request, options...)
 }
 
 // Option modifies a single model call. No option is retained after Call

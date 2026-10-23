@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
+
 import type { AgentyClient } from "@/api/client";
+import type { LocalModel } from "@/api/types";
 import { type ReasoningEffort, STANDARD_REASONING_EFFORTS, type UpdateModelDto } from "@/api/types";
 
 import {
@@ -50,11 +53,18 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
     if (command === "add") {
         const [, , modelCode] = requirePositionals(args, 3, "model add <code> --provider <ref> [options]");
         const provider = await resolveProvider(client, requireFlag(args, "provider"));
+        let local: LocalModel | undefined;
+        if (provider.type === "local") {
+            local = JSON.parse(await readFile(requireFlag(args, "local-config"), "utf8")) as LocalModel;
+            await client.probeLocalModel(local);
+        }
         const created = await client.createModel({
             providerCode: provider.code,
             modelCode,
+            local,
             name: flag(args, "name")?.trim() || modelCode,
-            contextWindow: positiveInteger(flag(args, "context-window") ?? "0", "--context-window", true),
+            contextWindow: positiveInteger(flag(args, "context-window") ?? (local ? "8192" : "0"), "--context-window", true),
+            maxOutputTokens: positiveInteger(flag(args, "max-output-tokens") ?? (local ? "512" : "8192"), "--max-output-tokens"),
             multiModal: booleanFlag(args, "multi-modal"),
             light: booleanFlag(args, "light"),
             isDefault: booleanFlag(args, "default"),
@@ -71,9 +81,12 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
             ? booleanFlag(args, "reasoning")
             : current.reasoning === true || (current.reasoningEfforts?.length ?? 0) > 0;
         const update: UpdateModelDto = {
+            local: hasFlag(args, "local-config")
+                ? JSON.parse(await readFile(requireFlag(args, "local-config"), "utf8")) as LocalModel
+                : current.local,
             name: hasFlag(args, "name") ? requireFlag(args, "name") : current.name,
             contextWindow: hasFlag(args, "context-window") ? positiveInteger(requireFlag(args, "context-window"), "--context-window", true) : current.contextWindow,
-            maxOutputTokens: current.maxOutputTokens,
+            maxOutputTokens: hasFlag(args, "max-output-tokens") ? positiveInteger(requireFlag(args, "max-output-tokens"), "--max-output-tokens") : current.maxOutputTokens,
             multiModal: hasFlag(args, "multi-modal") ? booleanFlag(args, "multi-modal") : current.multiModal,
             light: hasFlag(args, "light") ? booleanFlag(args, "light") : current.light,
             isDefault: hasFlag(args, "default") ? booleanFlag(args, "default") : current.isDefault,
@@ -82,6 +95,9 @@ export async function handleModel(client: AgentyClient, args: ParsedArgs): Promi
                 ? parseReasoningEfforts(requireFlag(args, "reasoning-efforts"))
                 : reasoning ? current.reasoningEfforts : [],
         };
+        if (update.local && hasFlag(args, "local-config")) {
+            await client.probeLocalModel(update.local);
+        }
         const updated = await client.updateModel(current.providerCode, current.code, update);
         action(args, updated, `Model updated: ${displayModel(updated)}`);
         return;

@@ -112,6 +112,9 @@ export async function persistWizardSetup(
         const providerCode = draft.code.trim();
         const existing = existingProviders.find((provider) => provider.code === providerCode);
         let providerChanged = false;
+        if (draft.type === "local") {
+            continue;
+        }
         if (draft.builtin) {
             providerChanged = existing?.apiKey !== draft.apiKey.trim() ||
                 (existing?.authMethod ?? "apiKey") !== draft.authMethod;

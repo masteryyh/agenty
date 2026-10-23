@@ -1,0 +1,103 @@
+name: Build inference workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Worker release version (without v)
+        required: true
+        default: "0.1.0"
+      publish:
+        description: Publish worker bundles to GitHub Releases
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            backend: mlx
+          - runner: macos-26
+            backend: llamaCpp
+          - runner: macos-26-intel
+            backend: llamaCpp
+          - runner: ubuntu-26.04
+            backend: llamaCpp
+          - runner: ubuntu-26.04-arm
+            backend: llamaCpp
+          - runner: windows-latest
+            backend: llamaCpp
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/Krypton
+      - uses: astral-sh/setup-uv@v7
+      - name: Install standalone CPython
+        shell: bash
+        run: uv python install 3.12.13
+      - name: Build native worker
+        if: matrix.backend == 'llamaCpp'
+        shell: bash
+        run: |
+          node scripts/build-worker.mjs llamaCpp
+          cd packages/llama-cpp-worker
+          uv run --no-project --python 3.12.13 tests/protocol.py
+      - name: Create worker bundle
+        shell: bash
+        env:
+          WORKER_BACKEND: ${{ matrix.backend }}
+          WORKER_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$WORKER_BACKEND" = mlx ]; then
+            python_executable=$(uv python find 3.12.13)
+            runtime_path=$("$python_executable" -c 'import sys; print(sys.base_prefix)')
+            uv run --no-project --python 3.12.13 scripts/worker-bundle.py mlx --version "$WORKER_VERSION" --python-runtime "$runtime_path"
+          else
+            uv run --no-project --python 3.12.13 scripts/worker-bundle.py llamaCpp --version "$WORKER_VERSION"
+          fi
+      - uses: actions/upload-artifact@v6
+        with:
+          name: worker-${{ matrix.backend }}-${{ matrix.runner }}
+          path: dist/workers/*
+  index:
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: worker-*
+          path: dist/workers
+          merge-multiple: true
+      - name: Create release index
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('dist/workers')
+          bundles = [json.loads(path.read_text()) for path in sorted(root.glob('*.json'))]
+          (root / 'index.json').write_text(json.dumps(dict(schemaVersion=1, bundles=bundles), indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v6
+        with:
+          name: inference-worker-release
+          path: dist/workers/*
+      - name: Publish worker release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKER_VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "workers-v${WORKER_VERSION}" dist/workers/* \
+            --title "Inference workers ${WORKER_VERSION}" \
+            --notes "Private MLX runtime and native llama.cpp inference workers. No model weights are included."

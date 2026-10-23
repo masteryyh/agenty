@@ -79,7 +79,7 @@ pub fn resolve_templates(directory: &Path, options: &LoadOptions) -> Result<Vec<
     let config = read_optional_json(&directory.join("tokenizer_config.json"))?.unwrap_or_default();
     let mut infos = discover_files(directory, &config)?;
     if infos.is_empty() {
-        let path = gguf::select_file(directory, options.gguf_file.as_deref())?;
+        let path = crate::model::selected_gguf(directory, options)?;
         if let Some(path) = path {
             add_gguf(&mut infos, &gguf::read(&path)?, &path)?;
         }

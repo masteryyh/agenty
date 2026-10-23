@@ -13,6 +13,8 @@ import (
 
 	"github.com/masteryyh/agenty-core/pkg/api/routes"
 	"github.com/masteryyh/agenty-core/pkg/application"
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
+	domainlocal "github.com/masteryyh/agenty-core/pkg/domain/localinference"
 	domainmcp "github.com/masteryyh/agenty-core/pkg/domain/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/codexmode"
 	"github.com/masteryyh/agenty-core/pkg/infra/compaction"
@@ -20,10 +22,13 @@ import (
 	"github.com/masteryyh/agenty-core/pkg/infra/event"
 	"github.com/masteryyh/agenty-core/pkg/infra/initialize"
 	"github.com/masteryyh/agenty-core/pkg/infra/instance"
+	localruntime "github.com/masteryyh/agenty-core/pkg/infra/localinference"
 	"github.com/masteryyh/agenty-core/pkg/infra/logging"
 	"github.com/masteryyh/agenty-core/pkg/infra/mcp"
 	"github.com/masteryyh/agenty-core/pkg/infra/metadata"
 	inframiddleware "github.com/masteryyh/agenty-core/pkg/infra/middleware"
+	"github.com/masteryyh/agenty-core/pkg/infra/modelcall"
+	"github.com/masteryyh/agenty-core/pkg/infra/modelhub"
 	"github.com/masteryyh/agenty-core/pkg/infra/permission"
 	infrasession "github.com/masteryyh/agenty-core/pkg/infra/session"
 	"github.com/masteryyh/agenty-core/pkg/infra/skill"
@@ -31,6 +36,7 @@ import (
 	infratools "github.com/masteryyh/agenty-core/pkg/infra/tools"
 	"github.com/masteryyh/agenty-core/pkg/infra/tools/builtin"
 	"github.com/masteryyh/agenty-core/pkg/utils/signal"
+	"path/filepath"
 )
 
 func main() {
@@ -152,7 +158,13 @@ func run() (exitCode int) {
 	var execution *infrasession.Engine
 	var mcpRegistry *mcp.Registry
 	var permissionManager *permission.PermissionManager
+	var localManager *localruntime.Manager
+	var workerInstaller *localruntime.Installer
+	var modelDownloads *modelhub.Manager
 	eventBroker := event.NewStreamBroker(func(snapshotCtx context.Context, topic string) (any, error) {
+		if topic == "localInference" {
+			return map[string]any{"runtime": localManager.Snapshot(), "installations": workerInstaller.List(), "modelDownloads": modelDownloads.List()}, nil
+		}
 		if topic == "mcp" {
 			return map[string]any{"servers": mcpRegistry.List(snapshotCtx)}, nil
 		}
@@ -194,7 +206,34 @@ func run() (exitCode int) {
 		}
 	}()
 
-	permissionManager = permission.NewPermissionManager()
+	localManager = localruntime.New(ctx, func(snapshot domainlocal.Snapshot) {
+		_ = eventBroker.Publish(ctx, "localInference", map[string]any{"runtime": snapshot})
+	})
+	workerInstaller = localruntime.NewInstaller(ctx, filepath.Join(dataDir, "workers"), func(installation localruntime.Installation) {
+		_ = eventBroker.Publish(ctx, "localInference", map[string]any{"installation": installation})
+	}, func(worker domainlocal.Worker) error {
+		_, err := localManager.UpdateConfig(config.Get(), func(cfg *domainlocal.Config) {
+			for index := range cfg.Workers {
+				if cfg.Workers[index].Backend == worker.Backend {
+					cfg.Workers[index] = worker
+					return
+				}
+			}
+			cfg.Workers = append(cfg.Workers, worker)
+		})
+		return err
+	})
+	if err := localManager.Configure(config.Get().LocalInference()); err != nil {
+		slog.WarnContext(ctx, "local inference configuration is invalid", "error", err)
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = workerInstaller.Shutdown(shutdownCtx)
+		_ = localManager.Shutdown(shutdownCtx)
+	}()
+	modelClient := &modelcall.Client{LocalRuntime: localManager}
+	permissionManager = permission.NewPermissionManager(modelClient)
 	middlewareManager := inframiddleware.NewManager()
 	if err := middlewareManager.Register(skill.NewMiddleware(skillRegistry)); err != nil {
 		reportCoreError(ctx, "failed to register skill middleware", "error", err)
@@ -239,11 +278,12 @@ func run() (exitCode int) {
 	}
 	middlewareChain.SetEventBarrier(eventBroker.TopicBarrier)
 	execution, err = infrasession.NewEngine(ctx, infrasession.Dependencies{
-		Sessions:  repos.Conversation,
-		Catalog:   repos.Catalog,
-		Tools:     toolRegistry,
-		LoopHooks: middlewareChain.AgentLoopHooks(),
-		Lifecycle: middlewareChain.LifecycleHooks(),
+		InvokeModel: modelClient.Invoke,
+		Sessions:    repos.Conversation,
+		Catalog:     repos.Catalog,
+		Tools:       toolRegistry,
+		LoopHooks:   middlewareChain.AgentLoopHooks(),
+		Lifecycle:   middlewareChain.LifecycleHooks(),
 	})
 	if err != nil {
 		reportCoreError(ctx, "failed to initialize execution engine", "error", err)
@@ -264,15 +304,50 @@ func run() (exitCode int) {
 		application.WithSessionCatalog(repos.Catalog),
 	)
 	providerService := application.NewProviderService(repos.Catalog)
+	providerService.SetLocalEnabled(func() bool { return config.Get().LocalInference().Enabled })
+	modelDownloads = modelhub.NewManager(ctx, modelhub.Options{
+		Directory: filepath.Join(dataDir, "models"),
+		Workers:   func() []domainlocal.Worker { return config.Get().LocalInference().Workers },
+		Publish: func(download modelhub.Download) {
+			_ = eventBroker.Publish(ctx, "localInference", map[string]any{"modelDownload": download})
+		},
+		Register: func(registerCtx context.Context, code, name string, contextWindow int, model *domainlocal.Model) error {
+			probeCtx, probeCancel := context.WithTimeout(registerCtx, 2*time.Minute)
+			defer probeCancel()
+			if _, err := localManager.Probe(probeCtx, model); err != nil {
+				return err
+			}
+			_, err := providerService.AddModel(registerCtx, "local", code, application.ModelInput{Name: name, ContextWindow: contextWindow, MaxOutputTokens: 512, Local: model})
+			return err
+		},
+	})
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = modelDownloads.Shutdown(shutdownCtx)
+	}()
 	initializeService := application.NewInitializeService(providerService, config.Get())
+	initializeService.SetLocalReadiness(func(ctx context.Context, model catalog.Model) error {
+		if !config.Get().LocalInference().Enabled {
+			return fmt.Errorf("enable local inference before selecting a local default model")
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		_, err := localManager.Probe(probeCtx, model.Local)
+		return err
+	})
 	apiDependencies := routes.Dependencies{
-		Provider:       providerService,
-		Initialization: initializeService,
-		Session:        sessionService,
-		Execution:      execution,
-		MCP:            mcpRegistry,
-		Skill:          skillRegistry,
-		Permission:     permissionManager,
+		LocalInference:  localManager,
+		WorkerInstaller: workerInstaller,
+		ModelDownloads:  modelDownloads,
+		Config:          config.Get(),
+		Provider:        providerService,
+		Initialization:  initializeService,
+		Session:         sessionService,
+		Execution:       execution,
+		MCP:             mcpRegistry,
+		Skill:           skillRegistry,
+		Permission:      permissionManager,
 	}
 	shutdownRequests := make(chan struct{}, 1)
 	api := routes.NewServer(apiDependencies, routes.SystemInfo{
@@ -340,6 +415,12 @@ func run() (exitCode int) {
 	if err := mcpRegistry.Shutdown(shutdownCtx); err != nil {
 		reportCoreError(shutdownCtx, "failed to stop MCP registry", "error", err)
 		exitCode = 1
+	}
+	if err := workerInstaller.Shutdown(shutdownCtx); err != nil {
+		slog.WarnContext(shutdownCtx, "failed to stop worker installer", "error", err)
+	}
+	if err := localManager.Shutdown(shutdownCtx); err != nil {
+		slog.WarnContext(shutdownCtx, "failed to stop local inference", "error", err)
 	}
 	eventBroker.Close()
 	if err := server.Shutdown(shutdownCtx); err != nil {

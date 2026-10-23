@@ -58,6 +58,9 @@ packages/agenty-cli/bun.lockb
 # Rust bootstrap
 packages/agenty-bootstrap/target/
 packages/agenty-bootstrap/dist/
+packages/llama-cpp-worker/build/
+packages/mlx-worker/.venv/
+**/__pycache__/
 
 # Coding Agents
 .reasonix
@@ -66,3 +69,6 @@ packages/agenty-bootstrap/dist/
 
 # macOS
 **/.DS_Store
+
+# Temporary MLX build staging
+packages/mlx-worker/.worker-build-*/

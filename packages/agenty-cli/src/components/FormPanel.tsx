@@ -478,7 +478,7 @@ export function FormPanel({
             >
                 {visibleFields.map((field, visibleIndex) => {
                     const selected = cursor === visibleIndex;
-                    const value = values[field.key] ?? field.value;
+                    const value = field.readOnly ? field.value : values[field.key] ?? field.value;
                     const scalarValue = typeof value === "string" ? value : "";
                     const listValue = Array.isArray(value) ? value : [];
                     const options = field.kind === "string-list" ? [] : field.options ?? [];

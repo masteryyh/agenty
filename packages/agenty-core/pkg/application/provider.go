@@ -10,13 +10,24 @@ import (
 	"time"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
+	"github.com/masteryyh/agenty-core/pkg/domain/localinference"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
+	localruntime "github.com/masteryyh/agenty-core/pkg/infra/localinference"
 	"github.com/masteryyh/agenty-core/pkg/infra/modelcatalog"
 	"github.com/masteryyh/agenty-core/pkg/infra/storage"
 )
 
 type ProviderService struct {
-	repo providerRepository
+	repo         providerRepository
+	localEnabled func() bool
+}
+
+func (s *ProviderService) SetLocalEnabled(enabled func() bool) { s.localEnabled = enabled }
+
+func (s *ProviderService) localState(provider *catalog.Provider) {
+	if provider != nil && provider.Type == catalog.APILocal && s.localEnabled != nil {
+		provider.LocalEnabled = s.localEnabled()
+	}
 }
 
 type providerRepository interface {
@@ -42,6 +53,9 @@ type ProviderInput struct {
 }
 
 func (s *ProviderService) Create(ctx context.Context, code string, in ProviderInput) (*catalog.Provider, error) {
+	if in.Type == catalog.APILocal || code == "local" {
+		return nil, Validation("local inference uses the built-in local provider")
+	}
 	codeVal, err := shared.NewCode(code)
 	if err != nil {
 		return nil, Validation(err.Error())
@@ -89,6 +103,7 @@ func (s *ProviderService) Get(ctx context.Context, code string) (*catalog.Provid
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
+	s.localState(p)
 	return p, nil
 }
 
@@ -139,6 +154,9 @@ func (s *ProviderService) List(ctx context.Context, targetCodes ...string) ([]*c
 			return nil, Internal("failed to list providers after model discovery: " + err.Error())
 		}
 	}
+	for _, provider := range providers {
+		s.localState(provider)
+	}
 	return providers, nil
 }
 
@@ -157,6 +175,9 @@ func (s *ProviderService) ListModels(ctx context.Context, code string) ([]catalo
 	}
 	if provider == nil {
 		return nil, Internal("provider repository returned an empty provider")
+	}
+	if provider.Type == catalog.APILocal {
+		return availableModelsFromCatalog(provider.Models), nil
 	}
 	if strings.TrimSpace(provider.APIKey) == "" {
 		return nil, Validation("provider " + code + " has no API key")
@@ -242,6 +263,15 @@ func (s *ProviderService) Update(ctx context.Context, code string, upd ProviderU
 			return nil, NotFound("provider " + code + " not found")
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
+	}
+	if p.Type == catalog.APILocal {
+		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.APIKey != nil || upd.Metadata != nil || upd.AuthMethod != nil && *upd.AuthMethod != catalog.AuthMethodNone {
+			return nil, Validation("local provider identity is fixed; use local inference configuration")
+		}
+		return p, nil
+	}
+	if upd.Type != nil && *upd.Type == catalog.APILocal {
+		return nil, Validation("local API is reserved for the built-in provider")
 	}
 	if p.Builtin {
 		if upd.Name != nil || upd.Type != nil || upd.BaseURL != nil || upd.Metadata != nil {
@@ -350,6 +380,7 @@ func (s *ProviderService) Delete(ctx context.Context, code string) error {
 }
 
 type ModelInput struct {
+	Local            *localinference.Model    `json:"local,omitempty"`
 	Name             string                   `json:"name"`
 	ContextWindow    int                      `json:"contextWindow,omitempty"`
 	MaxOutputTokens  int64                    `json:"maxOutputTokens"`
@@ -377,8 +408,34 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
-	if p.Builtin {
+	if p.Builtin && p.Type != catalog.APILocal {
 		return nil, Validation("built-in provider models are read-only")
+	}
+	if p.Type == catalog.APILocal {
+		if err := in.Local.Validate(); err != nil {
+			return nil, Validation(err.Error())
+		}
+		if in.MultiModal {
+			return nil, Validation("local inference currently accepts text only")
+		}
+		if in.ContextWindow <= 0 {
+			in.ContextWindow = 8192
+		}
+		if in.MaxOutputTokens <= 0 {
+			in.MaxOutputTokens = 512
+		}
+		for i := range in.Local.Resources {
+			fingerprint, err := localruntime.TokenizerFingerprint(in.Local.Resources[i].CodecDirectory)
+			if err != nil {
+				return nil, Validation("invalid local tokenizer: " + err.Error())
+			}
+			if old := in.Local.Resources[i].TokenizerSHA256; old != "" && old != fingerprint {
+				return nil, Validation("local tokenizer fingerprint mismatch")
+			}
+			in.Local.Resources[i].TokenizerSHA256 = fingerprint
+		}
+	} else if in.Local != nil {
+		return nil, Validation("local model resources require the local provider")
 	}
 
 	now := time.Now().UTC()
@@ -390,6 +447,14 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 		return nil, Validation("max output tokens must be less than context window")
 	}
 	reasoning := true
+	if p.Type == catalog.APILocal {
+		reasoning = in.Local.ThinkingEffort != ""
+		in.Reasoning = &reasoning
+		in.ReasoningEfforts = nil
+		if reasoning {
+			in.ReasoningEfforts = []shared.ReasoningEffort{shared.ReasoningEffort(in.Local.ThinkingEffort)}
+		}
+	}
 	if in.Reasoning != nil {
 		reasoning = *in.Reasoning
 	}
@@ -407,6 +472,7 @@ func (s *ProviderService) AddModel(ctx context.Context, providerCode, modelCode 
 		}
 	}
 	p.AddModel(catalog.Model{
+		Local:            in.Local,
 		Code:             ms,
 		Name:             in.Name,
 		ContextWindow:    in.ContextWindow,
@@ -445,7 +511,7 @@ func (s *ProviderService) RemoveModel(ctx context.Context, providerCode, modelCo
 		}
 		return nil, Internal("failed to get provider: " + err.Error())
 	}
-	if p.Builtin {
+	if p.Builtin && p.Type != catalog.APILocal {
 		return nil, Validation("built-in provider models are read-only")
 	}
 

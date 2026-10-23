@@ -366,7 +366,12 @@ func (engine *Engine) SetModel(
 		toolRuntime:     toolRuntime,
 	}
 	request := engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
-	if infracompaction.ShouldCompact(infracompaction.EstimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
+	targetCall := newModelCallConfig(*targetProvider, *targetModel)
+	count, err := infracompaction.CountRequestTokens(ctx, targetCall, request)
+	if err != nil {
+		return nil, err
+	}
+	if infracompaction.ShouldCompact(count, targetContextWindow, targetMaxOutputTokens) {
 		if _, err := engine.compactPreparedForWindowLocked(
 			runCtx,
 			prepared,
@@ -377,7 +382,11 @@ func (engine *Engine) SetModel(
 			return nil, fmt.Errorf("compact session before model switch: %w", err)
 		}
 		request = engine.sessionRequestForWindow(prepared, targetContextWindow, targetMaxOutputTokens)
-		if infracompaction.ShouldCompact(infracompaction.EstimateRequestTokens(request), targetContextWindow, targetMaxOutputTokens) {
+		count, err = infracompaction.CountRequestTokens(ctx, targetCall, request)
+		if err != nil {
+			return nil, err
+		}
+		if infracompaction.ShouldCompact(count, targetContextWindow, targetMaxOutputTokens) {
 			return nil, apperrors.Validation("session context remains too large for target model after compaction")
 		}
 	}
@@ -1289,6 +1298,7 @@ func (engine *Engine) executeLoop(
 	compactionAttempted := false
 
 	ctx = infracompaction.WithOperations(ctx, infracompaction.Operations{
+		Model:           prepared.modelCall,
 		ContextWindow:   modelContextWindow(prepared),
 		MaxOutputTokens: prepared.maxOutputTokens,
 		Attempted:       &compactionAttempted,
@@ -1354,6 +1364,8 @@ func (engine *Engine) executeLoop(
 
 func newModelCallConfig(provider catalog.Provider, model catalog.Model) modelcall.ModelCallConfig {
 	return modelcall.ModelCallConfig{
+		Local:             model.Local,
+		ContextWindow:     model.ContextWindow,
 		BaseURL:           provider.BaseURL,
 		APIType:           modelcall.APIType(provider.Type),
 		APIKey:            provider.APIKey,

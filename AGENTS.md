@@ -2,15 +2,17 @@
 
 ## Project overview
 
-Agenty is a local-first pnpm + Turborepo monorepo. The product and supporting-library path has five workspaces:
+Agenty is a local-first pnpm + Turborepo monorepo. The default product and supporting-library path has five workspaces:
 
 - packages/agenty-core: Go 1.26 core, exposed to its local client through HTTP/2 over a Unix domain socket or Windows named pipe.
 - packages/agenty-cli: Bun/TypeScript/React OpenTUI client.
 - packages/file-editor: Rust transactional filesystem helper for V4A patches and text-editor operations.
-- packages/llm-codec: Rust tokenizer/chat-template static library with a generated C ABI; built before core, with production inference integration still pending. Tokenization requires tokenizer.json; GGUF supplies metadata/templates only.
+- packages/llm-codec: Rust tokenizer/chat-template static library with a generated C ABI, linked into core for local inference. Tokenization requires tokenizer.json; GGUF supplies metadata/templates only.
 - packages/agenty-bootstrap: Rust self-extracting supervisor and launcher.
 
 The optional agenty-inspector workspace is a read-only local web debugger. It uses core's config path resolution and transcript reader/decoder/domain replay. It must not initialize or write the inspected data directory.
+
+Two optional inference workspaces are distributed separately: packages/mlx-worker (private Python/mlx-lm, Apple Silicon) and packages/llama-cpp-worker (native llama.cpp, GGUF/BPE). They use worker protocol v1 over stdio/NDJSON, independent of core IPC. The built-in local provider has fixed identity and authMethod=none, with editable local model records. Local inference defaults off. Enabled installed workers start asynchronously; weights load on demand. Prefer compatible MLX resources on Apple Silicon and fall back only before generation. Never replay an accepted generation.
 
 The bootstrap owns core process startup and shutdown. The CLI connects only with the bootstrap-provided IPC environment; it must not spawn core or fall back to stdio, HTTP/1, or fetch. Run the TUI directly in the user's terminal. Do not run it as a Turbo task because Turbo pipes stdio and breaks terminal capability handshakes.
 
@@ -35,7 +37,7 @@ POST /v1/stream is a bidirectional HTTP/2 stream. The request body carries newli
 
 Persist session changes before publishing their events. Keep topic sequence assignment, replay recording, and fanout ordered. Each consumer has a bounded queue; disconnect a slow consumer so it can replay or resync. Consumer disconnect must not cancel an accepted round. Same-session execution is serialized; different sessions may run concurrently.
 
-The bootstrap sets exactly these core/client environment variables: AGENTY_TRANSPORT (uds or named_pipe), AGENTY_CORE_ADDR, AGENTY_DATA_DIR, and AGENTY_IPC_VERSION. The canonical data directory is the ownership boundary: the same directory has one core, and distinct directories may run in parallel. A second bootstrap may attach to a compatible existing core; its CLI does not own that core. Runtime metadata is only a discovery hint; verify the live handshake. Do not add instance-ID environment variables or alternate IPC aliases.
+The bootstrap sets these shared core/client environment variables: AGENTY_TRANSPORT (uds or named_pipe), AGENTY_CORE_ADDR, AGENTY_DATA_DIR, and AGENTY_IPC_VERSION. The canonical data directory is the ownership boundary: the same directory has one core, and distinct directories may run in parallel. A second bootstrap may attach to a compatible existing core; its CLI does not own that core. Runtime metadata is only a discovery hint; verify the live handshake. Worker path options `--llama-cpp-worker` and `--mlx-worker` additionally set core-only `AGENTY_LLAMA_CPP_WORKER_BIN` and `AGENTY_MLX_WORKER_BIN`. These process-scoped executable overrides do not enter saved config; applying them requires owning the core. Do not add instance-ID environment variables or alternate IPC aliases.
 
 Data is local-first:
 
@@ -43,6 +45,8 @@ Data is local-first:
 - Sessions: append-only JSONL under AGENTY_DATA_DIR/sessions.
 - Session projection: AGENTY_DATA_DIR/agenty.sqlite.
 - Providers: AGENTY_DATA_DIR/providers.
+- Installed inference workers: AGENTY_DATA_DIR/workers, addressed by bundle SHA-256; model weights are registered using explicit local paths.
+- Downloaded model snapshots: AGENTY_DATA_DIR/models, separated by source and immutable file identities. Public Hugging Face and ModelScope resources support space checks, resumable downloads and preflight before registration; external local model paths remain supported.
 - Logs: AGENTY_DATA_DIR/logs.
 - Runtime lock and discovery metadata: AGENTY_DATA_DIR/runtime.
 
@@ -70,7 +74,7 @@ The footer stores offsets, lengths, and SHA3-256 digests for the three decompres
 
 The bootstrap extracts payloads into version-addressed paths derived from all three payload digests, prepares fileedit on PATH, resolves --data-dir, starts or attaches to core, verifies HTTP/2 protocol and data-directory identity, then launches the CLI with real terminal stdio. An owning bootstrap gracefully stops its child core when its CLI exits and kills remaining children if the bootstrap is terminated. An attaching bootstrap only manages its own CLI.
 
-pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun builds the CLI and packs payloads, Go builds core, and Cargo builds the patch helper, llm-codec library, and launcher. Do not add an npm workspaces field. The dependency graph builds the patch helper and llm-codec static library before core, then CLI and bootstrap.
+pnpm owns workspace resolution, Turborepo owns build ordering/caching, Bun builds the CLI and packs payloads, Go builds core, and Cargo builds the patch helper, llm-codec library, and launcher. Do not add an npm workspaces field. The dependency graph builds supported inference workers, the patch helper and llm-codec static library before core, then CLI and bootstrap. Workers retain executables and runtime dependencies in their module bin directories; worker ZIP packaging consumes these outputs. pnpm dev passes those executable paths to bootstrap, which forwards them through core-only environment variables. MLX builds skip targets other than macOS arm64.
 
 Builds resolve AGENTY_VERSION from the process environment first, then the ignored root .env, and otherwise use dev. Only .env.example is committed. Release CI passes target-specific GOOS, GOARCH, CC, CXX, PACKAGE_DIR, BIN_NAME, OS, ARCH, and OPENTUI_LIBC inputs.
 
@@ -81,6 +85,7 @@ Important commands:
 - pnpm cli:build, cli:dev, cli:typecheck
 - pnpm bootstrap:build, bootstrap:test
 - pnpm llm-codec:build, llm-codec:test, llm-codec:lint
+- pnpm mlx-worker:build, mlx-worker:test, llama-worker:build, llama-worker:test, worker:bundle
 
 pnpm run update updates pnpm, Go, and Cargo dependencies across the workspace. pnpm clean removes build outputs; pnpm deepclean also removes local caches, dependency stores, node_modules, and other generated temporary files. pnpm tidyup runs go fmt ./..., go vet ./..., and go mod tidy in every Go module.
 

@@ -8,10 +8,13 @@ Commands:
                                Manage model providers
   model list|get|add|update|remove
                                Manage models
+  local status|enable|disable|configure|install|installations|cancel-installation
+                               Manage local inference and worker installation
 
 Core options:
-  --data-dir <path>            Override the core data directory
-  AGENTY_CORE_BIN=<path>       Override the core executable
+  --data-dir <path>             Override the core data directory
+  --llama-cpp-worker <path>     Use a local llama.cpp worker executable
+  --mlx-worker <path>           Use a local MLX worker executable
   --json                       Emit machine-readable JSON
   --quiet                      Suppress action confirmation output
 

@@ -1,0 +1,9 @@
+{
+    "name": "llama-cpp-worker",
+    "private": true,
+    "scripts": {
+        "build": "node ../../scripts/build-worker.mjs llamaCpp",
+        "test": "python3 tests/protocol.py",
+        "clean": "python3 -c \"import shutil; shutil.rmtree('bin', ignore_errors=True); shutil.rmtree('build', ignore_errors=True)\""
+    }
+}

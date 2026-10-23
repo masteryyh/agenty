@@ -50,6 +50,7 @@ func autoReview(
 	ctx context.Context,
 	model modelcall.ModelCallConfig,
 	content string,
+	clients ...*modelcall.Client,
 ) (ReviewResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -68,7 +69,11 @@ func autoReview(
 	// SDKs retry transient transport errors. Only invalid completed outputs
 	// receive a second model invocation, so HTTP attempts are bounded at six.
 	for attempt := range 2 {
-		response, err := modelcall.Call(ctx, model, request, modelcall.WithMaxRetries(2))
+		invoke := modelcall.Call
+		if len(clients) > 0 && clients[0] != nil {
+			invoke = clients[0].Call
+		}
+		response, err := invoke(ctx, model, request, modelcall.WithMaxRetries(2))
 		if err != nil {
 			return ReviewResult{}, fmt.Errorf("invoke automatic reviewer: %w", err)
 		}
@@ -150,12 +155,17 @@ type pendingRequest struct {
 }
 
 type PermissionManager struct {
+	client  *modelcall.Client
 	mu      sync.Mutex
 	pending map[uuid.UUID]*pendingRequest
 }
 
-func NewPermissionManager() *PermissionManager {
-	return &PermissionManager{pending: make(map[uuid.UUID]*pendingRequest)}
+func NewPermissionManager(clients ...*modelcall.Client) *PermissionManager {
+	manager := &PermissionManager{pending: make(map[uuid.UUID]*pendingRequest)}
+	if len(clients) > 0 {
+		manager.client = clients[0]
+	}
+	return manager
 }
 
 func (manager *PermissionManager) Middleware() middleware.Middleware {
@@ -247,7 +257,7 @@ func (manager *PermissionManager) autoDecision(
 		return ReviewResult{Decision: Ask}, fmt.Errorf("publish automatic review start: %w", err)
 	}
 
-	decision, reviewErr := autoReview(ctx, state.Model, content)
+	decision, reviewErr := autoReview(ctx, state.Model, content, manager.client)
 	resolveErr := state.Emit(ctx, agentloop.Event{
 		Type:      EventReviewResolved,
 		Iteration: state.Iteration,

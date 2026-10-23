@@ -13,6 +13,7 @@ const OperationsKey = "operations"
 // It is carried through context so the atomic agent loop does not know about
 // compaction policy or persistence.
 type Operations struct {
+	Model           modelcall.ModelCallConfig
 	ContextWindow   int64
 	MaxOutputTokens int64
 	Attempted       *bool

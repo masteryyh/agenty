@@ -83,7 +83,16 @@ pnpm install
 pnpm cli:dev
 ```
 
-`pnpm cli:dev` 会先构建 `agenty-core`，再把源码 TUI 直接连接到当前终端。常用定向命令：
+`pnpm dev`（同 `pnpm cli:dev`）通过 Turbo 先构建本机支持的推理 worker，随后构建 core、CLI
+和 bootstrap，再以真实终端 stdio 启动打包后的程序。worker 产物保留在
+`packages/llama-cpp-worker/bin/llama-cpp-worker`（Windows 带 `.exe`）及 Apple Silicon 上的
+`packages/mlx-worker/bin/mlx-worker`。MLX 入口使用同目录中的私有 CPython 和锁定依赖。
+构建需要 C/C++ 编译器与 CMake 或 uv；MLX 另需 uv。
+
+启动器新增 `--llama-cpp-worker <path>` 和 `--mlx-worker <path>`，也支持等号形式。
+`dev` 自动传入构建路径，用户显式参数可覆盖。路径仅作用于当前 core 进程，不写入长期配置；
+本地推理仍需启用。数据目录已有 core 运行时，需要先关闭其 bootstrap，或使用独立的
+`--data-dir` 才能应用路径。常用定向命令：
 
 ```bash
 pnpm core:test
@@ -102,12 +111,27 @@ pnpm deepclean
 
 构建版本优先来自进程环境中的 `AGENTY_VERSION`，其次读取被忽略的根目录 `.env`，两者都
 没有时默认为 `dev`。如需固定本地版本，可把 `.env.example` 复制为 `.env`，直接运行
-`pnpm build` 即可构建完整 launcher。默认构建 file-editor、llm-codec 静态库、core、CLI 和 bootstrap；
+`pnpm build` 即可构建完整 launcher。默认构建本机支持的 worker、file-editor、llm-codec 静态库、core、CLI 和 bootstrap；
+worker ZIP 打包复用各模块 `bin` 产物，worker 仍独立于 launcher 分发。
 Inspector 通过 `pnpm inspector:build` 单独构建。
 
-Rust [llm-codec 静态库](./packages/llm-codec/README.md) 提供本地模型分词和 chat template
-渲染的 C ABI。分词必须使用本地 `tokenizer.json`；GGUF 仅用于提取 metadata 和模板。
-后续再由 core 的本地推理 provider 接入。
+内置 local 推理 provider 通过 Rust
+[llm-codec 静态库](./packages/llm-codec/README.md) 完成模板渲染、分词和增量解码，
+再调用独立的 MLX 或 llama.cpp worker 计算 token。初始化向导、`/provider` 和 CLI
+支持安装 worker 及启用本地推理。界面展示已注册模型并支持编辑，手动注册已有文件保留在 CLI 中。
+默认关闭；worker 发行包单独构建和发布。
+
+初始化向导的本地推理页面和 `/model` 支持浏览 Hugging Face、ModelScope 的公开模型，搜索并选择
+Safetensors 或 GGUF 量化版本。下载确认前展示兼容性、保存目录、目标分区用量及剩余可用空间；
+列表仅展示名称、参数量与仓库整体文件大小，缺失信息显示 `UNKNOWN`。导航到末项时自动加载下一页，
+重新进入面板自动刷新；回车或点击模型直接在列表上方打开下载弹窗，多版本仓库在弹窗内选择版本。
+选择后检查兼容性和容量，通过后才可点击 Download。Esc 返回，Ctrl+P 查看下载进度。
+空间不足或不支持推理时禁止下载。权重保存在数据目录的 `models` 下，
+进度按文件展示，支持取消和通过重新选择同一资源续传。校验与预检通过后自动添加到 local provider。
+完成页可启用本地推理并返回 `/model` 选择模型；向导内回到设置页面保存后启用。
+浏览面板关闭后，下载会在 core 存活期间继续；退出应用会中断下载，部分文件保留供后续续传。
+当前自动添加支持 Qwen3、Qwen3.5 文本推理；自动使用仓库自带的 tokenizer，缺失时尝试从声明的基础模型
+仓库获取。找不到匹配 tokenizer 时提示无法推理并禁止下载。私有或需授权的仓库暂不支持登录下载。
 
 Core 使用 CGO 构建 SQLite。Windows 需要通过 `CC` 配置 MinGW-w64 或 LLVM-MinGW 等 GCC
 兼容编译器；MSVC `cl.exe` 不受支持。进程级配置示例见 [core 构建说明](./packages/agenty-core/README-CN.md)。

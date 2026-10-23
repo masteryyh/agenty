@@ -5,6 +5,22 @@ const unexpected = async (): Promise<never> => {
 };
 
 const defaults: StoreClient = {
+    searchHubModels: unexpected,
+    hubModel: unexpected,
+    modelStorage: unexpected,
+    prepareModelDownload: unexpected,
+    modelDownloads: unexpected,
+    startModelDownload: unexpected,
+    cancelModelDownload: unexpected,
+    localInferenceConfig: unexpected,
+    configureLocalInference: unexpected,
+    localInferenceRuntime: unexpected,
+    workerInstallations: unexpected,
+    workerBundles: unexpected,
+    installWorker: unexpected,
+    cancelWorkerInstallation: unexpected,
+    probeLocalModel: unexpected,
+    subscribeLocalInference: () => {},
     compactSession: unexpected,
     close: () => {},
     completeInitialization: unexpected,

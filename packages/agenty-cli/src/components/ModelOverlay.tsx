@@ -6,6 +6,7 @@ import { useInput } from "../hooks/useInput";
 import { useAppStore } from "../state/store";
 import { useBottomDialogSize } from "./BottomDialog";
 import { List, useListNavigation } from "./List";
+import { ModelDownloadPanel } from "./ModelDownloadPanel";
 import { Panel } from "./Panel";
 import {
     createTableLayout,
@@ -13,10 +14,12 @@ import {
     TableHeader,
     TableRow,
 } from "./Table";
-import { Box, Pressable, Spinner, Text, TextInput } from "./ui";
+import { ActionBar, Box, Pressable, Spinner, Text, TextInput } from "./ui";
 
-export function isConfiguredProvider(provider: Pick<ModelProviderDto, "apiKey">): boolean {
-    return provider.apiKey.trim() !== "";
+export function isConfiguredProvider(provider: Pick<ModelProviderDto, "apiKey"> & Partial<Pick<ModelProviderDto, "type" | "localEnabled" | "models">>): boolean {
+    return provider.type === "local"
+        ? provider.localEnabled === true && (provider.models?.length ?? 0) > 0
+        : provider.apiKey.trim() !== "";
 }
 
 export function configuredProviders(
@@ -101,6 +104,7 @@ export function ModelOverlay() {
     const setOverlay = useAppStore((state) => state.setOverlay);
     const switchModel = useAppStore((state) => state.switchModel);
     const [providers, setProviders] = useState<ModelProviderDto[] | null>(null);
+    const [page, setPage] = useState<"download" | null>(null);
     const [providerCursor, setProviderCursor] = useState(0);
     const [modelCursor, setModelCursor] = useState(0);
     const [loadingProviderCode, setLoadingProviderCode] = useState<string | null>(null);
@@ -184,17 +188,31 @@ export function ModelOverlay() {
         });
     };
 
-    useInput((_input, key) => {
+    useInput((_input, key, event) => {
+        if (key.ctrl && event.name === "o") {
+            event.preventDefault();
+            event.stopPropagation();
+            setPage("download");
+            return;
+        }
         if (providers !== null && providers.length > 0) {
             return;
         }
         if (key.escape) {
             close();
         }
-    });
+    }, { isActive: page === null });
+
+    const backFromModels = () => {
+        setPage(null);
+        void reload("local");
+    };
+    if (page === "download") {
+        return <ModelDownloadPanel onClose={backFromModels} />;
+    }
 
     return (
-        <Panel title="Models">
+        <Panel title="Models" footer={<ActionBar actions={[{ key: "download", label: "Download (Ctrl+O)" }]} onAction={() => setPage("download")} />}>
             {providers === null ? (
                 <Spinner label="Loading..." />
             ) : providers.length === 0 ? (

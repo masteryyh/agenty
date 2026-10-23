@@ -22,7 +22,7 @@ export interface ProviderDraft {
     baseUrl: string;
     apiKey: string;
     oauth: boolean;
-    authMethod: "apiKey" | "oauth";
+    authMethod: "apiKey" | "oauth" | "none";
     builtin: boolean;
     modelsDiscovered: boolean;
 }
@@ -58,7 +58,7 @@ export function createBuiltinDraft(provider: ModelProviderDto, existing?: ModelP
         baseUrl: provider.baseUrl,
         apiKey: source.apiKey ?? "",
         oauth: provider.oauth === true,
-        authMethod: source.authMethod === "oauth" ? "oauth" : "apiKey",
+        authMethod: provider.type === "local" ? "none" : source.authMethod === "oauth" ? "oauth" : "apiKey",
         builtin: true,
         modelsDiscovered: source.modelsCached === true || (Boolean(provider.modelsUrl) && provider.models.length === 0),
     };
@@ -137,6 +137,9 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
     }
     if (!draft.name.trim()) {
         return "Provider name is required.";
+    }
+    if (draft.type === "local") {
+        return null;
     }
     if (!draft.baseUrl.trim()) {
         return "Base URL is required.";

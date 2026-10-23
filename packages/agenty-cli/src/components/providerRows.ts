@@ -146,7 +146,9 @@ export function providerRowState(row: ProviderListRow): string {
         return "";
     }
     if (row.provider.builtin === true) {
-        return row.provider.apiKey.trim() ? "configured" : "unconfigured";
+        return row.provider.type === "local"
+            ? row.provider.localEnabled ? "enabled" : "disabled"
+            : row.provider.apiKey.trim() ? "configured" : "unconfigured";
     }
     return "custom";
 }

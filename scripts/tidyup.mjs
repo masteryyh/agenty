@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 
+import { codecLinkEnvironment } from "./codec-link-env.mjs";
+import { resolveCoreBuildEnvironment } from "./core-build-env.mjs";
 import { REPOSITORY_ROOT, workspaceModules } from "./workspaces.mjs";
 
 const GO_TIDYUP_COMMANDS = [
@@ -46,6 +48,7 @@ export function runTidyup(repositoryRoot = REPOSITORY_ROOT, moduleName) {
         const result = spawnSync(step.command, step.args, {
             cwd: step.cwd,
             stdio: "inherit",
+            env: step.args[0] === "vet" ? codecLinkEnvironment(resolveCoreBuildEnvironment()) : process.env,
         });
         const status = exitCode(step, result);
         if (status !== 0) {

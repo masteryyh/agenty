@@ -387,5 +387,16 @@
                 "reasoning": true
             }
         ]
+    },
+    {
+        "name": "Local inference",
+        "code": "local",
+        "type": "local",
+        "baseUrl": "",
+        "apiKey": "",
+        "authMethod": "none",
+        "builtin": true,
+        "official": false,
+        "models": []
     }
 ]

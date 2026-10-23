@@ -1,8 +1,11 @@
 package config
 
+import "github.com/masteryyh/agenty-core/pkg/domain/localinference"
+
 // Config is the parsed configuration. Values come from the config file first,
 // then non-empty environment overrides are applied on top.
 type Config struct {
+	LocalInference localinference.Config `mapstructure:"localInference"`
 	// Version is the schema version of this config file. Reserved for future use.
 	Version int `mapstructure:"version"`
 

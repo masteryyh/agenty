@@ -32,7 +32,7 @@ func TestStaticLibraryFromGo(t *testing.T) {
 	if err := json.Unmarshal(metadata, &info); err != nil {
 		t.Fatal(err)
 	}
-	if abiVersion() != 1 || info.BosTokenID != 1 || info.EosTokenID != 2 || info.ModelName != "llm-codec-test-model" {
+	if abiVersion() != 2 || info.BosTokenID != 1 || info.EosTokenID != 2 || info.ModelName != "llm-codec-test-model" {
 		t.Fatalf("unexpected ABI or metadata: %s", metadata)
 	}
 	tokens, err := encode(handle, "Hello world 你好", true)

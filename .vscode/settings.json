@@ -3,5 +3,6 @@
         "./packages/agenty-bootstrap/Cargo.toml",
         "./packages/file-editor/Cargo.toml",
         "./packages/llm-codec/Cargo.toml"
-    ]
+    ],
+    "cmake.sourceDirectory": "/Users/yangyanhong/Documents/projects/agenty/packages/llama-cpp-worker"
 }

@@ -59,6 +59,12 @@ func validateProvider(provider *catalog.Provider) error {
 	if !provider.Type.Valid() {
 		return fmt.Errorf("invalid API type %q", provider.Type)
 	}
+	if provider.Type == catalog.APILocal {
+		if provider.Code.String() != "local" || provider.AuthMethod != catalog.AuthMethodNone || provider.BaseURL != "" || len(provider.Models) != 0 {
+			return errors.New("invalid built-in local provider definition")
+		}
+		return nil
+	}
 	if provider.AuthMethod != "" && provider.AuthMethod != catalog.AuthMethodAPIKey && provider.AuthMethod != catalog.AuthMethodOAuth {
 		return fmt.Errorf("invalid auth method %q", provider.AuthMethod)
 	}

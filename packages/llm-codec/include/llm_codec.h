@@ -148,6 +148,45 @@ int32_t llm_codec_chat_render(LlmCodecHandle handle,
                               struct LlmCodecError *out_error);
 
 /**
+ * Render and encode in one operation. The template supplies special tokens.
+ * # Safety
+ * Pointer and ownership rules are identical to llm_codec_tokenize.
+ */
+int32_t llm_codec_chat_encode(LlmCodecHandle handle,
+                              const uint8_t *request,
+                              size_t request_len,
+                              struct LlmCodecTokens *out_tokens,
+                              struct LlmCodecError *out_error);
+
+/**
+ * Create an independent decoder which retains its model after model_release.
+ * # Safety
+ * Outputs must be writable, aligned and empty, as with model_load.
+ */
+int32_t llm_codec_decoder_create(LlmCodecHandle model_handle,
+                                 LlmCodecHandle *out_handle,
+                                 struct LlmCodecError *out_error);
+
+/**
+ * Append IDs and optionally flush. A finished decoder accepts no further input.
+ * # Safety
+ * Pointer/length and output ownership rules are identical to llm_codec_decode.
+ */
+int32_t llm_codec_decoder_push(LlmCodecHandle handle,
+                               const uint32_t *ids,
+                               size_t ids_len,
+                               uint8_t finish,
+                               struct LlmCodecBytes *out_text,
+                               struct LlmCodecError *out_error);
+
+/**
+ * Release a decoder; in-flight operations retain their own reference.
+ * # Safety
+ * out_error must be NULL or an empty, aligned writable error slot.
+ */
+int32_t llm_codec_decoder_release(LlmCodecHandle handle, struct LlmCodecError *out_error);
+
+/**
  * Release a model. In-flight calls retain their own model reference.
  * # Safety
  * out_error, when non-NULL, must be an empty, aligned writable error slot.

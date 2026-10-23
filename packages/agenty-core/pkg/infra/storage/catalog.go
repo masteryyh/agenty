@@ -63,6 +63,20 @@ func (r *CatalogRepository) Get(_ context.Context, code shared.Code) (*catalog.P
 func (r *CatalogRepository) getLocked(code shared.Code, includeDiscoveryCache bool) (*catalog.Provider, error) {
 	if builtin, ok := r.builtinProviders[code]; ok {
 		provider := cloneProvider(builtin)
+		if provider.Type == catalog.APILocal {
+			data, err := os.ReadFile(filepath.Join(r.providersDir, "local.json"))
+			if err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+			if len(data) > 0 {
+				if err := json.Unmarshal(data, &provider.Models); err != nil {
+					return nil, fmt.Errorf("read local models: %w", err)
+				}
+			}
+			provider.AuthMethod = catalog.AuthMethodNone
+			normalizeModels(provider)
+			return provider, nil
+		}
 		credentials, err := r.readCredentials(code)
 		if err != nil {
 			return nil, err
@@ -116,6 +130,9 @@ func (r *CatalogRepository) NeedsModelDiscovery(_ context.Context, code shared.C
 	provider, err := r.getLocked(code, false)
 	if err != nil {
 		return false, err
+	}
+	if provider.Type == catalog.APILocal {
+		return false, nil
 	}
 	cache, ok := r.modelCache[code]
 	if ok {
@@ -175,6 +192,28 @@ func (r *CatalogRepository) Save(_ context.Context, provider *catalog.Provider) 
 	defer r.cacheMu.Unlock()
 	if _, builtin := r.builtinProviders[provider.Code]; builtin {
 		delete(r.modelCache, provider.Code)
+		if provider.Type == catalog.APILocal && provider.Code.String() == "local" {
+			if err := os.MkdirAll(r.providersDir, 0700); err != nil {
+				return err
+			}
+			data, err := json.MarshalIndent(provider.Models, "", "  ")
+			if err != nil {
+				return err
+			}
+			tmp, err := os.CreateTemp(r.providersDir, ".local-models-*")
+			if err != nil {
+				return err
+			}
+			defer os.Remove(tmp.Name())
+			if _, err := tmp.Write(data); err != nil {
+				_ = tmp.Close()
+				return err
+			}
+			if err := tmp.Close(); err != nil {
+				return err
+			}
+			return os.Rename(tmp.Name(), filepath.Join(r.providersDir, "local.json"))
+		}
 		return r.saveCredentials(provider.Code, provider.APIKey, provider.AuthMethod)
 	}
 	if err := os.MkdirAll(r.providersDir, 0700); err != nil {
@@ -375,7 +414,7 @@ func retainedCachedModels(cached, incoming []catalog.Model) []catalog.Model {
 }
 
 func modelsEqual(left, right catalog.Model) bool {
-	return left.Code == right.Code &&
+	return reflect.DeepEqual(left.Local, right.Local) && left.Code == right.Code &&
 		left.Name == right.Name &&
 		left.ContextWindow == right.ContextWindow &&
 		left.MaxOutputTokens == right.MaxOutputTokens &&
@@ -456,6 +495,11 @@ func cloneProvider(provider *catalog.Provider) *catalog.Provider {
 }
 
 func cloneModel(model catalog.Model) catalog.Model {
+	if model.Local != nil {
+		copy := *model.Local
+		copy.Resources = slices.Clone(copy.Resources)
+		model.Local = &copy
+	}
 	model.ReasoningEfforts = slices.Clone(model.ReasoningEfforts)
 	return model
 }

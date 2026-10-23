@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/masteryyh/agenty-core/pkg/domain/catalog"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
@@ -15,8 +16,13 @@ type initializationState interface {
 }
 
 type InitializeService struct {
-	providers *ProviderService
-	state     initializationState
+	localReady func(context.Context, catalog.Model) error
+	providers  *ProviderService
+	state      initializationState
+}
+
+func (s *InitializeService) SetLocalReadiness(check func(context.Context, catalog.Model) error) {
+	s.localReady = check
 }
 
 func NewInitializeService(
@@ -70,6 +76,11 @@ func (s *InitializeService) Complete(
 		)
 	}
 	effort := in.ReasoningEffort
+	if p.Type == catalog.APILocal && s.localReady != nil {
+		if err := s.localReady(ctx, *m); err != nil {
+			return InitializeAlreadyResult{}, Validation(err.Error())
+		}
+	}
 	if effort == "" {
 		effort = shared.ReasoningOff
 	}

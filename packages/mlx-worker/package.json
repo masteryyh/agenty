@@ -1,0 +1,9 @@
+{
+    "name": "mlx-worker",
+    "private": true,
+    "scripts": {
+        "build": "node ../../scripts/build-worker.mjs mlx",
+        "test": "python3 -m unittest discover -s tests",
+        "clean": "python3 -c \"import shutil; shutil.rmtree('bin', ignore_errors=True); shutil.rmtree('mlx_worker/__pycache__', ignore_errors=True); shutil.rmtree('tests/__pycache__', ignore_errors=True)\""
+    }
+}

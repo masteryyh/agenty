@@ -1,8 +1,8 @@
 # llm-codec
 
 Rust static library for local model tokenization and chat-template rendering.
-It exports a versioned C ABI for the future Go core inference path. The production
-core does not call it yet; `tests/ffi-go` exercises the release archive through cgo.
+It exports a versioned C ABI used by the Go core's `infra/llmcodec` package for
+production local inference. `tests/ffi-go` also exercises the release archive through cgo.
 
 ## Build and verify
 
@@ -76,18 +76,28 @@ selects its first shard. Multiple quantizations require load options such as
 `{"ggufFile":"model-q4.gguf"}`. Model loading reads selected GGUF metadata even
 when file-based templates exist and reports ambiguity or conflicting IDs.
 
+Local inference supplies `ggufMetadataPath` with the selected absolute GGUF file,
+or `ignoreGguf: true` for MLX. These options avoid reading unrelated quantizations
+from the codec directory. Nested `text_config` supplies language-model metadata;
+its pretraining EOS can differ from the chat tokenizer EOS, and both stopping IDs
+are retained. Boolean `add_*_token` flags are not special-token definitions.
+
 ## C ABI and ownership
 
 The generated header is the source of truth for signatures and numeric codes:
 
 | Entry point | Output |
 | --- | --- |
-| `llm_codec_abi_version` | ABI version, currently 1 |
+| `llm_codec_abi_version` | ABI version, currently 2 |
 | `llm_codec_model_load` | Opaque `uint64_t` handle and metadata JSON |
 | `llm_codec_template_resolve` | Validated `{name, source, text}` array; no tokenizer required |
 | `llm_codec_tokenize` | `uint32_t` token array |
 | `llm_codec_decode` | UTF-8 text |
 | `llm_codec_chat_render` | UTF-8 prompt |
+| `llm_codec_chat_encode` | Render then tokenize with `add_special_tokens=false`, in one FFI call |
+| `llm_codec_decoder_create` | Independent stateful decoder handle retaining the model |
+| `llm_codec_decoder_push` | Incremental UTF-8 output; `finish` flushes the remaining tail |
+| `llm_codec_decoder_release` | Releases decoder state |
 | `llm_codec_model_release` | Releases the handle |
 | `llm_codec_bytes_free`, `llm_codec_tokens_free`, `llm_codec_error_free` | Release Rust-owned outputs |
 
@@ -109,6 +119,11 @@ finish; later calls return `INVALID_HANDLE`. Output buffers remain valid after
 model release until freed. Loading publishes a handle only after all data validates.
 Rust panics are contained at operational FFI boundaries; caller pointer violations
 remain outside the ABI contract.
+
+Decoder calls are serialized per handle. Decoding preserves special tokens for
+the core's semantic parser. A decoder may outlive its model handle. After finish,
+further pushes fail. Concatenated output matches whole-sequence decoding, including
+Unicode split across token boundaries.
 
 ```c
 #include "llm_codec.h"

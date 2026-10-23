@@ -29,8 +29,12 @@ func NewMiddleware() middleware.Middleware {
 				return nil
 			}
 
+			count, err := CountRequestTokens(ctx, operations.Model, *state.Request)
+			if err != nil {
+				return err
+			}
 			if !ShouldCompact(
-				EstimateRequestTokens(*state.Request),
+				count,
 				operations.ContextWindow,
 				operations.MaxOutputTokens,
 			) {

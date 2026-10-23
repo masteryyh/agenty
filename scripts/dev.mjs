@@ -32,12 +32,21 @@ export function resolveDevPlan(
         hostPlatform,
         repositoryRoot,
     );
+    if (os !== resolveOS({}, hostPlatform) || arch !== resolveArch({}, hostArch)) {
+        throw new Error("local debugging must build for the current operating system and architecture");
+    }
+    const workers = [{ option: "--llama-cpp-worker", path: resolve(repositoryRoot, "packages/llama-cpp-worker/bin", `llama-cpp-worker${executableExtension(os)}`) }];
+    if (os === "macos" && arch === "arm64") {
+        workers.push({ option: "--mlx-worker", path: resolve(repositoryRoot, "packages/mlx-worker/bin/mlx-worker") });
+    }
+    const launcherArgs = [...workers.flatMap((worker) => [worker.option, worker.path]), ...args];
     return {
         buildEnvironment: turboPlan.buildEnvironment,
         buildArgs: turboPlan.args,
         launcher,
-        launcherArgs: args,
+        launcherArgs,
         packageManager: turboPlan.packageManager,
+        workers,
     };
 }
 
@@ -65,6 +74,12 @@ function run() {
     }
     if (!existsSync(plan.launcher)) {
         throw new Error(`bootstrap launcher not found at ${plan.launcher}`);
+    }
+
+    for (const worker of plan.workers) {
+        if (!existsSync(worker.path)) {
+            throw new Error(`worker executable not found at ${worker.path}`);
+        }
     }
 
     const launcher = spawnSync(plan.launcher, plan.launcherArgs, {

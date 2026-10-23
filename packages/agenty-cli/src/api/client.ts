@@ -10,15 +10,25 @@ import type {
     CreateModelDto,
     CreateModelProviderDto,
     ExecutionStart,
+    HubModelDetails,
+    HubModelPage,
     InitializeCompleteInput,
     InitializeStatusDto,
+    LocalInferenceConfig,
+    LocalModel,
+    LocalRuntimeSnapshot,
     McpEvent,
     McpLogEntry,
     McpServerConfig,
     McpServerDto,
+    ModelDownload,
+    ModelDownloadInput,
+    ModelDownloadPlan,
     ModelDto,
+    ModelHubSource,
     ModelProviderDto,
     ModelRef,
+    ModelStorage,
     PagedResponse,
     PermissionMode,
     ReasoningEffort,
@@ -31,6 +41,8 @@ import type {
     ToolDialect,
     UpdateModelDto,
     UpdateModelProviderDto,
+    WorkerBundle,
+    WorkerInstallation,
 } from "./types";
 import { STANDARD_REASONING_EFFORTS } from "./types";
 
@@ -40,6 +52,60 @@ export interface PreparedSession {
 }
 
 export class AgentyClient {
+    searchHubModels(source: ModelHubSource, search: string, cursor = ""): Promise<HubModelPage> {
+        return this.http.request("GET", `/v1/local-inference/hub-models?${new URLSearchParams({ source, search, cursor })}`);
+    }
+    hubModel(source: ModelHubSource, repository: string): Promise<HubModelDetails> {
+        return this.http.request("GET", `/v1/local-inference/hub-model?${new URLSearchParams({ source, repository })}`);
+    }
+    modelStorage(): Promise<ModelStorage> {
+        return this.http.request("GET", "/v1/local-inference/model-storage");
+    }
+    prepareModelDownload(input: ModelDownloadInput): Promise<ModelDownloadPlan> {
+        return this.http.request("POST", "/v1/local-inference/model-download-plans", input);
+    }
+    modelDownloads(): Promise<ModelDownload[]> {
+        return this.http.request("GET", "/v1/local-inference/model-downloads");
+    }
+    startModelDownload(planId: string, downloadOnly: boolean): Promise<ModelDownload> {
+        return this.http.request("POST", "/v1/local-inference/model-downloads", { planId, downloadOnly });
+    }
+    cancelModelDownload(id: string): Promise<void> {
+        return this.http.request("DELETE", `/v1/local-inference/model-downloads/${encodeURIComponent(id)}`);
+    }
+    localInferenceConfig(): Promise<LocalInferenceConfig> {
+        return this.http.request("GET", "/v1/local-inference/config");
+    }
+    configureLocalInference(config: Partial<LocalInferenceConfig>): Promise<LocalInferenceConfig> {
+        return this.http.request("PATCH", "/v1/local-inference/config", config);
+    }
+    localInferenceRuntime(): Promise<LocalRuntimeSnapshot> {
+        return this.http.request("GET", "/v1/local-inference/runtime");
+    }
+    workerInstallations(): Promise<WorkerInstallation[]> {
+        return this.http.request("GET", "/v1/local-inference/installations");
+    }
+    workerBundles(): Promise<WorkerBundle[]> {
+        return this.http.request("GET", "/v1/local-inference/worker-bundles");
+    }
+    installWorker(url: string, sha256: string): Promise<WorkerInstallation> {
+        return this.http.request("POST", "/v1/local-inference/installations", { url, sha256 });
+    }
+    installWorkerFile(filePath: string, sha256: string): Promise<WorkerInstallation> {
+        return this.http.request("POST", "/v1/local-inference/installations", { filePath, sha256 });
+    }
+    workerInstallation(id: string): Promise<WorkerInstallation> {
+        return this.http.request("GET", `/v1/local-inference/installations/${encodeURIComponent(id)}`);
+    }
+    cancelWorkerInstallation(id: string): Promise<void> {
+        return this.http.request("DELETE", `/v1/local-inference/installations/${encodeURIComponent(id)}`);
+    }
+    probeLocalModel(model: LocalModel): Promise<unknown> {
+        return this.http.request("POST", "/v1/local-inference/model-probes", model);
+    }
+    subscribeLocalInference(after?: EventCursor): void {
+        this.http.subscribe("localInference", after);
+    }
     private readonly sessionListeners = new Set<(event: SessionEvent) => void>();
     private readonly compactionListeners = new Set<(event: CompactionEvent) => void>();
     private readonly mcpListeners = new Set<(event: McpEvent) => void>();
@@ -49,13 +115,21 @@ export class AgentyClient {
         this.http.onFrame(async (frame) => {
             const event = frame.event as { kind?: string } | undefined;
             if (frame.type === "event" && event?.kind === "session") {
-                for (const listener of this.sessionListeners) listener(normalizeSessionEvent(event as SessionEvent));
+                for (const listener of this.sessionListeners) {
+                    listener(normalizeSessionEvent(event as SessionEvent));
+                }
             } else if (frame.type === "event" && event?.kind === "compaction") {
-                for (const listener of this.compactionListeners) listener(event as CompactionEvent);
+                for (const listener of this.compactionListeners) {
+                    listener(event as CompactionEvent);
+                }
             } else if (frame.type === "event" && frame.topic === "mcp" && event) {
-                for (const listener of this.mcpListeners) listener(event as McpEvent);
+                for (const listener of this.mcpListeners) {
+                    listener(event as McpEvent);
+                }
             }
-            for (const listener of this.streamListeners) await listener(frame);
+            for (const listener of this.streamListeners) {
+                await listener(frame);
+            }
         });
     }
 
@@ -185,7 +259,7 @@ export class AgentyClient {
         }
         const providers = await this.listProviders();
         const models = providers
-            .filter((provider) => provider.apiKey.trim() !== "")
+            .filter((provider) => provider.type === "local" ? provider.localEnabled === true : provider.apiKey.trim() !== "")
             .flatMap((provider) => provider.models.map((model) => projectModel(provider, model)));
         const model = models.find((candidate) => candidate.isDefault) ?? models[0];
         if (!model) {
@@ -375,7 +449,7 @@ export class AgentyClient {
     async setSessionPermissionMode(id: string, permissionMode: PermissionMode): Promise<ChatSessionDto> {
         const session = await this.http.request<ChatSessionDto>(
             "PUT", `/v1/sessions/${encodeURIComponent(id)}/permission-mode`, {
-            permissionMode,
+                permissionMode,
             },
         );
         return requireSession(session, `session.setPermissionMode ${id}`);
@@ -464,7 +538,7 @@ function normalizeProvider(provider: ModelProviderDto): ModelProviderDto {
         builtin: provider.builtin === true,
         official: provider.official === true,
         oauth: provider.oauth === true,
-        authMethod: provider.authMethod === "oauth" ? "oauth" : "apiKey",
+        authMethod: provider.type === "local" ? "none" : provider.authMethod === "oauth" ? "oauth" : "apiKey",
         modelsCached: provider.modelsCached === true,
         models: Array.isArray(provider.models)
             ? provider.models

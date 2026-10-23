@@ -1,15 +1,36 @@
 {
-    "$schema": "https://v2-11-5.turborepo.dev/schema.json",
-    "globalDependencies": [".env"],
+    "$schema": "https://v2-11-10.turborepo.dev/schema.json",
+    "globalDependencies": [
+        ".env"
+    ],
     "tasks": {
         "build": {
-            "dependsOn": ["^build"],
-            "outputs": ["bin/**", "dist/**"],
-            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
-            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
+            "dependsOn": [
+                "^build"
+            ],
+            "outputs": [
+                "bin/**",
+                "dist/**"
+            ],
+            "env": [
+                "AGENTY_VERSION",
+                "CGO_ENABLED",
+                "GOOS",
+                "GOARCH",
+                "CC",
+                "CXX",
+                "PACKAGE_DIR",
+                "BIN_NAME"
+            ],
+            "passThroughEnv": [
+                "GOCACHE",
+                "LOCALAPPDATA"
+            ]
         },
         "agenty-cli#build": {
-            "dependsOn": ["^build"],
+            "dependsOn": [
+                "^build"
+            ],
             "inputs": [
                 "package.json",
                 "scripts/**",
@@ -20,11 +41,20 @@
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
-            "outputs": ["bin/**"],
-            "env": ["AGENTY_VERSION", "OS", "ARCH", "OPENTUI_LIBC"]
+            "outputs": [
+                "bin/**"
+            ],
+            "env": [
+                "AGENTY_VERSION",
+                "OS",
+                "ARCH",
+                "OPENTUI_LIBC"
+            ]
         },
         "agenty-bootstrap#build": {
-            "dependsOn": ["^build"],
+            "dependsOn": [
+                "^build"
+            ],
             "inputs": [
                 "Cargo.toml",
                 "Cargo.lock",
@@ -37,12 +67,26 @@
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
-            "env": ["AGENTY_VERSION", "OS", "ARCH"],
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-            "outputs": ["bin/**"]
+            "env": [
+                "AGENTY_VERSION",
+                "OS",
+                "ARCH"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME"
+            ],
+            "outputs": [
+                "bin/**"
+            ]
         },
         "agenty-core#build": {
-            "dependsOn": ["^build"],
+            "dependsOn": [
+                "^build",
+                "llama-cpp-worker#build",
+                "mlx-worker#build"
+            ],
             "inputs": [
                 "go.mod",
                 "go.sum",
@@ -56,9 +100,23 @@
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
-            "outputs": ["bin/**"],
-            "env": ["AGENTY_VERSION", "CGO_ENABLED", "GOOS", "GOARCH", "CC", "CXX", "PACKAGE_DIR", "BIN_NAME"],
-            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
+            "outputs": [
+                "bin/**"
+            ],
+            "env": [
+                "AGENTY_VERSION",
+                "CGO_ENABLED",
+                "GOOS",
+                "GOARCH",
+                "CC",
+                "CXX",
+                "PACKAGE_DIR",
+                "BIN_NAME"
+            ],
+            "passThroughEnv": [
+                "GOCACHE",
+                "LOCALAPPDATA"
+            ]
         },
         "file-editor#build": {
             "inputs": [
@@ -69,32 +127,104 @@
                 "$TURBO_ROOT$/scripts/build-version.mjs",
                 "$TURBO_ROOT$/.env"
             ],
-            "env": ["OS", "ARCH"],
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"],
-            "outputs": ["target/release/fileedit", "target/release/fileedit.exe"]
+            "env": [
+                "OS",
+                "ARCH"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME"
+            ],
+            "outputs": [
+                "target/release/fileedit",
+                "target/release/fileedit.exe"
+            ]
         },
         "llm-codec#build": {
-            "inputs": ["Cargo.toml", "Cargo.lock", "build.rs", "cbindgen.toml", "package.json", "src/**", "scripts/build.mjs", "$TURBO_ROOT$/scripts/platform.mjs"],
-            "outputs": ["bin/**", "include/llm_codec.h"],
-            "env": ["OS", "ARCH", "GOOS", "GOARCH", "CC", "CXX"],
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+            "inputs": [
+                "Cargo.toml",
+                "Cargo.lock",
+                "build.rs",
+                "cbindgen.toml",
+                "package.json",
+                "src/**",
+                "scripts/build.mjs",
+                "$TURBO_ROOT$/scripts/platform.mjs"
+            ],
+            "outputs": [
+                "bin/**",
+                "include/llm_codec.h"
+            ],
+            "env": [
+                "OS",
+                "ARCH",
+                "GOOS",
+                "GOARCH",
+                "CC",
+                "CXX"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME"
+            ]
         },
         "llm-codec#test": {
-            "dependsOn": ["build"],
-            "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/core-build-env.mjs", "$TURBO_ROOT$/scripts/platform.mjs"],
-            "env": ["OS", "ARCH", "GOOS", "GOARCH", "CGO_ENABLED", "CC", "CXX", "CGO_LDFLAGS"],
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME", "GOCACHE"]
+            "dependsOn": [
+                "build"
+            ],
+            "inputs": [
+                "$TURBO_DEFAULT$",
+                "$TURBO_ROOT$/scripts/core-build-env.mjs",
+                "$TURBO_ROOT$/scripts/platform.mjs"
+            ],
+            "env": [
+                "OS",
+                "ARCH",
+                "GOOS",
+                "GOARCH",
+                "CGO_ENABLED",
+                "CC",
+                "CXX",
+                "CGO_LDFLAGS"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME",
+                "GOCACHE"
+            ]
         },
         "agenty-bootstrap#test": {
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME"
+            ]
         },
         "file-editor#test": {
-            "passThroughEnv": ["HOME", "CARGO_HOME", "RUSTUP_HOME"]
+            "passThroughEnv": [
+                "HOME",
+                "CARGO_HOME",
+                "RUSTUP_HOME"
+            ]
         },
         "test": {
-            "dependsOn": ["^build"],
-            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
-            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
+            "dependsOn": [
+                "^build"
+            ],
+            "env": [
+                "CGO_ENABLED",
+                "CC",
+                "CXX",
+                "GOOS",
+                "GOARCH"
+            ],
+            "passThroughEnv": [
+                "GOCACHE",
+                "LOCALAPPDATA"
+            ]
         },
         "lint": {},
         "clean": {
@@ -120,7 +250,10 @@
                 "CC",
                 "CXX"
             ],
-            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
+            "passThroughEnv": [
+                "GOCACHE",
+                "LOCALAPPDATA"
+            ]
         },
         "agenty-inspector#test": {
             "dependsOn": [],
@@ -130,8 +263,74 @@
                 "$TURBO_ROOT$/packages/agenty-core/go.mod",
                 "$TURBO_ROOT$/packages/agenty-core/go.sum"
             ],
-            "env": ["CGO_ENABLED", "CC", "CXX", "GOOS", "GOARCH"],
-            "passThroughEnv": ["GOCACHE", "LOCALAPPDATA"]
+            "env": [
+                "CGO_ENABLED",
+                "CC",
+                "CXX",
+                "GOOS",
+                "GOARCH"
+            ],
+            "passThroughEnv": [
+                "GOCACHE",
+                "LOCALAPPDATA"
+            ]
+        },
+        "llama-cpp-worker#build": {
+            "outputs": [
+                "bin/**"
+            ],
+            "inputs": [
+                "package.json",
+                "src/**",
+                "CMakeLists.txt",
+                "$TURBO_ROOT$/scripts/build-worker.mjs",
+                "$TURBO_ROOT$/scripts/platform.mjs"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "UV_CACHE_DIR",
+                "UV_PYTHON_INSTALL_DIR"
+            ],
+            "env": [
+                "OS",
+                "ARCH",
+                "CC",
+                "CXX"
+            ]
+        },
+        "llama-cpp-worker#test": {
+            "dependsOn": [
+                "build"
+            ]
+        },
+        "mlx-worker#build": {
+            "outputs": [
+                "bin/**"
+            ],
+            "inputs": [
+                "package.json",
+                "mlx_worker/**",
+                "pyproject.toml",
+                "requirements.lock",
+                "$TURBO_ROOT$/scripts/build-worker.mjs",
+                "$TURBO_ROOT$/scripts/platform.mjs",
+                "$TURBO_ROOT$/scripts/worker-bundle.py",
+                "$TURBO_ROOT$/LICENSE"
+            ],
+            "env": [
+                "OS",
+                "ARCH",
+                "CC",
+                "CXX"
+            ],
+            "passThroughEnv": [
+                "HOME",
+                "UV_CACHE_DIR",
+                "UV_PYTHON_INSTALL_DIR"
+            ]
+        },
+        "mlx-worker#test": {
+            "dependsOn": []
         }
     }
 }

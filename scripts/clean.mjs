@@ -3,7 +3,10 @@ import { relative, resolve } from "node:path";
 
 import { REPOSITORY_ROOT, workspacePackages } from "./workspaces.mjs";
 
-const ROOT_BUILD_PATHS = ["bin", "dist"];
+const ROOT_BUILD_PATHS = [
+    "bin", "dist", "packages/llama-cpp-worker/build",
+    "packages/mlx-worker/mlx_worker/__pycache__", "packages/mlx-worker/tests/__pycache__",
+];
 const MODULE_BUILD_PATHS = ["bin", "dist", "target", "web/dist"];
 const ROOT_DEEPCLEAN_PATHS = [
     ".cache",
@@ -12,6 +15,8 @@ const ROOT_DEEPCLEAN_PATHS = [
     ".turbo",
     "coverage",
     "node_modules",
+    "packages/mlx-worker/.venv",
+    "scripts/__pycache__",
 ];
 const MODULE_DEEPCLEAN_PATHS = [
     ".cache",

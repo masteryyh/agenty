@@ -38,7 +38,12 @@
         "inspector:start": "pnpm --filter agenty-inspector start",
         "inspector:test": "pnpm --filter agenty-inspector test",
         "inspector:typecheck": "pnpm --filter agenty-inspector typecheck",
-        "tidyup": "node scripts/tidyup.mjs"
+        "tidyup": "node scripts/tidyup.mjs",
+        "mlx-worker:build": "node scripts/build.mjs mlx-worker",
+        "mlx-worker:test": "pnpm --filter mlx-worker test",
+        "llama-worker:build": "node scripts/build.mjs llama-cpp-worker",
+        "llama-worker:test": "pnpm --filter llama-cpp-worker test",
+        "worker:bundle": "python3 scripts/worker-bundle.py"
     },
     "packageManager": "pnpm@12.3.4",
     "devDependencies": {
@@ -47,7 +52,7 @@
         "eslint-plugin-import-newlines": "^2.0.0",
         "eslint-plugin-jsonc": "^3.4.2",
         "eslint-plugin-simple-import-sort": "^14.0.0",
-        "turbo": "^2.11.5",
+        "turbo": "^2.11.10",
         "typescript-eslint": "^8.70.0"
     }
 }

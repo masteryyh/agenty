@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "*"
+      - "!workers-*"
 
 permissions:
   contents: write
@@ -101,6 +102,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+
+      - name: Setup uv for inference worker builds
+        uses: astral-sh/setup-uv@v7
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

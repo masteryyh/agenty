@@ -1,6 +1,7 @@
 import { AgentyClient } from "../api/client";
 import { handleHelp } from "./help";
 import { handleInit } from "./init";
+import { handleLocal } from "./local";
 import { handleModel } from "./model";
 import { handleProvider } from "./provider";
 import {
@@ -14,6 +15,7 @@ import { handleVersion } from "./version";
 
 const handlers: Record<string, (client: AgentyClient, args: ParsedArgs) => Promise<void> | void> = {
     "init": handleInit,
+    "local": handleLocal,
     "provider": handleProvider,
     "model": handleModel,
 };

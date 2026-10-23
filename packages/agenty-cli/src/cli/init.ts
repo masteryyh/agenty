@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+
 import type { AgentyClient } from "@/api/client";
 import { formatModelRef } from "@/api/modelReference";
+import type { LocalModel } from "@/api/types";
 import type { APIType } from "@/api/types";
 
 import {
@@ -23,6 +26,19 @@ export async function handleInit(client: AgentyClient, args: ParsedArgs): Promis
     const apiKeyProvided = hasFlag(args, "api-key") || hasFlag(args, "api-key-env");
     const providers = await client.listProviders();
     const existingProvider = providers.find((provider) => provider.code === providerCode);
+
+    if (existingProvider?.type === "local") {
+        if (apiKeyProvided) {
+            throw new CliError("local inference does not use an API key");
+        }
+        if (hasFlag(args, "local-config")) {
+            const local = JSON.parse(await readFile(requireFlag(args, "local-config"), "utf8")) as LocalModel;
+            await client.probeLocalModel(local);
+            await client.createModel({ providerCode, modelCode, name:flag(args, "model-name")?.trim() || modelCode,
+                contextWindow:positiveInteger(flag(args, "context-window") ?? "8192", "--context-window"),
+                maxOutputTokens:positiveInteger(flag(args, "max-output-tokens") ?? "512", "--max-output-tokens"), local, isDefault:true });
+        }
+    }
 
     if (existingProvider?.builtin) {
         if (apiKeyProvided) {

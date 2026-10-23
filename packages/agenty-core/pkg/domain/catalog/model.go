@@ -3,12 +3,14 @@ package catalog
 import (
 	"time"
 
+	"github.com/masteryyh/agenty-core/pkg/domain/localinference"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
 const DefaultMaxOutputTokens int64 = 8_192
 
 type Model struct {
+	Local            *localinference.Model    `json:"local,omitempty"`
 	Code             shared.ModelCode         `json:"code"`
 	Name             string                   `json:"name"`
 	ContextWindow    int                      `json:"contextWindow"`
@@ -24,6 +26,14 @@ type Model struct {
 }
 
 func NormalizeReasoningCapabilities(model *Model) {
+	if model.Local != nil {
+		model.Reasoning = model.Local.ThinkingEffort != ""
+		model.ReasoningEfforts = make([]shared.ReasoningEffort, 0)
+		if model.Reasoning {
+			model.ReasoningEfforts = append(model.ReasoningEfforts, shared.ReasoningEffort(model.Local.ThinkingEffort))
+		}
+		return
+	}
 	if !model.Reasoning && len(model.ReasoningEfforts) > 0 {
 		model.Reasoning = true
 	}

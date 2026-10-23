@@ -128,6 +128,33 @@ fn multiple_stop_ids_and_conflicts_are_preserved() {
 }
 
 #[test]
+fn nested_text_eos_and_tokenizer_flags_do_not_conflict_with_chat_eos() {
+    let directory = copy_fixture();
+    fs::write(
+        directory.path().join("config.json"),
+        r#"{"model_type":"qwen3_5","text_config":{"eos_token_id":0}}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("tokenizer_config.json"),
+        r#"{"eos_token":"[EOS]","add_bos_token":false,"add_eos_token":false}"#,
+    )
+    .unwrap();
+    let model = load(directory.path());
+    assert_eq!(model.metadata.eos_token_id, Some(2));
+    assert_eq!(model.metadata.stop_token_ids, [0, 2]);
+    let rendered = request(
+        json!({"messages":[{"role":"user","content":"Hello world"}],"addGenerationPrompt":true}),
+    );
+    assert_eq!(
+        model.chat_encode(&rendered).unwrap(),
+        model
+            .tokenize(&model.render(&rendered).unwrap(), false)
+            .unwrap()
+    );
+}
+
+#[test]
 fn named_special_tokens_and_shared_roles_are_preserved() {
     let directory = copy_fixture();
     fs::write(directory.path().join("special_tokens_map.json"),
@@ -489,6 +516,7 @@ fn gguf_ambiguity_corruption_and_shards() {
         directory.path(),
         &LoadOptions {
             gguf_file: Some("a.gguf".to_owned()),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -497,7 +525,8 @@ fn gguf_ambiguity_corruption_and_shards() {
         failure(Model::load(
             directory.path(),
             &LoadOptions {
-                gguf_file: Some("a.gguf".to_owned())
+                gguf_file: Some("a.gguf".to_owned()),
+                ..Default::default()
             }
         )),
         ErrorCode::InvalidGguf

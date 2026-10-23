@@ -95,8 +95,19 @@ pnpm install
 pnpm cli:dev
 ```
 
-`pnpm cli:dev` builds `agenty-core` first, then attaches the source TUI directly to the
-terminal. Useful focused commands include:
+`pnpm dev` (also `pnpm cli:dev`) builds supported inference workers through Turbo,
+then core, CLI and bootstrap, and launches the packed executable with real terminal
+stdio. Worker outputs remain in `packages/llama-cpp-worker/bin/llama-cpp-worker`
+(`.exe` on Windows) and, on Apple Silicon, `packages/mlx-worker/bin/mlx-worker`.
+The MLX executable launches its private CPython runtime and locked packages stored
+beside it. Builds require a C/C++ compiler and CMake or uv; MLX also requires uv.
+
+The launcher accepts `--llama-cpp-worker <path>` and `--mlx-worker <path>` (including
+`--option=path` forms). `dev` passes built paths automatically; explicit options
+can override them. Paths affect the current core process and stay out of saved config.
+Local inference remains off until enabled. If another core already owns the data
+directory, stop its bootstrap or choose a separate `--data-dir` to apply worker paths.
+Useful focused commands include:
 
 ```bash
 pnpm core:test
@@ -116,13 +127,35 @@ pnpm deepclean
 The build version comes from `AGENTY_VERSION` in the process environment, then from
 the ignored root `.env`; it defaults to `dev`. Copy `.env.example` to `.env` if you
 want a persistent local version, then run `pnpm build` for a complete launcher build.
-The default build includes file-editor, the llm-codec static library, core, CLI and bootstrap. Build Inspector
+The default build includes supported workers, file-editor, the llm-codec static library, core, CLI and bootstrap. Worker ZIP packaging reuses module `bin` outputs; workers remain separate from the packed launcher. Build Inspector
 separately with `pnpm inspector:build`.
 
-The Rust [llm-codec library](./packages/llm-codec/README.md) provides a C ABI
-for local model tokenization and chat-template rendering. It requires a local
-`tokenizer.json`; GGUF supplies metadata and templates only. Core integration
-into a local inference provider remains future work.
+The built-in local inference provider
+uses the Rust [llm-codec library](./packages/llm-codec/README.md) for templates,
+tokenization and streaming decoding. Optional MLX and llama.cpp workers calculate
+token IDs over a separate stdio protocol. Install workers through the initialization
+wizard, `/provider` or the CLI. Existing model files can still be registered through the CLI;
+the TUI lists downloaded models and supports editing their settings. Local inference
+defaults off; worker release bundles are built and published separately.
+
+The local setup wizard and `/model` can browse public Hugging Face and ModelScope
+repositories and select Safetensors or GGUF quantizations. Lists show only the name,
+parameter count and total repository file size, using `UNKNOWN` for missing metadata.
+Navigating to the last item loads the next page; reopening the browser refreshes it.
+Press Enter or click a model to open its download dialog above the list. Repositories
+with several variants offer a selector in that dialog. Selecting a variant checks
+compatibility and capacity before enabling Download. Use Esc to return and Ctrl+P to view progress.
+The dialog shows compatibility, destination, partition usage and available space.
+Insufficient space and unsupported models block downloads. Files are stored under the data directory's `models` folder, with per-file progress,
+cancellation and resume by selecting the same resource again. Verified models that
+pass preflight are added to the local provider.
+The completion page can enable local inference before returning to the model picker;
+inside the wizard, return to setup and save to enable it. Closing the panel leaves downloads
+running while core lives; exiting the app interrupts them and retains partial files.
+Automatic registration currently supports Qwen3/Qwen3.5 text inference. GGUF needs
+a matching tokenizer, automatically taken from the repository or its declared base model.
+If no matching tokenizer is found, downloading is disabled. Private or
+gated repository authentication is not supported yet.
 
 Core builds use CGO for SQLite. Windows builds need a GCC-compatible compiler such as
 MinGW-w64 or LLVM-MinGW configured through `CC`; MSVC `cl.exe` is unsupported. See the

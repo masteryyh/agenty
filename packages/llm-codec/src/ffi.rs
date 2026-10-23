@@ -53,6 +53,12 @@ pub struct LlmCodecError {
 
 static MODELS: OnceLock<Mutex<HashMap<LlmCodecHandle, Arc<Model>>>> = OnceLock::new();
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+type SharedDecoder = Arc<Mutex<crate::model::Decoder>>;
+static DECODERS: OnceLock<Mutex<HashMap<LlmCodecHandle, SharedDecoder>>> = OnceLock::new();
+
+fn decoders() -> &'static Mutex<HashMap<LlmCodecHandle, SharedDecoder>> {
+    DECODERS.get_or_init(Mutex::default)
+}
 
 fn models() -> &'static Mutex<HashMap<LlmCodecHandle, Arc<Model>>> {
     MODELS.get_or_init(Mutex::default)
@@ -341,6 +347,115 @@ pub unsafe extern "C" fn llm_codec_chat_render(
         let request: RenderRequest = json_input(request, request_len)?;
         let rendered = lookup(handle)?.render(&request)?;
         ptr::write(out_text, bytes_output(rendered.into_bytes()));
+        Ok(())
+    })
+}
+
+/// Render and encode in one operation. The template supplies special tokens.
+/// # Safety
+/// Pointer and ownership rules are identical to llm_codec_tokenize.
+#[no_mangle]
+pub unsafe extern "C" fn llm_codec_chat_encode(
+    handle: LlmCodecHandle,
+    request: *const u8,
+    request_len: usize,
+    out_tokens: *mut LlmCodecTokens,
+    out_error: *mut LlmCodecError,
+) -> i32 {
+    boundary(out_error, || {
+        check_pointer(out_tokens)?;
+        ptr::write(out_tokens, LlmCodecTokens::default());
+        let request: RenderRequest = json_input(request, request_len)?;
+        ptr::write(
+            out_tokens,
+            tokens_output(lookup(handle)?.chat_encode(&request)?),
+        );
+        Ok(())
+    })
+}
+
+/// Create an independent decoder which retains its model after model_release.
+/// # Safety
+/// Outputs must be writable, aligned and empty, as with model_load.
+#[no_mangle]
+pub unsafe extern "C" fn llm_codec_decoder_create(
+    model_handle: LlmCodecHandle,
+    out_handle: *mut LlmCodecHandle,
+    out_error: *mut LlmCodecError,
+) -> i32 {
+    boundary(out_error, || {
+        check_pointer(out_handle)?;
+        ptr::write(out_handle, 0);
+        let decoder = Arc::new(Mutex::new(crate::model::Decoder::new(lookup(
+            model_handle,
+        )?)));
+        let handle = NEXT_HANDLE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| Error::new(ErrorCode::ResourceLimit, "handle space exhausted"))?;
+        decoders()
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::Internal, "decoder registry poisoned"))?
+            .insert(handle, decoder);
+        ptr::write(out_handle, handle);
+        Ok(())
+    })
+}
+
+/// Append IDs and optionally flush. A finished decoder accepts no further input.
+/// # Safety
+/// Pointer/length and output ownership rules are identical to llm_codec_decode.
+#[no_mangle]
+pub unsafe extern "C" fn llm_codec_decoder_push(
+    handle: LlmCodecHandle,
+    ids: *const u32,
+    ids_len: usize,
+    finish: u8,
+    out_text: *mut LlmCodecBytes,
+    out_error: *mut LlmCodecError,
+) -> i32 {
+    boundary(out_error, || {
+        check_pointer(out_text)?;
+        ptr::write(out_text, LlmCodecBytes::default());
+        if finish > 1 {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                "finish must be 0 or 1",
+            ));
+        }
+        let decoder = decoders()
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::Internal, "decoder registry poisoned"))?
+            .get(&handle)
+            .cloned()
+            .ok_or_else(|| Error::new(ErrorCode::InvalidHandle, "unknown decoder"))?;
+        let output = decoder
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::Internal, "decoder lock poisoned"))?
+            .push(
+                input(ids, ids_len, crate::MAX_INPUT_BYTES / 4)?,
+                finish != 0,
+            )?;
+        ptr::write(out_text, bytes_output(output.into_bytes()));
+        Ok(())
+    })
+}
+
+/// Release a decoder; in-flight operations retain their own reference.
+/// # Safety
+/// out_error must be NULL or an empty, aligned writable error slot.
+#[no_mangle]
+pub unsafe extern "C" fn llm_codec_decoder_release(
+    handle: LlmCodecHandle,
+    out_error: *mut LlmCodecError,
+) -> i32 {
+    boundary(out_error, || {
+        decoders()
+            .lock()
+            .map_err(|_| Error::new(ErrorCode::Internal, "decoder registry poisoned"))?
+            .remove(&handle)
+            .ok_or_else(|| Error::new(ErrorCode::InvalidHandle, "unknown decoder"))?;
         Ok(())
     })
 }

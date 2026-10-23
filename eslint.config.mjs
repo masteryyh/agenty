@@ -13,6 +13,7 @@ export default defineConfig(
             "**/.turbo/**",
             "packages/agenty-inspector/web/src/generated.ts",
             "**/bin/**",
+            "packages/llama-cpp-worker/build/**",
             "**/coverage/**",
             "**/dist/**",
             "**/node_modules/**",

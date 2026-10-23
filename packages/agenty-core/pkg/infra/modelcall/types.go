@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/masteryyh/agenty-core/pkg/domain/conversation"
+	"github.com/masteryyh/agenty-core/pkg/domain/localinference"
 	"github.com/masteryyh/agenty-core/pkg/domain/shared"
 )
 
@@ -15,11 +16,12 @@ const (
 	APIOpenAICompletions APIType = "openai_completions"
 	APIAnthropic         APIType = "anthropic"
 	APIGemini            APIType = "gemini"
+	APILocal             APIType = "local"
 )
 
 func (t APIType) Valid() bool {
 	switch t {
-	case APIOpenAI, APIOpenAICompletions, APIAnthropic, APIGemini:
+	case APIOpenAI, APIOpenAICompletions, APIAnthropic, APIGemini, APILocal:
 		return true
 	default:
 		return false
@@ -30,6 +32,8 @@ func (t APIType) Valid() bool {
 // model invocation. It deliberately has no session, repository, or provider
 // business state.
 type ModelCallConfig struct {
+	Local             *localinference.Model
+	ContextWindow     int
 	BaseURL           string
 	APIType           APIType
 	APIKey            string

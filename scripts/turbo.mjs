@@ -11,7 +11,7 @@ function includesCoreBuild(task, filter) {
         return false;
     }
 
-    return filter !== "file-editor" && filter !== "llm-codec";
+    return !["file-editor", "llm-codec", "mlx-worker", "llama-cpp-worker"].includes(filter);
 }
 
 function targetGoOS(environment, hostPlatform) {
